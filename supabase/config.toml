@@ -1,0 +1,35 @@
+project_id = "xbuuhfwobrafcbgtdgjx"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+port = 54322
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+# Origines explicites uniquement : aucun wildcard sur un domaine entier.
+# En production, ajouter ici l'origine exacte de l'application déployée.
+additional_redirect_urls = ["http://localhost:5173/**", "http://localhost:4173/**", "https://reelora.netlify.app/**"]
+enable_signup = true
+
+[functions.reelora-health]
+verify_jwt = false
+
+[functions.reelora-ai]
+verify_jwt = true
+
+[functions.reelora-video]
+verify_jwt = true
