@@ -48,11 +48,11 @@ export default function Dashboard() {
           <Link to="/app/studio" className="btn btn-primary btn-sm"><Play size={14} /> Nouvelle création</Link>
         </>} />
 
-      {health && (!health.groq || (!health.heygen && !health.fal)) && (
+      {health && (!health.groq || !health.muapi) && (
         <div className="mb-6">
           <Banner tone="warning" title="Intégrations IA à finaliser">
-            {!health.groq && 'GROQ_API_KEY est absent : la génération de scripts et prompts est indisponible. '}
-            {!health.heygen && !health.fal && 'HEYGEN_API_KEY et FAL_KEY sont absents : la génération vidéo est indisponible. '}
+            {!health.groq && 'GROQ_API_KEY est absent : la génération de scripts et prompts avec Groq est indisponible. '}
+            {!health.muapi && 'MUAPI_API_KEY est absent : la génération vidéo avec MuAPI est indisponible. '}
             Les secrets se configurent côté serveur, dans Supabase → Edge Functions → Secrets. Aucune donnée fictive n’est présentée.
           </Banner>
         </div>

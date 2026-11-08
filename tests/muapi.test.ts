@@ -1,0 +1,454 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { handler as videoHandler } from '../supabase/functions/reelora-video/index.ts';
+import { handler as workerHandler } from '../supabase/functions/reelora-video-worker/index.ts';
+
+/* -------------------------------------------------------------------------- */
+/* Mocks: no real MuAPI / Supabase call. Every network hop is recorded.        */
+/* -------------------------------------------------------------------------- */
+
+const SUPABASE_URL = 'https://project.supabase.co';
+const EDGE_URL = `${SUPABASE_URL}/functions/v1/reelora-video`;
+const WORKER_URL = `${SUPABASE_URL}/functions/v1/reelora-video-worker`;
+const MUAPI_KEY = 'muapi-secret-key-98765';
+const WORKER_TOKEN = 'worker-token-secret-abc123';
+const VIDEO_URL = 'https://cdn.muapi.ai/output/final.mp4';
+const USER_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_USER = '22222222-2222-4222-8222-222222222222';
+const JOB_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const PROJECT_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const WORKSPACE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const REQUEST_ID = 'req-muapi-123';
+
+const SEEDANCE_T2V = {
+  model_id: 'seedance-lite-t2v', display_name: 'Seedance Lite — Texte → Vidéo',
+  description: 'Prompt → vidéo', category: 'Text to Video',
+  endpoint: '/api/v1/seedance-lite-t2v',
+  input_fields: ['prompt', 'aspect_ratio', 'resolution', 'duration', 'camera_fixed'],
+  required_fields: ['prompt'],
+  param_schema: {
+    aspect_ratio: { type: 'select', label: 'Format', options: ['16:9', '9:16', '1:1', '4:3', '3:4', '9:21'], default: '9:16' },
+    resolution: { type: 'select', label: 'Résolution', options: ['480p', '720p', '1080p'], default: '480p' },
+    duration: { type: 'number', label: 'Durée', min: 5, max: 30, default: 5 },
+    camera_fixed: { type: 'boolean', label: 'Caméra fixe', default: false },
+  },
+  cost_usd: 0.1, cost_currency: 'USD', is_enabled: true, is_coming_soon: false, active: true,
+};
+const VEO3_FAST = {
+  ...SEEDANCE_T2V, model_id: 'veo3-fast-text-to-video', display_name: 'Veo 3 Fast',
+  endpoint: '/api/v1/veo3-fast-text-to-video', input_fields: ['prompt', 'aspect_ratio'],
+  param_schema: { aspect_ratio: { type: 'select', options: ['16:9', '9:16'], default: '9:16' } },
+  cost_usd: 0.6,
+};
+const SEEDANCE_I2V = {
+  ...SEEDANCE_T2V, model_id: 'seedance-lite-i2v', display_name: 'Seedance Lite — Image → Vidéo',
+  endpoint: '/api/v1/seedance-lite-i2v', category: 'Image to Video',
+  input_fields: ['prompt', 'image_url', 'last_image', 'resolution', 'duration', 'camera_fixed'],
+  required_fields: ['prompt', 'image_url'],
+};
+
+interface Call {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown> | null;
+}
+const calls: Call[] = [];
+
+const state = {
+  authOk: true,
+  claim: true,
+  job: {} as Record<string, unknown>,
+  model: SEEDANCE_T2V as Record<string, unknown>,
+  service: { service_key: 'ugc_clip_8s', credits_cost: 9, active: true },
+  assets: [] as Record<string, unknown>[],
+  modelsCatalog: [] as Record<string, unknown>[],
+  submitStatus: 200,
+  submitResponse: { request_id: REQUEST_ID, status: 'processing', cost: { amount_credits: 0.1 } } as Record<string, unknown>,
+  resultResponse: { id: REQUEST_ID, status: 'completed', outputs: [VIDEO_URL], cost: { amount_credits: 0.1 } } as Record<string, unknown>,
+  tickDue: [] as Record<string, unknown>[],
+  jobsByProvider: [] as Record<string, unknown>[],
+};
+
+function asHeaders(h: HeadersInit | undefined): Record<string, string> {
+  if (!h) return {};
+  if (h instanceof Headers) return Object.fromEntries(h.entries());
+  if (Array.isArray(h)) return Object.fromEntries(h);
+  return { ...(h as Record<string, string>) };
+}
+
+async function fakeFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const headers = asHeaders(init?.headers);
+  let body: Record<string, unknown> | null = null;
+  if (typeof init?.body === 'string') {
+    try { body = JSON.parse(init.body) as Record<string, unknown>; } catch { body = null; }
+  }
+  calls.push({ url, method, headers, body });
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+
+  if (url.includes('/auth/v1/user')) {
+    return state.authOk ? json({ id: USER_ID }) : json({ message: 'invalid jwt' }, 401);
+  }
+  if (url === `${SUPABASE_URL}/rest/v1/rpc/reelora_worker_token`) return json(WORKER_TOKEN);
+  if (url.includes('/rest/v1/rpc/')) {
+    const name = url.split('/rest/v1/rpc/')[1]?.split('?')[0] ?? '';
+    if (name === 'reelora_claim_generation_submission') return json(state.claim);
+    if (name === 'reelora_video_tick') return json({ expired: 0, due: state.tickDue, checked_at: new Date().toISOString() });
+    if (name === 'reelora_sync_video_models') return json(state.modelsCatalog.length);
+    return json(true);
+  }
+  if (url.includes('/rest/v1/reelora_video_models')) return json([state.model]);
+  if (url.includes('/rest/v1/ugc_generated_assets')) return json(state.assets);
+  if (url.includes('/rest/v1/ugc_service_catalog')) return json([state.service]);
+  if (url.includes('/rest/v1/ugc_generation_jobs')) {
+    if (url.includes('provider_job_id=eq.')) return json(state.jobsByProvider);
+    return json([state.job]);
+  }
+  if (url.includes('/rest/v1/ugc_project_scripts')) return json([{ script_text: 'Script de secours valide pour le test.' }]);
+  if (url.includes('/rest/v1/reelora_avatars')) return json([]);
+  if (url.includes('/storage/v1/object/sign/')) return json({ signedURL: '/object/sign/ugc-assets/signed-token' });
+  if (url.includes('/storage/v1/object/ugc-assets/')) return json({ Key: 'ugc-assets/ok' });
+
+  if (url === 'https://api.muapi.ai/api/v1/models') return json({ models: state.modelsCatalog });
+  if (url.includes('/api/v1/predictions/')) return json(state.resultResponse);
+  if (url.startsWith('https://api.muapi.ai/api/v1/')) return json(state.submitResponse, state.submitStatus);
+  if (url === VIDEO_URL) return new Response(new Uint8Array([0, 1, 2, 3, 4]), { status: 200 });
+  return json({}, 404);
+}
+
+function baseJob(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: JOB_ID, workspace_id: WORKSPACE_ID, project_id: PROJECT_ID, created_by: USER_ID,
+    service_key: 'ugc_clip_8s', status: 'reserved', provider: null, provider_job_id: null,
+    credits_reserved: 9, credits_charged: 0, error_message: null, result_payload: {},
+    request_payload: {
+      provider: 'muapi', model_id: 'seedance-lite-t2v',
+      script_text: 'Accroche : découvrez notre sérum éclat, une peau lumineuse en sept jours.',
+      visual_prompt: 'UGC authentique, lumière naturelle, cadrage vertical smartphone.',
+      scenes: [{ scene_type: 'ugc', duration_seconds: 3, visual_prompt: 'Gros plan du flacon dans la main, lumière du matin.' }],
+      params: { aspect_ratio: '9:16', resolution: '480p', duration: 5, camera_fixed: false },
+    },
+    ...overrides,
+  };
+}
+function post(url: string, body: Record<string, unknown>, jwt = 'Bearer valid-user-jwt'): Request {
+  return new Request(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(jwt ? { Authorization: jwt } : {}) },
+    body: JSON.stringify(body),
+  });
+}
+function rpcCalls(name: string): Call[] {
+  return calls.filter((c) => c.url.includes(`/rest/v1/rpc/${name}`));
+}
+function muapiSubmits(): Call[] {
+  return calls.filter((c) => c.method === 'POST' && c.url.startsWith('https://api.muapi.ai/api/v1/') && !c.url.includes('/predictions/'));
+}
+function bodyOf(r: Response): Promise<Record<string, unknown>> {
+  return r.json() as Promise<Record<string, unknown>>;
+}
+
+const originalEnv = { ...process.env };
+beforeEach(() => {
+  calls.length = 0;
+  state.authOk = true;
+  state.claim = true;
+  state.job = baseJob();
+  state.model = SEEDANCE_T2V as unknown as Record<string, unknown>;
+  state.assets = [];
+  state.modelsCatalog = [];
+  state.submitStatus = 200;
+  state.submitResponse = { request_id: REQUEST_ID, status: 'processing', cost: { amount_credits: 0.1 } };
+  state.resultResponse = { id: REQUEST_ID, status: 'completed', outputs: [VIDEO_URL], cost: { amount_credits: 0.1 } };
+  state.tickDue = [];
+  state.jobsByProvider = [];
+  process.env = { ...originalEnv, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: 'service-role-test-key',
+    SUPABASE_ANON_KEY: 'anon-test-key', MUAPI_API_KEY: MUAPI_KEY };
+  vi.stubGlobal('fetch', fakeFetch);
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  process.env = { ...originalEnv };
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('Authentification obligatoire', () => {
+  it('refuse une requête sans en-tête Authorization', async () => {
+    const r = await videoHandler(post(EDGE_URL, { action: 'status', job_id: JOB_ID }, ''));
+    expect(r.status).toBe(401);
+    expect((await bodyOf(r)).error).toMatchObject({ code: 'UNAUTHENTICATED' });
+    expect(calls.some((c) => c.url.includes('api.muapi.ai'))).toBe(false);
+  });
+
+  it('refuse un jeton utilisateur invalide (validation GoTrue)', async () => {
+    state.authOk = false;
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(401);
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('le worker refuse un callback sans jeton ou avec un jeton erroné', async () => {
+    const bad = await workerHandler(post(`${WORKER_URL}?mode=webhook&token=wrong-token`, { id: REQUEST_ID }));
+    expect(bad.status).toBe(401);
+    const none = await workerHandler(post(`${WORKER_URL}?mode=tick`, { mode: 'tick' }));
+    expect(none.status).toBe(401);
+    expect(calls.some((c) => c.url.includes('/predictions/'))).toBe(false);
+  });
+});
+
+describe('Configuration MuAPI et protection des crédits', () => {
+  it('refuse la génération si MUAPI_API_KEY est absente, sans appeler MuAPI, et restitue les crédits', async () => {
+    delete process.env.MUAPI_API_KEY;
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(503);
+    expect((await bodyOf(r)).error).toMatchObject({ code: 'MUAPI_NOT_CONFIGURED' });
+    expect(muapiSubmits()).toHaveLength(0);
+    const finalize = rpcCalls('reelora_finalize_generation');
+    expect(finalize).toHaveLength(1);
+    expect(finalize[0].body?.p_status).toBe('failed');
+    expect(rpcCalls('reelora_release_video_quota')).toHaveLength(1);
+  });
+
+  it('refuse un solde insuffisant : la règle SQL lève insufficient_credits avant toute réservation', () => {
+    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261108000009_reelora_muapi.sql'), 'utf8');
+    expect(migration).toContain("raise exception 'insufficient_credits'");
+    expect(migration).toContain("perform public.reelora_consume_quota('video', v_job");
+    // Le contrôle du solde précède la réservation et l'appel fournisseur.
+    expect(migration.indexOf('raise exception')).toBeLessThan(migration.indexOf('apply_wallet_delta(v_uid'));
+  });
+
+  it('réserve exactement une fois via un identifiant d’idempotence par opération', () => {
+    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261108000009_reelora_muapi.sql'), 'utf8');
+    expect(migration).toContain('on conflict (created_by, request_key) do nothing');
+    expect(migration).toContain("'reserve-job:' || v_job::text");
+    expect(migration).toContain("'release-job:'");
+    expect(migration).toContain('release-job:');
+    expect(migration).not.toMatch(/monthly.*free.*credit|monthly_credits\s*\+/i);
+  });
+
+  it('un double clic ne soumet qu’une seule tâche MuAPI (claim atomique)', async () => {
+    state.claim = false;
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(await bodyOf(r)).toMatchObject({ status: 'reserved', provider: 'muapi' });
+  });
+
+  it('un job déjà soumis n’est jamais soumis une seconde fois', async () => {
+    state.job = baseJob({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID });
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(await bodyOf(r)).toMatchObject({ provider_job_id: REQUEST_ID, status: 'processing' });
+  });
+
+  it('isolation entre utilisateurs : un job tiers est refusé en start et en status', async () => {
+    state.job = baseJob({ created_by: OTHER_USER });
+    const start = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    const status = await videoHandler(post(EDGE_URL, { action: 'status', job_id: JOB_ID }));
+    expect(start.status).toBe(403);
+    expect(status.status).toBe(403);
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+});
+
+describe('Soumission MuAPI réelle (mockée) et paramètres vérifiés', () => {
+  it('envoie x-api-key, le prompt issu du script/scènes, uniquement les paramètres supportés, et le webhook signé par jeton', async () => {
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(200);
+    const data = await bodyOf(r);
+    expect(data).toMatchObject({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID, webhook_enabled: true });
+    const submit = muapiSubmits();
+    expect(submit).toHaveLength(1);
+    expect(submit[0].url).toContain('/api/v1/seedance-lite-t2v');
+    expect(submit[0].headers['x-api-key']).toBe(MUAPI_KEY);
+    const webhook = new URL(submit[0].url).searchParams.get('webhook') ?? '';
+    expect(webhook).toContain('mode=webhook');
+    expect(webhook).toContain(`token=${WORKER_TOKEN}`);
+    const body = submit[0].body ?? {};
+    expect(String(body.prompt)).toContain('Accroche');
+    expect(String(body.prompt)).toContain('Gros plan du flacon');
+    expect(body.aspect_ratio).toBe('9:16');
+    expect(body.duration).toBe(5);
+    expect(body).not.toHaveProperty('audio_url');
+    expect(body).not.toHaveProperty('negative_prompt');
+    const processing = rpcCalls('reelora_set_job_processing');
+    expect(processing).toHaveLength(1);
+    expect(processing[0].body).toMatchObject({ p_provider: 'muapi', p_provider_job_id: REQUEST_ID });
+    expect(JSON.stringify(processing[0].body)).not.toContain(MUAPI_KEY);
+  });
+
+  it('ne transmet pas un paramètre non pris en charge par le modèle (Veo 3 Fast)', async () => {
+    state.model = VEO3_FAST as unknown as Record<string, unknown>;
+    state.job = baseJob({ request_payload: { ...(state.job.request_payload as Record<string, unknown>),
+      model_id: 'veo3-fast-text-to-video', params: { duration: 10, resolution: '1080p', aspect_ratio: '16:9' } } });
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(200);
+    const body = muapiSubmits()[0].body ?? {};
+    expect(body.aspect_ratio).toBe('16:9');
+    expect(body).not.toHaveProperty('duration');
+    expect(body).not.toHaveProperty('resolution');
+    expect(body).not.toHaveProperty('camera_fixed');
+  });
+
+  it('un modèle image → vidéo exige image_url et rembourse si elle manque', async () => {
+    state.model = SEEDANCE_I2V as unknown as Record<string, unknown>;
+    state.job = baseJob({ request_payload: { ...(state.job.request_payload as Record<string, unknown>),
+      model_id: 'seedance-lite-i2v', image_url: null, avatar_id: null } });
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(503);
+    expect((await bodyOf(r)).error).toMatchObject({ code: 'IMAGE_MISSING' });
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_release_video_quota')).toHaveLength(1);
+  });
+
+  it('un modèle image → vidéo reçoit bien image_url quand elle est fournie', async () => {
+    state.model = SEEDANCE_I2V as unknown as Record<string, unknown>;
+    state.job = baseJob({ request_payload: { ...(state.job.request_payload as Record<string, unknown>),
+      model_id: 'seedance-lite-i2v', image_url: 'https://cdn.example.com/product.png' } });
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(200);
+    expect(muapiSubmits()[0].body?.image_url).toBe('https://cdn.example.com/product.png');
+  });
+
+  it('une erreur MuAPI est restituée sans exposer la clé et rembourse les crédits', async () => {
+    state.submitStatus = 401;
+    state.submitResponse = { message: `invalid x-api-key ${MUAPI_KEY}` };
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    const text = await r.text();
+    expect(r.status).toBe(503);
+    expect(text).not.toContain(MUAPI_KEY);
+    expect(text).toContain('[REDACTED]');
+    expect(rpcCalls('reelora_finalize_generation')).toHaveLength(1);
+    expect(rpcCalls('reelora_release_video_quota')).toHaveLength(1);
+  });
+
+  it('aucune clé MuAPI n’apparaît dans le frontend, les configs ou les logs', () => {
+    const frontend = readFileSync(join(process.cwd(), 'src/pages/Studio.tsx'), 'utf8');
+    const env = readFileSync(join(process.cwd(), '.env.example'), 'utf8');
+    const video = readFileSync(join(process.cwd(), 'supabase/functions/reelora-video/index.ts'), 'utf8');
+    expect(frontend).not.toContain('Deno.env.get');
+    expect(frontend).not.toContain('x-api-key');
+    expect(env).not.toMatch(/^\s*MUAPI_API_KEY\s*=/m);
+    expect(env).not.toContain('VITE_MUAPI');
+    expect(video).toContain('function redact');
+    expect(video).toContain('[REDACTED]');
+  });
+});
+
+describe('Catalogue, estimation et suivi', () => {
+  it('expose les modèles MuAPI vérifiés et synchronise leurs métadonnées depuis /models', async () => {
+    state.modelsCatalog = [{ name: 'seedance-lite-t2v', cost: 0.12, cost_currency: 'USD',
+      description: 'Seedance Lite', is_enabled: 1, is_coming_soon: false }];
+    const r = await videoHandler(post(EDGE_URL, { action: 'models' }));
+    expect(r.status).toBe(200);
+    const data = await bodyOf(r);
+    const models = data.models as Record<string, unknown>[];
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({ model_id: 'seedance-lite-t2v', endpoint: '/api/v1/seedance-lite-t2v' });
+    expect(JSON.stringify(models)).not.toContain('audio_url');
+    expect(rpcCalls('reelora_sync_video_models')).toHaveLength(1);
+  });
+
+  it('retourne une estimation de crédits et de coût fournisseur avant confirmation', async () => {
+    const r = await videoHandler(post(EDGE_URL, { action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v' }));
+    expect(await bodyOf(r)).toMatchObject({ service_key: 'ugc_clip_8s', credits_cost: 9,
+      model_available: true, provider_cost_usd: 0.1, provider_cost_currency: 'USD' });
+  });
+
+  it('le suivi lit la base sans appeler MuAPI inutilement et reflète l’état MuAPI', async () => {
+    state.job = baseJob({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID,
+      result_payload: { provider_status: 'processing' } });
+    const r = await videoHandler(post(EDGE_URL, { action: 'status', job_id: JOB_ID }));
+    expect(await bodyOf(r)).toMatchObject({ status: 'processing', progress: 55,
+      provider: 'muapi', provider_state: 'processing' });
+    expect(calls.some((c) => c.url.includes('/predictions/'))).toBe(false);
+  });
+
+  it('le suivi expose une URL signée de prévisualisation pour une vidéo terminée', async () => {
+    state.job = baseJob({ status: 'succeeded', provider: 'muapi', provider_job_id: REQUEST_ID });
+    state.assets = [{ storage_path: `${WORKSPACE_ID}/${JOB_ID}.mp4`, mime_type: 'video/mp4', file_size_bytes: 1234 }];
+    const r = await videoHandler(post(EDGE_URL, { action: 'status', job_id: JOB_ID }));
+    const data = await bodyOf(r);
+    expect(data).toMatchObject({ status: 'succeeded', progress: 100, storage_path: `${WORKSPACE_ID}/${JOB_ID}.mp4` });
+    expect(String(data.preview_url)).toContain('/storage/v1/');
+  });
+});
+
+describe('Worker serveur : webhook, cron, résultat, remboursement', () => {
+  it('un webhook valide re-vérifie MuAPI puis enregistre la vidéo dans Supabase Storage', async () => {
+    const job = baseJob({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID });
+    state.job = job; state.jobsByProvider = [job];
+    const r = await workerHandler(post(`${WORKER_URL}?mode=webhook&token=${WORKER_TOKEN}`,
+      { id: REQUEST_ID, status: 'completed', outputs: [VIDEO_URL] }));
+    expect(r.status).toBe(200);
+    expect(await bodyOf(r)).toMatchObject({ outcome: 'succeeded' });
+    expect(calls.some((c) => c.url.includes(`/predictions/${REQUEST_ID}/result`))).toBe(true);
+    const upload = calls.find((c) => c.method === 'POST' && c.url.includes(`/storage/v1/object/ugc-assets/${WORKSPACE_ID}/${JOB_ID}.mp4`));
+    expect(upload).toBeDefined();
+    const finalize = rpcCalls('reelora_finalize_generation');
+    expect(finalize).toHaveLength(1);
+    expect(finalize[0].body).toMatchObject({ p_status: 'succeeded', p_storage_path: `${WORKSPACE_ID}/${JOB_ID}.mp4`, p_mime_type: 'video/mp4' });
+    // Aucun remboursement abusif sur un succès.
+    expect(rpcCalls('reelora_release_video_quota')).toHaveLength(0);
+  });
+
+  it('gère la variante de réponse MuAPI imbriquée dans `data`', async () => {
+    const job = baseJob({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID });
+    state.job = job; state.jobsByProvider = [job];
+    state.resultResponse = { data: { id: REQUEST_ID, status: 'completed', outputs: [VIDEO_URL] } };
+    const r = await workerHandler(post(`${WORKER_URL}?mode=webhook&token=${WORKER_TOKEN}`, { id: REQUEST_ID }));
+    expect(await bodyOf(r)).toMatchObject({ outcome: 'succeeded' });
+  });
+
+  it('un webhook ne fait jamais confiance au corps : un faux "completed" reste en processing', async () => {
+    const job = baseJob({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID });
+    state.job = job; state.jobsByProvider = [job];
+    state.resultResponse = { id: REQUEST_ID, status: 'processing', outputs: [] };
+    const r = await workerHandler(post(`${WORKER_URL}?mode=webhook&token=${WORKER_TOKEN}`,
+      { id: REQUEST_ID, status: 'completed', outputs: ['https://evil.example/fake.mp4'] }));
+    expect(await bodyOf(r)).toMatchObject({ outcome: 'processing' });
+    expect(calls.some((c) => c.url.includes('/storage/v1/object/ugc-assets/') && c.method === 'POST')).toBe(false);
+    expect(rpcCalls('reelora_record_video_poll')).toHaveLength(1);
+  });
+
+  it('un échec MuAPI finalise en failed et restitue automatiquement les crédits', async () => {
+    const job = baseJob({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID });
+    state.job = job; state.jobsByProvider = [job];
+    state.resultResponse = { id: REQUEST_ID, status: 'failed', error: 'NSFW content', outputs: [] };
+    const r = await workerHandler(post(`${WORKER_URL}?mode=webhook&token=${WORKER_TOKEN}`, { id: REQUEST_ID }));
+    expect(await bodyOf(r)).toMatchObject({ outcome: 'failed' });
+    const finalize = rpcCalls('reelora_finalize_generation');
+    expect(finalize).toHaveLength(1);
+    expect(finalize[0].body?.p_status).toBe('failed');
+    expect(String(finalize[0].body?.p_error_message)).toContain('Crédits restitués');
+    expect(rpcCalls('reelora_release_video_quota')).toHaveLength(1);
+    expect(calls.some((c) => c.url.includes('/storage/v1/object/ugc-assets/') && c.method === 'POST')).toBe(false);
+  });
+
+  it('un callback déjà traité est idempotent (pas de second débit ni second remboursement)', async () => {
+    const job = baseJob({ status: 'succeeded', provider: 'muapi', provider_job_id: REQUEST_ID });
+    state.job = job; state.jobsByProvider = [job];
+    const r = await workerHandler(post(`${WORKER_URL}?mode=webhook&token=${WORKER_TOKEN}`, { id: REQUEST_ID }));
+    expect(await bodyOf(r)).toMatchObject({ outcome: 'already_terminal' });
+    expect(rpcCalls('reelora_finalize_generation')).toHaveLength(0);
+    expect(calls.some((c) => c.url.includes('/predictions/'))).toBe(false);
+  });
+
+  it('le cron réconcilie les jobs dus même sans page ouverte (token en en-tête)', async () => {
+    state.tickDue = [{ id: JOB_ID, job_id: JOB_ID, created_by: USER_ID, workspace_id: WORKSPACE_ID,
+      project_id: PROJECT_ID, provider_job_id: REQUEST_ID, provider: 'muapi', request_payload: { model_id: 'seedance-lite-t2v' } }];
+    state.job = baseJob({ status: 'processing', provider: 'muapi', provider_job_id: REQUEST_ID });
+    const req = new Request(`${WORKER_URL}?mode=tick`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-reelora-worker-token': WORKER_TOKEN },
+      body: JSON.stringify({ mode: 'tick' }) });
+    const r = await workerHandler(req);
+    expect(r.status).toBe(200);
+    expect(await bodyOf(r)).toMatchObject({ mode: 'tick', checked: 1 });
+    expect(rpcCalls('reelora_video_tick')).toHaveLength(1);
+    expect(calls.some((c) => c.url.includes(`/predictions/${REQUEST_ID}/result`))).toBe(true);
+  });
+});

@@ -63,9 +63,23 @@ describe('configuration des Edge Functions', () => {
     expect(health.match(/Boolean\(Deno\.env\.get\(/g)?.length).toBe(4);
     expect(health).not.toContain('JSON.stringify(Deno.env');
   });
-  it('aucune fonction n’est déployée sans vérification JWT sauf la sonde', () => {
+  it('seules la sonde et le worker MuAPI (protégé par jeton Vault) sont sans JWT', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(1);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(2);
+    expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
+    expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
+    const worker = read('supabase/functions/reelora-video-worker/index.ts');
+    expect(worker).toContain('constantTimeEqual');
+    expect(worker).toContain('reelora_worker_token');
+  });
+
+  it('la clé MuAPI n’est jamais une variable frontend ni un secret en clair', () => {
+    const env = read('.env.example');
+    const frontend = frontendCode();
+    expect(env).not.toMatch(/^\s*MUAPI_API_KEY\s*=/m);
+    expect(env).not.toContain('VITE_MUAPI');
+    expect(frontend).not.toContain('x-api-key');
+    expect(frontend).not.toContain('MUAPI_API_KEY=');
   });
 });
 

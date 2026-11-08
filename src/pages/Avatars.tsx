@@ -9,7 +9,7 @@ import { createAvatar, deleteAvatar, listAvatars, signedStorageUrl, updateAvatar
 import type { Avatar } from '../lib/types';
 
 const EMPTY = {
-  name: '', description: '', provider: 'heygen' as Avatar['provider'], provider_avatar_id: '',
+  name: '', description: '', provider: 'custom' as Avatar['provider'], provider_avatar_id: '',
   voice_id: '', language: 'fr', preview_storage_path: '', is_default: false,
   status: 'active' as Avatar['status'],
 };
@@ -101,14 +101,14 @@ export default function Avatars() {
 
   return (
     <>
-      <PageHeader eyebrow="Présentateurs" title="Mes avatars" description="Associez un avatar réel (HeyGen), un style fal.ai ou un avatar personnalisé à vos campagnes."
+      <PageHeader eyebrow="Présentateurs" title="Mes avatars" description="Associez une image de référence (présentateur ou produit) aux modèles MuAPI image → vidéo."
         actions={<Button icon={<Plus size={15} />} onClick={openCreate}>Nouvel avatar</Button>} />
 
-      <div className="mb-5"><Banner tone="info" title="Identifiants fournisseur requis">Pour HeyGen, renseignez l’identifiant d’avatar fourni par votre compte et éventuellement un identifiant de voix. Les clés API restent côté serveur. Sans configuration fournisseur, la génération vidéo échouera explicitement.</Banner></div>
+      <div className="mb-5"><Banner tone="info" title="Image de référence MuAPI">Pour les modèles image → vidéo, ajoutez une image JPG/PNG : elle est signée côté serveur puis transmise à MuAPI comme <code>image_url</code>. Les modèles texte → vidéo n’en ont pas besoin. Les clés API restent côté serveur.</Banner></div>
 
       {error && <ErrorState message={error} onRetry={() => void load()} />}
       {loading ? <LoadingState label="Chargement des avatars…" /> : avatars.length === 0 ? (
-        <EmptyState icon={<Users size={24} />} title="Aucun avatar" description="Créez un avatar pour pouvoir lancer une génération vidéo depuis le Studio." action={<Button icon={<Plus size={15} />} onClick={openCreate}>Créer un avatar</Button>} />
+        <EmptyState icon={<Users size={24} />} title="Aucun avatar" description="Ajoutez une image de référence pour les modèles MuAPI image → vidéo." action={<Button icon={<Plus size={15} />} onClick={openCreate}>Créer un avatar</Button>} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {avatars.map((a) => (
@@ -133,18 +133,18 @@ export default function Avatars() {
         </div>
       )}
 
-      <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Modifier l’avatar' : 'Nouvel avatar'} description="Les identifiants sont transmis au fournisseur uniquement au moment de la génération."
+      <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Modifier l’avatar' : 'Nouvel avatar'} description="L’image est utilisée comme référence par les modèles MuAPI image → vidéo."
         footer={<><Button variant="ghost" onClick={() => setModal(false)}>Annuler</Button><Button type="submit" form="avatar-form" loading={saving}>{editing ? 'Enregistrer' : 'Créer'}</Button></>}>
         <form id="avatar-form" onSubmit={(e) => void onSubmit(e)} className="space-y-4">
           <Input label="Nom" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex. Awa – présentatrice" />
           <Textarea label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Style, tenue, personnalité…" />
           <div className="grid gap-4 sm:grid-cols-2">
             <Select label="Fournisseur" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Avatar['provider'] })}>
-              <option value="heygen">HeyGen (avatar parlant)</option><option value="fal">fal.ai (image → vidéo)</option><option value="custom">Personnalisé</option>
+              <option value="custom">Image de référence MuAPI</option><option value="heygen">Ancienne fiche HeyGen</option><option value="fal">Ancienne fiche fal.ai</option>
             </Select>
             <Select label="Langue" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })}><option value="fr">Français</option><option value="en">Anglais</option><option value="es">Espagnol</option></Select>
           </div>
-          <Input label="Identifiant avatar fournisseur" value={form.provider_avatar_id} onChange={(e) => setForm({ ...form, provider_avatar_id: e.target.value })} placeholder="Ex. avatar_id HeyGen" />
+          <Input label="Référence interne" value={form.provider_avatar_id} onChange={(e) => setForm({ ...form, provider_avatar_id: e.target.value })} placeholder="Référence interne (optionnel)" />
           <Input label="Identifiant de voix" value={form.voice_id} onChange={(e) => setForm({ ...form, voice_id: e.target.value })} placeholder="Laisser vide pour la voix par défaut" />
           <label className="field">
             <span className="field-label">Image de référence</span>

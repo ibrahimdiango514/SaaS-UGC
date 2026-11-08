@@ -14,8 +14,8 @@ interface Config {
 }
 
 const DEFAULT_CONFIG: Config = {
-  provider: 'heygen', duration_seconds: 15, aspect_ratio: '9:16', resolution: '1080p',
-  style: 'ugc_naturel', voice_speed: 1, captions: true, background_color: '#FFFFFF', model: '',
+  provider: 'muapi', duration_seconds: 5, aspect_ratio: '9:16', resolution: '480p',
+  style: 'ugc_naturel', voice_speed: 1, captions: true, background_color: '#FFFFFF', model: 'seedance-lite-t2v',
 };
 
 export default function Presets() {
@@ -78,7 +78,7 @@ export default function Presets() {
       <PageHeader eyebrow="Studio" title="Paramètres de génération vidéo" description="Enregistrez des combinaisons de réglages réutilisables pour vos campagnes."
         actions={<Button icon={<Plus size={15} />} onClick={openCreate}>Nouveau réglage</Button>} />
 
-      <div className="mb-5"><Banner tone="info" title="Réglages réels, pas de simulation">Ces valeurs sont transmises telles quelles au fournisseur vidéo sélectionné (HeyGen ou fal.ai) lors du lancement d’une génération. Elles ne créent aucun résultat fictif.</Banner></div>
+      <div className="mb-5"><Banner tone="info" title="Réglages réels, pas de simulation">Ces valeurs servent de référence pour vos campagnes. Dans l’UGC Studio, seuls les paramètres réellement pris en charge par le modèle MuAPI choisi sont transmis au fournisseur. Elles ne créent aucun résultat fictif.</Banner></div>
 
       {error && <ErrorState message={error} onRetry={() => void load()} />}
       {loading ? <LoadingState label="Chargement des réglages…" /> : presets.length === 0 ? (
@@ -118,15 +118,15 @@ export default function Presets() {
           <Input label="Nom" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Témoignage 15 s vertical" />
           <div className="grid gap-4 sm:grid-cols-2">
             <Select label="Fournisseur" value={config.provider} onChange={(e) => setConfig({ ...config, provider: e.target.value })}>
-              <option value="heygen">HeyGen (avatar parlant)</option><option value="fal">fal.ai (image → vidéo)</option>
+              <option value="muapi">MuAPI (vidéo UGC)</option>
             </Select>
             <Select label="Format" value={config.aspect_ratio} onChange={(e) => setConfig({ ...config, aspect_ratio: e.target.value })}>{['9:16', '1:1', '4:5', '16:9'].map((x) => <option key={x}>{x}</option>)}</Select>
             <Input label="Durée (secondes)" type="number" min={5} max={60} value={config.duration_seconds} onChange={(e) => setConfig({ ...config, duration_seconds: Number(e.target.value) })} />
-            <Select label="Résolution" value={config.resolution} onChange={(e) => setConfig({ ...config, resolution: e.target.value })}><option value="720p">720p</option><option value="1080p">1080p</option><option value="4k">4K</option></Select>
+            <Select label="Résolution" value={config.resolution} onChange={(e) => setConfig({ ...config, resolution: e.target.value })}><option value="480p">480p</option><option value="720p">720p</option><option value="1080p">1080p</option></Select>
             <Input label="Style" value={config.style} onChange={(e) => setConfig({ ...config, style: e.target.value })} placeholder="ugc_naturel" />
             <Input label="Vitesse de la voix" type="number" min={0.5} max={2} step={0.1} value={config.voice_speed} onChange={(e) => setConfig({ ...config, voice_speed: Number(e.target.value) })} />
             <Input label="Couleur de fond" value={config.background_color} onChange={(e) => setConfig({ ...config, background_color: e.target.value })} placeholder="#FFFFFF" />
-            <Input label="Modèle fal.ai (optionnel)" value={config.model} onChange={(e) => setConfig({ ...config, model: e.target.value })} placeholder="fal-ai/kling-video…" />
+            <Input label="Modèle MuAPI (optionnel)" value={config.model} onChange={(e) => setConfig({ ...config, model: e.target.value })} placeholder="seedance-lite-t2v…" />
           </div>
           <Toggle checked={config.captions} onChange={(v) => setConfig({ ...config, captions: v })} label="Activer les sous-titres" />
           <Toggle checked={isDefault} onChange={setIsDefault} label="Utiliser comme réglage par défaut" />

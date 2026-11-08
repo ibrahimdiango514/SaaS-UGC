@@ -211,8 +211,8 @@ export default function Settings() {
             {health === null && <Banner tone="warning" title="État indisponible">La fonction reelora-health n’a pas répondu. Vérifiez le déploiement des Edge Functions.</Banner>}
             {health && [
               ['Groq (scripts & prompts)', health.groq, 'GROQ_API_KEY'],
-              ['HeyGen (avatars parlants)', health.heygen, 'HEYGEN_API_KEY'],
-              ['fal.ai (image → vidéo)', health.fal, 'FAL_KEY'],
+              ['MuAPI (génération vidéo)', health.muapi, 'MUAPI_API_KEY'],
+              ['Worker MuAPI (webhook + cron)', health.worker, 'jeton stocké dans Supabase Vault'],
               ['Supabase', health.supabase, 'injecté par la plateforme'],
             ].map(([label, ok, hint]) => (
               <div key={String(label)} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] px-4 py-3">

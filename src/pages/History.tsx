@@ -39,7 +39,12 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
         <div className="grid gap-3 bg-white/[0.02] px-5 pb-4 pt-1 text-xs sm:grid-cols-2">
           <div><p className="text-slate-500">Identifiant</p><p className="break-all font-mono text-slate-300">{job.id}</p></div>
           <div><p className="text-slate-500">Fournisseur</p><p className="text-slate-300">{job.provider ?? '—'} {job.provider_job_id && <span className="font-mono text-[10px]">({truncate(job.provider_job_id, 30)})</span>}</p></div>
+          <div><p className="text-slate-500">Modèle MuAPI</p><p className="font-mono text-slate-300">{String((job.request_payload as Record<string, unknown>)?.model_id ?? '—')}</p></div>
+          <div><p className="text-slate-500">Clé d’idempotence</p><p className="truncate font-mono text-slate-300">{String((job.request_payload as Record<string, unknown>)?.muapi_request_id ?? '—')}</p></div>
           <div className="sm:col-span-2"><p className="text-slate-500">Erreur</p><p className="text-slate-300">{job.error_message || '—'}</p></div>
+          {['queued', 'reserved', 'processing'].includes(job.status) && <div className="sm:col-span-2">
+            <Link to={`/app/studio?job=${job.id}`} className="btn btn-outline btn-sm"><Activity size={13} /> Reprendre le suivi dans le Studio</Link>
+          </div>}
           <div className="sm:col-span-2">
             <p className="mb-2 font-semibold text-slate-400">Événements de production</p>
             {loading ? <LoadingState /> : events.length === 0 ? <p className="text-slate-600">Aucun événement.</p> : (

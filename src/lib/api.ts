@@ -2,9 +2,9 @@ import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
   AdminOverview, AdminUser, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
-  GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, Plan, Product,
+  GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
-  ServiceCatalogItem, Subscription, VideoActionResult, Workspace, WorkspaceMember,
+  ServiceCatalogItem, Subscription, VideoActionResult, VideoCostEstimate, Workspace, WorkspaceMember,
 } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -325,8 +325,29 @@ export async function listServices(): Promise<ServiceCatalogItem[]> {
   );
 }
 
-export async function startGeneration(projectId: string, serviceKey: string, payload: Json): Promise<string> {
-  return rpc<string>('reelora_start_generation', { p_project_id: projectId, p_service_key: serviceKey, p_payload: payload });
+/**
+ * Reserve credits + create the job atomically. `idempotencyKey` is unique PER
+ * GENERATION OPERATION: replaying it (double click, retry, refreshed page)
+ * returns the SAME job and never creates a second reservation or debit.
+ */
+export async function startGeneration(
+  projectId: string, serviceKey: string, payload: Json, idempotencyKey?: string,
+): Promise<string> {
+  return rpc<string>('reelora_start_generation', {
+    p_project_id: projectId, p_service_key: serviceKey, p_payload: payload,
+    p_idempotency_key: idempotencyKey ?? null,
+  });
+}
+
+/** Verified MuAPI video models (curated endpoints, refreshed metadata from live /models). */
+export async function listVideoModels(): Promise<MuApiModel[]> {
+  const result = await invokeEdge<{ models: MuApiModel[] }>('reelora-video', { action: 'models' });
+  return result.models ?? [];
+}
+
+/** Server-side check of the credit cost shown before the confirmation dialog. */
+export function estimateVideo(serviceKey: string, modelId: string): Promise<VideoCostEstimate> {
+  return invokeEdge<VideoCostEstimate>('reelora-video', { action: 'estimate', service_key: serviceKey, model_id: modelId });
 }
 
 export async function cancelGeneration(jobId: string): Promise<boolean> {
@@ -520,4 +541,11 @@ export async function healthCheck(): Promise<{ configured: Record<string, boolea
   const { data, error } = await supabase.functions.invoke('reelora-health', { method: 'GET' });
   if (error) throw new AppError(humanizeError(error.message), 'HEALTH_ERROR');
   return data as { configured: Record<string, boolean> };
+}
+
+/** A stable, per-operation idempotency key: never reuse across different videos. */
+export function newGenerationIdempotencyKey(): string {
+  const g = globalThis as unknown as { crypto?: { randomUUID?: () => string } };
+  const id = g.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `ugc-${id}`;
 }

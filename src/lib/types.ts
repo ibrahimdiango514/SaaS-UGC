@@ -318,13 +318,56 @@ export interface AiScriptResult {
   scenes_saved: number;
 }
 
+/** A parameter actually supported by one verified MuAPI video model. */
+export interface MuApiParamDef {
+  type: 'select' | 'number' | 'boolean';
+  label?: string;
+  options?: (string | number)[];
+  min?: number;
+  max?: number;
+  default?: string | number | boolean;
+}
+
+/** Catalog row from GET reelora-video { action: "models" } (curated + live metadata). */
+export interface MuApiModel {
+  model_id: string;
+  display_name: string;
+  description: string | null;
+  category: 'Text to Video' | 'Image to Video' | string;
+  endpoint: string;
+  input_fields: string[];
+  required_fields: string[];
+  param_schema: Record<string, MuApiParamDef>;
+  cost_usd: number | string | null;
+  cost_currency: string;
+  is_enabled: boolean;
+  is_coming_soon: boolean;
+  synced_at?: string | null;
+}
+
+/** Explicit credit / provider cost shown BEFORE the user confirms. */
+export interface VideoCostEstimate {
+  service_key: string;
+  credits_cost: number;
+  service_active: boolean;
+  model_id: string | null;
+  model_available: boolean;
+  provider_cost_usd: number | string | null;
+  provider_cost_currency: string;
+}
+
 export interface VideoActionResult {
   job_id: string;
   status: string;
   provider?: string;
   provider_job_id?: string | null;
   provider_state?: string;
+  model_id?: string;
+  progress?: number;
+  preview_url?: string | null;
   storage_path?: string;
+  provider_cost?: Json | null;
+  webhook_enabled?: boolean;
   message?: string;
-  error?: string;
+  error?: string | null;
 }
