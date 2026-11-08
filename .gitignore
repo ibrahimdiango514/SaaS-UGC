@@ -147,3 +147,13 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Reelora / Supabase / Netlify
+supabase/.temp/
+supabase/.branches/
+.netlify/
+.env.local
+.env.production
+*.local
+playwright-report/
+test-results/
