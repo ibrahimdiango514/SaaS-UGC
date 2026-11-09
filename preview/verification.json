@@ -1,0 +1,153 @@
+{
+  "generatedAt": "2026-11-09T05:47:34.794Z",
+  "baseUrl": "http://127.0.0.1:4173",
+  "note": "Vérification UI dans un navigateur Chromium headless avec backend Supabase intercepté par des fixtures déterministes reflétant l’état serveur réel (muapi:true, groq:false). Aucun appel MuAPI réel, aucune clé, aucune génération lancée, aucun résultat simulé. La confirmation de coût est ouverte puis annulée.",
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "screenshots": [
+    "screenshots/01-video-studio-desktop.jpg",
+    "screenshots/02-video-studio-desktop-full.jpg",
+    "screenshots/10-devis-confirmation.jpg",
+    "screenshots/03-video-to-video-prepare.jpg",
+    "screenshots/04-video-studio-mobile.jpg",
+    "screenshots/05-video-studio-mobile-full.jpg",
+    "screenshots/06-image-studio-prepare.jpg",
+    "screenshots/07-my-generations.jpg",
+    "screenshots/08-my-projects.jpg",
+    "screenshots/09-saved-creations.jpg"
+  ],
+  "interactions": [
+    {
+      "name": "États réels : MuAPI configuré, Groq indisponible, aucune simulation IA",
+      "pass": true,
+      "detail": {
+        "muapiConfigured": true,
+        "groqUnavailable": true,
+        "generateEnabled": true
+      }
+    },
+    {
+      "name": "Devis affiché avant génération + confirmation obligatoire (aucun lancement)",
+      "pass": true,
+      "detail": {
+        "model": true,
+        "params": true,
+        "credits": true,
+        "providerCost": true,
+        "confirmLockedBeforeCheckbox": true
+      }
+    },
+    {
+      "name": "Mode Image → Vidéo exige une référence",
+      "pass": true
+    },
+    {
+      "name": "Video to Video préparé, sans génération",
+      "pass": true
+    },
+    {
+      "name": "Paramètres strictement dérivés du modèle (Veo 3 Fast)",
+      "pass": true,
+      "detail": {
+        "aspect": true,
+        "duration": false,
+        "resolution": false,
+        "camera": false
+      }
+    },
+    {
+      "name": "Aucun débordement horizontal mobile",
+      "pass": true,
+      "detail": {
+        "overflowPx": 0
+      }
+    },
+    {
+      "name": "My Generations : détails et relance",
+      "pass": true,
+      "detail": {
+        "details": true,
+        "reuseVisible": true
+      }
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "backendCalls": [
+    {
+      "call": "GET /functions/v1/reelora-health",
+      "count": 3
+    },
+    {
+      "call": "GET /rest/v1/reelora_notifications",
+      "count": 7
+    },
+    {
+      "call": "GET /rest/v1/ugc_credit_ledger",
+      "count": 1
+    },
+    {
+      "call": "GET /rest/v1/ugc_generated_assets",
+      "count": 4
+    },
+    {
+      "call": "GET /rest/v1/ugc_generation_jobs",
+      "count": 5
+    },
+    {
+      "call": "GET /rest/v1/ugc_job_events",
+      "count": 1
+    },
+    {
+      "call": "GET /rest/v1/ugc_profiles",
+      "count": 7
+    },
+    {
+      "call": "GET /rest/v1/ugc_service_catalog",
+      "count": 3
+    },
+    {
+      "call": "GET /rest/v1/ugc_video_projects",
+      "count": 5
+    },
+    {
+      "call": "GET /rest/v1/ugc_workspaces",
+      "count": 7
+    },
+    {
+      "call": "POST /functions/v1/reelora-video",
+      "count": 10
+    },
+    {
+      "call": "POST /rest/v1/rpc/reelora_bootstrap",
+      "count": 8
+    },
+    {
+      "call": "POST /rest/v1/rpc/reelora_quota_status",
+      "count": 7
+    }
+  ],
+  "muapiCalls": 0,
+  "serverState": {
+    "muapiSecretPresent": true,
+    "groqSecretPresent": false,
+    "realGenerationLaunched": false,
+    "jobsCreated": 0
+  },
+  "netlifyPreview": {
+    "url": "https://deploy-preview-2--saas-ugc-growth.netlify.app",
+    "independentFromMain": true,
+    "protected": true,
+    "note": "Accès anonyme bloqué par la protection de l’équipe Netlify ; le propriétaire peut ouvrir avec son compte ou désactiver la protection."
+  }
+}

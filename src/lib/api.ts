@@ -2,9 +2,10 @@ import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
   AdminOverview, AdminUser, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
-  GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, Plan, Product,
+  GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
-  ServiceCatalogItem, Subscription, VideoActionResult, Workspace, WorkspaceMember,
+  ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
+  Workspace, WorkspaceMember, MuApiParamDef,
 } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -263,6 +264,36 @@ export async function uploadAvatarPreview(workspaceId: string, file: File): Prom
   return path;
 }
 
+/**
+ * Upload a Video Studio reference image into the SAME private bucket and
+ * workspace prefix. The Edge Function signs this path server-side at submit
+ * time; no public URL is created and no provider key reaches the browser.
+ */
+export async function uploadReferenceImage(workspaceId: string, file: File): Promise<string> {
+  const ext = (file.name.split('.').pop()?.toLowerCase() || 'png').replace(/[^a-z0-9]/g, '') || 'png';
+  const path = `${workspaceId}/references/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw new AppError(humanizeError(error.message), 'STORAGE_ERROR');
+  return path;
+}
+
+/**
+ * Upload an editor-imported video/audio clip into the same private Storage
+ * bucket. Signed URLs are created on demand; no public URL is exposed.
+ */
+export async function uploadEditorMedia(workspaceId: string, file: File): Promise<string> {
+  const ext = (file.name.split('.').pop()?.toLowerCase() || 'mp4').replace(/[^a-z0-9]/g, '') || 'mp4';
+  const path = `${workspaceId}/editor/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw new AppError(humanizeError(error.message), 'STORAGE_ERROR');
+  return path;
+}
+
+/** Attach an already-generated asset to one of the user's projects (RLS-checked RPC). */
+export async function attachAssetToProject(assetId: string, projectId: string): Promise<boolean> {
+  return rpc<boolean>('reelora_attach_asset_to_project', { p_asset_id: assetId, p_project_id: projectId });
+}
+
 export async function signedStorageUrl(path: string, expires = 3600): Promise<string> {
   const { data, error } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, expires);
   if (error) throw new AppError(humanizeError(error.message), 'STORAGE_ERROR');
@@ -325,8 +356,58 @@ export async function listServices(): Promise<ServiceCatalogItem[]> {
   );
 }
 
-export async function startGeneration(projectId: string, serviceKey: string, payload: Json): Promise<string> {
-  return rpc<string>('reelora_start_generation', { p_project_id: projectId, p_service_key: serviceKey, p_payload: payload });
+/**
+ * Reserve credits + create the job atomically. `idempotencyKey` is unique PER
+ * GENERATION OPERATION: replaying it (double click, retry, refreshed page)
+ * returns the SAME job and never creates a second reservation or debit.
+ */
+export async function startGeneration(
+  projectId: string, serviceKey: string, payload: Json, idempotencyKey?: string,
+): Promise<string> {
+  return rpc<string>('reelora_start_generation', {
+    p_project_id: projectId, p_service_key: serviceKey, p_payload: payload,
+    p_idempotency_key: idempotencyKey ?? null,
+  });
+}
+
+/** Full live MuAPI video catalogue with explicit public/account diagnostics. */
+export function getVideoCatalog(): Promise<VideoCatalogResponse> {
+  return invokeEdge<VideoCatalogResponse>('reelora-video', { action: 'catalog' });
+}
+
+/** Verified MuAPI video models (kept for the classical Studio and existing tests). */
+export async function listVideoModels(): Promise<MuApiModel[]> {
+  const result = await invokeEdge<{ models: MuApiModel[] }>('reelora-video', { action: 'models' });
+  return result.models ?? [];
+}
+
+/** Full input_schema of one real model, fetched by the server with its own key. */
+export function getVideoModelDetail(modelId: string): Promise<{ model: MuApiModel }> {
+  return invokeEdge<{ model: MuApiModel }>('reelora-video', { action: 'model-detail', model_id: modelId });
+}
+
+export interface VideoQuoteInput {
+  params?: Record<string, string | number | boolean>;
+  prompt?: string;
+  image_url?: string;
+  last_image_url?: string;
+  /** Real schema fetched by model-detail; the server still validates every key. */
+  param_schema?: Record<string, MuApiParamDef>;
+}
+
+/**
+ * Server-side quote shown BEFORE confirmation. When `quote` is supplied the
+ * backend may call MuAPI's non-generating estimate-cost endpoint to obtain the
+ * exact USD price for these exact parameters. No inference or media is created.
+ */
+export function estimateVideo(serviceKey: string, modelId: string, quote?: VideoQuoteInput): Promise<VideoCostEstimate> {
+  const body: Record<string, unknown> = { action: 'estimate', service_key: serviceKey, model_id: modelId };
+  if (quote?.params) body.params = quote.params;
+  if (quote?.prompt) body.prompt = quote.prompt;
+  if (quote?.image_url) body.image_url = quote.image_url;
+  if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
+  if (quote?.param_schema) body.param_schema = quote.param_schema;
+  return invokeEdge<VideoCostEstimate>('reelora-video', body);
 }
 
 export async function cancelGeneration(jobId: string): Promise<boolean> {
@@ -344,6 +425,13 @@ export function videoStatus(jobId: string): Promise<VideoActionResult> {
 export async function listJobs(limit = 100): Promise<GenerationJob[]> {
   return unwrap<GenerationJob[]>(
     supabase.from('ugc_generation_jobs').select('*').order('created_at', { ascending: false }).limit(limit) as unknown as PromiseLike<AnyResult>,
+  );
+}
+
+/** RLS-scoped single job lookup for deep links and "reuse these parameters". */
+export async function getJob(id: string): Promise<GenerationJob | null> {
+  return unwrap<GenerationJob | null>(
+    supabase.from('ugc_generation_jobs').select('*').eq('id', id).maybeSingle() as unknown as PromiseLike<AnyResult>,
   );
 }
 
@@ -520,4 +608,11 @@ export async function healthCheck(): Promise<{ configured: Record<string, boolea
   const { data, error } = await supabase.functions.invoke('reelora-health', { method: 'GET' });
   if (error) throw new AppError(humanizeError(error.message), 'HEALTH_ERROR');
   return data as { configured: Record<string, boolean> };
+}
+
+/** A stable, per-operation idempotency key: never reuse across different videos. */
+export function newGenerationIdempotencyKey(): string {
+  const g = globalThis as unknown as { crypto?: { randomUUID?: () => string } };
+  const id = g.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `ugc-${id}`;
 }

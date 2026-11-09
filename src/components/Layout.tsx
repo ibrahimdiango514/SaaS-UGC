@@ -17,7 +17,7 @@ interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean }
 const NAV: NavItem[] = [
   { to: '/app', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  { to: '/app/studio', label: 'UGC Studio', icon: Clapperboard },
+  { to: '/app/studio', label: 'Video Studio', icon: Clapperboard },
   { to: '/app/avatars', label: 'Avatars', icon: Users },
   { to: '/app/scripts', label: 'Scripts IA', icon: Wand2 },
   { to: '/app/prompts', label: 'Prompts', icon: BookOpen },
@@ -46,6 +46,7 @@ export default function Layout() {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  const studioMobileShell = location.pathname === '/app/studio';
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -128,7 +129,7 @@ export default function Layout() {
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-ink/80 px-4 backdrop-blur-xl sm:px-6">
+        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-ink/80 px-4 backdrop-blur-xl sm:px-6', studioMobileShell && 'hidden lg:flex')}>
           <button className="btn btn-ghost btn-icon lg:hidden" onClick={() => setDrawerOpen(true)} aria-label="Ouvrir le menu"><Menu size={20} /></button>
           <div className="lg:hidden"><Logo compact /></div>
 
@@ -198,7 +199,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="flex-1 px-4 pb-28 pt-6 sm:px-6 lg:pb-10 lg:pt-8">
+        <main className={cn('flex-1 px-4 sm:px-6 lg:pb-10 lg:pt-8', studioMobileShell ? 'pb-0 pt-0' : 'pb-28 pt-6')}>
           <div className="mx-auto w-full max-w-[1400px]"><Outlet /></div>
         </main>
       </div>
@@ -225,7 +226,7 @@ export default function Layout() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className="safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-line bg-panel/95 px-1 pt-2 backdrop-blur-xl lg:hidden">
+      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-line bg-panel/95 px-1 pt-2 backdrop-blur-xl', studioMobileShell ? 'hidden' : 'lg:hidden')}>
         {MOBILE_NAV.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end}
             className={({ isActive }) => cn('flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-1 text-[10px] font-medium', isActive ? 'text-brand-300' : 'text-slate-500')}>

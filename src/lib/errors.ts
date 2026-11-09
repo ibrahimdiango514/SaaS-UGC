@@ -29,6 +29,19 @@ const DB_MESSAGES: Array<[RegExp, string]> = [
   [/duplicate key value violates unique constraint/i, 'Cette entrée existe déjà.'],
   [/violates row-level security/i, 'Action refusée par les règles de sécurité.'],
   [/invalid input syntax/i, 'Une valeur saisie est invalide.'],
+  [/invalid_idempotency_key/i, 'Identifiant d’opération invalide. Relancez la génération.'],
+  [/MUAPI_NOT_CONFIGURED/i, 'La génération vidéo MuAPI n’est pas configurée côté serveur (secret MUAPI_API_KEY).'],
+  [/MODEL_UNAVAILABLE/i, 'Ce modèle MuAPI n’est plus disponible. Choisissez-en un autre.'],
+  [/MODEL_NOT_FOUND/i, 'Modèle vidéo MuAPI introuvable.'],
+  [/IMAGE_MISSING/i, 'Ce modèle exige une image de référence (produit ou avatar).'],
+  [/SCRIPT_MISSING/i, 'Générez ou saisissez un script avant de lancer la vidéo.'],
+  [/MUAPI_SUBMIT_ERROR/i, 'MuAPI a refusé la génération. Vérifiez le modèle et les paramètres.'],
+  [/MUAPI_NO_REQUEST_ID/i, 'MuAPI n’a pas confirmé la tâche. Vos crédits ont été restitués.'],
+  [/timeout/i, 'Le fournisseur vidéo n’a pas répondu à temps. Vos crédits ont été restitués.'],
+  [/GROQ_NOT_CONFIGURED/i, 'L’assistance IA n’est pas configurée côté serveur (secret GROQ_API_KEY). Aucun texte n’est simulé ; saisissez votre script ou votre prompt manuellement.'],
+  [/AI_EMPTY_RESPONSE/i, 'Le service IA n’a renvoyé aucun contenu exploitable. Aucun texte n’est simulé ; réessayez ou saisissez votre texte manuellement.'],
+  [/AI_PROVIDER_ERROR/i, 'Le fournisseur IA a renvoyé une erreur. Aucun texte n’est simulé ; réessayez plus tard.'],
+  [/AI_INTERNAL_ERROR/i, 'Une erreur inattendue est survenue côté IA. Aucun texte n’est simulé.'],
 ];
 
 export function humanizeError(raw: string | undefined | null, fallback = 'Une erreur est survenue. Réessayez.'): string {

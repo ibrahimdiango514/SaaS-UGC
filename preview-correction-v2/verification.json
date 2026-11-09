@@ -1,0 +1,150 @@
+{
+  "generatedAt": "2026-11-09T14:06:25.494Z",
+  "base": "http://127.0.0.1:4182",
+  "viewportDesktop": "1440×1000",
+  "viewportMobile": "390×844",
+  "interactions": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "items": [
+      {
+        "name": "Accueil mobile : titre, 4 cartes inclinées, secteurs, solde et barre de prompt",
+        "pass": true,
+        "detail": {
+          "title": true,
+          "subtitle": true,
+          "sectors": true,
+          "nav": true,
+          "balance": true,
+          "chips": true,
+          "noFakeMedia": true,
+          "generate": true,
+          "noGlobalHeader": true,
+          "noBottomNav": true,
+          "promptBarVisible": true
+        }
+      },
+      {
+        "name": "Catalogue MuAPI : 11 modèles réels, diagnostics, clé validée, distinction public/compte",
+        "pass": true,
+        "detail": {
+          "diagnostics": true,
+          "counts": true,
+          "key": true,
+          "endpoints": true,
+          "distinction": true,
+          "cards": true,
+          "noGeneration": true
+        }
+      },
+      {
+        "name": "Recherche catalogue par nom : résultats réels filtrés",
+        "pass": true,
+        "detail": {
+          "term": true,
+          "seedance": true,
+          "visible": true
+        }
+      },
+      {
+        "name": "Modèle sélectionné : schéma réel, paramètres dynamiques et endpoints exacts",
+        "pass": true,
+        "detail": {
+          "model": true,
+          "params": true,
+          "endpoint": true,
+          "estimateEndpoint": true,
+          "source": true,
+          "noFakeAudioControls": true
+        }
+      },
+      {
+        "name": "Devis exclusivement backend : 9 crédits, coût exact estimate-cost, paramètres réels",
+        "pass": true
+      },
+      {
+        "name": "Confirmation explicite obligatoire du devis exact, aucun lancement",
+        "pass": true,
+        "detail": {
+          "model": true,
+          "params": true,
+          "credits": true,
+          "providerCost": true,
+          "locked": true,
+          "checkbox": true
+        }
+      },
+      {
+        "name": "AI Video Editor conservé : timeline 3 pistes, assistant, export refusé sans média",
+        "pass": true,
+        "detail": {
+          "demo": true,
+          "timeline": true,
+          "assist": true,
+          "missing": true,
+          "render": true,
+          "exportDisabled": true
+        }
+      }
+    ]
+  },
+  "files": [
+    "screenshots/01-accueil-mobile.jpg",
+    "screenshots/02-catalogue-muapi-desktop.jpg",
+    "screenshots/03-modele-parametres-desktop.jpg",
+    "screenshots/04-prompt-devis-mobile.jpg",
+    "screenshots/05-studio-desktop.jpg",
+    "screenshots/06-editeur-desktop.jpg"
+  ],
+  "titles": [
+    {
+      "file": "screenshots/01-accueil-mobile.jpg",
+      "title": "Accueil mobile 390×844 — barre, solde, 4 univers, prompt bas"
+    },
+    {
+      "file": "screenshots/02-catalogue-muapi-desktop.jpg",
+      "title": "Catalogue MuAPI desktop — diagnostics, recherche et statuts"
+    },
+    {
+      "file": "screenshots/03-modele-parametres-desktop.jpg",
+      "title": "Modèle sélectionné — paramètres dynamiques réels et devis"
+    },
+    {
+      "file": "screenshots/04-prompt-devis-mobile.jpg",
+      "title": "Barre de prompt mobile et devis backend « Générer · 9 crédits »"
+    },
+    {
+      "file": "screenshots/05-studio-desktop.jpg",
+      "title": "Studio desktop — plan, devis et paramètres réellement envoyés"
+    },
+    {
+      "file": "screenshots/06-editeur-desktop.jpg",
+      "title": "AI Video Editor desktop — timeline multipiste et assistant"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "backendCalls": 31,
+  "edgeActions": [
+    "catalog",
+    "model-detail",
+    "estimate"
+  ],
+  "rpcCalls": [
+    "reelora_bootstrap",
+    "reelora_quota_status"
+  ],
+  "externalHosts": [],
+  "muapiCalls": [],
+  "realGenerationLaunched": false,
+  "jobsCreated": 0,
+  "serverState": {
+    "muapiSecretPresent": true,
+    "groqSecretPresent": false,
+    "realGenerationLaunched": false,
+    "jobsCreated": 0,
+    "creditsSpent": 0,
+    "note": "Fixtures de navigateur : aucun appel MuAPI/Groq réel, aucun débit, aucun job créé."
+  }
+}

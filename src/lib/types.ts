@@ -119,7 +119,8 @@ export interface Avatar {
   created_by: string;
   name: string;
   description: string | null;
-  provider: 'heygen' | 'fal' | 'custom';
+  /** `legacy` preserves already-stored rows without exposing a retired provider name. */
+  provider: 'muapi' | 'custom' | 'legacy';
   provider_avatar_id: string | null;
   voice_id: string | null;
   preview_storage_path: string | null;
@@ -318,13 +319,108 @@ export interface AiScriptResult {
   scenes_saved: number;
 }
 
+/** A parameter actually supported by one verified MuAPI video model. */
+export interface MuApiParamDef {
+  type: 'select' | 'number' | 'boolean' | 'string' | 'array' | 'object';
+  label?: string;
+  description?: string;
+  options?: (string | number)[];
+  min?: number;
+  max?: number;
+  step?: number;
+  default?: string | number | boolean;
+  required?: boolean;
+}
+
+export type ReeloraModelStatus = 'active' | 'disabled' | 'coming_soon' | 'unsupported' | 'unverified';
+export type MuApiAccountAccess = 'account' | 'public_only' | 'unverified';
+
+/** Catalog row from GET reelora-video { action: "catalog" } (live MuAPI metadata). */
+export interface MuApiModel {
+  model_id: string;
+  display_name: string;
+  description: string | null;
+  category: string;
+  endpoint: string;
+  input_fields: string[];
+  required_fields: string[];
+  param_schema: Record<string, MuApiParamDef>;
+  cost_usd: number | string | null;
+  cost_currency: string;
+  is_enabled: boolean;
+  is_coming_soon: boolean;
+  synced_at?: string | null;
+  family?: string | null;
+  group_of?: string | null;
+  domain?: string | null;
+  cost_strategy?: string | null;
+  dynamic_pricing?: boolean;
+  endpoint_url?: string | null;
+  estimate_endpoint?: string | null;
+  source?: string | null;
+  reelora_status?: ReeloraModelStatus;
+  reelora_reason?: string;
+  account_access?: MuApiAccountAccess;
+}
+
+/** Read-only diagnostics explaining the difference between public and account catalogue. */
+export interface VideoCatalogDiagnostics {
+  source: 'muapi_authenticated' | 'muapi_public' | 'database';
+  fetched_at: string;
+  public_total: number | null;
+  authenticated_total: number | null;
+  detected_video: number;
+  active: number;
+  unavailable: number;
+  account_accessible: number;
+  public_only: number;
+  reasons: Record<string, number>;
+  endpoints: string[];
+  error?: string | null;
+  account: {
+    key_configured: boolean;
+    key_valid: boolean;
+    catalog_status: number | null;
+    balance_status: number | null;
+    keys_status: number | null;
+    key_is_test: boolean | null;
+    error?: string | null;
+  };
+}
+
+export interface VideoCatalogResponse {
+  models: MuApiModel[];
+  catalog: VideoCatalogDiagnostics;
+}
+
+/** Explicit credit / provider cost shown BEFORE the user confirms. */
+export interface VideoCostEstimate {
+  service_key: string;
+  credits_cost: number;
+  service_active: boolean;
+  model_id: string | null;
+  model_available: boolean;
+  model_status?: ReeloraModelStatus;
+  model_reason?: string | null;
+  provider_cost_usd: number | string | null;
+  provider_cost_currency: string;
+  provider_quote_source?: 'catalog' | 'estimate_cost' | 'unavailable';
+  provider_quote_error?: string | null;
+  quote_params?: Record<string, string | number | boolean>;
+}
+
 export interface VideoActionResult {
   job_id: string;
   status: string;
   provider?: string;
   provider_job_id?: string | null;
   provider_state?: string;
+  model_id?: string;
+  progress?: number;
+  preview_url?: string | null;
   storage_path?: string;
+  provider_cost?: Json | null;
+  webhook_enabled?: boolean;
   message?: string;
-  error?: string;
+  error?: string | null;
 }

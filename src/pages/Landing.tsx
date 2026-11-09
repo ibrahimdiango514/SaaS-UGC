@@ -26,10 +26,10 @@ const STEPS = [
 ];
 
 const FAQ = [
-  { q: 'Reelora génère-t-il réellement des vidéos ?', a: 'Oui. Reelora soumet la génération à un fournisseur vidéo réel (HeyGen pour les avatars parlants ou fal.ai / Kling pour l’image-vers-vidéo), puis télécharge et stocke le fichier produit dans votre bibliothèque privée. Une clé API fournisseur active est nécessaire.' },
+  { q: 'Reelora génère-t-il réellement des vidéos ?', a: 'Oui. Reelora soumet la génération au fournisseur vidéo MuAPI avec le modèle et les paramètres que vous choisissez, puis télécharge et stocke le fichier produit dans votre bibliothèque privée. Le secret serveur MUAPI_API_KEY doit être configuré.' },
   { q: 'Que se passe-t-il si une clé API manque ?', a: 'Aucune fausse vidéo n’est créée. L’application affiche précisément le secret manquant, marque la tâche comme échouée et restitue intégralement les crédits réservés.' },
-  { q: 'Mes données sont-elles isolées ?', a: 'Chaque espace de travail est isolé par des politiques RLS PostgreSQL. Les clés Groq, HeyGen, fal.ai et Supabase service_role ne sont jamais envoyées au navigateur.' },
-  { q: 'Comment fonctionnent les crédits ?', a: 'Chaque service a un coût en crédits, réservé au lancement, consommé uniquement en cas de succès et restitué en cas d’échec ou d’annulation. Votre formule fixe également des quotas mensuels.' },
+  { q: 'Mes données sont-elles isolées ?', a: 'Chaque espace de travail est isolé par des politiques RLS PostgreSQL. Les clés Groq et MuAPI, le jeton du worker et la clé service_role Supabase ne sont jamais envoyés au navigateur.' },
+  { q: 'Comment fonctionnent les crédits ?', a: 'Le coût estimé est affiché avant confirmation. Chaque service a un coût en crédits, réservé au lancement, consommé uniquement en cas de succès et restitué en cas d’échec, d’expiration ou d’annulation. Une clé d’idempotence empêche tout double débit.' },
 ];
 
 export default function Landing() {
