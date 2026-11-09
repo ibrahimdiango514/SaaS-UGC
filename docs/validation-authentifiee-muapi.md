@@ -3,6 +3,7 @@
 **Date d'exécution :** 2026-11-09 (horodatages UTC des outils Supabase).
 **Branche :** `arena/e22e624f-saas-ugc` (active, déjà basée sur `main` à jour).
 **Commit de départ :** `cee9e5aebf2b7cee3ea552b17b4a4deafea112ef` — merge de la PR #2 (`f812b30`), dernière correction V2. `origin/main` et `main` sont au même commit ; aucun commit n'a été ajouté à `main`, aucune PR n'a été créée ou fusionnée pendant cette phase.
+**Commit de livraison :** `3b99f98` sur `arena/e22e624f-saas-ugc` (poussé sur cette seule branche, 18 fichiers, `+637/−15`) ; ce rapport et la galerie en font partie.
 **Projet Supabase :** `xbuuhfwobrafcbgtdgjx`. `reelora-video` **v6 ACTIVE**, `verify_jwt=true` inchangé (`id=073c8930-6fe4-4149-b680-30e7af9b4d85`).
 
 > Ce rapport distingue strictement trois niveaux : **mesures live** (vrai JWT utilisateur + Edge déployée + MuAPI), **corrections de code validées par tests/fixtures**, et **limites**. Aucune fonctionnalité testée uniquement avec fixtures n'est déclarée validée en live.
