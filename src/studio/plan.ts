@@ -20,7 +20,7 @@ import {
 
 export const PLAN_VERSION = 'reelora-ugc-plan-v1';
 
-export type SectorId = 'cosmetique' | 'food' | 'ecommerce' | 'mode' | 'technologie' | 'general';
+export type SectorId = 'cosmetique' | 'food' | 'ecommerce' | 'fitness' | 'mode' | 'technologie' | 'general';
 
 export interface SectorDefinition {
   id: SectorId;
@@ -48,6 +48,11 @@ export const SECTORS: SectorDefinition[] = [
     example: 'Crée une publicité UGC de 15 secondes pour un accessoire tech : unboxing, détail produit et invitation à découvrir la boutique.',
   },
   {
+    id: 'fitness', label: 'Fitness', image: '/studio-examples/mode.jpg',
+    hint: 'Sport, bien-être, coaching',
+    example: 'Crée une publicité UGC de 15 secondes pour une application de fitness : accroche énergie, démonstration d’un exercice et appel à télécharger l’app.',
+  },
+  {
     id: 'mode', label: 'Mode', image: '/studio-examples/mode.jpg',
     hint: 'Vêtements, accessoires, lifestyle',
     example: 'Crée une vidéo UGC de 20 secondes pour une veste minimaliste : silhouette en mouvement, détail de la matière et appel à l’achat.',
@@ -63,6 +68,7 @@ const SECTOR_KEYWORDS: Record<Exclude<SectorId, 'general'>, string[]> = {
   cosmetique: ['cosmétique', 'cosmetique', 'sérum', 'serum', 'peau', 'soin', 'maquillage', 'parfum', 'beauté', 'beaute', 'skincare', 'crème', 'creme'],
   food: ['food', 'burger', 'restaurant', 'plat', 'boisson', 'café', 'cafe', 'snack', 'pizza', 'recette', 'gâteau', 'gateau', 'nourriture'],
   ecommerce: ['e-commerce', 'ecommerce', 'unboxing', 'boutique', 'marketplace', 'colis', 'packaging', 'produit', 'shop'],
+  fitness: ['fitness', 'sport', 'musculation', 'coaching', 'entraînement', 'entrainement', 'yoga', 'course', 'workout'],
   mode: ['mode', 'veste', 'vêtement', 'vetement', 'look', 'fashion', 'sneakers', 'tenue', 'textile', 'style'],
   technologie: ['tech', 'application', 'app ', 'logiciel', 'saas', 'smartphone', 'laptop', 'device', 'gadget', 'digital'],
 };

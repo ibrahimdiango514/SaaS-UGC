@@ -10,6 +10,7 @@
 
 import type { MuApiModel, MuApiParamDef, ServiceCatalogItem } from '../lib/types';
 import { isModelAvailable, modelsForMode, supportedParams, type GenerationMode } from './model';
+export { SUPPORTED_REQUIRED_FIELDS } from './model';
 
 export type QualityTier = 'rapide' | 'standard' | 'premium';
 
@@ -21,18 +22,7 @@ export interface QualityDefinition {
   serviceKey: string;
 }
 
-/**
- * Required input fields Reelora can actually provide today. A verified model
- * that requires anything else (e.g. `audio_url` for a lip-sync avatar) is not
- * offered as a working generation path until that capability is integrated.
- */
-export const SUPPORTED_REQUIRED_FIELDS = new Set([
-  // Reelora supplies the prompt itself and, for image-to-video, a signed
-  // private reference image. TTS/audio, last-frame and video inputs are not
-  // connected yet, so models requiring them are excluded rather than faked.
-  'prompt', 'image_url',
-]);
-
+/** Required input fields are declared in model.ts and shared with the Edge gateway. */
 export const QUALITY_TIERS: QualityDefinition[] = [
   { id: 'rapide', label: 'Rapide', description: 'Clip court, modèle le plus économique', serviceKey: 'ugc_clip_8s' },
   { id: 'standard', label: 'Standard', description: 'Clip plus long, rendu équilibré', serviceKey: 'ugc_clip_15s' },
@@ -49,7 +39,7 @@ export function serviceForQuality(services: ServiceCatalogItem[], tier: QualityT
 export function catalogByCost(models: MuApiModel[], mode: GenerationMode): MuApiModel[] {
   return modelsForMode(models, mode)
     .filter(isModelAvailable)
-    .filter((m) => (m.required_fields ?? []).every((field) => SUPPORTED_REQUIRED_FIELDS.has(field.toLowerCase())))
+    .filter((m) => (m.required_fields ?? []).every((field) => ['prompt', 'image_url'].includes(field.toLowerCase())))
     .slice()
     .sort((a, b) => {
       const ca = Number(a.cost_usd);

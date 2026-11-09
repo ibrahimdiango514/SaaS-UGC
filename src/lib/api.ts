@@ -4,7 +4,8 @@ import type {
   AdminOverview, AdminUser, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
-  ServiceCatalogItem, Subscription, VideoActionResult, VideoCostEstimate, Workspace, WorkspaceMember,
+  ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
+  Workspace, WorkspaceMember, MuApiParamDef,
 } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -369,15 +370,44 @@ export async function startGeneration(
   });
 }
 
-/** Verified MuAPI video models (curated endpoints, refreshed metadata from live /models). */
+/** Full live MuAPI video catalogue with explicit public/account diagnostics. */
+export function getVideoCatalog(): Promise<VideoCatalogResponse> {
+  return invokeEdge<VideoCatalogResponse>('reelora-video', { action: 'catalog' });
+}
+
+/** Verified MuAPI video models (kept for the classical Studio and existing tests). */
 export async function listVideoModels(): Promise<MuApiModel[]> {
   const result = await invokeEdge<{ models: MuApiModel[] }>('reelora-video', { action: 'models' });
   return result.models ?? [];
 }
 
-/** Server-side check of the credit cost shown before the confirmation dialog. */
-export function estimateVideo(serviceKey: string, modelId: string): Promise<VideoCostEstimate> {
-  return invokeEdge<VideoCostEstimate>('reelora-video', { action: 'estimate', service_key: serviceKey, model_id: modelId });
+/** Full input_schema of one real model, fetched by the server with its own key. */
+export function getVideoModelDetail(modelId: string): Promise<{ model: MuApiModel }> {
+  return invokeEdge<{ model: MuApiModel }>('reelora-video', { action: 'model-detail', model_id: modelId });
+}
+
+export interface VideoQuoteInput {
+  params?: Record<string, string | number | boolean>;
+  prompt?: string;
+  image_url?: string;
+  last_image_url?: string;
+  /** Real schema fetched by model-detail; the server still validates every key. */
+  param_schema?: Record<string, MuApiParamDef>;
+}
+
+/**
+ * Server-side quote shown BEFORE confirmation. When `quote` is supplied the
+ * backend may call MuAPI's non-generating estimate-cost endpoint to obtain the
+ * exact USD price for these exact parameters. No inference or media is created.
+ */
+export function estimateVideo(serviceKey: string, modelId: string, quote?: VideoQuoteInput): Promise<VideoCostEstimate> {
+  const body: Record<string, unknown> = { action: 'estimate', service_key: serviceKey, model_id: modelId };
+  if (quote?.params) body.params = quote.params;
+  if (quote?.prompt) body.prompt = quote.prompt;
+  if (quote?.image_url) body.image_url = quote.image_url;
+  if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
+  if (quote?.param_schema) body.param_schema = quote.param_schema;
+  return invokeEdge<VideoCostEstimate>('reelora-video', body);
 }
 
 export async function cancelGeneration(jobId: string): Promise<boolean> {

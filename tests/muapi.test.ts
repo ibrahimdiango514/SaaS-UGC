@@ -47,6 +47,47 @@ const SEEDANCE_I2V = {
   input_fields: ['prompt', 'image_url', 'last_image', 'resolution', 'duration', 'camera_fixed'],
   required_fields: ['prompt', 'image_url'],
 };
+const PUBLIC_CATALOG_MODEL = {
+  name: 'public-video-model', description: 'Public video model', category: 'Text to Video',
+  family: 'public-family', group_of: 'video', domain: 'ai', cost: 0.08, cost_currency: 'USD',
+  cost_strategy: 'public-fixed', dynamic_pricing: false, endpoint: '/api/v1/public-video-model',
+  endpoint_url: 'public-video-model', is_enabled: 1, is_coming_soon: false,
+  input_fields: ['prompt', 'aspect_ratio'], required_fields: ['prompt'],
+};
+const ACCOUNT_CATALOG_MODEL = {
+  ...PUBLIC_CATALOG_MODEL, name: 'seedance-lite-t2v', endpoint: '/api/v1/seedance-lite-t2v',
+  endpoint_url: 'seedance-lite-t2v', dynamic_pricing: true,
+  estimate_endpoint: '/api/v1/models/seedance-lite-t2v/estimate-cost',
+  cost: 0.1, required_fields: ['prompt'],
+};
+const DETAIL_RESPONSE = {
+  name: 'seedance-lite-t2v', description: 'Seedance Lite T2V', category: 'Text to Video',
+  family: 'bytedance', group_of: 'video', cost: 0.1, cost_currency: 'USD',
+  dynamic_pricing: true, endpoint: '/api/v1/seedance-lite-t2v',
+  endpoint_url: 'seedance-lite-t2v', is_enabled: 1, is_coming_soon: false,
+  input_fields: ['prompt', 'aspect_ratio', 'resolution', 'duration', 'camera_fixed'],
+  required_fields: ['prompt'],
+  estimate_endpoint: '/api/v1/models/seedance-lite-t2v/estimate-cost',
+  input_schema: { schemas: { input_data: { type: 'object', required: ['prompt'], properties: {
+    prompt: { type: 'string', title: 'Prompt', description: 'Instruction' },
+    aspect_ratio: { type: 'string', title: 'Aspect Ratio', enum: ['16:9', '9:16'], default: '16:9' },
+    resolution: { type: 'string', title: 'Resolution', enum: ['480p', '720p'], default: '480p' },
+    duration: { type: 'int', title: 'Duration', minValue: 3, maxValue: 12, default: 5 },
+    camera_fixed: { type: 'boolean', title: 'Camera Fixed', default: false },
+    reference_images: { type: 'array', title: 'Reference images' },
+  } } } },
+};
+const DYNAMIC_MODEL = {
+  ...SEEDANCE_T2V,
+  param_schema: {
+    ...(SEEDANCE_T2V.param_schema as Record<string, unknown>),
+    __catalog: {
+      family: 'bytedance', group_of: 'video', source: 'muapi_public',
+      dynamic_pricing: true, endpoint_url: 'seedance-lite-t2v',
+      estimate_endpoint: '/api/v1/models/seedance-lite-t2v/estimate-cost',
+    },
+  },
+};
 
 interface Call {
   url: string;
@@ -64,6 +105,16 @@ const state = {
   service: { service_key: 'ugc_clip_8s', credits_cost: 9, active: true },
   assets: [] as Record<string, unknown>[],
   modelsCatalog: [] as Record<string, unknown>[],
+  publicModels: [] as Record<string, unknown>[],
+  accountModels: [] as Record<string, unknown>[],
+  accountModelsStatus: 200,
+  balanceStatus: 200,
+  keysStatus: 200,
+  keysResponse: [{ is_test: false }] as Record<string, unknown>[],
+  detailStatus: 200,
+  detailResponse: {} as Record<string, unknown>,
+  estimateStatus: 200,
+  estimateResponse: { cost: 0.12, currency: 'USD' } as Record<string, unknown>,
   submitStatus: 200,
   submitResponse: { request_id: REQUEST_ID, status: 'processing', cost: { amount_credits: 0.1 } } as Record<string, unknown>,
   resultResponse: { id: REQUEST_ID, status: 'completed', outputs: [VIDEO_URL], cost: { amount_credits: 0.1 } } as Record<string, unknown>,
@@ -113,7 +164,17 @@ async function fakeFetch(input: string | URL | Request, init?: RequestInit): Pro
   if (url.includes('/storage/v1/object/sign/')) return json({ signedURL: '/object/sign/ugc-assets/signed-token' });
   if (url.includes('/storage/v1/object/ugc-assets/')) return json({ Key: 'ugc-assets/ok' });
 
-  if (url === 'https://api.muapi.ai/api/v1/models') return json({ models: state.modelsCatalog });
+  if (url === 'https://api.muapi.ai/api/v1/models') {
+    const authenticated = headers['x-api-key'] === MUAPI_KEY;
+    const models = authenticated
+      ? (state.accountModels.length ? state.accountModels : state.modelsCatalog)
+      : state.publicModels;
+    return json({ models, total: models.length }, authenticated ? state.accountModelsStatus : 200);
+  }
+  if (url === 'https://api.muapi.ai/api/v1/account/balance') return json({ balance: 42.5 }, state.balanceStatus);
+  if (url === 'https://api.muapi.ai/api/v1/keys') return json(state.keysResponse, state.keysStatus);
+  if (url.includes('/estimate-cost')) return json(state.estimateResponse, state.estimateStatus);
+  if (method === 'GET' && url.startsWith('https://api.muapi.ai/api/v1/models/')) return json(state.detailResponse, state.detailStatus);
   if (url.includes('/api/v1/predictions/')) return json(state.resultResponse);
   if (url.startsWith('https://api.muapi.ai/api/v1/')) return json(state.submitResponse, state.submitStatus);
   if (url === VIDEO_URL) return new Response(new Uint8Array([0, 1, 2, 3, 4]), { status: 200 });
@@ -146,7 +207,11 @@ function rpcCalls(name: string): Call[] {
   return calls.filter((c) => c.url.includes(`/rest/v1/rpc/${name}`));
 }
 function muapiSubmits(): Call[] {
-  return calls.filter((c) => c.method === 'POST' && c.url.startsWith('https://api.muapi.ai/api/v1/') && !c.url.includes('/predictions/'));
+  return calls.filter((c) => c.method === 'POST' && c.url.startsWith('https://api.muapi.ai/api/v1/')
+    && !c.url.includes('/predictions/') && !c.url.includes('/estimate-cost'));
+}
+function muapiEstimateCalls(): Call[] {
+  return calls.filter((c) => c.method === 'POST' && c.url.includes('/estimate-cost'));
 }
 function bodyOf(r: Response): Promise<Record<string, unknown>> {
   return r.json() as Promise<Record<string, unknown>>;
@@ -161,6 +226,16 @@ beforeEach(() => {
   state.model = SEEDANCE_T2V as unknown as Record<string, unknown>;
   state.assets = [];
   state.modelsCatalog = [];
+  state.publicModels = [];
+  state.accountModels = [];
+  state.accountModelsStatus = 200;
+  state.balanceStatus = 200;
+  state.keysStatus = 200;
+  state.keysResponse = [{ is_test: false }];
+  state.detailStatus = 200;
+  state.detailResponse = DETAIL_RESPONSE as unknown as Record<string, unknown>;
+  state.estimateStatus = 200;
+  state.estimateResponse = { cost: 0.12, currency: 'USD' };
   state.submitStatus = 200;
   state.submitResponse = { request_id: REQUEST_ID, status: 'processing', cost: { amount_credits: 0.1 } };
   state.resultResponse = { id: REQUEST_ID, status: 'completed', outputs: [VIDEO_URL], cost: { amount_credits: 0.1 } };
@@ -178,6 +253,13 @@ afterEach(() => {
 /* -------------------------------------------------------------------------- */
 
 describe('Authentification obligatoire', () => {
+  it('renvoie une erreur structurée 405 sur une méthode non POST', async () => {
+    const r = await videoHandler(new Request(EDGE_URL, { method: 'GET', headers: { Authorization: 'Bearer valid-user-jwt' } }));
+    expect(r.status).toBe(405);
+    expect((await bodyOf(r)).error).toMatchObject({ code: 'METHOD_NOT_ALLOWED', message: 'Méthode non autorisée.' });
+    expect(calls).toHaveLength(0);
+  });
+
   it('refuse une requête sans en-tête Authorization', async () => {
     const r = await videoHandler(post(EDGE_URL, { action: 'status', job_id: JOB_ID }, ''));
     expect(r.status).toBe(401);
@@ -498,5 +580,112 @@ describe('Worker serveur : webhook, cron, résultat, remboursement', () => {
     expect(await bodyOf(r)).toMatchObject({ mode: 'tick', checked: 1 });
     expect(rpcCalls('reelora_video_tick')).toHaveLength(1);
     expect(calls.some((c) => c.url.includes(`/predictions/${REQUEST_ID}/result`))).toBe(true);
+  });
+});
+
+describe('Catalogue V2 : public, compte, schéma réel et devis exact', () => {
+  it('distingue catalogue public et catalogue retourné avec la clé, sans POST de génération', async () => {
+    state.publicModels = [PUBLIC_CATALOG_MODEL];
+    state.accountModels = [ACCOUNT_CATALOG_MODEL];
+    const r = await videoHandler(post(EDGE_URL, { action: 'catalog' }));
+    expect(r.status).toBe(200);
+    const data = await bodyOf(r);
+    const catalog = data.catalog as Record<string, unknown>;
+    const models = data.models as Record<string, unknown>[];
+    expect(catalog.source).toBe('muapi_authenticated');
+    expect(catalog.public_total).toBe(1);
+    expect(catalog.authenticated_total).toBe(1);
+    expect(catalog.detected_video).toBe(2);
+    expect(catalog.active).toBe(1);
+    expect(catalog.unavailable).toBe(1);
+    expect(catalog.account_accessible).toBe(1);
+    expect(catalog.public_only).toBe(1);
+    expect(models.map((m) => m.model_id).sort()).toEqual(['public-video-model', 'seedance-lite-t2v']);
+    const publicModel = models.find((m) => m.model_id === 'public-video-model');
+    const accountModel = models.find((m) => m.model_id === 'seedance-lite-t2v');
+    expect(publicModel).toMatchObject({ account_access: 'public_only', reelora_status: 'unverified', category: 'Text to Video' });
+    expect(accountModel).toMatchObject({ account_access: 'account', reelora_status: 'active', dynamic_pricing: true });
+    expect((catalog.account as Record<string, unknown>).key_valid).toBe(true);
+    expect((catalog.account as Record<string, unknown>).key_is_test).toBe(false);
+    expect((catalog.endpoints as unknown[]).length).toBe(4);
+    expect(JSON.stringify(data)).not.toContain(MUAPI_KEY);
+    expect(JSON.stringify(data)).not.toContain('42.5');
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(muapiEstimateCalls()).toHaveLength(0);
+  });
+
+  it('signale une clé compte refusée sans présenter les modèles comme accessibles', async () => {
+    state.publicModels = [PUBLIC_CATALOG_MODEL];
+    state.accountModelsStatus = 401;
+    state.balanceStatus = 401;
+    state.keysStatus = 401;
+    const r = await videoHandler(post(EDGE_URL, { action: 'catalog' }));
+    expect(r.status).toBe(200);
+    const data = await bodyOf(r);
+    const catalog = data.catalog as Record<string, unknown>;
+    const models = data.models as Record<string, unknown>[];
+    expect(catalog.source).toBe('muapi_public');
+    expect((catalog.account as Record<string, unknown>).key_valid).toBe(false);
+    expect(String(catalog.error)).toContain('Clé MuAPI non validée');
+    expect(models.every((m) => m.account_access === 'unverified')).toBe(true);
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('récupère côté serveur le vrai input_schema d’un modèle et expose les types MuAPI', async () => {
+    const r = await videoHandler(post(EDGE_URL, { action: 'model-detail', model_id: 'seedance-lite-t2v' }));
+    expect(r.status).toBe(200);
+    const data = await bodyOf(r);
+    const model = data.model as Record<string, unknown>;
+    const schema = model.param_schema as Record<string, Record<string, unknown>>;
+    expect(model.model_id).toBe('seedance-lite-t2v');
+    expect(schema.aspect_ratio).toMatchObject({ type: 'select', options: ['16:9', '9:16'], default: '16:9' });
+    expect(schema.duration).toMatchObject({ type: 'number', min: 3, max: 12, default: 5 });
+    expect(schema.camera_fixed).toMatchObject({ type: 'boolean', default: false });
+    expect(schema.reference_images).toMatchObject({ type: 'array' });
+    expect(model).not.toHaveProperty('account_access');
+    expect(JSON.stringify(data)).not.toContain(MUAPI_KEY);
+    expect(calls.some((c) => c.method === 'GET' && c.url === 'https://api.muapi.ai/api/v1/models/seedance-lite-t2v')).toBe(true);
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('appelle estimate-cost avec les paramètres exacts et ne lance aucune génération', async () => {
+    state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
+    const params = { aspect_ratio: '9:16', resolution: '480p', duration: 5, camera_fixed: false };
+    const prompt = 'Une publicité UGC verticale pour un sérum cosmétique avec accroche et appel à l’achat.';
+    const r = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params, prompt, param_schema: SEEDANCE_T2V.param_schema,
+    }));
+    expect(r.status).toBe(200);
+    const estimate = await bodyOf(r);
+    expect(estimate).toMatchObject({
+      service_key: 'ugc_clip_8s', credits_cost: 9, model_available: true,
+      provider_cost_usd: 0.12, provider_cost_currency: 'USD', provider_quote_source: 'estimate_cost',
+    });
+    expect(estimate.quote_params).toMatchObject({ prompt, ...params });
+    expect(muapiEstimateCalls()).toHaveLength(1);
+    expect(muapiEstimateCalls()[0].headers['x-api-key']).toBe(MUAPI_KEY);
+    expect(muapiEstimateCalls()[0].url).toContain('/api/v1/models/seedance-lite-t2v/estimate-cost');
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_start_generation')).toHaveLength(0);
+    expect(JSON.stringify(estimate)).not.toContain(MUAPI_KEY);
+  });
+
+  it('bloque la génération si estimate-cost échoue, sans devis inventé ni débit', async () => {
+    state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
+    state.estimateStatus = 400;
+    state.estimateResponse = { message: 'invalid aspect_ratio' };
+    const r = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params: { aspect_ratio: '9:16', duration: 6 }, prompt: 'Autre instruction UGC suffisamment longue pour le devis.',
+      param_schema: SEEDANCE_T2V.param_schema,
+    }));
+    expect(r.status).toBe(200);
+    const estimate = await bodyOf(r);
+    expect(estimate.provider_quote_source).toBe('unavailable');
+    expect(estimate.model_available).toBe(false);
+    expect(String(estimate.provider_quote_error)).toContain('invalid aspect_ratio');
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_start_generation')).toHaveLength(0);
   });
 });
