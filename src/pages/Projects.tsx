@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Clapperboard, FolderKanban, Plus, Search, Trash2, Wand2, SlidersHorizontal } from 'lucide-react';
+import { Clapperboard, FolderKanban, Plus, Scissors, Search, Trash2, Wand2, SlidersHorizontal } from 'lucide-react';
 import { PageHeader, Card, Button, Input, Textarea, Select, Modal, Badge, LoadingState, ErrorState, EmptyState, ConfirmDialog } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
@@ -119,6 +119,7 @@ export default function Projects({ embedded = false }: { embedded?: boolean }) {
               <div className="mt-auto flex gap-2 pt-4">
                 <Link to={`/app/projets/${p.id}`} className="btn btn-secondary btn-sm flex-1">Ouvrir</Link>
                 <Link to={`/app/studio?projet=${p.id}`} className="btn btn-outline btn-sm" title="Ouvrir dans le Studio"><Wand2 size={14} /></Link>
+                <Link to={`/app/studio/montage?projet=${p.id}`} className="btn btn-outline btn-sm" title="Ouvrir dans l’éditeur intelligent"><Scissors size={14} /></Link>
                 <button onClick={() => setToDelete(p)} className="btn btn-ghost btn-sm text-rose-300" title="Supprimer"><Trash2 size={14} /></button>
               </div>
             </Card>

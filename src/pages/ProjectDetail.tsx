@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Clapperboard, FileText, Layers, Pencil, Save, Trash2, Wand2 } from 'lucide-react';
+import { ArrowLeft, Clapperboard, FileText, Layers, Pencil, Save, Scissors, Trash2, Wand2 } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Textarea, Select, Badge, LoadingState, ErrorState, EmptyState, Tabs, ConfirmDialog } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
@@ -73,6 +73,7 @@ export default function ProjectDetail() {
         actions={<>
           <Badge status={project.status}>{statusLabel(project.status)}</Badge>
           <Link to={`/app/studio?projet=${project.id}`} className="btn btn-primary btn-sm"><Wand2 size={14} /> Ouvrir dans le Studio</Link>
+          <Link to={`/app/studio/montage?projet=${project.id}`} className="btn btn-outline btn-sm"><Scissors size={14} /> Montage intelligent</Link>
           <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setConfirmDelete(true)}>Supprimer</Button>
         </>} />
 
