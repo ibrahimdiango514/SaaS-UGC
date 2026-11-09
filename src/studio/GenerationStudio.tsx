@@ -26,7 +26,10 @@ import { PromptBar, initialFormState, type GenerationFormState } from './compone
 import { StudioTopBar } from './components/StudioTopBar';
 import { TrackingPanel } from './components/PreviewStage';
 import { trackingState } from './tracking';
-import { modelFamily, modeFromModel, type ParamValue } from './model';
+import {
+  modelFamily, modeFromModel, providerQuoteCostLabel, providerQuoteOriginLabel,
+  type ParamValue,
+} from './model';
 import {
   QUALITY_TIERS, buildCompatibleParams, defaultSettingsFor, modelForQuality, serviceForQuality,
 } from './quality';
@@ -664,8 +667,8 @@ export default function GenerationStudio() {
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Modèle</span><span className="text-right text-white">{model ? modelFamily(model) : '—'}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Service</span><span className="text-right text-white">{service?.display_name ?? '—'}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Crédits UGC</span><span className="font-bold text-cyan-300">{cost ?? '…'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Coût fournisseur</span><span className="text-white">{Number(estimate?.provider_cost_usd ?? 0).toFixed(3)} {estimate?.provider_cost_currency ?? ''}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Origine du devis</span><span className="text-right text-white">{estimate?.provider_quote_source === 'estimate_cost' ? 'estimate-cost MuAPI' : 'catalogue MuAPI'}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Coût fournisseur</span><span className={estimate?.provider_quote_source === 'unavailable' ? 'text-right font-semibold text-amber-200' : 'text-right text-white'}>{providerQuoteCostLabel(estimate)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Origine du devis</span><span className="text-right text-white">{providerQuoteOriginLabel(estimate)}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Solde après réservation</span><span className="text-white">{cost !== null ? Math.max(0, balance - cost) : '—'}</span></div>
               </div>
               {estimate?.provider_quote_error && <p className="mt-2 text-[10px] text-amber-200">{estimate.provider_quote_error}</p>}

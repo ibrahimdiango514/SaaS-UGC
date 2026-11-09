@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { handler as videoHandler } from '../supabase/functions/reelora-video/index.ts';
 import { handler as workerHandler } from '../supabase/functions/reelora-video-worker/index.ts';
+import {
+  QUOTE_TO_CONFIRM, providerQuoteCostLabel, providerQuoteOriginLabel,
+  type ProviderQuoteView,
+} from '../src/studio/model';
 
 /* -------------------------------------------------------------------------- */
 /* Mocks: no real MuAPI / Supabase call. Every network hop is recorded.        */
@@ -684,8 +688,219 @@ describe('Catalogue V2 : public, compte, schéma réel et devis exact', () => {
     const estimate = await bodyOf(r);
     expect(estimate.provider_quote_source).toBe('unavailable');
     expect(estimate.model_available).toBe(false);
+    expect(estimate.provider_cost_usd).toBe(null);
     expect(String(estimate.provider_quote_error)).toContain('invalid aspect_ratio');
     expect(muapiSubmits()).toHaveLength(0);
     expect(rpcCalls('reelora_start_generation')).toHaveLength(0);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Phase de validation authentifiée : 9 cas demandés, couverts par fixtures.    */
+/* Le live (catalog / model-detail / estimate) est consigné dans le rapport ;   */
+/* aucun test ci-dessous ne prétend être une mesure réseau réelle.              */
+/* -------------------------------------------------------------------------- */
+
+describe('Validation authentifiée MuAPI — 9 cas (fixtures)', () => {
+  const PROMPT = 'Publicite UGC verticale de 15 secondes pour un serum cosmetique avec accroche, demonstration et appel a l achat.';
+  const quoteView = (e: Record<string, unknown>) => e as unknown as ProviderQuoteView;
+
+  it('1 · catalogue : JWT utilisateur validé, /models appelé avec la clé serveur, aucune génération', async () => {
+    state.publicModels = [PUBLIC_CATALOG_MODEL, ACCOUNT_CATALOG_MODEL];
+    state.accountModels = [ACCOUNT_CATALOG_MODEL];
+    const r = await videoHandler(post(EDGE_URL, { action: 'catalog' }));
+    expect(r.status).toBe(200);
+    const data = await bodyOf(r);
+    const catalog = data.catalog as Record<string, unknown>;
+    expect(calls.some((c) => c.url.includes('/auth/v1/user')
+      && c.headers.Authorization === 'Bearer valid-user-jwt')).toBe(true);
+    expect(calls.some((c) => c.url === 'https://api.muapi.ai/api/v1/models'
+      && c.headers['x-api-key'] === MUAPI_KEY)).toBe(true);
+    expect(catalog).toMatchObject({ source: 'muapi_authenticated', public_only: 1, account_accessible: 1 });
+    expect((catalog.account as Record<string, unknown>).key_valid).toBe(true);
+    expect((data.models as Record<string, unknown>[]).find((m) => m.model_id === 'seedance-lite-t2v'))
+      .toMatchObject({ account_access: 'account', reelora_status: 'active' });
+    expect(JSON.stringify(data)).not.toContain(MUAPI_KEY);
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('2 · fiche modèle : schéma réel récupéré côté serveur, sans secret ni génération', async () => {
+    const r = await videoHandler(post(EDGE_URL, { action: 'model-detail', model_id: 'seedance-lite-t2v' }));
+    expect(r.status).toBe(200);
+    const data = await bodyOf(r);
+    const model = data.model as Record<string, unknown>;
+    const schema = model.param_schema as Record<string, Record<string, unknown>>;
+    expect(calls.some((c) => c.url.includes('/auth/v1/user'))).toBe(true);
+    expect(calls.some((c) => c.method === 'GET'
+      && c.url === 'https://api.muapi.ai/api/v1/models/seedance-lite-t2v')).toBe(true);
+    expect(schema.duration).toMatchObject({ type: 'number', min: 3, max: 12, default: 5 });
+    expect(schema.resolution).toMatchObject({ type: 'select', options: ['480p', '720p'] });
+    expect(model).not.toHaveProperty('account_access');
+    expect(JSON.stringify(data)).not.toContain(MUAPI_KEY);
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(muapiEstimateCalls()).toHaveLength(0);
+  });
+
+  it('3 · devis statique : tarif catalogue explicite, aucun POST estimate-cost, aucun débit', async () => {
+    const r = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params: { aspect_ratio: '9:16' }, prompt: `${PROMPT} Cas trois.`,
+    }));
+    const e = await bodyOf(r);
+    expect(e).toMatchObject({
+      credits_cost: 9, service_active: true, model_available: true,
+      provider_cost_usd: 0.1, provider_cost_currency: 'USD', provider_quote_source: 'catalog',
+    });
+    expect(providerQuoteOriginLabel(quoteView(e))).toContain('devis exact non disponible');
+    expect(muapiEstimateCalls()).toHaveLength(0);
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_start_generation')).toHaveLength(0);
+  });
+
+  it('4 · devis dynamique : estimate-cost reçoit les paramètres exacts et remplace le tarif catalogue', async () => {
+    state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
+    const params = { aspect_ratio: '9:16', resolution: '480p', duration: 5, camera_fixed: false };
+    const prompt = `${PROMPT} Cas quatre.`;
+    const r = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params, prompt, param_schema: SEEDANCE_T2V.param_schema,
+    }));
+    const e = await bodyOf(r);
+    expect(e).toMatchObject({
+      credits_cost: 9, model_available: true, provider_cost_usd: 0.12,
+      provider_cost_currency: 'USD', provider_quote_source: 'estimate_cost',
+    });
+    expect(e.quote_params).toMatchObject({ prompt, ...params });
+    expect(muapiEstimateCalls()).toHaveLength(1);
+    expect(muapiEstimateCalls()[0].url).toContain('/api/v1/models/seedance-lite-t2v/estimate-cost');
+    expect(muapiEstimateCalls()[0].body).toMatchObject({ prompt, ...params });
+    expect(providerQuoteCostLabel(quoteView(e))).toBe('0.120 USD');
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_start_generation')).toHaveLength(0);
+  });
+
+  it('5 · modèle inaccessible : jamais présenté comme actif ni sélectionnable', async () => {
+    state.publicModels = [PUBLIC_CATALOG_MODEL, ACCOUNT_CATALOG_MODEL];
+    state.accountModels = [ACCOUNT_CATALOG_MODEL];
+    const catalog = await videoHandler(post(EDGE_URL, { action: 'catalog' }));
+    const c = await bodyOf(catalog);
+    const publicOnly = (c.models as Record<string, unknown>[]).find((m) => m.model_id === 'public-video-model');
+    expect((c.catalog as Record<string, unknown>).public_only).toBe(1);
+    expect(publicOnly).toMatchObject({ account_access: 'public_only', reelora_status: 'unverified' });
+
+    calls.length = 0;
+    state.model = { ...SEEDANCE_T2V, is_coming_soon: true } as unknown as Record<string, unknown>;
+    const soon = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+    }));
+    const e = await bodyOf(soon);
+    expect(e.model_available).toBe(false);
+    expect(e.model_status).toBe('coming_soon');
+    expect(muapiEstimateCalls()).toHaveLength(0);
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_start_generation')).toHaveLength(0);
+  });
+
+  it('6 · erreur fournisseur : aucun prix inventé, « devis fournisseur à confirmer »', async () => {
+    state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
+    state.estimateStatus = 503;
+    state.estimateResponse = { message: 'provider temporarily unavailable' };
+    const r = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params: { aspect_ratio: '9:16' }, prompt: `${PROMPT} Cas six.`,
+      param_schema: SEEDANCE_T2V.param_schema,
+    }));
+    const e = await bodyOf(r);
+    expect(e.provider_quote_source).toBe('unavailable');
+    expect(e.provider_cost_usd).toBe(null);
+    expect(e.model_available).toBe(false);
+    expect(String(e.provider_quote_error)).toContain('provider temporarily unavailable');
+    expect(providerQuoteCostLabel(quoteView(e))).toBe(QUOTE_TO_CONFIRM);
+    expect(providerQuoteOriginLabel(quoteView(e))).toBe(QUOTE_TO_CONFIRM);
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_start_generation')).toHaveLength(0);
+  });
+
+  it('7 · paramètres invalides : options inconnues et champs source écartés, nombre borné', async () => {
+    state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
+    const r = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params: {
+        aspect_ratio: '42:17', resolution: '480p', duration: 999, camera_fixed: false,
+        audio_url: 'https://evil.example/audio.mp3', reference_images: ['https://evil.example/x.png'],
+      },
+      prompt: `${PROMPT} Cas sept.`, param_schema: SEEDANCE_T2V.param_schema,
+    }));
+    const q = (await bodyOf(r)).quote_params as Record<string, unknown>;
+    expect(q.prompt).toContain('Cas sept');
+    expect(q.aspect_ratio).toBeUndefined();
+    expect(q.resolution).toBe('480p');
+    expect(q.duration).toBe(30);
+    expect(q.camera_fixed).toBe(false);
+    expect(q).not.toHaveProperty('audio_url');
+    expect(q).not.toHaveProperty('reference_images');
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('8 · devis : aucune génération, soumission, claim ni écriture Storage', async () => {
+    state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
+    await videoHandler(post(EDGE_URL, { action: 'catalog' }));
+    await videoHandler(post(EDGE_URL, { action: 'model-detail', model_id: 'seedance-lite-t2v' }));
+    await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params: { aspect_ratio: '9:16' }, prompt: `${PROMPT} Cas huit.`,
+    }));
+    expect(muapiSubmits()).toHaveLength(0);
+    expect(rpcCalls('reelora_claim_generation_submission')).toHaveLength(0);
+    expect(rpcCalls('reelora_set_job_processing')).toHaveLength(0);
+    expect(rpcCalls('reelora_finalize_generation')).toHaveLength(0);
+    expect(calls.filter((c) => c.method === 'POST' && c.url.includes('/storage/v1/object/'))).toHaveLength(0);
+  });
+
+  it('9 · devis : aucun débit ni réservation, tarif du service inchangé', async () => {
+    state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
+    const r = await videoHandler(post(EDGE_URL, {
+      action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v',
+      params: { aspect_ratio: '9:16' }, prompt: `${PROMPT} Cas neuf.`,
+    }));
+    const e = await bodyOf(r);
+    expect(e.credits_cost).toBe(9);
+    expect(e.service_active).toBe(true);
+    const billing = calls.filter((c) => /\/rest\/v1\/rpc\/reelora_(start_generation|consume_quota|reserve_video_quota|apply_wallet_delta|claim_generation_submission|finalize_generation|release_video_quota)/.test(c.url));
+    expect(billing).toHaveLength(0);
+    expect(calls.some((c) => c.url.includes('ugc_credit_ledger'))).toBe(false);
+    expect(calls.some((c) => c.url.includes('ugc_wallets'))).toBe(false);
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+});
+
+describe('Libellé UI du devis fournisseur', () => {
+  it('ne affiche jamais 0.000 USD quand le devis exact est indisponible', () => {
+    expect(providerQuoteCostLabel(null)).toBe(QUOTE_TO_CONFIRM);
+    expect(providerQuoteCostLabel({ provider_cost_usd: null, provider_quote_source: 'unavailable' })).toBe(QUOTE_TO_CONFIRM);
+    expect(providerQuoteCostLabel({ provider_cost_usd: 0, provider_quote_source: 'unavailable' })).toBe(QUOTE_TO_CONFIRM);
+    expect(providerQuoteCostLabel({ provider_cost_usd: 0.12, provider_quote_source: 'estimate_cost' })).toBe('0.120 USD');
+    expect(providerQuoteCostLabel({ provider_cost_usd: 0.1, provider_quote_source: 'catalog' })).toBe('0.100 USD');
+  });
+
+  it('distingue devis exact, tarif catalogue et devis à confirmer', () => {
+    expect(providerQuoteOriginLabel({ provider_cost_usd: 0.12, provider_quote_source: 'estimate_cost' })).toBe('estimate-cost MuAPI');
+    expect(providerQuoteOriginLabel({ provider_cost_usd: 0.1, provider_quote_source: 'catalog' })).toContain('devis exact non disponible');
+    expect(providerQuoteOriginLabel({ provider_cost_usd: null, provider_quote_source: 'unavailable' })).toBe(QUOTE_TO_CONFIRM);
+  });
+
+  it('le Studio et la barre de prompt utilisent le libellé serveur, sans repli à zéro', () => {
+    const studio = readFileSync(join(process.cwd(), 'src/studio/GenerationStudio.tsx'), 'utf8');
+    const promptBar = readFileSync(join(process.cwd(), 'src/studio/components/PromptBar.tsx'), 'utf8');
+    const confirm = readFileSync(join(process.cwd(), 'src/studio/components/CostConfirm.tsx'), 'utf8');
+    const browser = readFileSync(join(process.cwd(), 'src/studio/components/CatalogBrowser.tsx'), 'utf8');
+    expect(studio).toContain('providerQuoteCostLabel');
+    expect(studio).toContain('providerQuoteOriginLabel');
+    expect(promptBar).toContain('providerQuoteCostLabel');
+    expect(confirm).toContain('providerQuoteCostLabel');
+    expect(browser).toContain('providerQuoteCostLabel');
+    for (const source of [studio, promptBar, confirm, browser]) {
+      expect(source).not.toContain('?? 0).toFixed(3)');
+    }
   });
 });

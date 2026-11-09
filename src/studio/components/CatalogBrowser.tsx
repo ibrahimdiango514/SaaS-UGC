@@ -6,8 +6,8 @@ import {
 import { Badge, Button, cn } from '../../components/ui';
 import type { MuApiModel, VideoCatalogDiagnostics, VideoCostEstimate } from '../../lib/types';
 import {
-  MODE_LABELS, modelFamily, modelModes, providerCostLabel, reeloraModelStatus,
-  statusLabel, type ParamValue,
+  MODE_LABELS, modelFamily, modelModes, providerCostLabel, providerQuoteCostLabel,
+  providerQuoteOriginLabel, reeloraModelStatus, statusLabel, type ParamValue,
 } from '../model';
 import { DynamicParams } from './DynamicParams';
 
@@ -250,7 +250,7 @@ export function CatalogBrowser({ models, catalog, selectedId, onSelect, onClose,
             {estimate && selectedId && (
               <div className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] p-3 text-[11px] text-cyan-100">
                 <p className="flex items-center gap-1.5 font-semibold"><Coins size={12} /> Devis serveur : {estimate.credits_cost} crédits Reelora</p>
-                <p className="mt-1 text-slate-400">Fournisseur : {providerCostLabel(estimate.provider_cost_usd, estimate.provider_cost_currency)} · {estimate.provider_quote_source === 'estimate_cost' ? 'devis exact MuAPI' : 'tarif catalogue'}</p>
+                <p className={estimate.provider_quote_source === 'unavailable' ? 'mt-1 font-semibold text-amber-200' : 'mt-1 text-slate-400'}>Fournisseur : {providerQuoteCostLabel(estimate)} · {providerQuoteOriginLabel(estimate)}</p>
                 <p className="mt-1 text-slate-500">Solde {balance} · après réservation {Math.max(0, balance - estimate.credits_cost)}</p>
                 {estimate.provider_quote_error && <p className="mt-1 text-amber-200">{estimate.provider_quote_error}</p>}
               </div>

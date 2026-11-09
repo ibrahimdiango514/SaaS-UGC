@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { Button, Select, Toggle, cn } from '../../components/ui';
 import type { Avatar, MuApiModel, ServiceCatalogItem, VideoCostEstimate } from '../../lib/types';
-import { modelFamily, normalizeParamValue, paramLabel } from '../model';
+import { modelFamily, normalizeParamValue, paramLabel, providerQuoteCostLabel } from '../model';
 import {
   QUALITY_TIERS, compatibleParams, selectOptions, numericRange, clampToModelDuration,
   type QualityTier,
@@ -283,17 +283,17 @@ export function PromptBar({
         )}
 
         <div className="mt-1.5 flex flex-col gap-1 sm:mt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-          <div className={cn('flex max-h-[38px] flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden text-[10px] sm:max-h-none sm:flex-nowrap sm:overflow-visible sm:text-[11px]', compactShell && 'hidden sm:flex')}>
+          <div className="flex max-h-[38px] flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden text-[10px] sm:max-h-none sm:flex-nowrap sm:overflow-visible sm:text-[11px]">
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1.5 font-semibold text-cyan-200">
               <Coins size={12} /> {cost !== null ? `${cost} crédits UGC` : 'Devis en cours…'}
             </span>
             {estimate && (
-              <span className="text-slate-500">
-                Fournisseur {Number(estimate.provider_cost_usd ?? 0).toFixed(3)} {estimate.provider_cost_currency} · Solde {balance} crédits
+              <span className={estimate.provider_quote_source === 'unavailable' ? 'font-semibold text-amber-200' : 'text-slate-500'}>
+                Fournisseur {providerQuoteCostLabel(estimate)}<span className="hidden sm:inline"> · Solde {balance} crédits</span>
               </span>
             )}
-            {catalogSummary && <span className="max-w-full truncate text-slate-600" title={catalogSummary}>{catalogSummary}</span>}
-            {blockedReason && <span className="inline-flex max-w-full items-center gap-1 text-amber-300" title={blockedReason}><AlertCircle size={11} /> {blockedReason}</span>}
+            {catalogSummary && <span className="hidden max-w-full truncate text-slate-600 sm:inline" title={catalogSummary}>{catalogSummary}</span>}
+            {blockedReason && <span className="hidden max-w-full items-center gap-1 text-amber-300 sm:inline-flex" title={blockedReason}><AlertCircle size={11} /> {blockedReason}</span>}
           </div>
           <button type="button" onClick={onGenerate} disabled={!canGenerate} title={blockedReason ?? undefined}
             data-testid="generate-button"

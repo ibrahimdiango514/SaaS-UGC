@@ -8,6 +8,7 @@ import {
   PageHeader, Card, CardHeader, Button, Input, Textarea, Select, Badge, Banner,
   ProgressBar, ConfirmDialog, Modal, LoadingState, ErrorState, EmptyState,
 } from '../components/ui';
+import { providerQuoteCostLabel } from '../studio/model';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
@@ -480,7 +481,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                 {[
                   ['Solde disponible', `${quota?.credits ?? 0} crédits`, 'text-white'],
                   ['Coût de cette vidéo', `${credits} crédits`, 'text-amber-300'],
-                  ['Coût fournisseur estimé', estimate?.provider_cost_usd != null ? `${Number(estimate.provider_cost_usd).toFixed(3)} ${estimate.provider_cost_currency}` : '—', 'text-cyan-300'],
+                  ['Coût fournisseur estimé', providerQuoteCostLabel(estimate), estimate?.provider_quote_source === 'unavailable' ? 'text-amber-200' : 'text-cyan-300'],
                 ].map(([label, value, tone]) => (
                   <div key={label} className="rounded-xl border border-line bg-white/[0.03] px-4 py-3">
                     <p className="text-[11px] text-slate-500">{label}</p>

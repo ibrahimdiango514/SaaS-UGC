@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Coins, Info, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { Button, Modal } from '../../components/ui';
 import type { MuApiModel, VideoCostEstimate } from '../../lib/types';
-import { paramsSummary, providerCostLabel, type ParamValue } from '../model';
+import { paramsSummary, providerQuoteCostLabel, type ParamValue } from '../model';
 
 export function CostSummary({ model, estimate, balance, params, compact }: {
   model: MuApiModel;
@@ -37,7 +37,7 @@ export function CostSummary({ model, estimate, balance, params, compact }: {
           ['Coût Reelora', `${cost} crédits`, 'text-amber-300'],
           ['Solde actuel', `${balance} crédits`, 'text-white'],
           ['Après réservation', `${remaining} crédits`, enough ? 'text-emerald-300' : 'text-rose-300'],
-          ['Coût fournisseur', providerCostLabel(estimate?.provider_cost_usd, estimate?.provider_cost_currency), 'text-cyan-300'],
+          ['Coût fournisseur', providerQuoteCostLabel(estimate), estimate?.provider_quote_source === 'unavailable' ? 'text-amber-200' : 'text-cyan-300'],
         ].map(([label, value, tone]) => (
           <div key={label} className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
             <p className="text-[10px] text-slate-500">{label}</p>

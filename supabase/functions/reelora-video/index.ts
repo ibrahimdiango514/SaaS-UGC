@@ -848,6 +848,11 @@ async function actionEstimate(body: Json): Promise<Response> {
       : quoteSource === "unavailable" ? quoteError
         : "Modèle actif et sélectionnable.";
 
+  // A catalogue tariff is NOT an exact provider quote. When estimate-cost fails
+  // (or cannot be requested), never fall back to the catalogue price: the UI
+  // must display "devis fournisseur à confirmer" instead of an invented number.
+  if (quoteSource === "unavailable") providerCostUsd = null;
+
   return json({
     service_key: serviceKey,
     credits_cost: Number(service?.credits_cost ?? 0),

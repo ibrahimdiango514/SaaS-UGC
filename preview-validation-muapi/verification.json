@@ -1,0 +1,104 @@
+{
+  "generatedAt": "2026-11-09T15:31:23.198Z",
+  "base": "http://127.0.0.1:4183",
+  "viewportDesktop": "1440×1000",
+  "viewportMobile": "390×844",
+  "mode": "fixtures navigateur — aucune mesure MuAPI live, aucune génération",
+  "interactions": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0,
+    "items": [
+      {
+        "name": "Desktop 1440×1000 : devis exact, crédits Reelora et catalogue MuAPI",
+        "pass": true,
+        "file": "01-studio-desktop-devis-exact.jpg",
+        "detail": {
+          "exactQuote": true,
+          "usd": true,
+          "credits": true
+        }
+      },
+      {
+        "name": "Écran de confirmation obligatoire avant génération (aucun start)",
+        "pass": true,
+        "file": "02-confirmation-desktop.jpg",
+        "detail": {
+          "modal": true,
+          "checkbox": true,
+          "startActions": 0
+        }
+      },
+      {
+        "name": "Fiche modèle : contraintes réelles (durée 4–16 s, résolution, format) et devis",
+        "pass": true,
+        "file": "03-modele-parametres-desktop.jpg",
+        "detail": {
+          "params": true,
+          "resolution": true,
+          "estimateEndpoint": true
+        }
+      },
+      {
+        "name": "Mobile 390×844 : barre de prompt, devis USD + crédits et bouton de confirmation",
+        "pass": true,
+        "file": "04-studio-mobile-devis-exact.jpg",
+        "detail": {
+          "usd": true,
+          "promptBar": true
+        }
+      },
+      {
+        "name": "Échec estimate-cost : aucun prix inventé, « devis fournisseur à confirmer »",
+        "pass": true,
+        "file": "05-studio-desktop-devis-a-confirmer.jpg",
+        "detail": {
+          "label": true,
+          "noZero": true,
+          "generateDisabled": true
+        }
+      },
+      {
+        "name": "Mobile 390×844 : devis indisponible explicitement affiché, génération bloquée",
+        "pass": true,
+        "file": "06-studio-mobile-devis-a-confirmer.jpg",
+        "detail": {
+          "label": true,
+          "noZero": true,
+          "generateDisabled": true
+        }
+      }
+    ]
+  },
+  "files": [
+    "screenshots/01-studio-desktop-devis-exact.jpg",
+    "screenshots/02-confirmation-desktop.jpg",
+    "screenshots/03-modele-parametres-desktop.jpg",
+    "screenshots/04-studio-mobile-devis-exact.jpg",
+    "screenshots/05-studio-desktop-devis-a-confirmer.jpg",
+    "screenshots/06-studio-mobile-devis-a-confirmer.jpg"
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "backendCalls": 79,
+  "edgeActions": [
+    "catalog",
+    "model-detail",
+    "estimate"
+  ],
+  "rpcCalls": [
+    "reelora_bootstrap",
+    "reelora_quota_status"
+  ],
+  "externalHosts": [
+    "fonts.googleapis.com"
+  ],
+  "muapiCalls": [],
+  "startActions": 0,
+  "realGenerationLaunched": false,
+  "jobsCreated": 0,
+  "creditsSpent": 0,
+  "serverState": {
+    "note": "Fixtures de navigateur : aucun appel MuAPI/Groq réel, aucun débit, aucun job créé. Les sondes live sont consignées séparément dans docs/validation-authentifiee-muapi.md."
+  }
+}

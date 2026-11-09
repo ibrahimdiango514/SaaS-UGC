@@ -243,3 +243,41 @@ export function providerCostLabel(costUsd: number | string | null | undefined, c
     ? `${n.toFixed(3)} ${currency}`
     : 'non communiqué';
 }
+
+/** Wording required when MuAPI's exact estimate-cost quote cannot be obtained. */
+export const QUOTE_TO_CONFIRM = 'devis fournisseur à confirmer';
+
+export interface ProviderQuoteView {
+  provider_cost_usd?: number | string | null;
+  provider_cost_currency?: string;
+  provider_quote_source?: 'catalog' | 'estimate_cost' | 'unavailable' | string;
+}
+
+/** True only when the displayed USD amount comes from a successful exact quote. */
+export function isExactProviderQuote(estimate: ProviderQuoteView | null | undefined): boolean {
+  return estimate?.provider_quote_source === 'estimate_cost'
+    && estimate.provider_cost_usd !== null && estimate.provider_cost_usd !== undefined
+    && Number.isFinite(Number(estimate.provider_cost_usd));
+}
+
+/**
+ * Never display `0.000 USD` for a failed or absent quote. A catalogue tariff is
+ * factual but is explicitly labelled as a non-exact quote; `unavailable` has no
+ * price at all and is only described as "devis fournisseur à confirmer".
+ */
+export function providerQuoteCostLabel(estimate: ProviderQuoteView | null | undefined): string {
+  if (!estimate || estimate.provider_quote_source === 'unavailable'
+    || estimate.provider_cost_usd === null || estimate.provider_cost_usd === undefined) {
+    return QUOTE_TO_CONFIRM;
+  }
+  return providerCostLabel(estimate.provider_cost_usd, estimate.provider_cost_currency ?? 'USD');
+}
+
+export function providerQuoteOriginLabel(estimate: ProviderQuoteView | null | undefined): string {
+  if (isExactProviderQuote(estimate)) return 'estimate-cost MuAPI';
+  if (!estimate || estimate.provider_quote_source === 'unavailable'
+    || estimate.provider_cost_usd === null || estimate.provider_cost_usd === undefined) {
+    return QUOTE_TO_CONFIRM;
+  }
+  return 'tarif catalogue MuAPI · devis exact non disponible';
+}

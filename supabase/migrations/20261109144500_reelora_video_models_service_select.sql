@@ -1,0 +1,26 @@
+-- Reelora — correction additive : lecture du catalogue par l'Edge Function.
+--
+-- Constat (validation authentifiée 2026-11-09) :
+--   public.reelora_video_models est une vue `security_invoker = true` qui lit
+--   saas_ugc.ugc_video_models. La migration 20261108000001 a accordé
+--   `grant select on all tables in schema saas_ugc to service_role`, MAIS la table
+--   ugc_video_models a été créée plus tard (20261108000009) et cette dernière
+--   n'a accordé SELECT qu'à anon/authenticated. PostgREST renvoie donc 403/42501
+--   (`permission denied for table ugc_video_models`) quand reelora-video appelle
+--   la vue avec SUPABASE_SERVICE_ROLE_KEY. `actionCatalog` survit grâce au
+--   catalogue MuAPI live, mais `loadModel()` retourne [] : `model-detail` renvoie
+--   MODEL_NOT_FOUND et `estimate` ne peut pas charger le modèle.
+--
+-- Correction : un seul GRANT SELECT, strictement additif. Aucune table, colonne,
+-- vue, politique RLS, donnée, rôle utilisateur ou privilège existant n'est
+-- modifié ou supprimé. service_role possède déjà `rolbypassrls = true` et
+-- `usage` sur le schéma saas_ugc ; le GRANT suffit donc, sans toucher à RLS.
+-- Aucun accès supplémentaire n'est accordé à anon/authenticated : leurs
+-- politiques RLS existantes (`active and is_enabled and not is_coming_soon`)
+-- restent inchangées.
+--
+-- Validé avant application par un essai en transaction avec ROLLBACK :
+--   grant select ... -> has_table_privilege(service_role, table, SELECT) = true
+--   rollback         -> has_table_privilege(service_role, table, SELECT) = false
+
+grant select on saas_ugc.ugc_video_models to service_role;
