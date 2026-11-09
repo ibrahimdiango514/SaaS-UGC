@@ -2,7 +2,7 @@
 
 SaaS francophone de création de contenus UGC : scripts publicitaires générés par **Groq**, génération vidéo réelle par **MuAPI** (fournisseur vidéo principal), bibliothèque privée, crédits/quotas et administration. Ce dépôt contient l'intégralité des sources (frontend, migrations SQL, Edge Functions, configuration, tests). Rien n'est une maquette : chaque écran est relié à Supabase et aux services d'IA côté serveur.
 
-> **Important** — `MUAPI_API_KEY` et `GROQ_API_KEY` ne sont pas inclus. Sans eux, Reelora affiche une erreur explicite (`MUAPI_NOT_CONFIGURED`, `GROQ_NOT_CONFIGURED`), ne produit **aucun faux résultat** et restitue les crédits réservés. **Aucune génération vidéo réelle n'a été testée** : aucun secret MuAPI n'était disponible. Tous les tests automatisés utilisent des mocks. Voir [§7](#7-configuration-requise-intervention-utilisateur).
+> **Important** — `MUAPI_API_KEY` est enregistré comme **secret serveur Supabase** (jamais recopié dans le dépôt, le frontend, `VITE_*` ou les logs) ; la sonde de santé confirme sa **présence** (`muapi:true`), pas sa validité auprès de MuAPI. `GROQ_API_KEY` reste **absent** : l'assistance IA répond `GROQ_NOT_CONFIGURED` et ne produit **aucune réponse simulée**. **Aucune génération vidéo réelle n'a été lancée**, aucun crédit dépensé, aucun job créé : un test réel exige d'abord le devis (`docs/devis-test-muapi.md`) puis une confirmation explicite. Tous les tests automatisés utilisent des mocks. Voir [§7](#7-configuration-requise-intervention-utilisateur).
 
 ---
 
@@ -31,7 +31,7 @@ L'entrée principale `/app/studio` est une refonte originale, premium et mobile-
 
 | Espace | Route | État |
 | --- | --- | --- |
-| **Video Studio** | `/app/studio` | **Opérationnel** : catalogue MuAPI vérifié, modes, prompt, crédits, suivi et résultat. L'activation d'une génération réelle reste conditionnée au secret serveur `MUAPI_API_KEY`. |
+| **Video Studio** | `/app/studio` | **Opérationnel** : catalogue MuAPI vérifié, modes, prompt, crédits, suivi et résultat. Le secret serveur `MUAPI_API_KEY` est configuré ; la génération réelle exige un devis affiché puis une confirmation explicite, et n'a pas encore été lancée. |
 | **My Generations** | `/app/historique`, `/app/studio/generations` | **Opérationnel** : tâches, modèle, paramètres, description, coût, date, événements, ledger, reprise du suivi et relance avec paramètres similaires. |
 | **My Projects** | `/app/projets`, `/app/studio/projects` | **Opérationnel** : projets, scripts, scènes et rattachement des créations. |
 | **Mes créations enregistrées** | `/app/bibliotheque`, `/app/studio/saved` | **Opérationnel** : lecture, téléchargement, modèle, paramètres, coût, date, rattachement à un projet, relance. Fichiers dans `ugc-assets` privé. |
@@ -51,7 +51,7 @@ Avant le lancement, une confirmation explicite avec case à cocher reprend le mo
 - **Schéma** : `saas_ugc` existant **conservé et réutilisé** (32 tables, 31 vues `security_invoker`) + 8 tables Reelora + 1 table `ugc_video_models` + 9 vues `public.reelora_*`
 - **IA textuelle** : Groq (`llama-3.3-70b-versatile`) — scripts, accroches, dialogues, contenus publicitaires
 - **IA vidéo** : **MuAPI uniquement** (`https://api.muapi.ai/api/v1`, en-tête `x-api-key`). HeyGen et fal.ai ne sont **pas** utilisés.
-- **Tests** : Vitest — 85 tests (`tests/muapi.test.ts`, `studio-ux.test.ts`, `credits.test.ts`, `security.test.ts`, `errors.test.ts`, `format.test.ts`, `ui.test.tsx`)
+- **Tests** : Vitest — 106 tests, 9 fichiers (`tests/muapi.test.ts`, `studio-ux.test.ts`, `groq.test.ts`, `integration-parity.test.ts`, `credits.test.ts`, `security.test.ts`, `errors.test.ts`, `format.test.ts`, `ui.test.tsx`)
 - **Déploiement** : Preview Netlify de PR #2 `https://deploy-preview-2--saas-ugc-growth.netlify.app` (indépendante de `main`) ; accès soumis à la protection de l'équipe Netlify. Production **non déployée** et `main` inchangé.
 
 Projet Supabase cible : `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Le projet Sofia Immobilier Lab (`yswsildmbeomjlyofnrk`) n'est **jamais** modifié.
@@ -170,7 +170,7 @@ cp .env.example .env.local        # ajuster VITE_SITE_URL si besoin
 npm ci
 npm run dev                      # http://localhost:5173
 npm run typecheck                # TypeScript strict, sans erreur
-npm test                         # Vitest : 85 tests
+npm test                         # Vitest : 106 tests
 npm run build                    # tsc -b && vite build -> dist/
 npm run preview                  # prévisualisation de la compilation
 ```
@@ -188,6 +188,19 @@ supabase functions deploy reelora-video-worker --no-verify-jwt
 
 > ⚠️ Ne jamais déployer `reelora-ai` / `reelora-video` avec `--no-verify-jwt`. Le worker compense l'absence de JWT par le jeton Vault + la re-vérification serveur de l'état MuAPI.
 
+### Parité frontend ↔ Edge Functions
+
+L'audit de reprise a comparé les sources du dépôt aux **corps live** des quatre fonctions (`get_edge_function`). Trois versions live sont en retard sur le dépôt :
+
+| Fonction | Version live | Écart constaté | Correctif présent dans le dépôt |
+| --- | --- | --- | --- |
+| `reelora-video` | v4, `verify_jwt=true` | `buildMuapiBody` à 4 arguments : ni `workspaceImagePath`, ni `last_image`, ni signature serveur des images privées | source locale : 5 arguments, chemins Storage signés côté serveur, `LAST_IMAGE_MISSING` |
+| `reelora-video-worker` | v2, `verify_jwt=false` | `result_payload` sans `params`, `visual_prompt`, `mode`, `credits_reserved` | source locale : métadonnées complètes pour la bibliothèque |
+| `reelora-ai` | v3, `verify_jwt=true` | fallbacks déterministes fabriquant 3 scènes et renvoyant le prompt de l'utilisateur comme texte « amélioré » | source locale : aucune simulation, `AI_EMPTY_RESPONSE`, remboursement unique |
+| `reelora-health` | v5, `verify_jwt=false` | conforme (booléens de présence uniquement) | redéployée à l'identique lors du contrôle de parité |
+
+**Le frontend reste compatible avec les versions live** : il transmet déjà une URL signée `image_url` en plus des chemins privés, et `script_text` est renseigné à partir du prompt. Les correctifs serveur sont donc des durcissements, pas un prérequis au parcours actuel. Les trois corps corrigés sont **prêts mais non redéployés** : un redéploiement modifie le backend Supabase partagé et reste soumis à autorisation explicite (voir `scripts/deploy-edge-functions.sh`). Aucune **seconde intégration** n'a été créée. `tests/integration-parity.test.ts` verrouille le contrat (chemins Storage privés, `last_image`, métadonnées, absence de fournisseur retiré, absence de simulation Groq).
+
 ---
 
 ## 6. Tests & résultats
@@ -195,9 +208,9 @@ supabase functions deploy reelora-video-worker --no-verify-jwt
 | Suite | Résultat |
 | --- | --- |
 | `npm run typecheck` | ✅ 0 erreur |
-| `npm test` | ✅ **85/85 tests**, 7 fichiers — 28 tests MuAPI (auth, clé absente, solde insuffisant, réservation, absence de double débit/double soumission, images Storage signées, `last_image` conditionnel, métadonnées de résultat, suivi, remboursement, webhook + cron), 11 tests UX Studio, 17 sécurité, 7 crédits/estimation, 6 erreurs, 10 formatage, 6 UI |
-| `npm run build` | ✅ `dist/index.html` 1,25 kB, CSS 51,49 kB (9,25 kB gzip), JS 702,09 kB (190,59 kB gzip), 1668 modules |
-| `GET /functions/v1/reelora-health` | ✅ `{"groq":false,"muapi":false,"supabase":true,"worker":true}` |
+| `npm test` | ✅ **106/106 tests**, 9 fichiers — 28 MuAPI (auth, clé absente, solde insuffisant, réservation, idempotence, images Storage signées, `last_image`, métadonnées, suivi, remboursement, webhook + cron), 11 UX Studio, **13 Groq** (indisponibilité, aucune simulation, remboursement unique), **8 parité d'intégration**, 17 sécurité, 7 crédits/estimation, 6 erreurs, 10 formatage, 6 UI |
+| `npm run build` | ✅ `dist/index.html` 1,25 kB (0,72 gzip), CSS 51,49 kB (9,25 gzip), JS 702,66 kB (190,75 gzip), 1668 modules |
+| `GET /functions/v1/reelora-health` | ✅ `{"groq":false,"muapi":true,"supabase":true,"worker":true}` — le booléen `muapi` atteste la présence du secret, pas sa validité fournisseur |
 | `GET /functions/v1/reelora-video` sans jeton | ✅ `UNAUTHORIZED_NO_AUTH_HEADER` (passerelle JWT) |
 | `GET /functions/v1/reelora-video-worker` | ✅ `METHOD_NOT_ALLOWED` (POST uniquement, fonction déployée) |
 | **Chaîne serveur live** | ✅ `cron.job` `reelora-video-tick` actif, 5 exécutions `succeeded`, `net._http_response` → **HTTP 200** `{"mode":"tick","expired":0,"checked":0,"outcomes":[]}` : pg_cron → pg_net → worker → RPC validé en conditions réelles |
@@ -208,14 +221,16 @@ supabase functions deploy reelora-video-worker --no-verify-jwt
 
 Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel réel à MuAPI, aucune clé requise, aucune vidéo fictive enregistrée. Les sondes SQL ont été exécutées en transaction annulée : aucune donnée de test persistée.
 
+**Vérification navigateur** (`preview/verification.json`, `preview/gallery.html`) : Chromium headless sur le bundle compilé, **10 captures** ordinateur (1440×1000) + mobile (390×844), **7/7 interactions** réussies, **0 erreur console**, **0 erreur de page**, **13 appels backend** (fixtures déterministes), **0 appel MuAPI**. Les interactions couvrent l'état serveur réel (`muapi:true`, `groq:false`, boutons IA désactivés, aucune simulation), le **devis avant génération** (modèle `seedance-lite-t2v`, paramètres, 9 crédits, 0,100 USD, case de confirmation verrouillée, ouverture puis annulation sans lancement), Image → Vidéo sans référence, Video to Video préparé, paramètres strictement dérivés du modèle, absence de débordement horizontal mobile et relance depuis My Generations.
+
 ---
 
 ## 7. Configuration requise (intervention utilisateur)
 
-1. **Obligatoire — `MUAPI_API_KEY`** : secret Supabase Edge Functions, jamais `VITE_*`. Sans lui, `reelora-video` répond `MUAPI_NOT_CONFIGURED`, marque la tâche `failed` et restitue les crédits. **Aucune génération vidéo réelle n'a pu être testée** tant que ce secret n'est pas fourni. Une valeur littérale a été évoquée dans la demande alors que le texte précisait aussi qu'elle serait fournie ultérieurement : **aucune valeur n'a été recopiée, commitée ou définie comme secret**. Une confirmation explicite est demandée avant de l'activer côté serveur.
-2. **Obligatoire — `GROQ_API_KEY`** : sans lui, `reelora-ai` répond `GROQ_NOT_CONFIGURED`. Un script saisi manuellement reste utilisable.
+1. **`MUAPI_API_KEY` — fait** : enregistré une seule fois comme secret serveur Supabase après confirmation explicite de l'utilisateur (`ask_user` : outil + « vérification uniquement »). La valeur n'a jamais été recopiée dans un fichier, un log, le README, le frontend, GitHub ou une variable `VITE_*`. La santé renvoie `muapi:true` ; cela ne prouve pas que la clé est acceptée par MuAPI. **Aucun appel de génération, aucun crédit dépensé, aucun job créé.** Rotation/révocation uniquement sur demande explicite. Sans secret valide, `reelora-video` répond `MUAPI_NOT_CONFIGURED` (ou une erreur MuAPI lisible), marque la tâche `failed` et restitue les crédits.
+2. **`GROQ_API_KEY` — encore absent** : `reelora-ai` vérifie le secret avant toute consommation de quota et répond `GROQ_NOT_CONFIGURED` (503). Si Groq renvoie une erreur ou un contenu vide : `AI_PROVIDER_ERROR` / `AI_EMPTY_RESPONSE` (502) avec **remboursement unique** de l'unité de quota. **Aucun script, prompt, accroche ou scène n'est fabriqué localement** (les anciens fallbacks déterministes ont été retirés). Le studio désactive les boutons d'aide IA et affiche l'état. Un script saisi manuellement reste utilisable. Aucune clé Groq n'est définie sans confirmation.
 3. **Vérifier le catalogue live** : après ajout de la clé, ouvrir le Video Studio → « Catalogue MuAPI vérifié » → Actualiser. `reelora-video {action:"models"}` interroge `GET /api/v1/models` et met à jour les coûts/disponibilités. Si un modèle vérifié passe `is_enabled:0`, il est masqué automatiquement.
-4. **Tester une vraie génération** avec un compte disposant d'au moins 9 crédits, un projet, une description d'au moins 20 caractères, puis cocher la confirmation explicite. Vérifier le `request_id` dans My Generations, la vidéo dans Mes créations enregistrées et les écritures `reserve` → `capture` dans le ledger.
+4. **Test réel — devis préparé, NON LANCÉ** : voir `docs/devis-test-muapi.md` (modèle `seedance-lite-t2v`, paramètres `9:16 / 480p / 5 s / caméra libre`, **9 crédits Reelora**, **0,1000 USD** fournisseur, conditions et observations). Aucune génération ne sera lancée sans confirmation explicite après lecture de ce devis. Avec un compte disposant d'au moins 9 crédits, un projet et une description d'au moins 20 caractères, cocher la confirmation `CostConfirm` ; vérifier ensuite le `request_id` dans My Generations, la vidéo dans Mes créations enregistrées et les écritures `reserve` → `capture` dans le ledger.
 5. **Webhook** : `reelora-video` construit `?webhook=` automatiquement à partir de `SUPABASE_URL`. Si l'URL publique du projet diffère, définir `REELORA_WEBHOOK_BASE_URL`. Le cron reste actif même si MuAPI n'appelle pas le webhook.
 6. **`site_url`** du projet partagé vaut encore `https://sbc-ai-agency-dashbord.netlify.app`. Reelora passe `emailRedirectTo` explicite et l'allowlist contient `https://reelora.netlify.app/**`. Ajouter l'origine de production avant déploiement.
 7. **Paiement** : les recharges restent `pending` jusqu'à confirmation manuelle par un administrateur. Aucune passerelle automatique simulée.

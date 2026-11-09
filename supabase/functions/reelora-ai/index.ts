@@ -2,6 +2,11 @@
 // The GROQ_API_KEY is read only here, server-side. No key is ever sent to the browser.
 // Every call consumes a plan quota through a SECURITY DEFINER RPC executed with the
 // caller's JWT; credits are never handled by this function.
+//
+// NO SIMULATED AI RESPONSES: when Groq is absent, errors, or returns an empty
+// payload, this function fails explicitly (GROQ_NOT_CONFIGURED / AI_PROVIDER_ERROR /
+// AI_EMPTY_RESPONSE) and refunds the consumed quota unit. It never invents a
+// script, a prompt, a hook or a scene locally. See tests/groq.test.ts.
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -11,6 +16,18 @@ const cors: Record<string, string> = {
 };
 
 type Json = Record<string, unknown>;
+
+// Works in Deno (Supabase Edge) and in Node (Vitest with injected process.env),
+// so the unavailability states can be unit-tested without a live Groq key.
+function env(key: string): string {
+  const g = globalThis as unknown as {
+    Deno?: { env?: { get(k: string): string | undefined } };
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return g.Deno?.env?.get?.(key) ?? g.process?.env?.[key] ?? "";
+}
+
+const AI_EMPTY_MESSAGE = "Le service IA n’a renvoyé aucun contenu exploitable. Aucun texte n’est généré ni simulé ; réessayez ou saisissez votre texte manuellement.";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -29,9 +46,10 @@ function clamp(n: unknown, min: number, max: number, fallback: number): number {
   return Number.isFinite(v) ? Math.min(Math.max(v, min), max) : fallback;
 }
 
-const SUPABASE_URL = () => Deno.env.get("SUPABASE_URL") ?? "";
-const ANON_KEY = () => Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
-const SERVICE_KEY = () => Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const SUPABASE_URL = () => env("SUPABASE_URL");
+const ANON_KEY = () => env("SUPABASE_ANON_KEY") || env("SUPABASE_PUBLISHABLE_KEY");
+const SERVICE_KEY = () => env("SUPABASE_SERVICE_ROLE_KEY");
+const GROQ_KEY = () => env("GROQ_API_KEY");
 
 function rpcHeaders(userJwt: string): Record<string, string> {
   return { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" };
@@ -121,10 +139,12 @@ async function refundQuota(kind: string, referenceId: string | null, userId: str
   });
 }
 
-const MODEL = () => Deno.env.get("GROQ_MODEL") ?? "llama-3.3-70b-versatile";
+const MODEL = () => env("GROQ_MODEL") || "llama-3.3-70b-versatile";
 
+// Groq's answer is returned verbatim (trimmed). An empty / unparsable answer is
+// an explicit failure: Reelora NEVER manufactures an AI response locally.
 async function groq(system: string, user: string, jsonMode: boolean, maxTokens = 2400): Promise<string> {
-  const key = Deno.env.get("GROQ_API_KEY");
+  const key = GROQ_KEY();
   if (!key) throw new Error("GROQ_NOT_CONFIGURED");
   const body: Json = {
     model: MODEL(),
@@ -152,10 +172,13 @@ async function groq(system: string, user: string, jsonMode: boolean, maxTokens =
     } catch { /* keep generic */ }
     throw new Error(`GROQ_ERROR: ${detail}`);
   }
-  const parsed = JSON.parse(raw) as Json;
+  let parsed: Json;
+  try { parsed = JSON.parse(raw) as Json; } catch { throw new Error("AI_EMPTY_RESPONSE"); }
   const choices = parsed.choices as Json[] | undefined;
   const content = choices?.[0]?.message as Json | undefined;
-  return typeof content?.content === "string" ? content.content : "";
+  const text = typeof content?.content === "string" ? content.content.trim() : "";
+  if (!text) throw new Error("AI_EMPTY_RESPONSE");
+  return text;
 }
 
 function parseJsonLoose(raw: string): Json {
@@ -171,29 +194,31 @@ function parseJsonLoose(raw: string): Json {
 
 const SCENE_TYPES = ["hook", "ugc", "product_demo", "cutaway", "testimonial_style", "cta", "other"];
 
-function normalizeScenes(value: unknown, fallbackText: string): Json[] {
-  const raw = Array.isArray(value) ? value : [];
-  const scenes = raw.slice(0, 12).map((item, i) => {
+// Strict normalisation of Groq's own scenes. No scene, prompt, duration or
+// semantic type is ever invented here: an incomplete answer is a failure.
+function normalizeScenes(value: unknown, required = true): Json[] {
+  const raw = Array.isArray(value) ? value.slice(0, 12) : [];
+  const scenes = raw.map((item) => {
     const s = (item ?? {}) as Json;
     const type = str(s.scene_type ?? s.sceneType, 40);
+    const visual = str(s.visual_prompt ?? s.visualPrompt, 800);
+    if (!visual) throw new Error("AI_EMPTY_RESPONSE");
     return {
-      scene_type: SCENE_TYPES.includes(type) ? type : (i === 0 ? "hook" : i === raw.length - 1 ? "cta" : "ugc"),
+      scene_type: SCENE_TYPES.includes(type) ? type : "ugc",
       duration_seconds: clamp(s.duration_seconds ?? s.durationSeconds, 1, 120, 3),
-      visual_prompt: str(s.visual_prompt ?? s.visualPrompt, 800) || `Plan UGC ${i + 1}`,
+      visual_prompt: visual,
       spoken_text: str(s.spoken_text ?? s.spokenText, 700),
       subtitle_text: str(s.subtitle_text ?? s.subtitleText, 300),
       scene_settings: {},
     };
   });
-  if (scenes.length === 0 && fallbackText) {
-    return [
-      { scene_type: "hook", duration_seconds: 3, visual_prompt: "Accroche face caméra, lumière naturelle", spoken_text: fallbackText.slice(0, 160), subtitle_text: "", scene_settings: {} },
-      { scene_type: "ugc", duration_seconds: 8, visual_prompt: "Démonstration du produit en usage réel", spoken_text: fallbackText.slice(160, 500), subtitle_text: "", scene_settings: {} },
-      { scene_type: "cta", duration_seconds: 4, visual_prompt: "Appel à l'action avec le produit en évidence", spoken_text: fallbackText.slice(500, 700), subtitle_text: "", scene_settings: {} },
-    ];
-  }
+  if (scenes.length === 0 && required) throw new Error("AI_EMPTY_RESPONSE");
   return scenes;
 }
+
+// Any action that consumed a quota unit and then fails must give it back once.
+// The outer catch reads this holder, so no action can double-refund or leak a unit.
+type QuotaTaken = { kind: string; referenceId: string | null };
 
 function interpolate(template: string, values: Record<string, string>): string {
   return template.replace(/\{\{\s*([a-zA-Z_]+)\s*\}\}/g, (_m, key: string) => values[key] ?? "");
@@ -208,7 +233,7 @@ async function loadTemplate(id: string | null, category: string, userJwt: string
   return content || "Tu es un créateur UGC francophone. Réponds uniquement en JSON valide avec les clés hook, script_text, call_to_action, marketing_angle, claims_to_avoid, scenes.";
 }
 
-Deno.serve(async (req: Request) => {
+export async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   if (req.method !== "POST") return fail("METHOD_NOT_ALLOWED", "Méthode non autorisée.", 405);
 
@@ -216,14 +241,17 @@ Deno.serve(async (req: Request) => {
   if (!userJwt.startsWith("Bearer ")) return fail("UNAUTHENTICATED", "Authentification requise.", 401);
   const userId = await authUserId(userJwt);
   if (!userId) return fail("UNAUTHENTICATED", "Jeton utilisateur invalide.", 401);
-  if (!Deno.env.get("GROQ_API_KEY")) {
-    return fail("GROQ_NOT_CONFIGURED", "Le service IA n'est pas configuré : ajoutez le secret GROQ_API_KEY dans les secrets Supabase (Edge Functions).", 503);
+  // Checked BEFORE taking any quota: an unconfigured provider is an explicit,
+  // non-simulated 503 and must not consume a unit.
+  if (!GROQ_KEY()) {
+    return fail("GROQ_NOT_CONFIGURED", "Le service IA n’est pas configuré : ajoutez le secret serveur GROQ_API_KEY dans Supabase Edge Functions. Aucun texte n’est généré ni simulé ; vous pouvez saisir votre script ou votre prompt manuellement.", 503);
   }
 
   let body: Json;
   try { body = await req.json() as Json; } catch { return fail("INVALID_BODY", "Corps de requête JSON invalide.", 400); }
   const action = str(body.action, 40);
   const projectId = str(body.project_id, 80) || null;
+  let quotaTaken: QuotaTaken | null = null;
 
   try {
     if (action === "generate_script") {
@@ -238,6 +266,7 @@ Deno.serve(async (req: Request) => {
 
       const quota = await takeQuota("script", projectId, userJwt, { action, platform });
       if (quota.error) return fail(quota.error.code, quota.error.message, quota.error.status);
+      quotaTaken = { kind: "script", referenceId: projectId };
 
       const template = await loadTemplate(templateId, "script", userJwt);
       const system = "Tu es Reelora, expert en création de contenus UGC francophones. Tu produis des scripts courts, crédibles et conformes : aucune allégation chiffrée inventée, aucune promesse médicale, aucune mention de marque concurrente. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour.";
@@ -245,11 +274,12 @@ Deno.serve(async (req: Request) => {
         duree: String(duration), produit: product, audience, plateforme: platform, ton: tone,
       }) + `\n\nBrief complémentaire :\n- Produit : ${product}\n- Audience : ${audience}\n- Plateforme : ${platform}\n- Ton : ${tone}\n- Durée cible : ${duration} secondes\n- Objectif : ${objective || "non précisé"}\n- Marché : ${market || "non précisé"}\n- Langue : français\n- Contraintes : pas de chiffre inventé, pas de promesse irréaliste, 3 à 6 scènes maximum.`;
 
-      let content: string;
-      try { content = await groq(system, user, true); }
-      catch (e) { await refundQuota("script", projectId, userId); throw e; }
+      // Groq's own text only. No local fallback: an empty answer is an explicit
+      // failure with a quota refund (handled once by the outer catch).
+      const content = await groq(system, user, true);
       const parsed = parseJsonLoose(content);
-      const scriptText = str(parsed.script_text ?? parsed.script ?? parsed.content, 4000) || content.slice(0, 4000);
+      const scriptText = str(parsed.script_text ?? parsed.script ?? parsed.content, 4000);
+      if (!scriptText) throw new Error("AI_EMPTY_RESPONSE");
       const result = {
         hook: str(parsed.hook, 300),
         script_text: scriptText,
@@ -257,7 +287,9 @@ Deno.serve(async (req: Request) => {
         marketing_angle: str(parsed.marketing_angle ?? parsed.angle, 200),
         claims_to_avoid: Array.isArray(parsed.claims_to_avoid) ? parsed.claims_to_avoid.slice(0, 20).map(String) : [],
       };
-      const scenes = normalizeScenes(parsed.scenes, scriptText);
+      // Scenes are optional for a script response: absent means an empty list,
+      // never three invented scenes derived from the user's own text.
+      const scenes = normalizeScenes(parsed.scenes, false);
 
       let scriptId: string | null = null;
       let scenesSaved = 0;
@@ -287,11 +319,13 @@ Deno.serve(async (req: Request) => {
       if (content.length < 10) return fail("INVALID_INPUT", "Le prompt doit contenir au moins 10 caractères.", 400);
       const quota = await takeQuota("prompt", null, userJwt, { action });
       if (quota.error) return fail(quota.error.code, quota.error.message, quota.error.status);
-      let raw: string;
-      try { raw = await groq("Tu es un ingénieur prompt francophone. Réponds uniquement en JSON valide.", interpolate(await loadTemplate(null, "system", userJwt), { prompt: content }), true, 1200); }
-      catch (e) { await refundQuota("prompt", null, userId); throw e; }
+      quotaTaken = { kind: "prompt", referenceId: null };
+      const raw = await groq("Tu es un ingénieur prompt francophone. Réponds uniquement en JSON valide.", interpolate(await loadTemplate(null, "system", userJwt), { prompt: content }), true, 1200);
       const parsed = parseJsonLoose(raw);
-      return json({ action, content: str(parsed.content, 8000) || content, variables: Array.isArray(parsed.variables) ? parsed.variables.slice(0, 20).map(String) : [], usage: quota.usage });
+      const improved = str(parsed.content, 8000);
+      // Never echo the user's own prompt back as if Groq had improved it.
+      if (!improved) throw new Error("AI_EMPTY_RESPONSE");
+      return json({ action, content: improved, variables: Array.isArray(parsed.variables) ? parsed.variables.slice(0, 20).map(String) : [], usage: quota.usage });
     }
 
     if (action === "generate_hooks") {
@@ -299,11 +333,11 @@ Deno.serve(async (req: Request) => {
       const audience = str(body.audience, 300) || "grand public";
       const quota = await takeQuota("prompt", null, userJwt, { action });
       if (quota.error) return fail(quota.error.code, quota.error.message, quota.error.status);
-      let raw: string;
-      try { raw = await groq("Tu es un créateur UGC francophone. Réponds uniquement en JSON valide.", interpolate(await loadTemplate(null, "hook", userJwt), { produit: product, audience }), true, 800); }
-      catch (e) { await refundQuota("prompt", null, userId); throw e; }
+      quotaTaken = { kind: "prompt", referenceId: null };
+      const raw = await groq("Tu es un créateur UGC francophone. Réponds uniquement en JSON valide.", interpolate(await loadTemplate(null, "hook", userJwt), { produit: product, audience }), true, 800);
       const parsed = parseJsonLoose(raw);
       const hooks = Array.isArray(parsed.hooks) ? parsed.hooks.slice(0, 10).map((h) => str(h, 160)).filter(Boolean) : [];
+      if (hooks.length === 0) throw new Error("AI_EMPTY_RESPONSE");
       return json({ action, hooks, usage: quota.usage });
     }
 
@@ -313,9 +347,8 @@ Deno.serve(async (req: Request) => {
       const ambiance = str(body.ambiance, 200) || "lumière naturelle, style spontané";
       const quota = await takeQuota("prompt", null, userJwt, { action });
       if (quota.error) return fail(quota.error.code, quota.error.message, quota.error.status);
-      let raw: string;
-      try { raw = await groq("Tu es un directeur artistique UGC. Réponds en une seule phrase, en français, sans mise en forme.", interpolate(await loadTemplate(null, "visual", userJwt), { produit: product, action: actionText, ambiance }), false, 400); }
-      catch (e) { await refundQuota("prompt", null, userId); throw e; }
+      quotaTaken = { kind: "prompt", referenceId: null };
+      const raw = await groq("Tu es un directeur artistique UGC. Réponds en une seule phrase, en français, sans mise en forme.", interpolate(await loadTemplate(null, "visual", userJwt), { produit: product, action: actionText, ambiance }), false, 400);
       return json({ action, text: raw.trim(), usage: quota.usage });
     }
 
@@ -324,11 +357,10 @@ Deno.serve(async (req: Request) => {
       if (!scriptText) return fail("INVALID_INPUT", "Le texte du script est requis.", 400);
       const quota = await takeQuota("prompt", projectId, userJwt, { action });
       if (quota.error) return fail(quota.error.code, quota.error.message, quota.error.status);
+      quotaTaken = { kind: "prompt", referenceId: projectId };
       const system = "Tu es un monteur UGC. Réponds uniquement en JSON valide : {\"scenes\":[{\"scene_type\":\"hook|ugc|product_demo|cutaway|testimonial_style|cta|other\",\"duration_seconds\":3,\"visual_prompt\":\"...\",\"spoken_text\":\"...\",\"subtitle_text\":\"...\"}]}. 3 à 6 scènes, français, aucune marque tierce.";
-      let raw: string;
-      try { raw = await groq(system, `Découpe ce script en scènes pour une vidéo verticale de ${clamp(body.duration, 5, 90, 15)} secondes :\n${scriptText}`, true, 1800); }
-      catch (e) { await refundQuota("prompt", projectId, userId); throw e; }
-      const scenes = normalizeScenes(parseJsonLoose(raw).scenes, scriptText);
+      const raw = await groq(system, `Découpe ce script en scènes pour une vidéo verticale de ${clamp(body.duration, 5, 90, 15)} secondes :\n${scriptText}`, true, 1800);
+      const scenes = normalizeScenes(parseJsonLoose(raw).scenes, true);
       let scenesSaved = 0;
       if (projectId) {
         const r = await rpc("reelora_save_scenes", { p_project_id: projectId, p_script_id: null, p_scenes: scenes }, userJwt);
@@ -339,10 +371,20 @@ Deno.serve(async (req: Request) => {
 
     return fail("UNKNOWN_ACTION", "Action IA inconnue.", 400);
   } catch (error) {
+    // One refund, whatever the failure: missing key, Groq error, empty answer,
+    // network timeout or unexpected exception. No unit is consumed without a
+    // real AI answer being returned.
+    if (quotaTaken) await refundQuota(quotaTaken.kind, quotaTaken.referenceId, userId);
     const message = error instanceof Error ? error.message : String(error);
-    if (message === "GROQ_NOT_CONFIGURED") return fail("GROQ_NOT_CONFIGURED", "Le secret GROQ_API_KEY est absent côté serveur.", 503);
-    if (message.startsWith("GROQ_ERROR:")) return fail("AI_PROVIDER_ERROR", `Le fournisseur IA a renvoyé une erreur : ${message.replace("GROQ_ERROR: ", "")}`, 502);
+    if (message === "GROQ_NOT_CONFIGURED") return fail("GROQ_NOT_CONFIGURED", "Le secret serveur GROQ_API_KEY est absent. Aucun texte n’est généré ni simulé.", 503);
+    if (message === "AI_EMPTY_RESPONSE") return fail("AI_EMPTY_RESPONSE", AI_EMPTY_MESSAGE, 502);
+    if (message.startsWith("GROQ_ERROR:")) return fail("AI_PROVIDER_ERROR", `Le fournisseur IA a renvoyé une erreur : ${message.replace("GROQ_ERROR: ", "")}. Aucun texte n’est simulé.`, 502);
     console.error("reelora-ai", message);
-    return fail("AI_INTERNAL_ERROR", "Une erreur inattendue est survenue lors de la génération.", 500);
+    return fail("AI_INTERNAL_ERROR", "Une erreur inattendue est survenue lors de la génération. Aucun texte n’est simulé.", 500);
   }
-});
+}
+
+// Deno-only bootstrap: exporting `handler` lets Vitest import this module in
+// Node without a Deno global (same pattern as the video/worker functions).
+const runtime = globalThis as unknown as { Deno?: { serve?: (fn: (r: Request) => Promise<Response>) => void } };
+if (runtime.Deno?.serve) runtime.Deno.serve(handler);
