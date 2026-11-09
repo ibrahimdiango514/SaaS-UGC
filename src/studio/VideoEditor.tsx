@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertCircle, ArrowLeft, CheckCircle2, Clapperboard, Download, Film, FolderOpen,
-  Info, LoaderCircle, Mic, Pause, Play, RefreshCw, Save, Scissors, Sparkles,
-  Subtitles, Upload, Wand2, X,
+  ArrowLeft, CheckCircle2, Clapperboard, Film, FolderOpen, Mic, Pause, Play,
+  RefreshCw, Save, Scissors, Sparkles, Subtitles, Upload, Wand2,
 } from 'lucide-react';
-import { Banner, Button, ErrorState, LoadingState, Modal, Select, cn } from '../components/ui';
+import { Button, ErrorState, LoadingState, Modal, Select, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -19,6 +18,7 @@ import {
   validateProductionPlan, type ProductionPlan,
 } from './plan';
 import { AssistPanel } from './editor/components/AssistPanel';
+import { ExportPanel } from './editor/components/ExportPanel';
 import { PreviewPlayer, type SceneMediaMeta } from './editor/components/PreviewPlayer';
 import { SubtitlesVoiceoverPanel } from './editor/components/SubtitlesVoiceoverPanel';
 import { Timeline } from './editor/components/Timeline';
@@ -31,8 +31,9 @@ import {
   type ProjectMediaItem,
 } from './editor/projectMedia';
 import {
-  RENDER_LIMITATIONS, buildSrt, downloadBlob, exportCapabilities, exportFilename,
-  renderIssues, renderProject, type RenderResult,
+  DEFAULT_EXPORT_SETTINGS, buildSrt, exportCapabilities, probeExportCapabilities,
+  renderIssues, renderVideo, resolveExportPlan,
+  type ExportCapabilities, type ExportPhase, type ExportSettings, type RenderResult,
 } from './editor/render';
 import {
   ASPECT_PRESETS, emptyAudio, patchScene, replaceSceneSource, splitScene,
@@ -136,6 +137,9 @@ export default function VideoEditor() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [exportSettings, setExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
+  const [caps, setCaps] = useState<ExportCapabilities>(() => exportCapabilities('9:16'));
+  const [exportPhase, setExportPhase] = useState<ExportPhase>('idle');
   const [rendering, setRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const [renderLabel, setRenderLabel] = useState('');
@@ -143,6 +147,7 @@ export default function VideoEditor() {
   const [renderResult, setRenderResult] = useState<RenderResult | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const renderLockRef = useRef(false);
   const undoStack = useRef<EditorProject[]>([]);
   const redoStack = useRef<EditorProject[]>([]);
   const [, setHistoryTick] = useState(0);
@@ -272,16 +277,33 @@ export default function VideoEditor() {
     setHistoryTick((t) => t + 1);
   }, []);
 
-  // Warn before accidental tab close when edits haven't been persisted to Supabase yet.
+  // Warn before accidental tab close when edits haven't been persisted or an export is running.
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !rendering) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [dirty]);
+  }, [dirty, rendering]);
+
+  // Abort any in-flight export cleanly on unmount so media/encoder resources never leak.
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
+
+  // Re-probe hardware WebCodecs / MediaRecorder capabilities when ratio or FPS changes.
+  useEffect(() => {
+    let active = true;
+    const aspect = project?.aspect ?? '9:16';
+    void probeExportCapabilities(aspect, exportSettings.fps).then((probed) => {
+      if (!active) return;
+      setCaps(probed);
+      if (!probed.resolutions[exportSettings.resolution]?.supported && probed.resolutions['720p']?.supported) {
+        setExportSettings((prev) => ({ ...prev, resolution: '720p' }));
+      }
+    });
+    return () => { active = false; };
+  }, [project?.aspect, exportSettings.fps, exportSettings.resolution]);
 
   // Keyboard shortcuts when focus is outside inputs
   useEffect(() => {
@@ -314,8 +336,6 @@ export default function VideoEditor() {
   }, [project, playhead, commitChange, onUndo, onRedo]);
 
   const total = useMemo(() => project ? totalDuration(project) : 0, [project]);
-  const issues = useMemo(() => project ? renderIssues(project) : [], [project]);
-  const caps = useMemo(() => exportCapabilities(), []);
 
   const onTogglePlay = useCallback(() => {
     if (!project) return;
@@ -497,47 +517,82 @@ export default function VideoEditor() {
     }
   }, [project, toast]);
 
-  const render = useCallback(async () => {
-    if (!project) return;
-    const problems = renderIssues(project);
+  const executeRender = useCallback(async (targetProject: EditorProject) => {
+    const problems = renderIssues(targetProject);
     if (problems.length) {
       setRenderError(problems.join(' '));
+      setExportPhase('failed');
       toast.warning(problems[0]);
       return;
     }
-    if (!caps.supported || !caps.mimeType) {
-      setRenderError(caps.reasons.join(' ') || 'Rendu vidéo non pris en charge par ce navigateur.');
+    const plan = resolveExportPlan(targetProject.aspect, exportSettings, caps);
+    if (!plan.allowed) {
+      const msg = plan.reason || caps.reasons.join(' ') || 'Rendu vidéo non pris en charge par ce navigateur.';
+      setRenderError(msg);
+      setExportPhase('failed');
       return;
     }
-    abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setRendering(true);
+    setExportPhase('preparing');
     setRenderError('');
     setRenderResult(null);
-    setRenderProgress(0);
+    setRenderProgress(0.02);
     setRenderLabel('Préparation des médias…');
     try {
-      const result = await renderProject(project, {
-        fps: 30,
+      const result = await renderVideo(targetProject, {
+        settings: exportSettings,
         signal: controller.signal,
-        onProgress: (ratio, label) => { setRenderProgress(ratio); setRenderLabel(label); },
+        onStage: (phase, ratio, label) => {
+          setExportPhase(phase);
+          setRenderProgress(ratio);
+          setRenderLabel(label);
+        },
       });
       setRenderResult(result);
+      setExportPhase('succeeded');
       setRenderProgress(1);
-      setRenderLabel('Rendu terminé');
-      toast.success('Rendu navigateur terminé : votre vidéo réelle est prête.');
+      setRenderLabel('Fichier vidéo vérifié et prêt.');
+      toast.success(`Export ${result.container.toUpperCase()} (${result.width}×${result.height}) terminé et vérifié.`);
     } catch (err) {
-      if (controller.signal.aborted) {
-        setRenderError('Rendu interrompu. Le montage est conservé : reprenez quand vous voulez.');
+      if (controller.signal.aborted || (err instanceof Error && (err.name === 'AbortError' || (err as { code?: string }).code === 'ABORTED'))) {
+        setExportPhase('cancelled');
+        setRenderError('');
       } else {
+        setExportPhase('failed');
         setRenderError(asAppError(err).message);
       }
     } finally {
       setRendering(false);
       abortRef.current = null;
     }
-  }, [project, caps, toast]);
+  }, [exportSettings, caps, toast]);
+
+  const render = useCallback(async () => {
+    if (!project || renderLockRef.current) return;
+    renderLockRef.current = true;
+    try {
+      await executeRender(project);
+    } finally {
+      renderLockRef.current = false;
+    }
+  }, [project, executeRender]);
+
+  const saveAndRender = useCallback(async () => {
+    if (!project || renderLockRef.current) return;
+    renderLockRef.current = true;
+    try {
+      const saved = await save();
+      if (saved) await executeRender(saved);
+    } finally {
+      renderLockRef.current = false;
+    }
+  }, [project, save, executeRender]);
+
+  const cancelRender = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const refreshMediaBin = async () => {
     setLibraryOpen(true);
@@ -1032,143 +1087,24 @@ export default function VideoEditor() {
             </section>
           </div>
 
-          {/* Module 4: Real Render & Export (strict capability check, never simulated) */}
+          {/* Module 4: Professional Real Render & Export */}
           <div className={cn(mobileSection === 'export' ? 'block' : 'hidden', activeTab === 'export' ? 'lg:block' : 'lg:hidden')}>
-            <section className="rounded-2xl border border-cyan-400/20 bg-[#080d14] p-4" aria-label="Export et rendu vidéo réel">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="flex items-center gap-1.5 text-xs font-semibold text-white">
-                    <Film size={13} className="text-cyan-300" /> Export & rendu réel
-                  </p>
-                  <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
-                    Canvas 2D + Web Audio + MediaRecorder : le fichier vidéo n’est exporté que lorsque l’encodage navigateur réel est disponible et que chaque plan contient un média réel.
-                  </p>
-                </div>
-                <span className={cn(
-                  'rounded-lg border px-2 py-1 text-[10px]',
-                  caps.supported ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200' : 'border-rose-400/25 bg-rose-400/10 text-rose-200',
-                )}>
-                  {caps.supported && caps.mimeType ? caps.mimeType.split(';')[0] : 'Encodage indisponible'}
-                </span>
-              </div>
-
-              {/* Technical capability diagnostics */}
-              <div className="mt-3 grid gap-2 sm:grid-cols-3 text-[10px]">
-                <div className="rounded-lg border border-white/[0.07] bg-black/25 px-2.5 py-2">
-                  <span className="text-slate-500">MediaRecorder</span>
-                  <p className={caps.hasMediaRecorder ? 'text-emerald-300' : 'text-rose-300'}>
-                    {caps.hasMediaRecorder ? 'Disponible' : 'Indisponible'}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-white/[0.07] bg-black/25 px-2.5 py-2">
-                  <span className="text-slate-500">Capture Canvas</span>
-                  <p className={caps.hasCaptureStream ? 'text-emerald-300' : 'text-rose-300'}>
-                    {caps.hasCaptureStream ? 'Disponible' : 'Indisponible'}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-white/[0.07] bg-black/25 px-2.5 py-2">
-                  <span className="text-slate-500">Mixage Web Audio</span>
-                  <p className={caps.hasAudioContext ? 'text-emerald-300' : 'text-amber-300'}>
-                    {caps.hasAudioContext ? 'Disponible' : 'Vidéo seule'}
-                  </p>
-                </div>
-              </div>
-
-              {issues.length > 0 && (
-                <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-[11px] leading-relaxed text-amber-200">
-                  <AlertCircle size={11} className="mr-1 inline" /> {issues.join(' ')}
-                </div>
-              )}
-
-              {!caps.supported && (
-                <div className="mt-3">
-                  <Banner tone="danger" title="Export vidéo indisponible dans cet environnement">
-                    {caps.reasons.join(' ')} Aucun export factice ou simulé ne sera généré. Utilisez un navigateur prenant en charge MediaRecorder et canvas.captureStream (Chrome, Edge, Firefox récents).
-                  </Banner>
-                </div>
-              )}
-
-              {renderError && <div className="mt-3"><Banner tone="danger" title="Rendu non terminé">{renderError}</Banner></div>}
-
-              {rendering && (
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-[10px] text-slate-400">
-                    <span>{renderLabel}</span>
-                    <span>{Math.round(renderProgress * 100)} %</span>
-                  </div>
-                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/[0.08]">
-                    <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-300 transition-all" style={{ width: `${Math.round(renderProgress * 100)}%` }} />
-                  </div>
-                  <Button size="sm" variant="ghost" className="mt-2" icon={<X size={12} />} onClick={() => abortRef.current?.abort()}>
-                    Interrompre
-                  </Button>
-                </div>
-              )}
-
-              {renderResult && (
-                <div className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] p-3">
-                  <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-200">
-                    <CheckCircle2 size={12} /> Fichier prêt · {renderResult.width}×{renderResult.height} · {renderResult.durationSeconds.toFixed(1)} s
-                  </p>
-                  <p className="mt-1 text-[10px] text-slate-400">
-                    {(renderResult.blob.size / 1024 / 1024).toFixed(2)} Mo · {renderResult.mimeType} · audio mixé : {renderResult.audioMixed ? 'oui' : 'non'}
-                  </p>
-                  <Button
-                    size="sm"
-                    className="mt-2"
-                    icon={<Download size={13} />}
-                    onClick={() => downloadBlob(renderResult.blob, exportFilename(project, renderResult.mimeType))}
-                  >
-                    Télécharger la vidéo
-                  </Button>
-                </div>
-              )}
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  loading={rendering}
-                  disabled={issues.length > 0 || !caps.supported}
-                  icon={<LoaderCircle size={13} />}
-                  onClick={() => void render()}
-                >
-                  Lancer le rendu
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={issues.length > 0 || !caps.supported}
-                  icon={<RefreshCw size={13} />}
-                  onClick={() => void (async () => { await save(); await render(); })()}
-                >
-                  Enregistrer et exporter
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={!srtReady}
-                  icon={<Download size={13} />}
-                  onClick={() => {
-                    const srt = buildSrt(project);
-                    if (!srt.trim()) return;
-                    downloadBlob(new Blob([srt], { type: 'text/plain;charset=utf-8' }), 'sous-titres.srt');
-                  }}
-                >
-                  Exporter sous-titres (.SRT)
-                </Button>
-              </div>
-
-              <details className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3 text-[10px] text-slate-400">
-                <summary className="cursor-pointer font-medium text-slate-300">Limitations techniques explicites</summary>
-                <ul className="mt-2 list-disc space-y-1 pl-4 leading-relaxed">
-                  {RENDER_LIMITATIONS.map((l) => <li key={l}>{l}</li>)}
-                </ul>
-                <p className="mt-2 flex items-start gap-1.5">
-                  <Info size={10} className="mt-0.5 shrink-0" />
-                  Aucune file de rendu serveur, aucun transcodage MP4 garanti, aucun crédit UGC consommé par le montage.
-                </p>
-              </details>
-            </section>
+            <ExportPanel
+              project={project}
+              caps={caps}
+              settings={exportSettings}
+              onSettingsChange={setExportSettings}
+              onAspectChange={(aspect) => commitChange({ ...project, aspect })}
+              phase={exportPhase}
+              progress={renderProgress}
+              progressLabel={renderLabel}
+              error={renderError}
+              result={renderResult}
+              onStartRender={() => void render()}
+              onSaveAndRender={() => void saveAndRender()}
+              onCancel={cancelRender}
+              srtReady={srtReady}
+            />
           </div>
         </div>
       </div>
