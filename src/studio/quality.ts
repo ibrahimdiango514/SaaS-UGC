@@ -9,7 +9,10 @@
  */
 
 import type { MuApiModel, MuApiParamDef, ServiceCatalogItem } from '../lib/types';
-import { isModelAvailable, modelsForMode, supportedParams, type GenerationMode } from './model';
+import {
+  isModelAvailable, modelsForMode, normalizeParamValue, optionsOf, supportedParams,
+  type GenerationMode,
+} from './model';
 export { SUPPORTED_REQUIRED_FIELDS } from './model';
 
 export type QualityTier = 'rapide' | 'standard' | 'premium';
@@ -35,17 +38,25 @@ export function serviceForQuality(services: ServiceCatalogItem[], tier: QualityT
   return services.find((s) => s.service_key === def.serviceKey && s.active) ?? null;
 }
 
+/**
+ * A model without a KNOWN, finite catalogue price must never be ranked as
+ * "le plus économique": the old `NaN → 0` fallback silently promoted unknown
+ * prices. Only real declared costs can be compared.
+ */
+export function hasKnownCost(model: MuApiModel): boolean {
+  const n = Number(model.cost_usd);
+  return model.cost_usd !== null && model.cost_usd !== undefined && model.cost_usd !== ''
+    && Number.isFinite(n) && n >= 0;
+}
+
 /** Sorted by the real provider cost declared in the verified catalog. */
 export function catalogByCost(models: MuApiModel[], mode: GenerationMode): MuApiModel[] {
   return modelsForMode(models, mode)
     .filter(isModelAvailable)
     .filter((m) => (m.required_fields ?? []).every((field) => ['prompt', 'image_url'].includes(field.toLowerCase())))
+    .filter(hasKnownCost)
     .slice()
-    .sort((a, b) => {
-      const ca = Number(a.cost_usd);
-      const cb = Number(b.cost_usd);
-      return (Number.isFinite(ca) ? ca : 0) - (Number.isFinite(cb) ? cb : 0);
-    });
+    .sort((a, b) => Number(a.cost_usd) - Number(b.cost_usd));
 }
 
 export function modelForQuality(models: MuApiModel[], mode: GenerationMode, tier: QualityTier): MuApiModel | null {
@@ -57,36 +68,64 @@ export function modelForQuality(models: MuApiModel[], mode: GenerationMode, tier
   return sorted[Math.min(index, sorted.length - 1)];
 }
 
+/** The exact Rapide / Standard / Premium → real model + service mapping. */
+export function qualityTierSummary(models: MuApiModel[], services: ServiceCatalogItem[], mode: GenerationMode) {
+  return QUALITY_TIERS.map((def) => {
+    const service = serviceForQuality(services, def.id);
+    const picked = modelForQuality(models, mode, def.id);
+    return {
+      tier: def.id,
+      label: def.label,
+      description: def.description,
+      serviceKey: def.serviceKey,
+      serviceActive: Boolean(service?.active),
+      creditsCost: service?.credits_cost ?? null,
+      modelId: picked?.model_id ?? null,
+      modelName: picked?.display_name ?? null,
+      catalogCostUsd: picked && hasKnownCost(picked) ? Number(picked.cost_usd) : null,
+      available: Boolean(service?.active && picked),
+    };
+  });
+}
+
 /** Only parameters the selected model really accepts. */
 export function compatibleParams(model: MuApiModel | null): Array<[string, MuApiParamDef]> {
   return model ? supportedParams(model) : [];
 }
 
+/**
+ * MuAPI schemas describe options either as `type: "select"` or as another
+ * scalar type carrying an `options` array. Both are real declared constraints;
+ * requiring only `select` used to discard valid values.
+ */
 export function selectOptions(model: MuApiModel | null, key: string): string[] {
-  if (!model) return [];
-  const def = model.param_schema?.[key];
-  return def?.type === 'select' && Array.isArray(def.options) ? def.options.map(String) : [];
+  return model ? optionsOf(model, key) : [];
 }
 
 export function numericRange(model: MuApiModel | null, key: string): { min: number; max: number } | null {
   if (!model) return null;
   const def = model.param_schema?.[key];
-  return def?.type === 'number' ? { min: Number(def.min ?? 1), max: Number(def.max ?? 300) } : null;
+  // Both bounds must be REAL declared bounds: never use 1..300 as a guess.
+  if (!def || def.min == null || def.max == null) return null;
+  const min = Number(def.min);
+  const max = Number(def.max);
+  return Number.isFinite(min) && Number.isFinite(max) && max >= min ? { min, max } : null;
 }
 
 /** Clamp a user duration to the model's REAL bounds; null = not supported. */
 export function clampToModelDuration(model: MuApiModel | null, desired: number): number | null {
-  const range = numericRange(model, 'duration');
-  if (!range) return null;
+  if (!model) return null;
+  const def = model.param_schema?.duration;
   const n = Number(desired);
-  const base = Number.isFinite(n) ? n : range.min;
   // MuAPI duration selects (e.g. Kling 5|10) only accept declared option values.
-  const def = model?.param_schema?.duration;
-  if (def?.type === 'select') {
-    const options = (def.options ?? []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
-    if (options.length === 0) return null;
-    return options.reduce((best, v) => Math.abs(v - base) < Math.abs(best - base) ? v : best, options[0]);
+  const declared = selectOptions(model, 'duration').map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (declared.length) {
+    const base = Number.isFinite(n) ? n : declared[0];
+    return declared.reduce((best, v) => Math.abs(v - base) < Math.abs(best - base) ? v : best, declared[0]);
   }
+  const range = numericRange(model, 'duration');
+  if (!range) return Number.isFinite(Number(def?.default)) ? Number(def?.default) : null;
+  const base = Number.isFinite(n) ? n : range.min;
   return Math.min(range.max, Math.max(range.min, Math.round(base)));
 }
 
@@ -107,6 +146,28 @@ export function defaultSettingsFor(model: MuApiModel | null): {
   };
 }
 
+/**
+ * Only a value that the REAL schema declares is sent. MuAPI catalog rows with
+ * a placeholder `string` field and no options/default must not receive a
+ * guessed `9:16`, `720p` or duration from the local UI.
+ */
+function declaredScalar(
+  model: MuApiModel,
+  key: string,
+  def: MuApiParamDef,
+  candidate: string | number | boolean,
+): string | number | boolean | null {
+  const options = selectOptions(model, key);
+  if (options.length) {
+    const raw = String(candidate);
+    if (options.includes(raw)) return normalizeParamValue(model, key, raw);
+    if (def.default !== undefined && options.includes(String(def.default))) return def.default;
+    return null;
+  }
+  if (def.default !== undefined) return def.default;
+  return null;
+}
+
 /** Build the exact `params` object sent to the existing backend. */
 export function buildCompatibleParams(
   model: MuApiModel | null,
@@ -116,13 +177,14 @@ export function buildCompatibleParams(
   if (!model) return out;
   for (const [key, def] of compatibleParams(model)) {
     if (key === 'aspect_ratio') {
-      const options = selectOptions(model, key);
-      if (options.includes(chosen.ratio)) out[key] = chosen.ratio;
-      else if (options.length && typeof def.default === 'string') out[key] = def.default;
+      const value = declaredScalar(model, key, def, chosen.ratio);
+      if (value !== null) out[key] = value;
       continue;
     }
     if (key === 'resolution') {
-      if (chosen.resolution && selectOptions(model, key).includes(chosen.resolution)) out[key] = chosen.resolution;
+      if (chosen.resolution === null) continue;
+      const value = declaredScalar(model, key, def, chosen.resolution);
+      if (value !== null) out[key] = value;
       continue;
     }
     if (key === 'duration') {
@@ -132,12 +194,16 @@ export function buildCompatibleParams(
     }
     if (Object.prototype.hasOwnProperty.call(chosen.extras, key)) {
       const raw = chosen.extras[key];
-      if (def.type === 'select' && !selectOptions(model, key).includes(String(raw))) continue;
+      const options = selectOptions(model, key);
+      if (options.length && !options.includes(String(raw))) continue;
       if (def.type === 'boolean') out[key] = raw === true || raw === 'true' || raw === 1;
       else if (def.type === 'number') {
         const n = Number(raw);
-        if (Number.isFinite(n)) out[key] = n;
-      } else out[key] = raw;
+        if (Number.isFinite(n)) {
+          const range = numericRange(model, key);
+          out[key] = range ? Math.min(range.max, Math.max(range.min, n)) : normalizeParamValue(model, key, String(raw));
+        }
+      } else out[key] = options.length ? normalizeParamValue(model, key, String(raw)) : raw;
     } else if (def.default !== undefined) {
       out[key] = def.default as string | number | boolean;
     }

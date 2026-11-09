@@ -142,7 +142,7 @@ describe('Qualité, catalogue vérifié et devis', () => {
     expect(QUALITY_TIERS.map((q) => q.id)).toEqual(['rapide', 'standard', 'premium']);
     expect(QUALITY_TIERS.map((q) => q.serviceKey)).toEqual(['ugc_clip_8s', 'ugc_clip_15s', 'ugc_ad_4clips']);
     expect(read('src/studio/quality.ts')).not.toMatch(/credits_cost\s*[:=]\s*\d/);
-    expect(read('src/studio/components/PromptBar.tsx')).toContain('estimate?.credits_cost');
+    expect(read('src/studio/components/PromptBar.tsx')).toContain('creditSummary(estimate');
   });
 
   it('exclut un modèle vérifié dont une entrée requise n’est pas intégrée', () => {

@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { Button, Select, Toggle, cn } from '../../components/ui';
 import type { Avatar, MuApiModel, ServiceCatalogItem, VideoCostEstimate } from '../../lib/types';
-import { modelFamily, normalizeParamValue, paramLabel, providerQuoteCostLabel } from '../model';
+import { modelFamily, normalizeParamValue, paramLabel, providerQuoteCostLabel, providerQuoteOriginLabel } from '../model';
+import { USD_CREDIT_NOTE, creditSummary } from '../catalog';
 import {
   QUALITY_TIERS, compatibleParams, selectOptions, numericRange, clampToModelDuration,
   type QualityTier,
@@ -84,10 +85,11 @@ export function PromptBar({
   const extras = compatibleParams(model).filter(([key]) => !RESERVED_KEYS.includes(key));
   const modelAcceptsImage = Boolean(model?.input_fields.includes('image_url'));
   const modelAcceptsLastImage = Boolean(model?.input_fields.includes('last_image'));
-  const cost = estimate?.credits_cost ?? null;
+  const summary = creditSummary(estimate, balance, Boolean(model?.dynamic_pricing));
+  const cost = summary.creditsCost;
   const tier = QUALITY_TIERS.find((q) => q.id === state.quality);
   const service = services.find((s) => s.service_key === tier?.serviceKey);
-  const canGenerate = !blockedReason && !busy && cost !== null && cost > 0 && balance >= cost;
+  const canGenerate = !blockedReason && !busy && summary.canReserve;
 
   const focusPrompt = () => { promptRef.current?.focus(); promptRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
 
@@ -283,15 +285,16 @@ export function PromptBar({
         )}
 
         <div className="mt-1.5 flex flex-col gap-1 sm:mt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-          <div className="flex max-h-[38px] flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden text-[10px] sm:max-h-none sm:flex-nowrap sm:overflow-visible sm:text-[11px]">
+          <div className="flex max-h-[38px] flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden text-[10px] sm:max-h-none sm:flex-nowrap sm:overflow-visible sm:text-[11px]" data-testid="studio-credit-summary">
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1.5 font-semibold text-cyan-200">
               <Coins size={12} /> {cost !== null ? `${cost} crédits UGC` : 'Devis en cours…'}
             </span>
             {estimate && (
-              <span className={estimate.provider_quote_source === 'unavailable' ? 'font-semibold text-amber-200' : 'text-slate-500'}>
+              <span data-testid="studio-provider-quote" className={summary.quoteToConfirm ? 'font-semibold text-amber-200' : 'text-slate-500'} title={`${providerQuoteOriginLabel(estimate)} · ${USD_CREDIT_NOTE}`}>
                 Fournisseur {providerQuoteCostLabel(estimate)}<span className="hidden sm:inline"> · Solde {balance} crédits</span>
               </span>
             )}
+            {summary.quoteToConfirm && <span className="hidden text-amber-200 lg:inline">Génération bloquée : devis à confirmer</span>}
             {catalogSummary && <span className="hidden max-w-full truncate text-slate-600 sm:inline" title={catalogSummary}>{catalogSummary}</span>}
             {blockedReason && <span className="hidden max-w-full items-center gap-1 text-amber-300 sm:inline-flex" title={blockedReason}><AlertCircle size={11} /> {blockedReason}</span>}
           </div>
@@ -305,6 +308,12 @@ export function PromptBar({
             <Play size={15} /> {busy ? 'Génération…' : generateLabel ?? (cost !== null ? `Générer · ${cost} crédits` : 'Générer · devis…')}
           </button>
         </div>
+        {summary.quoteToConfirm && (
+          <p data-testid="studio-quote-warning" className="mt-1.5 text-[10px] leading-relaxed text-amber-200 lg:hidden">
+            Devis fournisseur à confirmer · aucun montant de remplacement · génération bloquée.
+          </p>
+        )}
+        <p className="mt-1 hidden text-[9px] leading-relaxed text-slate-600 sm:block">{USD_CREDIT_NOTE}</p>
         <button type="button" onClick={focusPrompt} className="sr-only">Aller au prompt</button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { ImagePlus, SlidersHorizontal, Upload, X } from 'lucide-react';
 import { Button, Select, Toggle } from '../../components/ui';
 import type { MuApiModel } from '../../lib/types';
-import { normalizeParamValue, paramLabel, supportedParams, type ParamValue } from '../model';
+import { normalizeParamValue, optionsOf, paramLabel, supportedParams, type ParamValue } from '../model';
 
 function Field({ name, model, value, onChange }: {
   name: string; model: MuApiModel; value: ParamValue | undefined;
@@ -10,6 +10,22 @@ function Field({ name, model, value, onChange }: {
   const def = model.param_schema[name];
   const stringValue = value === undefined || value === null ? '' : String(value);
   const required = model.required_fields.includes(name) || def.required === true;
+  const options = optionsOf(model, name);
+  const min = def.min ?? 1;
+  const max = def.max ?? 300;
+  const hasRange = def.min != null && def.max != null
+    && Number.isFinite(min) && Number.isFinite(max) && max >= min;
+
+  // MuAPI may declare options on a `string`/`number` field, not only on a
+  // `select`. Every declared option is a real constraint; honour it first.
+  if (options.length > 0) {
+    return (
+      <Select id={`param-${name}`} label={`${def.label ?? paramLabel(name)}${required ? ' *' : ''}`} value={stringValue}
+        onChange={(e) => onChange(name, normalizeParamValue(model, name, e.target.value))}>
+        {options.map((option) => <option key={option} value={option}>{option}{name === 'duration' ? ' s' : ''}</option>)}
+      </Select>
+    );
+  }
 
   if (def.type === 'boolean') {
     return (
@@ -19,9 +35,7 @@ function Field({ name, model, value, onChange }: {
     );
   }
 
-  if (def.type === 'number') {
-    const min = def.min ?? 1;
-    const max = def.max ?? 300;
+  if (hasRange) {
     const current = Number(value ?? def.default ?? min);
     return (
       <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-3">
@@ -37,24 +51,29 @@ function Field({ name, model, value, onChange }: {
     );
   }
 
-  if (def.type === 'select') {
-    const options = (def.options ?? []).map(String);
+  if (def.type === 'number') {
     return (
-      <Select id={`param-${name}`} label={`${def.label ?? paramLabel(name)}${required ? ' *' : ''}`} value={stringValue}
-        onChange={(e) => onChange(name, normalizeParamValue(model, name, e.target.value))}>
-        {options.map((option) => <option key={option} value={option}>{option}{name === 'duration' ? ' s' : ''}</option>)}
-      </Select>
+      <label htmlFor={`param-${name}`} className="block text-[11px] font-medium text-slate-300">
+        {def.label ?? paramLabel(name)}{required ? ' *' : ''}
+        <input id={`param-${name}`} type="number" step={def.step ?? 1} value={stringValue}
+          placeholder={def.default !== undefined ? String(def.default) : 'Valeur numérique déclarée'}
+          onChange={(e) => onChange(name, Number(e.target.value))}
+          className="studio-input mt-1.5" />
+      </label>
     );
   }
 
   if (def.type === 'string') {
     return (
-      <label htmlFor={`param-${name}`} className="block text-[11px] font-medium text-slate-300">
-        {def.label ?? paramLabel(name)}{required ? ' *' : ''}
-        <input id={`param-${name}`} value={stringValue} placeholder={def.description ?? 'Valeur acceptée par le modèle'}
-          onChange={(e) => onChange(name, e.target.value)}
-          className="studio-input mt-1.5" />
-      </label>
+      <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-3" data-testid="dynamic-params-declared-field">
+        <label htmlFor={`param-${name}`} className="block text-[11px] font-medium text-slate-300">
+          {def.label ?? paramLabel(name)}{required ? ' *' : ''}
+          <input id={`param-${name}`} value={stringValue} placeholder={def.description ?? 'Valeur acceptée par le modèle'}
+            onChange={(e) => onChange(name, e.target.value)}
+            className="studio-input mt-1.5" />
+        </label>
+        <p className="mt-1.5 text-[9px] leading-relaxed text-slate-600">Champ déclaré sans liste d’options dans le schéma synchronisé : la fiche détaillée du fournisseur fait foi, aucune valeur n’est supposée.</p>
+      </div>
     );
   }
 
@@ -66,7 +85,9 @@ function Field({ name, model, value, onChange }: {
 export function DynamicParams({ model, values, onChange }: {
   model: MuApiModel; values: Record<string, ParamValue>; onChange: (values: Record<string, ParamValue>) => void;
 }) {
-  const params = supportedParams(model).filter(([, def]) => ['select', 'number', 'boolean', 'string'].includes(def.type));
+  const declared = supportedParams(model);
+  const params = declared.filter(([, def]) => ['select', 'number', 'boolean', 'string'].includes(def.type) || Number.isFinite(def.min) || Number.isFinite(def.max) || (def.options?.length ?? 0) > 0);
+  const structured = declared.filter(([key]) => !params.some(([k]) => k === key)).map(([key]) => key);
   const hasFirstImage = model.input_fields.includes('image_url');
   const hasLastImage = model.input_fields.includes('last_image');
 
@@ -90,6 +111,12 @@ export function DynamicParams({ model, values, onChange }: {
         </div>
       ) : (
         <p className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-xs text-slate-500">Ce modèle n’expose aucun réglage supplémentaire exploitable : seul le prompt sera envoyé.</p>
+      )}
+
+      {structured.length > 0 && (
+        <p data-testid="dynamic-params-incompatible" className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] px-3 py-2 text-[10px] leading-relaxed text-amber-200/90">
+          Champs structurés déclarés mais non connectés : {structured.join(', ')}. Aucun contrôle ni valeur de substitution n’est fabriqué ; ces champs ne sont pas envoyés.
+        </p>
       )}
 
       {(hasFirstImage || hasLastImage) && (

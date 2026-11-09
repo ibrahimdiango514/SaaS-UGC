@@ -31,6 +31,7 @@ import {
   modelModes, modelsForMode, paramsSummary, type GenerationMode, type ParamValue,
 } from './model';
 import { trackingState } from './tracking';
+import { creditSummary } from './catalog';
 
 const VALID_MODES: GenerationMode[] = ['text-to-video', 'image-to-video', 'video-to-video'];
 const MAX_REFERENCE_BYTES = 8 * 1024 * 1024;
@@ -112,6 +113,9 @@ export default function VideoStudio() {
   const modeModels = useMemo(() => modelsForMode(models, mode), [models, mode]);
   const selectedService = useMemo(() => services.find((s) => s.service_key === serviceKey), [services, serviceKey]);
   const balance = quota?.credits ?? 0;
+  const requiresExactQuote = Boolean(selectedModel?.dynamic_pricing);
+  const summary = creditSummary(estimate, balance, requiresExactQuote);
+  const paramsKey = JSON.stringify(paramValues);
   const tracking = useMemo(() => trackingState(status, providerState), [status, providerState]);
   const terminal = ['succeeded', 'failed', 'cancelled'].includes(status);
   const resumable = useMemo(() => jobs.filter((j) => ACTIVE_STATUSES.includes(j.status)).slice(0, 3), [jobs]);
@@ -163,9 +167,14 @@ export default function VideoStudio() {
   useEffect(() => {
     if (!serviceKey || !modelId || mode === 'video-to-video') { setEstimate(null); return; }
     let active = true;
-    estimateVideo(serviceKey, modelId).then((e) => { if (active) setEstimate(e); }).catch(() => { if (active) setEstimate(null); });
+    // Phase 2: ask the backend for the exact, non-generating estimate-cost
+    // quote using the SAME parameters/prompt as the eventual generation.
+    estimateVideo(serviceKey, modelId, {
+      params: paramValues, prompt: prompt.trim() || scriptText.trim(),
+      param_schema: selectedModel?.param_schema,
+    }).then((e) => { if (active) setEstimate(e); }).catch(() => { if (active) setEstimate(null); });
     return () => { active = false; };
-  }, [serviceKey, modelId, mode]);
+  }, [serviceKey, modelId, mode, paramsKey, prompt, scriptText, selectedModel?.param_schema]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current !== null) { window.clearInterval(pollRef.current); pollRef.current = null; }
@@ -306,18 +315,24 @@ export default function VideoStudio() {
     else {
       if (!estimate.service_active) issues.push('Le service de crédits sélectionné est inactif.');
       if (!estimate.model_available) issues.push('Le modèle MuAPI sélectionné n’est plus disponible.');
-      if (estimate.credits_cost > balance) issues.push('Crédits insuffisants pour cette réservation.');
+      if (requiresExactQuote && !summary.exactQuote) issues.push('Devis exact estimate-cost indisponible pour ce modèle dynamique.');
+      if (summary.quoteToConfirm) issues.push('Devis fournisseur à confirmer : aucun prix de remplacement accepté.');
+      if (summary.creditsCost !== null && summary.creditsCost > balance) issues.push('Crédits insuffisants pour cette réservation.');
+      if (summary.creditsCost === null || summary.creditsCost <= 0) issues.push('Coût en crédits non confirmé par le serveur.');
     }
     if (health?.muapi === false) issues.push('Le secret serveur MUAPI_API_KEY n’est pas configuré : une génération réelle ne peut pas aboutir.');
     if (selectedModel?.required_fields.includes('image_url') && !referenceFile && !referencePath) issues.push('Importez l’image de référence requise par ce modèle.');
     if (selectedModel?.required_fields.includes('last_image') && !lastFile && !lastPath) issues.push('Importez l’image finale requise par ce modèle.');
     if (starting || (jobId && !terminal)) issues.push('Une génération est déjà en cours pour cette session.');
     return issues;
-  }, [mode, selectedModel, projectId, prompt, serviceKey, selectedService, estimate, balance, health, referenceFile, referencePath, lastFile, lastPath, starting, jobId, terminal]);
+  }, [mode, selectedModel, projectId, prompt, serviceKey, selectedService, estimate, balance, health, referenceFile, referencePath, lastFile, lastPath, starting, jobId, terminal, requiresExactQuote, summary.exactQuote, summary.quoteToConfirm, summary.creditsCost]);
   const blockedReason = launchIssues[0];
 
   const onLaunch = async () => {
-    if (blockedReason || !selectedModel || !projectId) { toast.warning(blockedReason || 'Complétez la configuration.'); return; }
+    if (blockedReason || !selectedModel || !projectId || !estimate || !summary.canReserve || summary.quoteToConfirm) {
+      toast.warning(blockedReason || 'Devis à confirmer : génération non autorisée.');
+      return;
+    }
     setStarting(true); setRunError(''); setPreviewUrl(null); setFinishedJob(null);
     try {
       if (!workspaceId && (referenceFile || lastFile)) throw new Error('Workspace indisponible pour l’import.');

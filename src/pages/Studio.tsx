@@ -12,6 +12,7 @@ import { providerQuoteCostLabel } from '../studio/model';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
+import { creditSummary } from '../studio/catalog';
 import {
   cancelGeneration, createProject, estimateVideo, generateScenes, generateScript, healthCheck,
   listAssets, listAvatars, listJobs, listProjects, listScripts, listServices, listVideoModels,
@@ -106,7 +107,11 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
 
   const selectedModel = useMemo(() => models.find((m) => m.model_id === modelId), [models, modelId]);
   const selectedService = useMemo(() => services.find((s) => s.service_key === serviceKey), [services, serviceKey]);
-  const credits = selectedService?.credits_cost ?? estimate?.credits_cost ?? 0;
+  const requiresExactQuote = Boolean(selectedModel?.dynamic_pricing);
+  const summary = creditSummary(estimate, quota?.credits ?? 0, requiresExactQuote);
+  const credits = summary.creditsCost;
+  const creditsLabel = credits !== null ? `${credits} crédits` : 'devis en cours';
+  const paramsKey = JSON.stringify(paramValues);
   const needsImage = Boolean(selectedModel?.required_fields.includes('image_url'));
   const terminal = ['succeeded', 'failed', 'cancelled'].includes(status);
 
@@ -148,9 +153,12 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
   useEffect(() => {
     if (!serviceKey || !modelId) { setEstimate(null); return; }
     let active = true;
-    estimateVideo(serviceKey, modelId).then((e) => { if (active) setEstimate(e); }).catch(() => { if (active) setEstimate(null); });
+    estimateVideo(serviceKey, modelId, {
+      params: paramValues, prompt: visualPrompt.trim() || scriptText.trim(),
+      image_url: imageUrl.trim(), param_schema: selectedModel?.param_schema,
+    }).then((e) => { if (active) setEstimate(e); }).catch(() => { if (active) setEstimate(null); });
     return () => { active = false; };
-  }, [serviceKey, modelId]);
+  }, [serviceKey, modelId, paramsKey, visualPrompt, scriptText, imageUrl, selectedModel?.param_schema]);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; }
@@ -257,13 +265,18 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
       ['Scènes / prompt visuel', scenes.length > 0 || visualPrompt.trim().length > 20],
       ['Modèle MuAPI disponible', Boolean(modelId && selectedModel?.is_enabled && !selectedModel?.is_coming_soon)],
       ['Image de référence (si requise)', !needsImage || hasImage],
-      ['Service & crédits suffisants', Boolean(serviceKey) && (quota?.credits ?? 0) >= credits && credits > 0],
+      ['Service & crédits suffisants', Boolean(serviceKey && selectedService?.active) && credits !== null && credits > 0 && (quota?.credits ?? 0) >= credits],
+      ['Devis fournisseur confirmé', summary.canReserve && !summary.quoteToConfirm],
       ['Clé serveur MUAPI_API_KEY', Boolean(health?.muapi)],
     ] as Array<[string, boolean]>;
-  }, [projectId, productName, objective, scriptText, scenes, visualPrompt, modelId, selectedModel, needsImage, avatars, avatarId, imageUrl, serviceKey, quota, credits, health]);
-  const canLaunch = checklist.every(([, ok]) => ok) && !starting && !(jobId && !terminal);
+  }, [projectId, productName, objective, scriptText, scenes, visualPrompt, modelId, selectedModel, selectedService, needsImage, avatars, avatarId, imageUrl, serviceKey, quota, credits, health, summary.canReserve, summary.quoteToConfirm]);
+  const canLaunch = checklist.every(([, ok]) => ok) && summary.canReserve && !summary.quoteToConfirm && !starting && !(jobId && !terminal);
 
   const onLaunch = async () => {
+    if (!canLaunch || !estimate || !summary.canReserve || summary.quoteToConfirm) {
+      toast.warning('Devis à confirmer ou check-list incomplète : génération non autorisée.');
+      return;
+    }
     setRunError(''); setPreviewUrl(null); setStarting(true);
     try {
       const payload = {
@@ -480,7 +493,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
               <div className="grid gap-3 sm:grid-cols-3">
                 {[
                   ['Solde disponible', `${quota?.credits ?? 0} crédits`, 'text-white'],
-                  ['Coût de cette vidéo', `${credits} crédits`, 'text-amber-300'],
+                  ['Coût de cette vidéo', creditsLabel, 'text-amber-300'],
                   ['Coût fournisseur estimé', providerQuoteCostLabel(estimate), estimate?.provider_quote_source === 'unavailable' ? 'text-amber-200' : 'text-cyan-300'],
                 ].map(([label, value, tone]) => (
                   <div key={label} className="rounded-xl border border-line bg-white/[0.03] px-4 py-3">
@@ -490,11 +503,11 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                 ))}
               </div>
               <div className="rounded-xl border border-brand-400/20 bg-brand-500/[0.06] px-4 py-3 text-xs leading-relaxed text-slate-300">
-                Modèle : <span className="text-white">{selectedModel?.display_name ?? '—'}</span> · Réservation de <span className="text-white">{credits} crédits</span> avant soumission.
+                Modèle : <span className="text-white">{selectedModel?.display_name ?? '—'}</span> · Réservation de <span className="text-white">{creditsLabel}</span> avant soumission.
                 Débit définitif uniquement si MuAPI produit une vidéo ; restitution automatique si le fournisseur échoue, si la tâche expire ou si vous annulez à temps.
                 Aucune génération ne sera facturée deux fois grâce à un identifiant d’idempotence propre à cette opération.
               </div>
-              {quota && credits > quota.credits && <Banner tone="danger" title="Crédits insuffisants">Rechargez votre solde depuis l’abonnement avant de confirmer.</Banner>}
+              {quota && credits !== null && credits > quota.credits && <Banner tone="danger" title="Crédits insuffisants">Rechargez votre solde depuis l’abonnement avant de confirmer.</Banner>}
               {estimate && !estimate.model_available && <Banner tone="warning" title="Modèle indisponible">Ce modèle MuAPI n’est plus actif. Retournez à l’étape 4.</Banner>}
               <div className="flex flex-wrap gap-2">
                 <Button size="lg" icon={<Play size={16} />} loading={starting} disabled={!canLaunch} onClick={() => setConfirmOpen(true)}>Confirmer et lancer la génération</Button>
@@ -588,9 +601,9 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
       </div>
 
       <ConfirmDialog open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={() => void onLaunch()}
-        confirmLabel={`Confirmer · ${credits} crédits`} loading={starting}
+        confirmLabel={`Confirmer · ${creditsLabel}`} loading={starting}
         title="Confirmer la génération vidéo MuAPI"
-        message={`Modèle ${selectedModel?.display_name ?? modelId}. ${credits} crédits seront réservés maintenant puis débités uniquement si MuAPI produit la vidéo. En cas d’échec, d’expiration ou d’annulation autorisée, ils seront restitués automatiquement. Un seul lancement sera facturé pour cette opération.`} />
+        message={`Modèle ${selectedModel?.display_name ?? modelId}. ${creditsLabel} seront réservés maintenant puis débités uniquement si MuAPI produit la vidéo. En cas d’échec, d’expiration ou d’annulation autorisée, ils seront restitués automatiquement. Un seul lancement sera facturé pour cette opération.`} />
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nouveau projet publicitaire"
         description="Le projet est créé dans votre workspace avec les règles RLS et quotas existantes."

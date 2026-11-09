@@ -894,13 +894,17 @@ describe('Libellé UI du devis fournisseur', () => {
     const promptBar = readFileSync(join(process.cwd(), 'src/studio/components/PromptBar.tsx'), 'utf8');
     const confirm = readFileSync(join(process.cwd(), 'src/studio/components/CostConfirm.tsx'), 'utf8');
     const browser = readFileSync(join(process.cwd(), 'src/studio/components/CatalogBrowser.tsx'), 'utf8');
-    expect(studio).toContain('providerQuoteCostLabel');
+    expect(studio).toContain('creditSummary');
     expect(studio).toContain('providerQuoteOriginLabel');
+    expect(promptBar).toContain('creditSummary');
     expect(promptBar).toContain('providerQuoteCostLabel');
-    expect(confirm).toContain('providerQuoteCostLabel');
+    expect(confirm).toContain('creditSummary');
+    expect(confirm).toContain('providerQuoteOriginLabel');
+    expect(browser).toContain('creditSummary');
     expect(browser).toContain('providerQuoteCostLabel');
     for (const source of [studio, promptBar, confirm, browser]) {
       expect(source).not.toContain('?? 0).toFixed(3)');
+      expect(source).not.toMatch(/provider_cost_usd\s*\|\|\s*0/);
     }
   });
 });

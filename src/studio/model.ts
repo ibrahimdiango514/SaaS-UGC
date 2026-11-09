@@ -152,10 +152,13 @@ export function optionsOf(model: MuApiModel, key: string): string[] {
   return (def?.options ?? []).map(String);
 }
 
-/** A select value must keep the exact type declared in the MuAPI schema. */
+/** A declared option keeps its exact type; numeric schemas never receive strings. */
 export function normalizeParamValue(model: MuApiModel, key: string, raw: string): ParamValue {
-  const option = model.param_schema?.[key]?.options?.find((v) => String(v) === raw);
-  return typeof option === 'number' ? option : raw;
+  const def = model.param_schema?.[key];
+  const option = def?.options?.find((v) => String(v) === raw);
+  if (typeof option === 'number') return option;
+  if (def?.type === 'number' && Number.isFinite(Number(raw))) return Number(raw);
+  return raw;
 }
 
 export function modelResolutions(model: MuApiModel): string[] {
@@ -237,11 +240,15 @@ export function statusLabel(status: ReeloraModelStatus): string {
 }
 
 /** Cost shown to the user comes from the server estimate; never a local guess. */
-export function providerCostLabel(costUsd: number | string | null | undefined, currency = 'USD'): string {
+export function usableCostUsd(costUsd: number | string | null | undefined): number | null {
+  if (costUsd === null || costUsd === undefined || (typeof costUsd === 'string' && !costUsd.trim())) return null;
   const n = Number(costUsd);
-  return Number.isFinite(n) && costUsd !== null && costUsd !== undefined
-    ? `${n.toFixed(3)} ${currency}`
-    : 'non communiqué';
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+export function providerCostLabel(costUsd: number | string | null | undefined, currency = 'USD'): string {
+  const n = usableCostUsd(costUsd);
+  return n !== null ? `${n.toFixed(3)} ${currency}` : 'non communiqué';
 }
 
 /** Wording required when MuAPI's exact estimate-cost quote cannot be obtained. */
@@ -251,13 +258,19 @@ export interface ProviderQuoteView {
   provider_cost_usd?: number | string | null;
   provider_cost_currency?: string;
   provider_quote_source?: 'catalog' | 'estimate_cost' | 'unavailable' | string;
+  provider_quote_error?: string | null;
 }
 
 /** True only when the displayed USD amount comes from a successful exact quote. */
 export function isExactProviderQuote(estimate: ProviderQuoteView | null | undefined): boolean {
   return estimate?.provider_quote_source === 'estimate_cost'
-    && estimate.provider_cost_usd !== null && estimate.provider_cost_usd !== undefined
-    && Number.isFinite(Number(estimate.provider_cost_usd));
+    && usableCostUsd(estimate.provider_cost_usd) !== null;
+}
+
+export function hasUsableProviderCost(estimate: ProviderQuoteView | null | undefined): boolean {
+  return Boolean(estimate) && estimate?.provider_quote_source !== 'unavailable'
+    && !estimate?.provider_quote_error
+    && usableCostUsd(estimate?.provider_cost_usd) !== null;
 }
 
 /**
@@ -266,18 +279,12 @@ export function isExactProviderQuote(estimate: ProviderQuoteView | null | undefi
  * price at all and is only described as "devis fournisseur à confirmer".
  */
 export function providerQuoteCostLabel(estimate: ProviderQuoteView | null | undefined): string {
-  if (!estimate || estimate.provider_quote_source === 'unavailable'
-    || estimate.provider_cost_usd === null || estimate.provider_cost_usd === undefined) {
-    return QUOTE_TO_CONFIRM;
-  }
-  return providerCostLabel(estimate.provider_cost_usd, estimate.provider_cost_currency ?? 'USD');
+  if (!hasUsableProviderCost(estimate)) return QUOTE_TO_CONFIRM;
+  return providerCostLabel(estimate?.provider_cost_usd, estimate?.provider_cost_currency ?? 'USD');
 }
 
 export function providerQuoteOriginLabel(estimate: ProviderQuoteView | null | undefined): string {
   if (isExactProviderQuote(estimate)) return 'estimate-cost MuAPI';
-  if (!estimate || estimate.provider_quote_source === 'unavailable'
-    || estimate.provider_cost_usd === null || estimate.provider_cost_usd === undefined) {
-    return QUOTE_TO_CONFIRM;
-  }
+  if (!hasUsableProviderCost(estimate)) return QUOTE_TO_CONFIRM;
   return 'tarif catalogue MuAPI · devis exact non disponible';
 }

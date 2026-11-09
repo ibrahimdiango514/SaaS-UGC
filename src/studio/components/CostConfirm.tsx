@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Coins, Info, LockKeyhole, ShieldCheck } from 'lucide-react';
-import { Button, Modal } from '../../components/ui';
+import { Coins, Info, LockKeyhole, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Button, Modal, cn } from '../../components/ui';
 import type { MuApiModel, VideoCostEstimate } from '../../lib/types';
-import { paramsSummary, providerQuoteCostLabel, type ParamValue } from '../model';
+import { paramsSummary, providerQuoteOriginLabel, type ParamValue } from '../model';
+import { USD_CREDIT_NOTE, canConfirmGeneration, creditSummary } from '../catalog';
 
 export function CostSummary({ model, estimate, balance, params, compact }: {
   model: MuApiModel;
@@ -11,15 +12,17 @@ export function CostSummary({ model, estimate, balance, params, compact }: {
   params: Record<string, ParamValue>;
   compact?: boolean;
 }) {
-  const cost = estimate?.credits_cost ?? 0;
-  const remaining = Math.max(0, balance - cost);
-  const enough = cost > 0 && balance >= cost;
+  const summary = creditSummary(estimate, balance, Boolean(model.dynamic_pricing));
+  const cost = summary.creditsCost;
+  const costLabel = cost !== null ? `${cost} crédits` : 'devis en cours';
+  const remaining = summary.remaining === null ? '—' : `${summary.remaining} crédits`;
 
   if (compact) {
     return (
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="rounded-lg bg-white/[0.05] px-2 py-1 text-slate-300">{cost} crédits</span>
+        <span className="rounded-lg bg-white/[0.05] px-2 py-1 text-slate-300">{costLabel}</span>
         <span className="text-slate-500">Solde {balance} · après réservation {remaining}</span>
+        {summary.quoteToConfirm && <span className="font-semibold text-amber-200">Devis fournisseur à confirmer</span>}
       </div>
     );
   }
@@ -34,16 +37,23 @@ export function CostSummary({ model, estimate, balance, params, compact }: {
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
-          ['Coût Reelora', `${cost} crédits`, 'text-amber-300'],
+          ['Coût Reelora', costLabel, 'text-amber-300'],
           ['Solde actuel', `${balance} crédits`, 'text-white'],
-          ['Après réservation', `${remaining} crédits`, enough ? 'text-emerald-300' : 'text-rose-300'],
-          ['Coût fournisseur', providerQuoteCostLabel(estimate), estimate?.provider_quote_source === 'unavailable' ? 'text-amber-200' : 'text-cyan-300'],
+          ['Après réservation', remaining, summary.enough ? 'text-emerald-300' : 'text-rose-300'],
+          ['Coût fournisseur', summary.usdLabel, summary.quoteToConfirm ? 'text-amber-200' : 'text-cyan-300'],
         ].map(([label, value, tone]) => (
           <div key={label} className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
             <p className="text-[10px] text-slate-500">{label}</p>
-            <p className={`mt-1 text-sm font-bold ${tone}`}>{value}</p>
+            <p className={cn('mt-1 text-sm font-bold', String(tone))}>{value}</p>
           </div>
         ))}
+      </div>
+      <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-[10px] leading-relaxed text-slate-400">
+        <p>Origine : <b className="text-slate-200">{providerQuoteOriginLabel(estimate)}</b></p>
+        <p className="mt-1">{USD_CREDIT_NOTE}</p>
+        {summary.quoteToConfirm && (
+          <p data-testid="quote-to-confirm" className="mt-2 flex items-start gap-1.5 font-semibold text-amber-200"><TriangleAlert size={13} className="mt-0.5 shrink-0" /> Devis fournisseur à confirmer : aucun montant USD de remplacement, y compris un zéro factice, n’est utilisé. La réservation est bloquée.</p>
+        )}
       </div>
       <div className="rounded-xl border border-brand-400/20 bg-brand-500/[0.06] p-3 text-[11px] leading-relaxed text-slate-300">
         <p className="flex items-center gap-1.5 font-semibold text-brand-100"><ShieldCheck size={13} /> Réservation, idempotence et capture existantes</p>
@@ -61,8 +71,13 @@ export function CostConfirm({ open, onClose, onConfirm, model, estimate, balance
 }) {
   const [accepted, setAccepted] = useState(false);
   useEffect(() => { if (!open) setAccepted(false); }, [open]);
-  const cost = estimate?.credits_cost ?? 0;
-  const canConfirm = accepted && cost > 0 && balance >= cost && estimate?.service_active !== false && estimate?.model_available !== false && !blockedReason && !loading;
+  const summary = creditSummary(estimate, balance, Boolean(model.dynamic_pricing));
+  const canConfirm = canConfirmGeneration({
+    estimate, balance, accepted, loading, blockedReason,
+    requiresExactQuote: Boolean(model.dynamic_pricing),
+  });
+  const cost = summary.creditsCost;
+  const costLabel = cost !== null ? `${cost} crédits` : 'devis en cours';
 
   return (
     <Modal open={open} onClose={onClose} title="Confirmer la génération vidéo" size="lg"
@@ -70,15 +85,15 @@ export function CostConfirm({ open, onClose, onConfirm, model, estimate, balance
       footer={<>
         <Button variant="ghost" onClick={onClose}>Annuler</Button>
         <Button icon={<LockKeyhole size={14} />} loading={loading} disabled={!canConfirm} onClick={onConfirm}>
-          Je confirme · réserver {cost} crédits
+          Je confirme · réserver {costLabel}
         </Button>
       </>}>
       <CostSummary model={model} estimate={estimate} balance={balance} params={params} />
       {blockedReason && <p className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 py-2.5 text-xs text-rose-200">{blockedReason}</p>}
-      {balance < cost && <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-200"><Info size={13} /> Crédits insuffisants : rechargez depuis l’abonnement avant de lancer.</p>}
+      {!summary.enough && cost !== null && <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-200"><Info size={13} /> Crédits insuffisants : rechargez depuis l’abonnement avant de lancer.</p>}
       <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-xs leading-relaxed text-slate-300">
         <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500" />
-        <span>J’ai vérifié le modèle, les paramètres et le coût. J’accepte la réservation de {cost} crédits et je comprends que le débit définitif n’intervient qu’après un résultat MuAPI réel.</span>
+        <span>J’ai vérifié le modèle, les paramètres et le coût. J’accepte la réservation de {costLabel} et je comprends que le débit définitif n’intervient qu’après un résultat MuAPI réel.</span>
       </label>
       <p className="mt-3 text-[10px] leading-relaxed text-slate-600">Aucun résultat fictif : sans clé serveur MuAPI valide, la tâche échoue explicitement et les crédits réservés sont restitués.</p>
     </Modal>

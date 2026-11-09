@@ -4,7 +4,7 @@ import {
   AlertCircle, ArrowRight, CheckCircle2, Clapperboard, Coins, Database, Info,
   Layers3, Plus, RefreshCw, Scissors, Square,
 } from 'lucide-react';
-import { Banner, Button, ErrorState, LoadingState, Modal, Select } from '../components/ui';
+import { Banner, Button, ErrorState, LoadingState, Modal, Select, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -27,12 +27,13 @@ import { StudioTopBar } from './components/StudioTopBar';
 import { TrackingPanel } from './components/PreviewStage';
 import { trackingState } from './tracking';
 import {
-  modelFamily, modeFromModel, providerQuoteCostLabel, providerQuoteOriginLabel,
-  type ParamValue,
+  modelFamily, modeFromModel, providerQuoteOriginLabel, type ParamValue,
 } from './model';
 import {
-  QUALITY_TIERS, buildCompatibleParams, defaultSettingsFor, modelForQuality, serviceForQuality,
+  QUALITY_TIERS, buildCompatibleParams, defaultSettingsFor, modelForQuality,
+  qualityTierSummary, serviceForQuality,
 } from './quality';
+import { USD_CREDIT_NOTE, creditSummary } from './catalog';
 import {
   PLAN_VERSION, CREATION_MODES, buildLocalPlan, mapAiScriptToPlan, planToEditorProject,
   validateProductionPlan, type ProductionPlan, type SectorId,
@@ -320,7 +321,13 @@ export default function GenerationStudio() {
   }, [service?.service_key, model?.model_id, schemaKey, inputFieldsKey, paramsKey, form.prompt,
     reference?.url, reference?.lastUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cost = estimate?.credits_cost ?? null;
+  const requiresExactQuote = Boolean(model?.dynamic_pricing);
+  const summary = creditSummary(estimate, balance, requiresExactQuote);
+  const cost = summary.creditsCost;
+  const tierSummary = useMemo(
+    () => qualityTierSummary(models, services, modeDef.mode),
+    [models, services, modeDef.mode],
+  );
   const issues = useMemo(() => {
     const out: string[] = [];
     if (!model) out.push('Aucun modèle MuAPI compatible disponible pour ce mode.');
@@ -338,7 +345,10 @@ export default function GenerationStudio() {
       if (!estimate.service_active) out.push('Le service de crédits est inactif.');
       if (!estimate.model_available) out.push(estimate.model_reason || 'Le modèle MuAPI sélectionné n’est plus disponible.');
       if (estimate.provider_quote_error) out.push(estimate.provider_quote_error);
-      if (estimate.credits_cost > balance) out.push('Crédits UGC insuffisants pour cette réservation.');
+      if (requiresExactQuote && !summary.exactQuote) out.push('Devis exact estimate-cost indisponible pour ce modèle dynamique : aucune génération payante sans prix confirmé.');
+      if (summary.quoteToConfirm) out.push('Devis fournisseur à confirmer : aucun prix fictif, y compris un zéro factice, n’est accepté.');
+      if (cost !== null && cost > balance) out.push('Crédits UGC insuffisants pour cette réservation.');
+      if (cost === null || cost <= 0) out.push('Coût en crédits Reelora non confirmé par le serveur.');
     }
     const needsImage = (model?.required_fields ?? []).some((f) => f.toLowerCase() === 'image_url');
     if (needsImage && !reference?.url) out.push('Ce modèle exige une image de référence réelle pour le devis et la génération.');
@@ -350,7 +360,8 @@ export default function GenerationStudio() {
     return out;
   }, [model, service, catalog, catalogError, health, detailLoading, quoteBusy, estimateError,
     form.prompt, form.mode, form.referenceFile, form.lastReferenceFile, form.avatarId, projectId,
-    estimate, balance, reference, starting, jobId, status]);
+    estimate, balance, reference, starting, jobId, status, requiresExactQuote,
+    summary.exactQuote, summary.quoteToConfirm, cost]);
   const blockedReason = issues[0] ?? '';
 
   const applyResult = useCallback((r: VideoActionResult) => {
@@ -419,7 +430,10 @@ export default function GenerationStudio() {
   };
 
   const onConfirm = async () => {
-    if (blockedReason || !model || !service || !projectId || !estimate) { toast.warning(blockedReason || 'Complétez la configuration.'); return; }
+    if (blockedReason || !model || !service || !projectId || !estimate || !summary.canReserve || summary.quoteToConfirm) {
+      toast.warning(blockedReason || 'Devis à confirmer : génération non autorisée.');
+      return;
+    }
     setStarting(true); setConfirmOpen(false); setRunError(''); setResult(null);
     try {
       let referencePayload: Record<string, unknown> = {};
@@ -617,6 +631,31 @@ export default function GenerationStudio() {
         <div className="mt-3"><Banner tone="danger" title="Devis backend indisponible">{estimateError}</Banner></div>
       )}
 
+      <section data-testid="studio-tier-summary" className="mt-3 rounded-2xl border border-white/[0.08] bg-[#080d14] p-3 sm:p-4" aria-label="Correspondance des niveaux de qualité">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">Rapide · Standard · Premium</p>
+            <h2 className="mt-0.5 text-sm font-semibold text-white">Services et modèles réellement associés</h2>
+          </div>
+          <span className="rounded-lg border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[10px] text-slate-500">{models.length} modèles · {services.length} services</span>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {tierSummary.map((tier) => (
+            <div key={tier.tier} className={cn('rounded-xl border p-3', form.quality === tier.tier ? 'border-cyan-400/35 bg-cyan-400/[0.06]' : 'border-white/[0.07] bg-white/[0.02]')}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-bold text-white">{tier.label}</p>
+                <span className={cn('rounded-md px-1.5 py-0.5 text-[9px]', tier.available ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-200')}>{tier.available ? 'Disponible' : 'Indisponible'}</span>
+              </div>
+              <p className="mt-1 text-[10px] leading-snug text-slate-500">{tier.description}</p>
+              <p className="mt-2 text-[11px] font-semibold text-amber-300">{tier.creditsCost ?? '—'} crédits UGC · {tier.serviceKey}</p>
+              <p className="mt-0.5 truncate text-[10px] text-slate-400" title={tier.modelId ?? ''}>{tier.modelName ?? 'Aucun modèle compatible'}</p>
+              <p className="mt-0.5 text-[9px] text-slate-600">Tarif catalogue {tier.catalogCostUsd !== null ? `${tier.catalogCostUsd.toFixed(3)} USD` : '—'} · devis exact séparé</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-600"><Info size={11} className="mt-0.5 shrink-0" /> {USD_CREDIT_NOTE}</p>
+      </section>
+
       {showEmpty && (
         <div className="mt-4">
           <GenerationEmptyState onExample={onExample} onStart={() => document.getElementById('studio-prompt')?.focus()}
@@ -667,12 +706,13 @@ export default function GenerationStudio() {
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Modèle</span><span className="text-right text-white">{model ? modelFamily(model) : '—'}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Service</span><span className="text-right text-white">{service?.display_name ?? '—'}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Crédits UGC</span><span className="font-bold text-cyan-300">{cost ?? '…'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Coût fournisseur</span><span className={estimate?.provider_quote_source === 'unavailable' ? 'text-right font-semibold text-amber-200' : 'text-right text-white'}>{providerQuoteCostLabel(estimate)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Coût fournisseur</span><span className={summary.quoteToConfirm ? 'text-right font-semibold text-amber-200' : 'text-right text-white'}>{summary.usdLabel}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Origine du devis</span><span className="text-right text-white">{providerQuoteOriginLabel(estimate)}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Solde après réservation</span><span className="text-white">{cost !== null ? Math.max(0, balance - cost) : '—'}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Solde après réservation</span><span className="text-white">{summary.remaining ?? '—'}</span></div>
               </div>
               {estimate?.provider_quote_error && <p className="mt-2 text-[10px] text-amber-200">{estimate.provider_quote_error}</p>}
-              <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-500"><Info size={11} className="mt-0.5 shrink-0" /> Devis calculé exclusivement côté backend. Réservation avant envoi, capture uniquement après succès, restitution sur échec.</p>
+              {summary.quoteToConfirm && <p data-testid="studio-quote-warning" className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-2 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-200">Devis fournisseur à confirmer : aucun prix fictif, génération bloquée.</p>}
+              <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-500"><Info size={11} className="mt-0.5 shrink-0" /> Devis calculé exclusivement côté backend. {USD_CREDIT_NOTE} Réservation avant envoi, capture uniquement après succès, restitution sur échec.</p>
             </div>
             <div className="rounded-2xl border border-white/[0.08] bg-[#080d14] p-4">
               <p className="text-[11px] font-semibold text-white">Paramètres réellement envoyés</p>
@@ -694,7 +734,9 @@ export default function GenerationStudio() {
           referenceFile={form.referenceFile} lastReferenceFile={form.lastReferenceFile}
           onReferenceChange={(file) => patch({ referenceFile: file })}
           onLastReferenceChange={(file) => patch({ lastReferenceFile: file })}
-          estimate={selectedModelId === model?.model_id ? estimate : null} balance={balance} />
+          estimate={selectedModelId === model?.model_id ? estimate : null} balance={balance}
+          loading={loading} catalogError={catalogError} estimateError={estimateError}
+          quoteBusy={quoteBusy} providerUnavailable={catalog?.account.key_valid === false || health?.muapi === false} />
       )}
 
       {jobId && (

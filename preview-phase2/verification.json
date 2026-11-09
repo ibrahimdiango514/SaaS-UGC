@@ -1,0 +1,155 @@
+{
+  "generatedAt": "2026-11-09T18:09:33.744Z",
+  "base": "http://127.0.0.1:4183",
+  "viewportDesktop": "1440×1000",
+  "viewportConfirm": "1440×1200",
+  "viewportMobile": "390×844",
+  "mode": "CAPTURES SIMULÉES — fixtures navigateur Phase 2 : aucune mesure MuAPI live, aucune génération, aucun débit, aucun job créé",
+  "watermark": "SIMULÉ · FIXTURES PHASE 2 · aucune génération / aucun débit",
+  "interactions": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "items": [
+      {
+        "name": "Desktop 1440×1000 : devis exact, crédits Reelora et correspondance des trois niveaux",
+        "pass": true,
+        "file": "screenshots/01-studio-desktop-devis-exact.jpg",
+        "detail": {
+          "usd": "Fournisseur 1.870 USD · Solde 36 crédits",
+          "credits": " 16 crédits UGCFournisseur 1.870 USD · Solde 36 crédits415 détectés · 236 actifs · 179 indisponibles · 415 retournés avec la clé",
+          "tiers": true,
+          "generateEnabled": true,
+          "noZero": true,
+          "watermark": true
+        }
+      },
+      {
+        "name": "Confirmation explicite obligatoire avant génération (aucun start)",
+        "pass": true,
+        "file": "screenshots/02-confirmation-desktop.jpg",
+        "detail": {
+          "modal": true,
+          "checkbox": true,
+          "exact": true,
+          "startActions": 0,
+          "noZero": true,
+          "watermark": true
+        }
+      },
+      {
+        "name": "Catalogue : recherche multi-critères, tri, capacités et devis dynamique",
+        "pass": true,
+        "file": "screenshots/03-catalogue-filtres-desktop.jpg",
+        "detail": {
+          "filters": true,
+          "cards": 2,
+          "tags": 6,
+          "count": "2 résultats · 2 affichés sur 7 modèles réels",
+          "noZero": true,
+          "watermark": true
+        }
+      },
+      {
+        "name": "Mobile 390×844 : devis USD + crédits sans chevauchement",
+        "pass": true,
+        "file": "screenshots/04-studio-mobile-devis-exact.jpg",
+        "detail": {
+          "usd": "Fournisseur 1.870 USD · Solde 36 crédits",
+          "credits": " 16 crédits UGCFournisseur 1.870 USD · Solde 36 crédits415 détectés · 236 actifs · 179 indisponibles · 415 retournés avec la clé",
+          "generateEnabled": true,
+          "noOverlap": true,
+          "noZero": true,
+          "watermark": true
+        }
+      },
+      {
+        "name": "Devis indisponible : aucun prix inventé, génération bloquée (desktop)",
+        "pass": true,
+        "file": "screenshots/05-studio-desktop-devis-indisponible.jpg",
+        "detail": {
+          "quote": "Fournisseur devis fournisseur à confirmer · Solde 36 crédits",
+          "warning": true,
+          "generateDisabled": true,
+          "providerError": true,
+          "noZero": true,
+          "watermark": true
+        }
+      },
+      {
+        "name": "Devis indisponible explicitement affiché sur mobile, génération bloquée",
+        "pass": true,
+        "file": "screenshots/06-studio-mobile-devis-indisponible.jpg",
+        "detail": {
+          "quote": "Fournisseur devis fournisseur à confirmer · Solde 36 crédits",
+          "warning": true,
+          "generateDisabled": true,
+          "noZero": true,
+          "watermark": true
+        }
+      },
+      {
+        "name": "Fournisseur indisponible et catalogue vide : états explicites, aucun modèle fictif",
+        "pass": true,
+        "file": "screenshots/07-catalogue-fournisseur-indisponible.jpg",
+        "detail": {
+          "providerError": " Fournisseur ou catalogue partiellement indisponibleMuAPI HTTP 503 (fixture) Aucun modèle ni tarif n’est inventé.",
+          "empty": "Aucun modèle disponibleLe fournisseur n’a renvoyé aucun modèle. Aucune liste de secours ni aucun prix fictif n’est utilisé. Vérifiez le secret serveur puis actualisez.Réessayer",
+          "noModels": true,
+          "noZero": true,
+          "watermark": true
+        }
+      },
+      {
+        "name": "Recherche sans résultat : état vide et réinitialisation des filtres",
+        "pass": true,
+        "file": "screenshots/08-catalogue-aucun-resultat.jpg",
+        "detail": {
+          "noResults": "Aucun modèle réel ne correspond aux filtresModifiez la recherche, la catégorie, la capacité ou le statut. Les 7 modèles du catalogue restent disponibles.Effacer les filtres",
+          "count": "0 résultat · 0 affiché sur 7 modèles réels",
+          "cards": 0,
+          "noZero": true,
+          "watermark": true
+        }
+      }
+    ]
+  },
+  "files": [
+    "screenshots/01-studio-desktop-devis-exact.jpg",
+    "screenshots/02-confirmation-desktop.jpg",
+    "screenshots/03-catalogue-filtres-desktop.jpg",
+    "screenshots/04-studio-mobile-devis-exact.jpg",
+    "screenshots/05-studio-desktop-devis-indisponible.jpg",
+    "screenshots/06-studio-mobile-devis-indisponible.jpg",
+    "screenshots/07-catalogue-fournisseur-indisponible.jpg",
+    "screenshots/08-catalogue-aucun-resultat.jpg"
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "backendCalls": 101,
+  "edgeActions": [
+    "catalog",
+    "estimate",
+    "health",
+    "model-detail"
+  ],
+  "rpcCalls": [
+    "reelora_bootstrap",
+    "reelora_quota_status"
+  ],
+  "externalHosts": [
+    "fonts.googleapis.com",
+    "xbuuhfwobrafcbgtdgjx.supabase.co"
+  ],
+  "muapiCalls": [],
+  "startActions": 0,
+  "realGenerationLaunched": false,
+  "jobsCreated": 0,
+  "creditsSpent": 0,
+  "serverState": {
+    "note": "Aucune génération vidéo, réservation, capture, remboursement, sonde MuAPI payante ou déploiement pendant les captures Phase 2. Les compteurs 415/236 proviennent de l’audit DB en lecture seule et des vérifications live antérieures, pas d’une nouvelle sonde.",
+    "liveChecksEarlier": "415 modèles, 236 actifs, 4 fiches, 3 devis exacts (0,020 / 1,870 / 9,350 USD), 142 tests — phase précédente uniquement.",
+    "phase2Checks": "Audit DB lecture seule + 157 tests simulés + 8 captures navigateur avec fixtures."
+  }
+}
