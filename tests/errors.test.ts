@@ -9,8 +9,9 @@ describe('humanizeError', () => {
     expect(humanizeError('insufficient_credits')).toContain('Crédits insuffisants');
     expect(humanizeError('account_not_active')).toContain('suspendu');
   });
-  it('signale les problèmes réseau', () => {
+  it('signale les problèmes réseau et les échecs CORS/Edge', () => {
     expect(humanizeError('Failed to fetch')).toContain('Connexion impossible');
+    expect(humanizeError('Failed to send a request to the Edge Function')).toContain('service Edge Reelora');
   });
   it('utilise le message de secours si rien n’est fourni', () => {
     expect(humanizeError(null, 'Oups')).toBe('Oups');

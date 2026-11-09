@@ -2,7 +2,7 @@
 // never their values. The browser uses it to explain why a feature is disabled.
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-application-name, x-retry-count",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 

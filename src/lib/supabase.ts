@@ -20,7 +20,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     detectSessionInUrl: true,
     storageKey: 'reelora.auth.v1',
   },
-  global: { headers: { 'x-application-name': 'reelora' } },
 });
 
 export const STORAGE_BUCKET = 'ugc-assets';

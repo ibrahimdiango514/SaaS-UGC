@@ -35,10 +35,11 @@ describe('clés secrètes côté serveur uniquement', () => {
     expect(code).not.toContain('SUPABASE_SERVICE_ROLE_KEY as string');
     expect(code).not.toMatch(/SUPABASE_SERVICE_ROLE_KEY\s*\)/);
   });
-  it('le client Supabase n’utilise que la clé publishable', () => {
+  it('le client Supabase n’utilise que la clé publishable et n’injecte pas de header global incompatible CORS Edge', () => {
     const client = stripComments(read('src/lib/supabase.ts'));
     expect(client).toContain('VITE_SUPABASE_PUBLISHABLE_KEY');
     expect(client).not.toContain('SERVICE_ROLE');
+    expect(client).not.toContain('x-application-name');
   });
   it('.env.example ne documente que des variables publiques VITE_', () => {
     const env = read('.env.example');

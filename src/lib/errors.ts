@@ -47,6 +47,9 @@ const DB_MESSAGES: Array<[RegExp, string]> = [
 export function humanizeError(raw: string | undefined | null, fallback = 'Une erreur est survenue. Réessayez.'): string {
   if (!raw) return fallback;
   for (const [pattern, message] of DB_MESSAGES) if (pattern.test(raw)) return message;
+  if (/Failed to send a request to the Edge Function|FunctionsFetchError/i.test(raw)) {
+    return 'Impossible de joindre le service Edge Reelora (réseau ou CORS). Vérifiez votre connexion puis réessayez.';
+  }
   if (/fetch failed|network|Failed to fetch|NetworkError/i.test(raw)) return 'Connexion impossible. Vérifiez votre réseau puis réessayez.';
   return raw.length > 260 ? `${raw.slice(0, 260)}…` : raw;
 }
