@@ -44,7 +44,7 @@ function defaultParams(model: MuApiModel | undefined): Record<string, ParamValue
   return out;
 }
 
-export default function Studio() {
+export default function Studio({ embedded = false }: { embedded?: boolean }) {
   const toast = useToast();
   const { workspaceId, quota, refreshQuota } = useAuth();
   const [params] = useSearchParams();
@@ -304,9 +304,16 @@ export default function Studio() {
 
   return (
     <>
-      <PageHeader eyebrow="Production · MuAPI" title="UGC Studio"
-        description="Du brief produit à la vidéo réelle : script Groq, scènes, modèle MuAPI, crédits maîtrisés et suivi serveur."
-        actions={<Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>} />
+      {embedded ? (
+        <div className="mb-4 flex flex-wrap justify-end gap-2">
+          <Link to="/app/studio" className="btn btn-outline btn-sm">Nouveau Video Studio</Link>
+          <Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>
+        </div>
+      ) : (
+        <PageHeader eyebrow="Production · MuAPI" title="UGC Studio"
+          description="Du brief produit à la vidéo réelle : script Groq, scènes, modèle MuAPI, crédits maîtrisés et suivi serveur."
+          actions={<Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>} />
+      )}
 
       {/* Étapes — mobile-first, défilement horizontal */}
       <div className="mb-5 flex gap-2 overflow-x-auto pb-1">

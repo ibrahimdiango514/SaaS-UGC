@@ -8,6 +8,16 @@ import { asAppError } from '../lib/errors';
 import { formatDate, statusLabel, truncate } from '../lib/format';
 import { cancelGeneration, listJobEvents, listJobs, listLedger } from '../lib/api';
 import type { GenerationJob, LedgerEntry } from '../lib/types';
+import { paramsSummary, type ParamValue } from '../studio/model';
+
+function usedParams(payload: Record<string, unknown>): Record<string, ParamValue> {
+  const out: Record<string, ParamValue> = {};
+  const source = payload.params && typeof payload.params === 'object' ? payload.params as Record<string, unknown> : {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') out[key] = value;
+  }
+  return out;
+}
 
 function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (id: string) => void; onRefresh: () => void }) {
   const [open, setOpen] = useState(false);
@@ -40,11 +50,15 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
           <div><p className="text-slate-500">Identifiant</p><p className="break-all font-mono text-slate-300">{job.id}</p></div>
           <div><p className="text-slate-500">Fournisseur</p><p className="text-slate-300">{job.provider ?? '—'} {job.provider_job_id && <span className="font-mono text-[10px]">({truncate(job.provider_job_id, 30)})</span>}</p></div>
           <div><p className="text-slate-500">Modèle MuAPI</p><p className="font-mono text-slate-300">{String((job.request_payload as Record<string, unknown>)?.model_id ?? '—')}</p></div>
-          <div><p className="text-slate-500">Clé d’idempotence</p><p className="truncate font-mono text-slate-300">{String((job.request_payload as Record<string, unknown>)?.muapi_request_id ?? '—')}</p></div>
+          <div><p className="text-slate-500">Coût / date</p><p className="text-slate-300">{job.credits_charged || job.credits_reserved} crédits · {formatDate(job.created_at, true)}</p></div>
+          <div className="sm:col-span-2"><p className="text-slate-500">Paramètres utilisés</p><p className="text-slate-300">{paramsSummary(usedParams(job.request_payload as Record<string, unknown>))}</p></div>
+          <div className="sm:col-span-2"><p className="text-slate-500">Description</p><p className="line-clamp-3 text-slate-300">{String((job.request_payload as Record<string, unknown>)?.visual_prompt ?? '—')}</p></div>
           <div className="sm:col-span-2"><p className="text-slate-500">Erreur</p><p className="text-slate-300">{job.error_message || '—'}</p></div>
-          {['queued', 'reserved', 'processing'].includes(job.status) && <div className="sm:col-span-2">
-            <Link to={`/app/studio?job=${job.id}`} className="btn btn-outline btn-sm"><Activity size={13} /> Reprendre le suivi dans le Studio</Link>
-          </div>}
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <Link to={`/app/studio?reuse=${job.id}`} className="btn btn-outline btn-sm"><RefreshCw size={13} /> Relancer avec ces paramètres</Link>
+            {['queued', 'reserved', 'processing'].includes(job.status) &&
+              <Link to={`/app/studio?job=${job.id}`} className="btn btn-ghost btn-sm"><Activity size={13} /> Reprendre le suivi</Link>}
+          </div>
           <div className="sm:col-span-2">
             <p className="mb-2 font-semibold text-slate-400">Événements de production</p>
             {loading ? <LoadingState /> : events.length === 0 ? <p className="text-slate-600">Aucun événement.</p> : (
@@ -62,7 +76,7 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
   );
 }
 
-export default function History() {
+export default function History({ embedded = false }: { embedded?: boolean }) {
   const toast = useToast();
   const { refreshQuota } = useAuth();
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
@@ -90,8 +104,12 @@ export default function History() {
 
   return (
     <>
-      <PageHeader eyebrow="Suivi" title="Historique des générations" description="Chaque tâche, événement de production et mouvement de crédits est enregistré."
-        actions={<Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>} />
+      {embedded ? (
+        <div className="mb-4 flex justify-end"><Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button></div>
+      ) : (
+        <PageHeader eyebrow="Suivi" title="Historique des générations" description="Chaque tâche, événement de production et mouvement de crédits est enregistré."
+          actions={<Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>} />
+      )}
       <Tabs active={tab} onChange={setTab} tabs={[{ id: 'jobs', label: `Générations (${jobs.length})`, icon: <Activity size={14} /> }, { id: 'ledger', label: `Crédits (${ledger.length})`, icon: <Coins size={14} /> }]} />
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 

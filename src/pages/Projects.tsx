@@ -14,7 +14,7 @@ const EMPTY_FORM = {
   campaign_objective: '', target_audience: '', target_market: '',
 };
 
-export default function Projects() {
+export default function Projects({ embedded = false }: { embedded?: boolean }) {
   const toast = useToast();
   const { refreshQuota } = useAuth();
   const [params, setParams] = useSearchParams();
@@ -65,8 +65,12 @@ export default function Projects() {
 
   return (
     <>
-      <PageHeader eyebrow="Production" title="Mes projets" description="Organisez vos campagnes UGC, du brief à la vidéo finale."
-        actions={<Button icon={<Plus size={15} />} onClick={() => setModal(true)}>Nouveau projet</Button>} />
+      {embedded ? (
+        <div className="mb-4 flex justify-end"><Button icon={<Plus size={15} />} onClick={() => setModal(true)}>Nouveau projet</Button></div>
+      ) : (
+        <PageHeader eyebrow="Production" title="Mes projets" description="Organisez vos campagnes UGC, du brief à la vidéo finale."
+          actions={<Button icon={<Plus size={15} />} onClick={() => setModal(true)}>Nouveau projet</Button>} />
+      )}
 
       <Card className="mb-5 flex flex-wrap items-center gap-3 p-4">
         <div className="relative min-w-[220px] flex-1">

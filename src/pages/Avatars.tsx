@@ -9,7 +9,7 @@ import { createAvatar, deleteAvatar, listAvatars, signedStorageUrl, updateAvatar
 import type { Avatar } from '../lib/types';
 
 const EMPTY = {
-  name: '', description: '', provider: 'custom' as Avatar['provider'], provider_avatar_id: '',
+  name: '', description: '', provider: 'muapi' as Avatar['provider'], provider_avatar_id: '',
   voice_id: '', language: 'fr', preview_storage_path: '', is_default: false,
   status: 'active' as Avatar['status'],
 };
@@ -139,8 +139,8 @@ export default function Avatars() {
           <Input label="Nom" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex. Awa – présentatrice" />
           <Textarea label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Style, tenue, personnalité…" />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Select label="Fournisseur" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Avatar['provider'] })}>
-              <option value="custom">Image de référence MuAPI</option><option value="heygen">Ancienne fiche HeyGen</option><option value="fal">Ancienne fiche fal.ai</option>
+            <Select label="Type de fiche" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Avatar['provider'] })}>
+              <option value="muapi">Image de référence MuAPI</option><option value="custom">Référence personnalisée</option><option value="legacy">Fiche historique (lecture seule)</option>
             </Select>
             <Select label="Langue" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })}><option value="fr">Français</option><option value="en">Anglais</option><option value="es">Espagnol</option></Select>
           </div>

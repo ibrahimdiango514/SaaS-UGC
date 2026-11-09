@@ -25,6 +25,23 @@ SaaS francophone de création de contenus UGC : scripts publicitaires générés
 | Administration | Vue d'ensemble, utilisateurs/rôles, suspension, formule, ajustement de crédits, recharges, catalogue, paramètres, audit |
 | Transverse | Interface 100 % française, mobile-first, responsive, états de chargement/erreur/vide, notifications, error boundary |
 
+## 1bis. Nouvelle expérience « Reelora Video Studio »
+
+L'entrée principale `/app/studio` est une refonte originale, premium et mobile-first : identité Reelora (aurora violet/cyan, grain discret, animations `fadeUp`), grande prévisualisation centrale, navigation modulaire horizontale, barre d'action collante et hiérarchie claire. Elle s'inspire fonctionnellement de la section vidéo MuAPI sans en copier l'interface.
+
+| Espace | Route | État |
+| --- | --- | --- |
+| **Video Studio** | `/app/studio` | **Opérationnel** : catalogue MuAPI vérifié, modes, prompt, crédits, suivi et résultat. L'activation d'une génération réelle reste conditionnée au secret serveur `MUAPI_API_KEY`. |
+| **My Generations** | `/app/historique`, `/app/studio/generations` | **Opérationnel** : tâches, modèle, paramètres, description, coût, date, événements, ledger, reprise du suivi et relance avec paramètres similaires. |
+| **My Projects** | `/app/projets`, `/app/studio/projects` | **Opérationnel** : projets, scripts, scènes et rattachement des créations. |
+| **Mes créations enregistrées** | `/app/bibliotheque`, `/app/studio/saved` | **Opérationnel** : lecture, téléchargement, modèle, paramètres, coût, date, rattachement à un projet, relance. Fichiers dans `ugc-assets` privé. |
+| Image Studio, Avatar Studio, Video to Video, Image Generation, Audio Studio, AI Clipping, Lip Sync, Vibe Motion, Body Swap, Cinema Studio, Marketing Studio, Workflows, Agents, Storyboarding | `/app/studio/espace/:section` | **Préparés, non opérationnels** : routes et architecture modulaire en place, aucun fournisseur, aucun bouton de génération, aucun résultat simulé. |
+| Parcours classique 5 étapes | `/app/studio/avance` | Conservé pour ne supprimer aucune fonctionnalité validée. |
+
+Le Video Studio génère dynamiquement ses paramètres depuis `param_schema ∩ input_fields` de chaque modèle : ratio, résolution, durée, vitesse/mode, caméra, images de référence et options spécifiques. Aucun paramètre non accepté n'est affiché ni envoyé. Les modes disponibles sont dérivés des champs réels : **Text to Video** et **Image to Video** avec modèles vérifiés ; **Video to Video** est un espace préparé tant qu'aucun modèle correspondant n'est intégré.
+
+Avant le lancement, une confirmation explicite avec case à cocher reprend le modèle, les paramètres, le coût serveur estimé en crédits, le solde, le solde après réservation et les règles d'idempotence/capture/restitution. Le suivi professionnel affiche brouillon → en attente → soumission fournisseur → génération → traitement du résultat → terminé, avec variantes échec/annulé ; la poursuite après fermeture de page reste assurée par le webhook MuAPI, le worker et le cron livrés.
+
 ---
 
 ## 2. Pile technique
@@ -34,8 +51,8 @@ SaaS francophone de création de contenus UGC : scripts publicitaires générés
 - **Schéma** : `saas_ugc` existant **conservé et réutilisé** (32 tables, 31 vues `security_invoker`) + 8 tables Reelora + 1 table `ugc_video_models` + 9 vues `public.reelora_*`
 - **IA textuelle** : Groq (`llama-3.3-70b-versatile`) — scripts, accroches, dialogues, contenus publicitaires
 - **IA vidéo** : **MuAPI uniquement** (`https://api.muapi.ai/api/v1`, en-tête `x-api-key`). HeyGen et fal.ai ne sont **pas** utilisés.
-- **Tests** : Vitest — 67 tests (`tests/muapi.test.ts`, `credits.test.ts`, `security.test.ts`, `errors.test.ts`, `format.test.ts`, `ui.test.tsx`)
-- **Déploiement** : Netlify (configuration fournie, **non déployé**)
+- **Tests** : Vitest — 85 tests (`tests/muapi.test.ts`, `studio-ux.test.ts`, `credits.test.ts`, `security.test.ts`, `errors.test.ts`, `format.test.ts`, `ui.test.tsx`)
+- **Déploiement** : Preview Netlify de PR #2 `https://deploy-preview-2--saas-ugc-growth.netlify.app` (indépendante de `main`) ; accès soumis à la protection de l'équipe Netlify. Production **non déployée** et `main` inchangé.
 
 Projet Supabase cible : `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Le projet Sofia Immobilier Lab (`yswsildmbeomjlyofnrk`) n'est **jamais** modifié.
 
@@ -95,8 +112,10 @@ Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models
 | `20261108000010_reelora_muapi_sync.sql` | Wrappers PostgREST `reelora_worker_token` / `reelora_sync_video_models` (service-role only) |
 | `20261108000011_reelora_muapi_catalog_cast.sql` | Normalisation `is_enabled`/`is_coming_soon` numériques du catalogue live |
 | `20261108000012_reelora_muapi_progress.sql` | Mirroir de l'état fournisseur dans `result_payload` (vue publique historique à liste de colonnes explicite) |
+| `20261108000013_reelora_studio_library.sql` | RPC RLS `reelora_attach_asset_to_project` : rattacher une création existante à un projet, sans nouvelle architecture de crédits |
+| `20261108000014…00015_reelora_avatar_provider_*.sql` | Alias `muapi`/`custom`/`legacy` pour les fiches d'avatar, valeurs historiques conservées, aucun fournisseur retiré nommé dans l'application |
 
-Versions live correspondantes : `20261108223923 reelora_muapi_v1`, `20261108224022 reelora_muapi_sync`, `20261108224047 reelora_muapi_catalog_cast`, `20261108231047 reelora_muapi_progress`. **Aucune table, vue ni donnée préexistante n'a été supprimée** (test automatisé).
+Versions live correspondantes : `20261108223923 reelora_muapi_v1`, `20261108224022 reelora_muapi_sync`, `20261108224047 reelora_muapi_catalog_cast`, `20261108231047 reelora_muapi_progress`, puis `reelora_studio_library`, `reelora_avatar_provider_alias` et `reelora_avatar_provider_generic`. **Aucune table, vue ni donnée préexistante n'a été supprimée** (test automatisé).
 
 ### Edge Functions déployées (live)
 
@@ -106,6 +125,8 @@ Versions live correspondantes : `20261108223923 reelora_muapi_v1`, `202611082240
 | `reelora-ai` | v2 | `true` |
 | `reelora-video` | v3 | `true` |
 | `reelora-video-worker` | v1 | `false` (jeton Vault) |
+
+> Les sources de `reelora-video` et du worker contiennent des améliorations additives pour la signature serveur des images de référence et l'enrichissement des métadonnées de résultat. Ces versions de source ne sont **pas redéployées** pendant la phase Preview : le frontend reste compatible avec les versions live ci-dessus en transmettant des URL Storage signées. Aucun déploiement backend de production n'a été déclenché.
 
 ---
 
@@ -149,7 +170,7 @@ cp .env.example .env.local        # ajuster VITE_SITE_URL si besoin
 npm ci
 npm run dev                      # http://localhost:5173
 npm run typecheck                # TypeScript strict, sans erreur
-npm test                         # Vitest : 67 tests
+npm test                         # Vitest : 85 tests
 npm run build                    # tsc -b && vite build -> dist/
 npm run preview                  # prévisualisation de la compilation
 ```
@@ -174,8 +195,8 @@ supabase functions deploy reelora-video-worker --no-verify-jwt
 | Suite | Résultat |
 | --- | --- |
 | `npm run typecheck` | ✅ 0 erreur |
-| `npm test` | ✅ **67/67 tests**, 6 fichiers — 25 tests MuAPI (auth, clé absente, solde insuffisant, réservation, absence de double débit/double soumission, soumission conforme, suivi, enregistrement du résultat, remboursement sur échec, isolation utilisateurs, protection des secrets, webhook + cron), 7 tests crédits/estimation, 13 sécurité, 6 erreurs, 10 formatage, 6 UI |
-| `npm run build` | ✅ `dist/index.html`, CSS 42,78 kB, JS 623,23 kB (170,06 kB gzip) |
+| `npm test` | ✅ **85/85 tests**, 7 fichiers — 28 tests MuAPI (auth, clé absente, solde insuffisant, réservation, absence de double débit/double soumission, images Storage signées, `last_image` conditionnel, métadonnées de résultat, suivi, remboursement, webhook + cron), 11 tests UX Studio, 17 sécurité, 7 crédits/estimation, 6 erreurs, 10 formatage, 6 UI |
+| `npm run build` | ✅ `dist/index.html` 1,25 kB, CSS 51,49 kB (9,25 kB gzip), JS 702,09 kB (190,59 kB gzip), 1668 modules |
 | `GET /functions/v1/reelora-health` | ✅ `{"groq":false,"muapi":false,"supabase":true,"worker":true}` |
 | `GET /functions/v1/reelora-video` sans jeton | ✅ `UNAUTHORIZED_NO_AUTH_HEADER` (passerelle JWT) |
 | `GET /functions/v1/reelora-video-worker` | ✅ `METHOD_NOT_ALLOWED` (POST uniquement, fonction déployée) |
@@ -191,14 +212,14 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 
 ## 7. Configuration requise (intervention utilisateur)
 
-1. **Obligatoire — `MUAPI_API_KEY`** : secret Supabase Edge Functions, jamais `VITE_*`. Sans lui, `reelora-video` répond `MUAPI_NOT_CONFIGURED`, marque la tâche `failed` et restitue les crédits. **Aucune génération vidéo réelle n'a pu être testée** tant que ce secret n'est pas fourni.
+1. **Obligatoire — `MUAPI_API_KEY`** : secret Supabase Edge Functions, jamais `VITE_*`. Sans lui, `reelora-video` répond `MUAPI_NOT_CONFIGURED`, marque la tâche `failed` et restitue les crédits. **Aucune génération vidéo réelle n'a pu être testée** tant que ce secret n'est pas fourni. Une valeur littérale a été évoquée dans la demande alors que le texte précisait aussi qu'elle serait fournie ultérieurement : **aucune valeur n'a été recopiée, commitée ou définie comme secret**. Une confirmation explicite est demandée avant de l'activer côté serveur.
 2. **Obligatoire — `GROQ_API_KEY`** : sans lui, `reelora-ai` répond `GROQ_NOT_CONFIGURED`. Un script saisi manuellement reste utilisable.
-3. **Vérifier le catalogue live** : après ajout de la clé, ouvrir l'UGC Studio → étape 4. `reelora-video {action:"models"}` interroge `GET /api/v1/models` et met à jour les coûts/disponibilités. Si un modèle vérifié passe `is_enabled:0`, il est masqué automatiquement.
-4. **Tester une vraie génération** avec un compte disposant d'au moins 9 crédits, un projet, un script, puis confirmer à l'étape 5. Vérifier le `request_id` dans l'historique, la vidéo dans la bibliothèque et les écritures `reserve` → `capture` dans le ledger.
+3. **Vérifier le catalogue live** : après ajout de la clé, ouvrir le Video Studio → « Catalogue MuAPI vérifié » → Actualiser. `reelora-video {action:"models"}` interroge `GET /api/v1/models` et met à jour les coûts/disponibilités. Si un modèle vérifié passe `is_enabled:0`, il est masqué automatiquement.
+4. **Tester une vraie génération** avec un compte disposant d'au moins 9 crédits, un projet, une description d'au moins 20 caractères, puis cocher la confirmation explicite. Vérifier le `request_id` dans My Generations, la vidéo dans Mes créations enregistrées et les écritures `reserve` → `capture` dans le ledger.
 5. **Webhook** : `reelora-video` construit `?webhook=` automatiquement à partir de `SUPABASE_URL`. Si l'URL publique du projet diffère, définir `REELORA_WEBHOOK_BASE_URL`. Le cron reste actif même si MuAPI n'appelle pas le webhook.
 6. **`site_url`** du projet partagé vaut encore `https://sbc-ai-agency-dashbord.netlify.app`. Reelora passe `emailRedirectTo` explicite et l'allowlist contient `https://reelora.netlify.app/**`. Ajouter l'origine de production avant déploiement.
 7. **Paiement** : les recharges restent `pending` jusqu'à confirmation manuelle par un administrateur. Aucune passerelle automatique simulée.
-8. **Déploiement Netlify** : préparé (`netlify.toml`, `public/_redirects`, `NODE_VERSION=22`) mais **volontairement non effectué**. Renseigner les 3 variables `VITE_*` dans l'environnement Netlify.
+8. **Preview Netlify** : la PR #2 publie automatiquement `https://deploy-preview-2--saas-ugc-growth.netlify.app`, sans toucher `main` ni la production. L'URL est actuellement protégée par la politique d'accès de l'équipe Netlify : le propriétaire doit ouvrir la Preview avec son compte Netlify ou désactiver cette protection pour un test public. Aucun déploiement de production n'a été déclenché.
 
 ---
 
@@ -214,7 +235,7 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 
 ## 9. Bonnes pratiques d'usage
 
-- Un script doit être généré ou saisi avant de lancer une vidéo. Un modèle image → vidéo exige une image de référence (avatar avec image ou URL HTTPS publique) ; un modèle texte → vidéo n'en a pas besoin. L'UGC Studio affiche une check-list et désactive le bouton si une condition manque.
+- Une description de scène est obligatoire ; le script voix off Groq est optionnel et sert de contexte. Un modèle image → vidéo exige une image de référence importée dans Storage privé ; un modèle texte → vidéo n'en a pas besoin. Le Video Studio désactive le lancement tant qu'une condition réelle manque.
 - Le coût en crédits **et** le coût fournisseur estimé sont affichés avant une confirmation explicite. Les crédits ne sont jamais débités pour une génération échouée ; l'historique détaille chaque réservation, consommation et restitution.
 - Le suivi continue côté serveur (webhook + cron) : fermer l'onglet n'interrompt pas la génération. Un job en cours se reprend depuis l'historique ou `?job=<id>`.
 - Les modèles de prompts système sont en lecture seule : copiez-les pour les personnaliser.

@@ -263,6 +263,24 @@ export async function uploadAvatarPreview(workspaceId: string, file: File): Prom
   return path;
 }
 
+/**
+ * Upload a Video Studio reference image into the SAME private bucket and
+ * workspace prefix. The Edge Function signs this path server-side at submit
+ * time; no public URL is created and no provider key reaches the browser.
+ */
+export async function uploadReferenceImage(workspaceId: string, file: File): Promise<string> {
+  const ext = (file.name.split('.').pop()?.toLowerCase() || 'png').replace(/[^a-z0-9]/g, '') || 'png';
+  const path = `${workspaceId}/references/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw new AppError(humanizeError(error.message), 'STORAGE_ERROR');
+  return path;
+}
+
+/** Attach an already-generated asset to one of the user's projects (RLS-checked RPC). */
+export async function attachAssetToProject(assetId: string, projectId: string): Promise<boolean> {
+  return rpc<boolean>('reelora_attach_asset_to_project', { p_asset_id: assetId, p_project_id: projectId });
+}
+
 export async function signedStorageUrl(path: string, expires = 3600): Promise<string> {
   const { data, error } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(path, expires);
   if (error) throw new AppError(humanizeError(error.message), 'STORAGE_ERROR');
@@ -365,6 +383,13 @@ export function videoStatus(jobId: string): Promise<VideoActionResult> {
 export async function listJobs(limit = 100): Promise<GenerationJob[]> {
   return unwrap<GenerationJob[]>(
     supabase.from('ugc_generation_jobs').select('*').order('created_at', { ascending: false }).limit(limit) as unknown as PromiseLike<AnyResult>,
+  );
+}
+
+/** RLS-scoped single job lookup for deep links and "reuse these parameters". */
+export async function getJob(id: string): Promise<GenerationJob | null> {
+  return unwrap<GenerationJob | null>(
+    supabase.from('ugc_generation_jobs').select('*').eq('id', id).maybeSingle() as unknown as PromiseLike<AnyResult>,
   );
 }
 

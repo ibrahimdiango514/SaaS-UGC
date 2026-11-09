@@ -83,6 +83,36 @@ describe('configuration des Edge Functions', () => {
   });
 });
 
+describe('Video Studio : frontière des secrets et espaces non opérationnels', () => {
+  const frontend = frontendCode();
+  it('aucun fournisseur vidéo retiré n’est nommé dans le frontend', () => {
+    expect(frontend.toLowerCase()).not.toContain('heygen');
+    expect(frontend.toLowerCase()).not.toContain('fal.ai');
+  });
+  it('le nouveau studio ne lit ni clé serveur ni en-tête fournisseur', () => {
+    expect(frontend).not.toContain('VITE_MUAPI');
+    expect(frontend).not.toContain('x-api-key');
+    expect(frontend).not.toContain('MUAPI_API_KEY=');
+  });
+  it('la navigation marque explicitement les espaces préparés', () => {
+    const sections = read('src/studio/sections.ts');
+    expect(sections).toContain("status: 'prepared'");
+    expect(sections).toContain('non opérationnel');
+    expect(sections).toContain("id: 'video-to-video'");
+  });
+});
+
+describe('bibliothèque Reelora : RPC additive et RLS', () => {
+  it('l’attachement à un projet est défini, vérifié et réservé aux utilisateurs authentifiés', () => {
+    const sql = read('supabase/migrations/20261108000013_reelora_studio_library.sql');
+    expect(sql).toContain('function public.reelora_attach_asset_to_project(');
+    expect(sql).toContain('ugc_private.can_edit_workspace');
+    expect(sql).toContain('grant execute on function public.reelora_attach_asset_to_project(uuid, uuid) to authenticated');
+    expect(sql).not.toMatch(/disable row level security/i);
+    expect(sql).not.toMatch(/drop\s+table/i);
+  });
+});
+
 describe('contrat RPC frontend ↔ migrations', () => {
   const migrations = readdirSync(join(root, 'supabase/migrations'))
     .filter((f) => f.endsWith('.sql'))

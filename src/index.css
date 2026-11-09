@@ -30,7 +30,7 @@
     @apply inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink;
   }
   .btn-primary {
-    @apply bg-gradient-to-r from-brand-500 to-brand-600 text-white shadow-glow hover:from-brand-400 hover:to-brand-500 active:scale-[0.98];
+    @apply bg-gradient-to-r from-brand-500 to-brand-600 text-white shadow-glow hover:from-brand-400 hover:to-brand-500 active:scale-[0.98] disabled:from-brand-500/40 disabled:to-brand-600/40 disabled:text-white/70 disabled:shadow-none disabled:active:scale-100;
   }
   .btn-secondary { @apply bg-white/10 text-white hover:bg-white/15 active:scale-[0.98]; }
   .btn-ghost { @apply bg-transparent text-slate-300 hover:bg-white/[0.08] hover:text-white; }

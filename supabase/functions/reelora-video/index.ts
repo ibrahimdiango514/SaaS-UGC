@@ -114,6 +114,16 @@ async function loadScript(projectId: string): Promise<string> {
   );
   return str(rows[0]?.script_text, 4000);
 }
+/**
+ * A reference image may be uploaded to the private Reelora bucket. Only paths
+ * inside the job's own workspace prefix are signed and forwarded to MuAPI.
+ */
+function workspaceImagePath(raw: unknown, workspaceId: string): string {
+  const path = str(raw, 500).replace(/^\/+/, '');
+  const ws = str(workspaceId, 80);
+  if (!ws || !path.startsWith(`${ws}/`) || path.includes('..') || path.includes('\\')) return '';
+  return path;
+}
 async function signStoragePath(path: string): Promise<string | null> {
   const res = await fetch(`${SUPABASE_URL()}/storage/v1/object/sign/${BUCKET}/${path}`, {
     method: "POST", headers: svcHeaders({ "Content-Type": "application/json" }),
@@ -133,13 +143,19 @@ interface ParamDef { type: string; options?: unknown[]; min?: number; max?: numb
 function asArray(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
-function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: string): Json {
+function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: string, lastImageUrl = ""): Json {
   const fields = asArray(model.input_fields);
   const required = asArray(model.required_fields);
   const body: Json = { prompt };
-  if (required.includes("image_url")) {
-    if (!imageUrl) throw new Error("IMAGE_MISSING");
-    body.image_url = imageUrl;
+  if (fields.includes("image_url")) {
+    if (required.includes("image_url") && !imageUrl) throw new Error("IMAGE_MISSING");
+    if (imageUrl) body.image_url = imageUrl;
+  }
+  // `last_image` is an optional, model-specific reference frame. It is sent
+  // ONLY when the verified catalog explicitly declares that input field.
+  if (fields.includes("last_image")) {
+    if (required.includes("last_image") && !lastImageUrl) throw new Error("LAST_IMAGE_MISSING");
+    if (lastImageUrl) body.last_image = lastImageUrl;
   }
   const schema = (model.param_schema && typeof model.param_schema === "object"
     ? model.param_schema : {}) as Record<string, ParamDef>;
@@ -187,7 +203,8 @@ function friendly(code: string, detail: string): string {
     MUAPI_NO_REQUEST_ID: "MuAPI n’a pas renvoyé d’identifiant de tâche. Les crédits réservés ont été restitués.",
     MODEL_UNAVAILABLE: "Ce modèle vidéo MuAPI n’est plus disponible. Choisissez un autre modèle.",
     MODEL_NOT_FOUND: "Modèle vidéo MuAPI inconnu.",
-    IMAGE_MISSING: "Ce modèle exige une image de référence. Ajoutez une image à l’avatar ou choisissez un modèle texte → vidéo.",
+    IMAGE_MISSING: "Ce modèle exige une image de référence. Importez une image ou choisissez un modèle texte → vidéo.",
+    LAST_IMAGE_MISSING: "Ce modèle exige une image finale de référence.",
     SCRIPT_MISSING: "Générez ou saisissez un script avant de lancer la vidéo.",
     SUBMISSION_ALREADY_CLAIMED: "La soumission est déjà en cours. Actualisez le suivi.",
   };
@@ -291,18 +308,28 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
   if (script.length < 10) return await failJob(jobId, userId, "SCRIPT_MISSING", "Script absent.");
   const prompt = buildPrompt(payload, script);
 
-  let imageUrl = str(payload.image_url, 2000);
-  if (!imageUrl) {
+  const workspaceId = str(job.workspace_id, 80);
+  const modelFields = asArray(model.input_fields);
+  const acceptsImage = modelFields.includes("image_url");
+  const acceptsLastImage = modelFields.includes("last_image");
+  let imageUrl = acceptsImage ? str(payload.image_url, 2000) : "";
+  const imagePath = acceptsImage ? workspaceImagePath(payload.image_storage_path, workspaceId) : "";
+  if (!imageUrl && imagePath) imageUrl = (await signStoragePath(imagePath)) ?? "";
+  if (!imageUrl && acceptsImage) {
     const avatar = await loadAvatar(str(payload.avatar_id, 80));
     imageUrl = str(avatar?.preview_url, 2000);
-    const avatarPath = str(avatar?.preview_storage_path, 500);
+    const avatarPath = workspaceImagePath(avatar?.preview_storage_path, workspaceId);
     if (!imageUrl && avatarPath) {
       imageUrl = (await signStoragePath(avatarPath)) ?? "";
     }
   }
 
+  let lastImageUrl = acceptsLastImage ? str(payload.last_image_url, 2000) : "";
+  const lastImagePath = acceptsLastImage ? workspaceImagePath(payload.last_image_storage_path, workspaceId) : "";
+  if (!lastImageUrl && lastImagePath) lastImageUrl = (await signStoragePath(lastImagePath)) ?? "";
+
   let submitBody: Json;
-  try { submitBody = buildMuapiBody(model, payload, prompt, imageUrl); }
+  try { submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl); }
   catch (e) {
     const code = e instanceof Error ? e.message.split(":")[0] : "INVALID_INPUT";
     return await failJob(jobId, userId, code, e instanceof Error ? e.message : String(e));

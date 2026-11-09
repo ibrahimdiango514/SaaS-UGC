@@ -17,7 +17,7 @@ interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean }
 const NAV: NavItem[] = [
   { to: '/app', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  { to: '/app/studio', label: 'UGC Studio', icon: Clapperboard },
+  { to: '/app/studio', label: 'Video Studio', icon: Clapperboard },
   { to: '/app/avatars', label: 'Avatars', icon: Users },
   { to: '/app/scripts', label: 'Scripts IA', icon: Wand2 },
   { to: '/app/prompts', label: 'Prompts', icon: BookOpen },

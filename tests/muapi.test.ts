@@ -314,6 +314,51 @@ describe('Soumission MuAPI réelle (mockée) et paramètres vérifiés', () => {
     expect(muapiSubmits()[0].body?.image_url).toBe('https://cdn.example.com/product.png');
   });
 
+  it('signe côté serveur une image de référence importée dans Storage privé', async () => {
+    state.model = SEEDANCE_I2V as unknown as Record<string, unknown>;
+    state.job = baseJob({ request_payload: { ...(state.job.request_payload as Record<string, unknown>),
+      model_id: 'seedance-lite-i2v', image_url: null, avatar_id: null,
+      image_storage_path: `${WORKSPACE_ID}/references/first.png` } });
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(200);
+    const signs = calls.filter((c) => c.url.includes(`/storage/v1/object/sign/ugc-assets/${WORKSPACE_ID}/references/first.png`));
+    expect(signs).toHaveLength(1);
+    const body = muapiSubmits()[0].body ?? {};
+    expect(String(body.image_url)).toContain('/storage/v1/');
+    expect(body).not.toHaveProperty('last_image');
+  });
+
+  it('refuse un chemin d’image hors du workspace sans le signer ni soumettre', async () => {
+    state.model = SEEDANCE_I2V as unknown as Record<string, unknown>;
+    state.job = baseJob({ request_payload: { ...(state.job.request_payload as Record<string, unknown>),
+      model_id: 'seedance-lite-i2v', image_url: null, avatar_id: null,
+      image_storage_path: 'autre-workspace/secret.png' } });
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(503);
+    expect((await bodyOf(r)).error).toMatchObject({ code: 'IMAGE_MISSING' });
+    expect(calls.some((c) => c.url.includes('/storage/v1/object/sign/'))).toBe(false);
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('envoie last_image uniquement lorsque le modèle vérifié le déclare', async () => {
+    state.model = SEEDANCE_I2V as unknown as Record<string, unknown>;
+    state.job = baseJob({ request_payload: { ...(state.job.request_payload as Record<string, unknown>),
+      model_id: 'seedance-lite-i2v', image_url: 'https://cdn.example.com/first.png',
+      last_image_storage_path: `${WORKSPACE_ID}/references/last.png` } });
+    const withField = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(withField.status).toBe(200);
+    expect(String(muapiSubmits()[0].body?.last_image)).toContain('/storage/v1/');
+
+    calls.length = 0;
+    state.model = SEEDANCE_T2V as unknown as Record<string, unknown>;
+    state.job = baseJob({ request_payload: { ...(state.job.request_payload as Record<string, unknown>),
+      model_id: 'seedance-lite-t2v', last_image_storage_path: `${WORKSPACE_ID}/references/last.png` } });
+    const withoutField = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(withoutField.status).toBe(200);
+    expect(muapiSubmits()[0].body).not.toHaveProperty('last_image');
+    expect(calls.some((c) => c.url.includes('/storage/v1/object/sign/'))).toBe(false);
+  });
+
   it('une erreur MuAPI est restituée sans exposer la clé et rembourse les crédits', async () => {
     state.submitStatus = 401;
     state.submitResponse = { message: `invalid x-api-key ${MUAPI_KEY}` };
@@ -392,6 +437,9 @@ describe('Worker serveur : webhook, cron, résultat, remboursement', () => {
     const finalize = rpcCalls('reelora_finalize_generation');
     expect(finalize).toHaveLength(1);
     expect(finalize[0].body).toMatchObject({ p_status: 'succeeded', p_storage_path: `${WORKSPACE_ID}/${JOB_ID}.mp4`, p_mime_type: 'video/mp4' });
+    const resultPayload = finalize[0].body?.p_result_payload as Record<string, unknown>;
+    expect(resultPayload).toMatchObject({ model_id: 'seedance-lite-t2v', credits_reserved: 9 });
+    expect(resultPayload.params).toMatchObject({ aspect_ratio: '9:16' });
     // Aucun remboursement abusif sur un succès.
     expect(rpcCalls('reelora_release_video_quota')).toHaveLength(0);
   });

@@ -119,7 +119,8 @@ export interface Avatar {
   created_by: string;
   name: string;
   description: string | null;
-  provider: 'heygen' | 'fal' | 'custom';
+  /** `legacy` preserves already-stored rows without exposing a retired provider name. */
+  provider: 'muapi' | 'custom' | 'legacy';
   provider_avatar_id: string | null;
   voice_id: string | null;
   preview_storage_path: string | null;

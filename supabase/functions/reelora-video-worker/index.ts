@@ -161,11 +161,17 @@ async function reconcile(job: Json): Promise<string> {
   if (result.state === "completed" && result.outputs.length) {
     try {
       const stored = await uploadVideo(jobId, str(job.workspace_id, 80), result.outputs[0]);
+      const requestPayload = job.request_payload && typeof job.request_payload === "object"
+        ? job.request_payload as Json : {};
       await finalize(jobId, "succeeded", {
         storage_path: stored.path, file_size_bytes: stored.size,
         result_payload: {
-          provider: "muapi", provider_job_id: requestId, model_id: str(job.request_payload && typeof job.request_payload === "object" ? (job.request_payload as Json).model_id : null, 120),
+          provider: "muapi", provider_job_id: requestId, model_id: str(requestPayload.model_id, 120),
           source_url: result.outputs[0], muapi_cost: result.cost, provider_status: result.state,
+          params: requestPayload.params && typeof requestPayload.params === "object" ? requestPayload.params : {},
+          visual_prompt: str(requestPayload.visual_prompt, 1000),
+          mode: str(requestPayload.mode, 40),
+          credits_reserved: Number(job.credits_reserved ?? 0),
         },
       });
       return "succeeded";
