@@ -1,0 +1,191 @@
+{
+  "generatedAt": "2026-11-09T08:04:09.517Z",
+  "base": "http://127.0.0.1:4181",
+  "viewportDesktop": "1440×1000",
+  "viewportMobile": "390×844",
+  "interactions": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "items": [
+      {
+        "name": "État vide : 5 secteurs, vraies images Démo, catégories verrouillées, solde UGC",
+        "pass": true,
+        "detail": {
+          "fiveSectors": true,
+          "demoImages": true,
+          "locked": true,
+          "muapi": true,
+          "credits": true
+        }
+      },
+      {
+        "name": "Une seule instruction → plan de production structuré + devis serveur",
+        "pass": true
+      },
+      {
+        "name": "Réglages compatibles + état Groq explicite sans simulation",
+        "pass": true
+      },
+      {
+        "name": "Qualité Rapide → devis backend 9 crédits / 0,100 USD",
+        "pass": true
+      },
+      {
+        "name": "Confirmation obligatoire du devis avant toute génération (aucun lancement)",
+        "pass": true,
+        "detail": {
+          "model": true,
+          "params": true,
+          "credits": true,
+          "providerCost": true,
+          "locked": true,
+          "checkbox": true
+        }
+      },
+      {
+        "name": "Éditeur : projet Démo distinct, timeline 3 pistes, assistant, export refusé sans média",
+        "pass": true,
+        "detail": {
+          "demo": true,
+          "timeline": true,
+          "assist": true,
+          "missing": true,
+          "render": true,
+          "exportDisabled": true
+        }
+      },
+      {
+        "name": "Timeline interactive : réordonnancement + suggestion acceptée/refusable",
+        "pass": true,
+        "detail": {
+          "sceneCountBefore": "4"
+        }
+      },
+      {
+        "name": "Bibliothèque : aucune création fictive présentée comme réelle",
+        "pass": true
+      },
+      {
+        "name": "Historique : mode, qualité, projet, résultat et actions éditeur",
+        "pass": true
+      },
+      {
+        "name": "Parcours détaillé existant conservé et relié au nouveau studio",
+        "pass": true
+      }
+    ]
+  },
+  "files": [
+    "screenshots/01-video-studio-vide-desktop.jpg",
+    "screenshots/02-video-studio-vide-desktop-full.jpg",
+    "screenshots/03-plan-et-devis-desktop.jpg",
+    "screenshots/04-reglages-avances-desktop.jpg",
+    "screenshots/05-devis-rapide-desktop.jpg",
+    "screenshots/06-confirmation-devis-desktop.jpg",
+    "screenshots/07-editeur-timeline-desktop.jpg",
+    "screenshots/08-editeur-desktop-full.jpg",
+    "screenshots/09-editeur-apres-interaction.jpg",
+    "screenshots/10-bibliotheque-vide.jpg",
+    "screenshots/11-historique-enrichi.jpg",
+    "screenshots/12-parcours-detaille-conserve.jpg",
+    "screenshots/13-video-studio-mobile.jpg",
+    "screenshots/14-editeur-mobile.jpg"
+  ],
+  "titles": [
+    {
+      "file": "screenshots/01-video-studio-vide-desktop.jpg",
+      "title": "Nouveau Video Generation Studio — état vide desktop"
+    },
+    {
+      "file": "screenshots/02-video-studio-vide-desktop-full.jpg",
+      "title": "État vide desktop — page complète"
+    },
+    {
+      "file": "screenshots/03-plan-et-devis-desktop.jpg",
+      "title": "Plan de production et devis serveur"
+    },
+    {
+      "file": "screenshots/04-reglages-avances-desktop.jpg",
+      "title": "Réglages avancés, compatibilités et état Groq"
+    },
+    {
+      "file": "screenshots/05-devis-rapide-desktop.jpg",
+      "title": "Devis backend qualité Rapide"
+    },
+    {
+      "file": "screenshots/06-confirmation-devis-desktop.jpg",
+      "title": "Confirmation explicite du devis — bouton verrouillé"
+    },
+    {
+      "file": "screenshots/07-editeur-timeline-desktop.jpg",
+      "title": "AI Video Editor — timeline et pistes"
+    },
+    {
+      "file": "screenshots/08-editeur-desktop-full.jpg",
+      "title": "AI Video Editor — page complète desktop"
+    },
+    {
+      "file": "screenshots/09-editeur-apres-interaction.jpg",
+      "title": "Éditeur après réordonnancement et suggestion"
+    },
+    {
+      "file": "screenshots/10-bibliotheque-vide.jpg",
+      "title": "Bibliothèque sans création fictive"
+    },
+    {
+      "file": "screenshots/11-historique-enrichi.jpg",
+      "title": "Historique enrichi et actions post-génération"
+    },
+    {
+      "file": "screenshots/12-parcours-detaille-conserve.jpg",
+      "title": "Parcours détaillé conservé"
+    },
+    {
+      "file": "screenshots/13-video-studio-mobile.jpg",
+      "title": "Video Studio mobile 390×844"
+    },
+    {
+      "file": "screenshots/14-editeur-mobile.jpg",
+      "title": "AI Video Editor mobile 390×844"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "backendCalls": 56,
+  "edgeActions": [
+    "models",
+    "estimate",
+    "estimate",
+    "models",
+    "estimate",
+    "models",
+    "estimate"
+  ],
+  "rpcCalls": [
+    "reelora_bootstrap",
+    "reelora_quota_status",
+    "reelora_bootstrap",
+    "reelora_quota_status",
+    "reelora_bootstrap",
+    "reelora_quota_status",
+    "reelora_bootstrap",
+    "reelora_quota_status",
+    "reelora_bootstrap",
+    "reelora_quota_status",
+    "reelora_bootstrap",
+    "reelora_quota_status"
+  ],
+  "externalHosts": [],
+  "muapiCalls": [],
+  "realGenerationLaunched": false,
+  "jobsCreated": 0,
+  "serverState": {
+    "muapiSecretPresent": true,
+    "groqSecretPresent": false,
+    "realGenerationLaunched": false,
+    "jobsCreated": 0,
+    "creditsSpent": 0,
+    "note": "Fixtures de navigateur uniquement : aucun appel MuAPI/Groq réel, aucun débit, aucun job créé."
+  }
+}

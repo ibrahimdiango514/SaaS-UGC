@@ -21,6 +21,8 @@ import Subscription from './pages/Subscription';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
 import VideoStudio from './studio/VideoStudio';
+import GenerationStudio from './studio/GenerationStudio';
+import VideoEditor from './studio/VideoEditor';
 import { PreparedSpace } from './studio/components/PreparedSpace';
 import { StudioGenerations, StudioLegacy, StudioProjects, StudioSaved } from './studio/StudioPages';
 
@@ -44,7 +46,9 @@ export default function App() {
                   <Route index element={<Dashboard />} />
                   <Route path="projets" element={<StudioProjects />} />
                   <Route path="projets/:id" element={<ProjectDetail />} />
-                  <Route path="studio" element={<VideoStudio />} />
+                  <Route path="studio" element={<GenerationStudio />} />
+                  <Route path="studio/classique" element={<VideoStudio />} />
+                  <Route path="studio/montage" element={<VideoEditor />} />
                   <Route path="studio/avance" element={<StudioLegacy />} />
                   <Route path="studio/generations" element={<StudioGenerations />} />
                   <Route path="studio/projects" element={<StudioProjects />} />

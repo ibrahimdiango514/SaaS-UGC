@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, ArrowRight, CheckCircle2, Clapperboard, Clock3, Coins, Download, Film,
-  FolderKanban, Image as ImageIcon, Layers3, Lock, Play, Plus, RefreshCw, Sparkles, Square, Wand2,
+  FolderKanban, Image as ImageIcon, Layers3, Lock, Play, Plus, RefreshCw, Scissors, Sparkles, Square, Wand2,
 } from 'lucide-react';
 import {
   Badge, Banner, Button, Card, ErrorState, Input, LoadingState, Modal, Select, cn,
@@ -390,9 +390,11 @@ export default function VideoStudio() {
   const resultCredits = finishedJob?.credits_charged || finishedJob?.credits_reserved || estimate?.credits_cost || 0;
 
   return (
-    <StudioShell title="Video Studio" actions={<>
+    <StudioShell title="Video Studio · parcours détaillé" actions={<>
+      <Link to="/app/studio" className="btn btn-primary btn-sm"><Sparkles size={13} /> Nouveau studio</Link>
+      <Link to="/app/studio/montage" className="btn btn-outline btn-sm"><Scissors size={13} /> Éditeur</Link>
       <Link to="/app/historique" className="btn btn-outline btn-sm"><Clock3 size={13} /> Mes générations</Link>
-      <Link to="/app/studio/avance" className="btn btn-ghost btn-sm"><Wand2 size={13} /> Parcours classique</Link>
+      <Link to="/app/studio/avance" className="btn btn-ghost btn-sm"><Wand2 size={13} /> Parcours 5 étapes</Link>
     </>}>
       {health?.muapi === false && (
         <div className="mb-4"><Banner tone="warning" title="Activation MuAPI en attente">

@@ -276,6 +276,18 @@ export async function uploadReferenceImage(workspaceId: string, file: File): Pro
   return path;
 }
 
+/**
+ * Upload an editor-imported video/audio clip into the same private Storage
+ * bucket. Signed URLs are created on demand; no public URL is exposed.
+ */
+export async function uploadEditorMedia(workspaceId: string, file: File): Promise<string> {
+  const ext = (file.name.split('.').pop()?.toLowerCase() || 'mp4').replace(/[^a-z0-9]/g, '') || 'mp4';
+  const path = `${workspaceId}/editor/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw new AppError(humanizeError(error.message), 'STORAGE_ERROR');
+  return path;
+}
+
 /** Attach an already-generated asset to one of the user's projects (RLS-checked RPC). */
 export async function attachAssetToProject(assetId: string, projectId: string): Promise<boolean> {
   return rpc<boolean>('reelora_attach_asset_to_project', { p_asset_id: assetId, p_project_id: projectId });
