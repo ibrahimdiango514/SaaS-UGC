@@ -158,6 +158,19 @@ describe('Pagination réelle de l’historique', () => {
     expect(range).toHaveBeenCalledWith(50, 100);
   });
 
+  it('limite les générations chargées aux identifiants du projet demandé', async () => {
+    const range = vi.fn().mockResolvedValue({ data: [], error: null });
+    const eq = vi.fn(() => ({ range }));
+    const order = vi.fn(() => ({ eq }));
+    const select = vi.fn(() => ({ order }));
+    mocks.from.mockReturnValue({ select });
+
+    await expect(listJobs(200, 0, undefined, PROJECT_ID)).resolves.toEqual([]);
+
+    expect(eq).toHaveBeenCalledWith('project_id', PROJECT_ID);
+    expect(range).toHaveBeenCalledWith(0, 199);
+  });
+
   it('charge les mouvements de crédits par plage ordonnée', async () => {
     const range = vi.fn().mockResolvedValue({ data: [], error: null });
     const order = vi.fn(() => ({ range }));

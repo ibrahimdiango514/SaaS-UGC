@@ -516,11 +516,17 @@ export function videoStatus(jobId: string): Promise<VideoActionResult> {
   return invokeEdge<VideoActionResult>('reelora-video', { action: 'status', job_id: jobId });
 }
 
-export async function listJobs(limit = 100, offset = 0, status?: GenerationJob['status']): Promise<GenerationJob[]> {
+export async function listJobs(
+  limit = 100,
+  offset = 0,
+  status?: GenerationJob['status'],
+  projectId?: string,
+): Promise<GenerationJob[]> {
   const start = Math.max(0, Math.floor(offset));
   const pageSize = Math.max(1, Math.floor(limit));
   let query = supabase.from('ugc_generation_jobs').select('*').order('created_at', { ascending: false });
   if (status) query = query.eq('status', status);
+  if (projectId) query = query.eq('project_id', projectId);
   return unwrap<GenerationJob[]>(
     query.range(start, start + pageSize - 1) as unknown as PromiseLike<AnyResult>,
   );

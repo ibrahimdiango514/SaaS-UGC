@@ -707,6 +707,9 @@ function ProvidersView({ statuses }: { statuses: BusinessProviderStatus[] | null
 
 export default function BusinessGrowWorkspace() {
   const { user, session, workspace, workspaceId } = useAuth();
+  const accountScope = `${user?.id ?? ''}:${workspaceId ?? ''}`;
+  const hasSession = Boolean(user && session);
+  const sessionToken = session?.access_token ?? null;
   const [section, setSection] = useState<BusinessSection>('chat');
   const [providers, setProviders] = useState<BusinessProviderStatus[] | null>(null);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
@@ -720,24 +723,57 @@ export default function BusinessGrowWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const messageLoadSequence = useRef(0);
+  const accountScopeRef = useRef(accountScope);
+  const workspaceLoadSequence = useRef(0);
+  const conversationLoadSequence = useRef(0);
+  const statusLoadSequence = useRef(0);
+  const memoryLoadSequence = useRef(0);
+
+  useEffect(() => {
+    accountScopeRef.current = accountScope;
+    workspaceLoadSequence.current += 1;
+    conversationLoadSequence.current += 1;
+    statusLoadSequence.current += 1;
+    memoryLoadSequence.current += 1;
+    messageLoadSequence.current += 1;
+    setProviders(null);
+    setConversations([]);
+    setSelectedConversationId(null);
+    setMessages([]);
+    setMemory(null);
+    setBackendReady(false);
+    setLoadingMessages(false);
+    setLoadingMemory(false);
+    setBusy(false);
+    setError(null);
+    setMemoryError(null);
+  }, [accountScope]);
 
   const loadConversations = useCallback(async () => {
+    const requestId = ++conversationLoadSequence.current;
+    const requestScope = accountScope;
     const result = await businessGrowApi.listConversations();
+    if (requestId !== conversationLoadSequence.current || accountScopeRef.current !== requestScope) return;
     setConversations(result.conversations);
     setSelectedConversationId((current) =>
       current && result.conversations.some((conversation) => conversation.id === current)
         ? current
         : result.conversations[0]?.id ?? null,
     );
-  }, []);
+  }, [accountScope]);
 
   const loadStatus = useCallback(async () => {
+    const requestId = ++statusLoadSequence.current;
+    const requestScope = accountScope;
     const result = await businessGrowApi.getStatus();
+    if (requestId !== statusLoadSequence.current || accountScopeRef.current !== requestScope) return;
     setProviders(result.providers);
-  }, []);
+  }, [accountScope]);
 
   const refreshWorkspace = useCallback(async () => {
-    if (!user || !session) {
+    const requestId = ++workspaceLoadSequence.current;
+    const requestScope = accountScope;
+    if (!hasSession) {
       setBackendReady(false);
       setProviders(null);
       setConversations([]);
@@ -749,6 +785,7 @@ export default function BusinessGrowWorkspace() {
     setBackendReady(false);
     setError(null);
     const [statusResult, conversationsResult] = await Promise.allSettled([loadStatus(), loadConversations()]);
+    if (requestId !== workspaceLoadSequence.current || accountScopeRef.current !== requestScope) return;
     if (statusResult.status === 'fulfilled' && conversationsResult.status === 'fulfilled') {
       setBackendReady(true);
       return;
@@ -759,7 +796,7 @@ export default function BusinessGrowWorkspace() {
       : conversationsResult.status === 'rejected' && conversationsResult.reason instanceof Error
         ? conversationsResult.reason.message
         : 'Le backend Business Grow n’est pas encore installé ou accessible.');
-  }, [loadConversations, loadStatus, session, user]);
+  }, [accountScope, hasSession, loadConversations, loadStatus, sessionToken]);
 
   useEffect(() => {
     void refreshWorkspace();
@@ -767,6 +804,7 @@ export default function BusinessGrowWorkspace() {
 
   const loadMessages = useCallback(async () => {
     const sequence = ++messageLoadSequence.current;
+    const requestScope = accountScope;
     if (!selectedConversationId || !backendReady) {
       setMessages([]);
       setLoadingMessages(false);
@@ -775,99 +813,125 @@ export default function BusinessGrowWorkspace() {
     setLoadingMessages(true);
     try {
       const result = await businessGrowApi.listMessages(selectedConversationId);
-      if (messageLoadSequence.current === sequence) {
+      if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) {
         setMessages(result.messages);
         setError(null);
       }
     } catch (loadError) {
-      if (messageLoadSequence.current === sequence) {
+      if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) {
         setError(loadError instanceof Error ? loadError.message : 'Impossible de charger les messages.');
       }
     } finally {
-      if (messageLoadSequence.current === sequence) setLoadingMessages(false);
+      if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) setLoadingMessages(false);
     }
-  }, [backendReady, selectedConversationId]);
+  }, [accountScope, backendReady, selectedConversationId]);
 
   useEffect(() => {
     void loadMessages();
   }, [loadMessages]);
 
   const loadMemory = useCallback(async () => {
+    const requestId = ++memoryLoadSequence.current;
+    const requestScope = accountScope;
     setLoadingMemory(true);
     setMemoryError(null);
     try {
-      setMemory(await businessGrowApi.getMemory());
+      const result = await businessGrowApi.getMemory();
+      if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) setMemory(result);
     } catch (loadError) {
-      setMemoryError(loadError instanceof Error ? loadError.message : 'Impossible de charger la mémoire.');
+      if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) {
+        setMemoryError(loadError instanceof Error ? loadError.message : 'Impossible de charger la mémoire.');
+      }
     } finally {
-      setLoadingMemory(false);
+      if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) setLoadingMemory(false);
     }
-  }, []);
+  }, [accountScope]);
 
   useEffect(() => {
     if (section === 'memory' && backendReady) void loadMemory();
   }, [backendReady, loadMemory, section]);
 
   const createConversation = useCallback(async () => {
+    const requestScope = accountScope;
     setBusy(true);
     setError(null);
     try {
       const result = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
+      if (accountScopeRef.current !== requestScope) return;
       await loadConversations();
+      if (accountScopeRef.current !== requestScope) return;
       setSelectedConversationId(result.conversationId);
       setMessages([]);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Impossible de créer la conversation.');
+      if (accountScopeRef.current === requestScope) {
+        setError(createError instanceof Error ? createError.message : 'Impossible de créer la conversation.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadConversations, workspaceId]);
+  }, [accountScope, loadConversations, workspaceId]);
 
   const renameConversation = useCallback(async (conversationId: string, title: string): Promise<boolean> => {
+    const requestScope = accountScope;
     setError(null);
     try {
       await businessGrowApi.renameConversation(conversationId, title);
+      if (accountScopeRef.current !== requestScope) return false;
       await loadConversations();
+      if (accountScopeRef.current !== requestScope) return false;
       return true;
     } catch (renameError) {
-      setError(renameError instanceof Error ? renameError.message : 'Impossible de renommer la conversation.');
+      if (accountScopeRef.current === requestScope) {
+        setError(renameError instanceof Error ? renameError.message : 'Impossible de renommer la conversation.');
+      }
       return false;
     }
-  }, [loadConversations]);
+  }, [accountScope, loadConversations]);
 
   const deleteConversation = useCallback(async (conversationId: string): Promise<boolean> => {
+    const requestScope = accountScope;
     setError(null);
     try {
       await businessGrowApi.deleteConversation(conversationId);
+      if (accountScopeRef.current !== requestScope) return false;
       if (selectedConversationId === conversationId) {
         setSelectedConversationId(null);
         setMessages([]);
       }
       await loadConversations();
+      if (accountScopeRef.current !== requestScope) return false;
       return true;
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Impossible de supprimer la conversation.');
+      if (accountScopeRef.current === requestScope) {
+        setError(deleteError instanceof Error ? deleteError.message : 'Impossible de supprimer la conversation.');
+      }
       return false;
     }
-  }, [loadConversations, selectedConversationId]);
+  }, [accountScope, loadConversations, selectedConversationId]);
 
   const sendMessage = useCallback(async (content: string): Promise<boolean> => {
+    const requestScope = accountScope;
     setError(null);
     setBusy(true);
     let conversationId = selectedConversationId;
     try {
       if (!conversationId) {
         const result = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
+        if (accountScopeRef.current !== requestScope) return false;
         conversationId = result.conversationId;
         setSelectedConversationId(conversationId);
       }
       await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID());
+      if (accountScopeRef.current !== requestScope) return false;
       await Promise.all([
         loadConversations(),
-        businessGrowApi.listMessages(conversationId).then((result) => setMessages(result.messages)),
+        businessGrowApi.listMessages(conversationId).then((result) => {
+          if (accountScopeRef.current === requestScope) setMessages(result.messages);
+        }),
       ]);
-      return true;
+      return accountScopeRef.current === requestScope;
     } catch (sendError) {
+      if (accountScopeRef.current !== requestScope) return false;
       const code = sendError instanceof BusinessGrowApiError
         ? sendError.code
         : typeof sendError === 'object' && sendError !== null && 'code' in sendError && typeof sendError.code === 'string'
@@ -890,7 +954,9 @@ export default function BusinessGrowWorkspace() {
         await Promise.allSettled([
           loadConversations(),
           conversationId
-            ? businessGrowApi.listMessages(conversationId).then((result) => setMessages(result.messages))
+            ? businessGrowApi.listMessages(conversationId).then((result) => {
+              if (accountScopeRef.current === requestScope) setMessages(result.messages);
+            })
             : Promise.resolve(),
         ]);
         return true;
@@ -899,48 +965,60 @@ export default function BusinessGrowWorkspace() {
         return false;
       }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadConversations, loadMessages, selectedConversationId, workspaceId]);
+  }, [accountScope, loadConversations, selectedConversationId, workspaceId]);
 
   const saveMemoryConsent = useCallback(async (enabled: boolean) => {
+    const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
       await businessGrowApi.setMemoryConsent(enabled);
+      if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (consentError) {
-      setMemoryError(consentError instanceof Error ? consentError.message : 'Impossible de modifier le consentement.');
+      if (accountScopeRef.current === requestScope) {
+        setMemoryError(consentError instanceof Error ? consentError.message : 'Impossible de modifier le consentement.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadMemory]);
+  }, [accountScope, loadMemory]);
 
   const saveMemoryProfile = useCallback(async (profile: Record<string, unknown>) => {
+    const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
       await businessGrowApi.saveMemoryProfile(profile);
+      if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (saveError) {
-      setMemoryError(saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le profil.');
+      if (accountScopeRef.current === requestScope) {
+        setMemoryError(saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le profil.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadMemory]);
+  }, [accountScope, loadMemory]);
 
   const mutateMemoryItem = useCallback(async (operation: () => Promise<unknown>) => {
+    const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
       await operation();
+      if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (itemError) {
-      setMemoryError(itemError instanceof Error ? itemError.message : 'Impossible de modifier la mémoire.');
+      if (accountScopeRef.current === requestScope) {
+        setMemoryError(itemError instanceof Error ? itemError.message : 'Impossible de modifier la mémoire.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadMemory]);
+  }, [accountScope, loadMemory]);
 
   const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
   const ActiveIcon = activeSection.icon;

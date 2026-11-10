@@ -9,23 +9,26 @@ import {
   BUSINESS_PROVIDERS, isBusinessProviderAvailable,
 } from '../src/business/ai/registry';
 
-const authMocks = vi.hoisted(() => ({ workspace: null as null | {
-  id: string;
-  owner_user_id: string;
-  name: string;
-  country_code: string;
-  default_language: string;
-  created_at: string;
-  updated_at: string;
-} }));
+const authMocks = vi.hoisted(() => ({
+  userId: 'business-grow-test-user',
+  workspace: null as null | {
+    id: string;
+    owner_user_id: string;
+    name: string;
+    country_code: string;
+    default_language: string;
+    created_at: string;
+    updated_at: string;
+  },
+}));
 
 vi.mock('../src/context/AuthContext', () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => children,
   useAuth: (() => {
-    const user = { id: 'business-grow-test-user', email: 'business-grow@example.test' };
     const session = { access_token: 'test-token' };
     return () => ({
-      user, session, profile: null, workspace: authMocks.workspace, workspaceId: authMocks.workspace?.id ?? null, quota: null,
+      user: { id: authMocks.userId, email: `${authMocks.userId}@example.test` },
+      session, profile: null, workspace: authMocks.workspace, workspaceId: authMocks.workspace?.id ?? null, quota: null,
       isAdmin: false, loading: false, bootstrapError: null,
       refreshQuota: vi.fn(), refreshAll: vi.fn(), logout: vi.fn(),
     });
@@ -119,6 +122,7 @@ vi.mock('../src/lib/api', async (importOriginal) => {
 import App from '../src/App';
 
 beforeEach(() => {
+  authMocks.userId = 'business-grow-test-user';
   authMocks.workspace = null;
   businessMocks.state.conversations = [];
   businessMocks.state.messages = [];
@@ -261,6 +265,46 @@ describe('Business Grow', () => {
     fireEvent.click(screen.getByRole('button', { name: /Campagne B/ }));
     expect(await screen.findByText('Message B')).toBeTruthy();
     expect(businessMocks.listMessages).toHaveBeenCalledWith(second);
+  });
+
+  it('ne laisse pas un chargement de messages d’un compte précédent repeupler Business Grow', async () => {
+    const oldConversationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const newConversationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    businessMocks.state.conversations = [{
+      id: oldConversationId, title: 'Conversation privée A', created_at: '2026-01-01', updated_at: '2026-01-01',
+    }];
+    let resolveOldMessages!: (result: { messages: typeof businessMocks.state.messages }) => void;
+    businessMocks.listMessages.mockImplementation(async (conversationId?: string) => {
+      if (conversationId === oldConversationId) {
+        return new Promise((resolve) => { resolveOldMessages = resolve; });
+      }
+      return {
+        messages: [{
+          id: 'new-account-message', author_role: 'assistant',
+          content: 'Contenu privé du nouveau compte', created_at: '2026-02-01',
+        }],
+      };
+    });
+
+    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Conversation privée A' });
+    await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(oldConversationId));
+
+    authMocks.userId = 'business-grow-user-2';
+    businessMocks.state.conversations = [{
+      id: newConversationId, title: 'Conversation du compte B', created_at: '2026-02-01', updated_at: '2026-02-01',
+    }];
+    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText('Contenu privé du nouveau compte')).toBeTruthy();
+
+    resolveOldMessages({
+      messages: [{
+        id: 'old-account-message', author_role: 'assistant',
+        content: 'Contenu privé de l’ancien compte', created_at: '2026-01-01',
+      }],
+    });
+    await waitFor(() => expect(screen.queryByText('Contenu privé de l’ancien compte')).toBeNull());
+    expect(screen.getByText('Contenu privé du nouveau compte')).toBeTruthy();
   });
 
   it('affiche fidèlement les statuts du traitement conservés dans l’historique', async () => {
