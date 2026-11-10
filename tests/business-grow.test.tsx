@@ -119,6 +119,7 @@ const businessMocks = vi.hoisted(() => {
     listTools: vi.fn(async () => ({ tools: [] as Array<Record<string, unknown>> })),
     resolveTool: vi.fn(async (_id: string, _decision: 'approved' | 'rejected') => ({ status: 'executed' })),
     listIntegrations: vi.fn(async () => ({ connections: [] })),
+    getRouting: vi.fn(async () => ({ preferences: [] as Array<Record<string, unknown>> })),
     saveRouting: vi.fn(async () => ({ saved: true, id: 'pref-1' })),
     getMemory: vi.fn(async () => state.memory),
     setMemoryConsent: vi.fn(async (enabled: boolean) => {
@@ -704,5 +705,47 @@ describe('Business Grow', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('PROVIDER_AUTH_FAILED');
     expect(alert.textContent).toContain('Supabase Edge Functions Secrets');
+  });
+
+  it('envoie explicitement selectionMode auto si une règle manuelle sauvegardée existe pour le rôle', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [{
+        provider_key: 'groq',
+        display_name: 'Groq',
+        enabled: true,
+        status: 'available',
+        config_status: 'configured',
+        checked_at: '2026-11-10T18:00:00Z',
+      }],
+    });
+    businessMocks.getRouting.mockResolvedValueOnce({
+      preferences: [{
+        role_key: 'business_advisor',
+        selection_mode: 'manual',
+        preferred_provider_key: 'gemini',
+        preferred_model_key: 'gemini-2.5-flash',
+        allow_fallback: false,
+      }],
+    });
+    businessMocks.sendMessage.mockResolvedValueOnce({
+      requestId: 'req-auto-override',
+      inputMessageId: 'msg-auto-override',
+      status: 'succeeded',
+      providerAvailable: true,
+      provider: { key: 'groq', model: 'openai/gpt-oss-120b' },
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Priorités du mois.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
+    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    expect(options).toMatchObject({
+      roleKey: 'business_advisor',
+      routing: { selectionMode: 'auto', allowFallback: true },
+    });
   });
 });

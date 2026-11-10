@@ -221,10 +221,16 @@ async function invokeViaNetlifyProxy<T>(
       );
     }
 
+    const contentType = (response.headers?.get('Content-Type') ?? '').toLowerCase();
+    if (contentType.includes('text/html') && idx + 1 < endpoints.length) {
+      continue;
+    }
+
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
+      if (idx + 1 < endpoints.length) continue;
       throw new BusinessGrowApiError(
         'Le serveur Business Grow a renvoyé une réponse invalide.',
         'INVALID_RESPONSE',

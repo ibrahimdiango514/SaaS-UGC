@@ -10,6 +10,10 @@ function jsonError(status, code, message) {
   });
 }
 
+export const config = {
+  path: '/api/business-grow',
+};
+
 export default async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204 });

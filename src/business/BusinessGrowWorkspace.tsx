@@ -606,7 +606,7 @@ function AssistantView({
                   {message.request_status === 'failed' && `Erreur (${message.request_error_code || 'erreur inconnue'})`}
                   {message.request_status === 'canceled' && 'Traitement annulé'}
                   {message.request_status === 'succeeded' && message.author_role === 'assistant' && message.request_provider_key
-                    ? `Réponse fournie par ${BUSINESS_PROVIDERS.find((provider) => provider.id === message.request_provider_key)?.name ?? message.request_provider_key}${message.request_model_key ? ` · ${message.request_model_key}` : ''}`
+                    ? ` · Réponse fournie par ${BUSINESS_PROVIDERS.find((provider) => provider.id === message.request_provider_key)?.name ?? message.request_provider_key}${message.request_model_key ? ` · ${message.request_model_key}` : ''}`
                     : null}
                 </p>
               )}
@@ -1604,8 +1604,11 @@ export default function BusinessGrowWorkspace() {
         conversationId = result.conversationId;
         setSelectedConversationId(conversationId);
       }
+      const hasSavedManualOverride = savedRouting.some(
+        (pref) => pref.role_key === roleKey && pref.selection_mode === 'manual',
+      );
       const sendOptions: BusinessSendOptions | undefined =
-        roleKey === 'business_advisor' && routingMode === 'auto' && !workspaceId
+        roleKey === 'business_advisor' && routingMode === 'auto' && !workspaceId && !hasSavedManualOverride
           ? undefined
           : {
             roleKey,
@@ -1619,7 +1622,12 @@ export default function BusinessGrowWorkspace() {
                   allowFallback: manualAllowFallback,
                 },
               }
-              : {}),
+              : {
+                routing: {
+                  selectionMode: 'auto',
+                  allowFallback: true,
+                },
+              }),
           };
       if (sendOptions) {
         await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID(), sendOptions);
@@ -1676,7 +1684,7 @@ export default function BusinessGrowWorkspace() {
     } finally {
       if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [accountScope, loadConversations, loadOperationalDetails, manualAllowFallback, preferredModelKey, preferredProviderKey, roleKey, routingMode, selectedConversationId, workspaceId]);
+  }, [accountScope, loadConversations, loadOperationalDetails, manualAllowFallback, preferredModelKey, preferredProviderKey, roleKey, routingMode, savedRouting, selectedConversationId, workspaceId]);
 
   const resolveTool = useCallback(async (executionId: string, decision: 'approved' | 'rejected') => {
     const requestScope = accountScope;

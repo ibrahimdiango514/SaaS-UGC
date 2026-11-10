@@ -219,6 +219,81 @@ describe('Business Grow browser API', () => {
     }
   });
 
+  it('falls back to /.netlify/functions/business-grow when /api/business-grow returns HTML SPA fallback', async () => {
+    vi.stubGlobal('window', { location: { hostname: 'deploy-preview-4--saas-ugc-growth.netlify.app' } });
+    const fetcher = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(input) === '/api/business-grow') {
+        return new Response('<!doctype html><html></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        });
+      }
+      return new Response(JSON.stringify({ data: { providers: [{ provider_key: 'groq' }] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    try {
+      await expect(businessGrowApi.getStatus()).resolves.toEqual({ providers: [{ provider_key: 'groq' }] });
+      expect(String(fetcher.mock.calls[0][0])).toBe('/api/business-grow');
+      expect(String(fetcher.mock.calls[1][0])).toBe('/.netlify/functions/business-grow');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('executes the real Netlify Edge relay without forwarding an Origin header upstream', async () => {
+    // @ts-expect-error JS edge relay module without TypeScript declaration file
+    const { default: relayHandler } = await import('../netlify/edge-functions/business-grow.js') as {
+      default: (request: Request) => Promise<Response>;
+    };
+    vi.stubGlobal('window', { location: { hostname: 'deploy-preview-4--saas-ugc-growth.netlify.app' } });
+
+    const upstreamCalls: Array<{ url: string; origin: string | null; auth: string | null; apikey: string | null }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/business-grow') {
+        return await relayHandler(
+          new Request('https://deploy-preview-4--saas-ugc-growth.netlify.app/api/business-grow', {
+            method: 'POST',
+            headers: {
+              Origin: 'https://deploy-preview-4--saas-ugc-growth.netlify.app',
+              ...(init?.headers as Record<string, string>),
+            },
+            body: init?.body as string,
+          }),
+        );
+      }
+      const headers = new Headers(init?.headers);
+      upstreamCalls.push({
+        url,
+        origin: headers.get('Origin'),
+        auth: headers.get('Authorization'),
+        apikey: headers.get('apikey'),
+      });
+      return new Response(JSON.stringify({ data: { providers: [{ provider_key: 'groq', status: 'available' }] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    try {
+      const res = await businessGrowApi.getStatus();
+      expect(res.providers).toEqual([{ provider_key: 'groq', status: 'available' }]);
+      expect(upstreamCalls).toEqual([{
+        url: 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/business-grow',
+        origin: null,
+        auth: 'Bearer test-session-token',
+        apikey: 'test-publishable-key',
+      }]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps the Netlify preview relays free of server secrets and locked to the canonical Supabase project', () => {
     for (const rel of ['netlify/edge-functions/business-grow.js', 'netlify/functions/business-grow.mjs']) {
       const src = readFileSync(join(process.cwd(), rel), 'utf8');
