@@ -34,4 +34,23 @@ describe('Business Grow integration boundaries', () => {
     expect(design).toContain('ALTER TABLE saas_business.conversations FORCE ROW LEVEL SECURITY;');
     expect(design).toContain('ALTER TABLE saas_business.ai_requests FORCE ROW LEVEL SECURITY;');
   });
+
+  it('keeps both Business Grow SQL migrations isolated from Studio credit/quota tables and enforced by RLS', () => {
+    const m1 = read('supabase/migrations/20261110000001_business_grow_saas_business.sql');
+    const m2 = read('supabase/migrations/20261110000002_business_grow_ai_extensions.sql');
+    const intelligence = read('supabase/functions/business-grow/intelligence.ts');
+
+    for (const content of [m1, m2, intelligence]) {
+      expect(content).not.toMatch(/saas_ugc\.credit_ledger|saas_ugc\.ugc_wallets|reelora_reserve_credits|reelora_charge_credits|credits_balance|monthly_credits/i);
+    }
+
+    expect(m1).toContain('CREATE SCHEMA saas_business AUTHORIZATION bg_owner;');
+    expect(m1).toContain('ALTER TABLE saas_business.integration_connections FORCE ROW LEVEL SECURITY;');
+    expect(m2).toContain('ALTER TABLE saas_business.wallets FORCE ROW LEVEL SECURITY;');
+    expect(m2).toContain('ALTER TABLE saas_business.credit_ledger FORCE ROW LEVEL SECURITY;');
+    expect(m2).toContain('ALTER TABLE saas_business.user_routing_preferences FORCE ROW LEVEL SECURITY;');
+    expect(m2).toContain('ALTER TABLE saas_business.tool_executions FORCE ROW LEVEL SECURITY;');
+    expect(m2).toContain('bg_get_workspace_context');
+    expect(m2).not.toMatch(/INSERT INTO saas_ugc|UPDATE saas_ugc|DELETE FROM saas_ugc/i);
+  });
 });

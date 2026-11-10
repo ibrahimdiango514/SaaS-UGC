@@ -66,6 +66,82 @@ export interface BusinessProviderStatus {
   status: 'unverified' | 'available' | 'degraded' | 'unavailable';
   config_status: 'missing' | 'configured' | 'error';
   checked_at: string | null;
+  verified_model_keys?: string[];
+}
+
+export interface BusinessModelRecord {
+  provider_key: string;
+  model_key: string;
+  provider_model_key: string;
+  display_name: string;
+  capabilities: Record<string, unknown>;
+  enabled: boolean;
+  verification_status: 'unverified' | 'verified' | 'unavailable';
+  max_input_tokens: number | null;
+  max_output_tokens: number | null;
+  verified_at: string | null;
+}
+
+export interface BusinessQuotaStatus {
+  domain: 'business_grow';
+  studio_ugc_untouched: boolean;
+  available_units: number | null;
+  reserved_units: number;
+  monthly_allowance: number | null;
+  period_key?: string;
+  period_used?: number;
+  lifetime_consumed?: number;
+}
+
+export interface BusinessToolExecution {
+  id: string;
+  conversation_id: string;
+  request_id: string | null;
+  tool_name: string;
+  risk_level: 'read_only' | 'write_requires_approval' | 'external_publish_requires_approval';
+  status: 'pending_approval' | 'approved' | 'rejected' | 'executed' | 'failed';
+  input_args: Record<string, unknown>;
+  output_result: Record<string, unknown>;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface BusinessVerificationResult {
+  providerKey: string;
+  modelKey: string;
+  status: 'healthy' | 'failed';
+  latencyMs: number;
+  errorCode: string | null;
+  availableModels: string[];
+}
+
+export interface BusinessRoutingPreference {
+  id?: string;
+  roleKey: string;
+  selectionMode: 'auto' | 'manual';
+  preferredProviderKey: string | null;
+  preferredModelKey: string | null;
+  allowFallback: boolean;
+}
+
+export interface BusinessIntegrationConnection {
+  id: string;
+  workspace_id: string | null;
+  connector_key: string;
+  external_account_ref: string | null;
+  status: 'unconfigured' | 'pending' | 'connected' | 'disconnected' | 'error';
+  updated_at: string;
+}
+
+export interface BusinessSendOptions {
+  roleKey?: string;
+  workspaceId?: string | null;
+  routing?: {
+    selectionMode?: 'auto' | 'manual';
+    preferredProviderKey?: string | null;
+    preferredModelKey?: string | null;
+    allowFallback?: boolean;
+  };
 }
 
 export class BusinessGrowApiError extends Error {
@@ -178,6 +254,30 @@ function parseResponse<T>(payload: unknown, status: number): T {
 
 export const businessGrowApi = {
   getStatus: () => invoke<{ providers: BusinessProviderStatus[] }>('status'),
+  verifyProvider: (providerKey: string, modelKey?: string) =>
+    invoke<BusinessVerificationResult>('providers.verify', {
+      providerKey,
+      ...(modelKey ? { modelKey } : {}),
+    }),
+  listModels: (providerKey?: string | null, includeRemote = false) =>
+    invoke<{ models: BusinessModelRecord[]; remoteModels: Record<string, string[]> }>('models.list', {
+      ...(providerKey ? { providerKey } : {}),
+      includeRemote,
+    }),
+  listRoles: () =>
+    invoke<{ roles: Array<{ role_key?: string; roleKey?: string; description: string }> }>('roles.list'),
+  getRouting: () =>
+    invoke<{ preferences: Array<Record<string, unknown>> }>('routing.get'),
+  saveRouting: (pref: BusinessRoutingPreference) =>
+    invoke<{ saved: boolean; id: string | null }>('routing.save', { ...pref }),
+  getQuota: () => invoke<BusinessQuotaStatus>('quota.status'),
+  listRequests: () => invoke<{ requests: Array<Record<string, unknown>> }>('requests.list'),
+  listTools: (conversationId?: string | null) =>
+    invoke<{ tools: BusinessToolExecution[] }>('tools.list', conversationId ? { conversationId } : {}),
+  resolveTool: (executionId: string, decision: 'approved' | 'rejected') =>
+    invoke<Record<string, unknown>>('tools.resolve', { executionId, decision }),
+  listIntegrations: () =>
+    invoke<{ connections: BusinessIntegrationConnection[] }>('integrations.list'),
   listConversations: () => invoke<{ conversations: BusinessConversation[] }>('conversations.list'),
   createConversation: (title: string, workspaceId: string | null) =>
     invoke<{ conversationId: string }>('conversations.create', { title, workspaceId }),
@@ -187,14 +287,31 @@ export const businessGrowApi = {
     invoke<{ deleted: boolean }>('conversations.delete', { conversationId }),
   listMessages: (conversationId: string) =>
     invoke<{ messages: BusinessMessage[] }>('messages.list', { conversationId }),
-  sendMessage: (conversationId: string, content: string, idempotencyKey: string) =>
+  sendMessage: (
+    conversationId: string,
+    content: string,
+    idempotencyKey: string,
+    options?: BusinessSendOptions,
+  ) =>
     invoke<{
       requestId: string;
       inputMessageId: string;
       status: string;
       providerAvailable: boolean;
       provider?: { key: string; model: string };
-    }>('messages.send', { conversationId, content, idempotencyKey }),
+      roleKey?: string;
+      fallbackUsed?: boolean;
+      attemptsCount?: number;
+      usage?: { inputTokens: number | null; outputTokens: number | null };
+      toolProposals?: Array<{ id: string | null; toolName: string; riskLevel: string; summary: string; arguments: Record<string, unknown> }>;
+    }>('messages.send', {
+      conversationId,
+      content,
+      idempotencyKey,
+      ...(options?.roleKey ? { roleKey: options.roleKey } : {}),
+      ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
+      ...(options?.routing ? { routing: options.routing } : {}),
+    }),
   getMemory: () => invoke<BusinessMemory>('memory.get'),
   setMemoryConsent: (enabled: boolean) =>
     invoke<{ event_id: number; occurred_at: string }>('memory.consent', { enabled }),

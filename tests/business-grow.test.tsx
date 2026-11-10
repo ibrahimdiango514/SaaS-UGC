@@ -66,7 +66,7 @@ const businessMocks = vi.hoisted(() => {
       price_currency: null, product_url: null, reference_image_paths: [], product_facts: {},
       created_at: '2026-01-01', updated_at: '2026-01-01',
     }]),
-    getStatus: vi.fn(async () => ({ providers: [] })),
+    getStatus: vi.fn(async (): Promise<{ providers: Array<Record<string, unknown>> }> => ({ providers: [] })),
     listConversations: vi.fn(async () => ({ conversations: state.conversations })),
     createConversation: vi.fn(async (title: string) => {
       state.conversations.unshift({
@@ -85,12 +85,39 @@ const businessMocks = vi.hoisted(() => {
       return { deleted: state.conversations.length !== originalLength };
     }),
     listMessages: vi.fn(async (_conversationId?: string) => ({ messages: state.messages })),
-    sendMessage: vi.fn(async (_id?: string, _content?: string): Promise<{
+    sendMessage: vi.fn(async (_id?: string, _content?: string, _idem?: string, _options?: unknown): Promise<{
       requestId: string; inputMessageId: string; status: string; providerAvailable: boolean;
       provider?: { key: string; model: string };
     }> => {
       throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
     }),
+    verifyProvider: vi.fn(async (providerKey: string) => ({
+      providerKey,
+      modelKey: 'verified-groq-model',
+      status: 'healthy' as const,
+      latencyMs: 38,
+      errorCode: null,
+      availableModels: ['verified-groq-model'],
+    })),
+    listModels: vi.fn(async () => ({ models: [], remoteModels: {} })),
+    getQuota: vi.fn(async (): Promise<{
+      domain: 'business_grow';
+      studio_ugc_untouched: boolean;
+      available_units: number | null;
+      reserved_units: number;
+      monthly_allowance: number | null;
+    }> => ({
+      domain: 'business_grow',
+      studio_ugc_untouched: true,
+      available_units: null,
+      reserved_units: 0,
+      monthly_allowance: null,
+    })),
+    listRequests: vi.fn(async () => ({ requests: [] })),
+    listTools: vi.fn(async () => ({ tools: [] as Array<Record<string, unknown>> })),
+    resolveTool: vi.fn(async (_id: string, _decision: 'approved' | 'rejected') => ({ status: 'executed' })),
+    listIntegrations: vi.fn(async () => ({ connections: [] })),
+    saveRouting: vi.fn(async () => ({ saved: true, id: 'pref-1' })),
     getMemory: vi.fn(async () => state.memory),
     setMemoryConsent: vi.fn(async (enabled: boolean) => {
       state.memory = { ...state.memory, consent: enabled, policyVersion: 'business-grow-memory-v1' };
@@ -129,6 +156,17 @@ beforeEach(() => {
   businessMocks.state.memory = { consent: false, policyVersion: null, profile: null, items: [] };
   vi.clearAllMocks();
   businessMocks.getStatus.mockResolvedValue({ providers: [] });
+  businessMocks.listModels.mockResolvedValue({ models: [], remoteModels: {} });
+  businessMocks.getQuota.mockResolvedValue({
+    domain: 'business_grow',
+    studio_ugc_untouched: true,
+    available_units: null,
+    reserved_units: 0,
+    monthly_allowance: null,
+  });
+  businessMocks.listRequests.mockResolvedValue({ requests: [] });
+  businessMocks.listTools.mockResolvedValue({ tools: [] });
+  businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
   businessMocks.listConversations.mockImplementation(async () => ({ conversations: businessMocks.state.conversations }));
   businessMocks.listMessages.mockImplementation(async () => ({ messages: businessMocks.state.messages }));
   businessMocks.sendMessage.mockImplementation(async () => {
@@ -455,5 +493,120 @@ describe('Business Grow', () => {
       .toEqual(['scripts', 'hooks', 'reasoning']);
     expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'kilo')?.proposedCapabilities)
       .toEqual(['economic-routing', 'fallback']);
+  });
+
+  it('transmet le rôle, le mode manuel de routage et affiche le quota Business Grow isolé', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [
+        {
+          provider_key: 'groq',
+          display_name: 'Groq',
+          enabled: true,
+          status: 'available',
+          config_status: 'configured',
+          checked_at: '2026-11-09T00:00:00Z',
+        },
+      ],
+    });
+    businessMocks.getQuota.mockResolvedValue({
+      domain: 'business_grow',
+      studio_ugc_untouched: true,
+      available_units: 840,
+      reserved_units: 0,
+      monthly_allowance: 1000,
+    });
+    businessMocks.sendMessage.mockResolvedValueOnce({
+      requestId: 'req-1',
+      inputMessageId: 'msg-1',
+      status: 'succeeded',
+      providerAvailable: true,
+      provider: { key: 'groq', model: 'verified-groq-model' },
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByTestId('business-quota-pill')).toBeTruthy();
+    expect(screen.getByTestId('business-quota-pill').textContent).toContain('840 unités');
+
+    fireEvent.change(screen.getByLabelText('Rôle de la tâche IA'), { target: { value: 'marketing_campaign' } });
+    fireEvent.change(screen.getByLabelText('Mode de routage'), { target: { value: 'manual' } });
+    fireEvent.change(await screen.findByLabelText('Fournisseur manuel'), { target: { value: 'groq' } });
+    fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Lance ma campagne.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
+    const [, , , options] = businessMocks.sendMessage.mock.calls[0];
+    expect(options).toMatchObject({
+      roleKey: 'marketing_campaign',
+      routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
+    });
+  });
+
+  it('affiche les propositions d’outils en attente, gère l’approbation et offre un transfert sans débit vers Studio UGC', async () => {
+    const convId = '99999999-9999-4999-8999-999999999999';
+    businessMocks.state.conversations = [{
+      id: convId, title: 'Campagne', created_at: '2026-11-09', updated_at: '2026-11-09',
+    }];
+    businessMocks.listTools.mockResolvedValueOnce({
+      tools: [{
+        id: 'tool-handoff-1',
+        conversation_id: convId,
+        request_id: 'req-1',
+        tool_name: 'handoff_ugc_brief',
+        risk_level: 'write_requires_approval',
+        status: 'pending_approval',
+        input_args: { summary: 'Script UGC produit hydratant', hook: '3 secondes pour briller' },
+        output_result: {},
+        error_message: null,
+        created_at: '2026-11-09',
+      }],
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByTestId('business-tool-proposals')).toBeTruthy();
+    expect(screen.getByText('Transférer vers Studio UGC')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Ouvrir dans Studio UGC \(sans débit\)/ }).getAttribute('href')).toBe('/app/studio');
+
+    businessMocks.listTools.mockResolvedValueOnce({ tools: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Approuver' }));
+    await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-handoff-1', 'approved'));
+  });
+
+  it('permet de vérifier un fournisseur réel et affiche les adaptateurs préparés sans les simuler', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [{
+        provider_key: 'groq',
+        display_name: 'Groq',
+        enabled: true,
+        status: 'unverified',
+        config_status: 'configured',
+        checked_at: null,
+      }],
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+    fireEvent.click(screen.getByRole('button', { name: 'Fournisseurs IA' }));
+
+    expect(screen.getByTestId('adapter-openai').textContent).toContain('Adaptateur prêt');
+    expect(screen.getByTestId('adapter-anthropic')).toBeTruthy();
+    expect(screen.getByTestId('adapter-deepseek')).toBeTruthy();
+    expect(screen.getByTestId('adapter-mistral')).toBeTruthy();
+
+    const groqCard = screen.getByTestId('provider-groq');
+    const verifyBtn = groqCard.querySelector('button');
+    expect(verifyBtn?.textContent).toContain('Vérifier la connexion');
+    if (verifyBtn) fireEvent.click(verifyBtn);
+
+    await waitFor(() => expect(businessMocks.verifyProvider).toHaveBeenCalledWith('groq'));
+    expect(await screen.findByText(/groq \(verified-groq-model\) vérifié avec succès/)).toBeTruthy();
+  });
+
+  it('affiche les intégrations planifiées dans l’onglet Intégrations sans fausse connexion', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    expect(await screen.findByTestId('business-integrations')).toBeTruthy();
+    expect(screen.getByTestId('connector-facebook').textContent).toContain('Planifié');
+    expect(screen.getByTestId('connector-shopify').textContent).toContain('Planifié');
+    expect(screen.getByTestId('connector-woocommerce')).toBeTruthy();
   });
 });

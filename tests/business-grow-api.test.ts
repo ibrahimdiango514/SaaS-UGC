@@ -108,4 +108,64 @@ describe('Business Grow browser API', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('invokes new Business Grow actions cleanly with structured payloads', async () => {
+    invoke.mockResolvedValue({ data: { data: { ok: true } }, error: null });
+
+    await businessGrowApi.verifyProvider('groq', 'llama-3.3-70b-versatile');
+    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
+      body: { action: 'providers.verify', providerKey: 'groq', modelKey: 'llama-3.3-70b-versatile' },
+    });
+
+    await businessGrowApi.listModels('gemini', true);
+    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
+      body: { action: 'models.list', providerKey: 'gemini', includeRemote: true },
+    });
+
+    await businessGrowApi.saveRouting({
+      roleKey: 'action_plan',
+      selectionMode: 'manual',
+      preferredProviderKey: 'groq',
+      preferredModelKey: null,
+      allowFallback: false,
+    });
+    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
+      body: {
+        action: 'routing.save',
+        roleKey: 'action_plan',
+        selectionMode: 'manual',
+        preferredProviderKey: 'groq',
+        preferredModelKey: null,
+        allowFallback: false,
+      },
+    });
+
+    await businessGrowApi.getQuota();
+    expect(invoke).toHaveBeenLastCalledWith('business-grow', { body: { action: 'quota.status' } });
+
+    await businessGrowApi.resolveTool('tool-1', 'approved');
+    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
+      body: { action: 'tools.resolve', executionId: 'tool-1', decision: 'approved' },
+    });
+
+    await businessGrowApi.listIntegrations();
+    expect(invoke).toHaveBeenLastCalledWith('business-grow', { body: { action: 'integrations.list' } });
+
+    await businessGrowApi.sendMessage('conv-1', 'Hello', 'idem-1', {
+      roleKey: 'marketing_campaign',
+      workspaceId: 'ws-1',
+      routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
+    });
+    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
+      body: {
+        action: 'messages.send',
+        conversationId: 'conv-1',
+        content: 'Hello',
+        idempotencyKey: 'idem-1',
+        roleKey: 'marketing_campaign',
+        workspaceId: 'ws-1',
+        routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
+      },
+    });
+  });
 });

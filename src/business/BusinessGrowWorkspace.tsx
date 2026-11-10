@@ -1,28 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Lightbulb, LockKeyhole,
-  MessageSquare, Package, Pencil, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, X, Zap,
+  Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, LockKeyhole,
+  MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, X, Zap,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { listBrands, listProducts } from '../lib/api';
+import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
 import type { Brand, Product, Workspace } from '../lib/types';
 import {
   BusinessGrowApiError, businessGrowApi,
-  type BusinessConversation, type BusinessMemory, type BusinessMessage, type BusinessProviderStatus,
+  type BusinessConversation, type BusinessIntegrationConnection, type BusinessMemory,
+  type BusinessMessage, type BusinessModelRecord, type BusinessProviderStatus,
+  type BusinessQuotaStatus, type BusinessRoutingPreference, type BusinessSendOptions,
+  type BusinessToolExecution, type BusinessVerificationResult,
 } from './api';
 import {
-  BUSINESS_PROVIDERS, type BusinessCapability,
+  BUSINESS_PROVIDERS, BUSINESS_ROLES, EXTENSIBLE_PROVIDER_ADAPTERS,
+  type BusinessCapability, type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
 
-type BusinessSection = 'chat' | 'company' | 'memory' | 'providers';
+type BusinessSection = 'chat' | 'company' | 'memory' | 'providers' | 'integrations';
 
 const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare }[] = [
   { id: 'chat', label: 'Assistant', icon: MessageSquare },
   { id: 'company', label: 'Entreprise', icon: Building2 },
   { id: 'memory', label: 'Mémoire métier', icon: Building2 },
   { id: 'providers', label: 'Fournisseurs IA', icon: Zap },
+  { id: 'integrations', label: 'Intégrations', icon: Plug },
 ];
 
 function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
@@ -186,6 +192,14 @@ const CAPABILITY_LABELS: Record<BusinessCapability, string> = {
   'video-generation': 'Génération vidéo',
 };
 
+const TOOL_LABELS: Record<string, string> = {
+  propose_memory_save: 'Enregistrer dans la mémoire métier',
+  propose_action_plan: 'Structurer un plan d’action',
+  propose_campaign_brief: 'Créer un brief campagne marketing',
+  handoff_ugc_brief: 'Transférer vers Studio UGC',
+  request_connector_read: 'Demander une lecture connecteur',
+};
+
 function providerStatus(provider: BusinessProviderStatus | undefined) {
   if (!provider) return { label: 'Non vérifié', description: 'Le statut serveur n’a pas pu être vérifié.' };
   if (provider.config_status !== 'configured') {
@@ -231,12 +245,24 @@ function ProviderStatusList({ statuses, compact = false }: {
 function AssistantView({
   backendReady,
   providers,
+  models,
+  quota,
+  tools,
   conversations,
   selectedConversationId,
   messages,
   loading,
   error,
   busy,
+  roleKey,
+  routingMode,
+  preferredProviderKey,
+  preferredModelKey,
+  onChangeRole,
+  onChangeRoutingMode,
+  onChangePreferredProvider,
+  onChangePreferredModel,
+  onResolveTool,
   onNewConversation,
   onRenameConversation,
   onDeleteConversation,
@@ -246,12 +272,24 @@ function AssistantView({
 }: {
   backendReady: boolean;
   providers: BusinessProviderStatus[] | null;
+  models: BusinessModelRecord[];
+  quota: BusinessQuotaStatus | null;
+  tools: BusinessToolExecution[];
   conversations: BusinessConversation[];
   selectedConversationId: string | null;
   messages: BusinessMessage[];
   loading: boolean;
   error: string | null;
   busy: boolean;
+  roleKey: BusinessRoleKey;
+  routingMode: RoutingSelectionMode;
+  preferredProviderKey: string;
+  preferredModelKey: string;
+  onChangeRole: (role: BusinessRoleKey) => void;
+  onChangeRoutingMode: (mode: RoutingSelectionMode) => void;
+  onChangePreferredProvider: (providerKey: string) => void;
+  onChangePreferredModel: (modelKey: string) => void;
+  onResolveTool: (executionId: string, decision: 'approved' | 'rejected') => Promise<void>;
   onNewConversation: () => void;
   onRenameConversation: (id: string, title: string) => Promise<boolean>;
   onDeleteConversation: (id: string) => Promise<boolean>;
@@ -267,6 +305,8 @@ function AssistantView({
   const availableProviders = (providers ?? []).filter((provider) =>
     provider.enabled && provider.status === 'available' && provider.config_status === 'configured',
   );
+  const verifiedModels = models.filter((model) => model.verification_status === 'verified' && model.enabled);
+  const pendingTools = tools.filter((tool) => tool.status === 'pending_approval');
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -278,7 +318,7 @@ function AssistantView({
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <section className="flex min-h-[620px] flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090d16]">
-        <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/15 text-brand-200"><Brain size={19} /></span>
             <div>
@@ -295,6 +335,70 @@ function AssistantView({
           >
             Nouvelle conversation
           </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-white/[0.015] px-4 py-2.5 sm:px-6">
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span>Rôle :</span>
+            <select
+              aria-label="Rôle de la tâche IA"
+              value={roleKey}
+              onChange={(event) => onChangeRole(event.target.value as BusinessRoleKey)}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+            >
+              {BUSINESS_ROLES.map((role) => (
+                <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span>Routage :</span>
+            <select
+              aria-label="Mode de routage"
+              value={routingMode}
+              onChange={(event) => onChangeRoutingMode(event.target.value as RoutingSelectionMode)}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+            >
+              <option value="auto">Automatique (AI Director)</option>
+              <option value="manual">Manuel</option>
+            </select>
+          </label>
+          {routingMode === 'manual' && (
+            <>
+              <select
+                aria-label="Fournisseur manuel"
+                value={preferredProviderKey}
+                onChange={(event) => onChangePreferredProvider(event.target.value)}
+                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+              >
+                <option value="">Fournisseur…</option>
+                {availableProviders.map((provider) => (
+                  <option key={provider.provider_key} value={provider.provider_key}>{provider.display_name}</option>
+                ))}
+              </select>
+              {verifiedModels.length > 0 && (
+                <select
+                  aria-label="Modèle manuel"
+                  value={preferredModelKey}
+                  onChange={(event) => onChangePreferredModel(event.target.value)}
+                  className="max-w-[200px] truncate rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+                >
+                  <option value="">Modèle par défaut</option>
+                  {verifiedModels
+                    .filter((m) => !preferredProviderKey || m.provider_key === preferredProviderKey)
+                    .map((model) => (
+                      <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{model.display_name}</option>
+                    ))}
+                </select>
+              )}
+            </>
+          )}
+          {quota && quota.available_units !== null && (
+            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-300" data-testid="business-quota-pill">
+              <Gauge size={12} className="text-brand-300" />
+              Quota Business Grow : {quota.available_units} unités
+            </span>
+          )}
         </div>
 
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6" aria-live="polite">
@@ -375,6 +479,35 @@ function AssistantView({
               )}
             </article>
           ))}
+          {pendingTools.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.05] p-3" data-testid="business-tool-proposals">
+              <p className="text-xs font-semibold text-brand-100">Actions assistées en attente d’approbation</p>
+              {pendingTools.map((tool) => (
+                <div key={tool.id} className="rounded-lg border border-white/[0.08] bg-[#0c111b] p-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-white">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
+                    <Badge tone="neutral">{tool.risk_level === 'write_requires_approval' ? 'Validation requise' : 'Publication bloquée'}</Badge>
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    {typeof tool.input_args?.summary === 'string' ? tool.input_args.summary : JSON.stringify(tool.input_args)}
+                  </p>
+                  <div className="mt-2.5 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => { void onResolveTool(tool.id, 'approved'); }} disabled={busy}>
+                      Approuver
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { void onResolveTool(tool.id, 'rejected'); }} disabled={busy}>
+                      Rejeter
+                    </Button>
+                    {tool.tool_name === 'handoff_ugc_brief' && (
+                      <Link to="/app/studio" state={{ ugcBrief: tool.input_args }} className="btn btn-outline btn-sm">
+                        Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {backendReady && !availableProviders.length && (
             <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs leading-relaxed text-amber-100/80" role="status">
               Aucun fournisseur IA vérifié n’est actuellement disponible. Votre demande sera conservée dans l’historique, mais aucune réponse ne sera simulée.
@@ -667,36 +800,242 @@ function MemoryView({
   );
 }
 
-function ProvidersView({ statuses }: { statuses: BusinessProviderStatus[] | null }) {
+function ProvidersView({
+  backendReady,
+  statuses,
+  models,
+  requests,
+  quota,
+  verifyingKey,
+  verifyMessage,
+  onVerifyProvider,
+  onSaveRouting,
+}: {
+  backendReady: boolean;
+  statuses: BusinessProviderStatus[] | null;
+  models: BusinessModelRecord[];
+  requests: Array<Record<string, unknown>>;
+  quota: BusinessQuotaStatus | null;
+  verifyingKey: string | null;
+  verifyMessage: string | null;
+  onVerifyProvider: (providerKey: string) => Promise<void>;
+  onSaveRouting: (pref: BusinessRoutingPreference) => Promise<void>;
+}) {
   const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
+  const [routingRole, setRoutingRole] = useState<BusinessRoleKey>('business_advisor');
+  const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
+  const [routingProvider, setRoutingProvider] = useState('');
+  const [routingModel, setRoutingModel] = useState('');
+
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
-      <div className="mb-5 max-w-2xl">
-        <h2 className="text-lg font-semibold text-white">Registre des fournisseurs</h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Les rôles affichés sont des propositions. L’AI Director ne peut router que vers un fournisseur configuré, vérifié et disponible côté serveur.
-        </p>
-      </div>
-      <div className="space-y-3">
-        {BUSINESS_PROVIDERS.map((provider) => {
-          const status = providerStatus(byKey.get(provider.id));
-          return (
-            <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-white">{provider.name}</h3>
-                  <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.description}</p>
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <h2 className="text-lg font-semibold text-white">Registre des fournisseurs</h2>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              Les rôles affichés sont des propositions. L’AI Director ne peut router que vers un fournisseur configuré, vérifié et disponible côté serveur.
+            </p>
+          </div>
+          {quota && quota.available_units !== null && (
+            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-xs text-slate-300">
+              <p className="font-semibold text-white">Quota Business Grow isolé</p>
+              <p className="mt-0.5 text-slate-400">{quota.available_units} unité(s) · Studio UGC intact ({quota.studio_ugc_untouched ? 'oui' : 'non'})</p>
+            </div>
+          )}
+        </div>
+        {verifyMessage && (
+          <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-slate-200" role="status">
+            {verifyMessage}
+          </div>
+        )}
+        <div className="space-y-3">
+          {BUSINESS_PROVIDERS.map((provider) => {
+            const rawStatus = byKey.get(provider.id);
+            const status = providerStatus(rawStatus);
+            const providerModels = models.filter((model) => model.provider_key === provider.id);
+            const canProbe = backendReady && provider.id !== 'muapi' && (rawStatus?.config_status === 'configured' || provider.id === 'groq' || provider.id === 'gemini');
+            return (
+              <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-white">{provider.name}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.description}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={status.label === 'Disponible' ? 'success' : 'neutral'}>{status.label}</Badge>
+                    {canProbe && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        loading={verifyingKey === provider.id}
+                        disabled={Boolean(verifyingKey)}
+                        onClick={() => { void onVerifyProvider(provider.id); }}
+                      >
+                        Vérifier la connexion
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <Badge tone="neutral">{status.label}</Badge>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {provider.proposedCapabilities.map((capability) => (
+                    <span key={capability} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-400">
+                      {CAPABILITY_LABELS[capability]}
+                    </span>
+                  ))}
+                </div>
+                {providerModels.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {providerModels.map((model) => (
+                      <span
+                        key={model.model_key}
+                        className={cn(
+                          'rounded-md border px-2 py-0.5 text-[10px]',
+                          model.verification_status === 'verified'
+                            ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200'
+                            : 'border-white/10 bg-white/[0.02] text-slate-400',
+                        )}
+                      >
+                        {model.display_name} ({model.verification_status})
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {provider.note && <p className="mt-3 text-[11px] text-slate-500">{provider.note}</p>}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+        <div className="mb-4 flex items-center gap-2">
+          <SlidersHorizontal size={16} className="text-brand-300" />
+          <h3 className="text-sm font-semibold text-white">Adaptateurs extensibles préparés</h3>
+        </div>
+        <p className="mb-4 text-xs text-slate-400">
+          Ces adaptateurs disposent d’une interface prête côté serveur, sans clé ni exécution distante active tant qu’ils ne sont pas configurés et vérifiés.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {EXTENSIBLE_PROVIDER_ADAPTERS.map((adapter) => (
+            <article key={adapter.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-3.5" data-testid={`adapter-${adapter.id}`}>
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-medium text-white">{adapter.name}</h4>
+                <Badge tone="neutral">{adapter.statusLabel}</Badge>
               </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {provider.proposedCapabilities.map((capability) => (
-                  <span key={capability} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-400">
-                    {CAPABILITY_LABELS[capability]}
-                  </span>
+              <p className="mt-1 text-[11px] text-slate-400">{adapter.statusDescription}</p>
+              <p className="mt-2 font-mono text-[10px] text-slate-500">{adapter.envKeyHint}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {backendReady && (
+        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+          <h3 className="text-sm font-semibold text-white">Préférence de routage par rôle</h3>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Rôle routage"
+              value={routingRole}
+              onChange={(event) => setRoutingRole(event.target.value as BusinessRoleKey)}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+            >
+              {BUSINESS_ROLES.map((role) => (
+                <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Mode de routage par rôle"
+              value={routingMode}
+              onChange={(event) => setRoutingMode(event.target.value as RoutingSelectionMode)}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+            >
+              <option value="auto">Automatique</option>
+              <option value="manual">Manuel</option>
+            </select>
+            {routingMode === 'manual' && (
+              <>
+                <input
+                  value={routingProvider}
+                  onChange={(event) => setRoutingProvider(event.target.value)}
+                  placeholder="Fournisseur (ex: groq)"
+                  aria-label="Fournisseur préféré"
+                  className="w-40 rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+                />
+                <input
+                  value={routingModel}
+                  onChange={(event) => setRoutingModel(event.target.value)}
+                  placeholder="Modèle (optionnel)"
+                  aria-label="Modèle préféré"
+                  className="w-48 rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+                />
+              </>
+            )}
+            <Button
+              size="sm"
+              onClick={() => {
+                void onSaveRouting({
+                  roleKey: routingRole,
+                  selectionMode: routingMode,
+                  preferredProviderKey: routingMode === 'manual' && routingProvider.trim() ? routingProvider.trim() : null,
+                  preferredModelKey: routingMode === 'manual' && routingModel.trim() ? routingModel.trim() : null,
+                  allowFallback: routingMode === 'auto',
+                });
+              }}
+            >
+              Enregistrer la règle
+            </Button>
+          </div>
+          {requests.length > 0 && (
+            <div className="mt-5">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
+                <Activity size={14} className="text-cyan-300" /> Exécutions récentes ({requests.length})
+              </div>
+              <div className="space-y-1.5 text-[11px]">
+                {requests.slice(0, 6).map((req) => (
+                  <div key={String(req.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-slate-300">
+                    <span>{String(req.task_role_key ?? 'business_advisor')} · {String(req.selected_provider_key ?? 'aucun')} / {String(req.selected_model_key ?? '—')}</span>
+                    <span className="text-slate-500">
+                      {String(req.status ?? '')}
+                      {req.latency_ms ? ` · ${String(req.latency_ms)} ms` : ''}
+                    </span>
+                  </div>
                 ))}
               </div>
-              {provider.note && <p className="mt-3 text-[11px] text-slate-500">{provider.note}</p>}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function IntegrationsView({ connections }: { connections: BusinessIntegrationConnection[] }) {
+  const byConnector = new Map(connections.map((conn) => [conn.connector_key, conn]));
+  return (
+    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="business-integrations">
+      <div className="mb-5 max-w-2xl">
+        <h2 className="text-lg font-semibold text-white">Connecteurs métier (planifiés)</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+          Les contrats d’intégration définissent les autorisations par espace de travail. Aucune connexion ou publication externe n’est simulée.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {INTEGRATION_DEFINITIONS.map((contract: IntegrationDefinition) => {
+          const persisted = byConnector.get(contract.id);
+          return (
+            <article key={contract.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`connector-${contract.id}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">{contract.name}</h3>
+                  <p className="mt-1 text-[11px] text-slate-500">Authentification : {contract.authorization}</p>
+                </div>
+                <Badge tone="neutral">{persisted?.status ?? 'Planifié'}</Badge>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Capacités proposées : {contract.proposedCapabilities.join(', ')}
+              </p>
+              <p className="mt-1 text-[11px] text-slate-500">{contract.note}</p>
             </article>
           );
         })}
@@ -712,6 +1051,11 @@ export default function BusinessGrowWorkspace() {
   const sessionToken = session?.access_token ?? null;
   const [section, setSection] = useState<BusinessSection>('chat');
   const [providers, setProviders] = useState<BusinessProviderStatus[] | null>(null);
+  const [models, setModels] = useState<BusinessModelRecord[]>([]);
+  const [quota, setQuota] = useState<BusinessQuotaStatus | null>(null);
+  const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
+  const [tools, setTools] = useState<BusinessToolExecution[]>([]);
+  const [integrations, setIntegrations] = useState<BusinessIntegrationConnection[]>([]);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BusinessMessage[]>([]);
@@ -720,14 +1064,21 @@ export default function BusinessGrowWorkspace() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingMemory, setLoadingMemory] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [verifyingKey, setVerifyingKey] = useState<string | null>(null);
+  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [roleKey, setRoleKey] = useState<BusinessRoleKey>('business_advisor');
+  const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
+  const [preferredProviderKey, setPreferredProviderKey] = useState('');
+  const [preferredModelKey, setPreferredModelKey] = useState('');
   const messageLoadSequence = useRef(0);
   const accountScopeRef = useRef(accountScope);
   const workspaceLoadSequence = useRef(0);
   const conversationLoadSequence = useRef(0);
   const statusLoadSequence = useRef(0);
   const memoryLoadSequence = useRef(0);
+  const detailsLoadSequence = useRef(0);
 
   useEffect(() => {
     accountScopeRef.current = accountScope;
@@ -736,7 +1087,13 @@ export default function BusinessGrowWorkspace() {
     statusLoadSequence.current += 1;
     memoryLoadSequence.current += 1;
     messageLoadSequence.current += 1;
+    detailsLoadSequence.current += 1;
     setProviders(null);
+    setModels([]);
+    setQuota(null);
+    setRequests([]);
+    setTools([]);
+    setIntegrations([]);
     setConversations([]);
     setSelectedConversationId(null);
     setMessages([]);
@@ -745,6 +1102,8 @@ export default function BusinessGrowWorkspace() {
     setLoadingMessages(false);
     setLoadingMemory(false);
     setBusy(false);
+    setVerifyingKey(null);
+    setVerifyMessage(null);
     setError(null);
     setMemoryError(null);
   }, [accountScope]);
@@ -770,6 +1129,22 @@ export default function BusinessGrowWorkspace() {
     setProviders(result.providers);
   }, [accountScope]);
 
+  const loadOperationalDetails = useCallback(async () => {
+    const requestId = ++detailsLoadSequence.current;
+    const requestScope = accountScope;
+    const [modelsRes, quotaRes, reqRes, integrationsRes] = await Promise.allSettled([
+      businessGrowApi.listModels?.() ?? Promise.resolve(null),
+      businessGrowApi.getQuota?.() ?? Promise.resolve(null),
+      businessGrowApi.listRequests?.() ?? Promise.resolve(null),
+      businessGrowApi.listIntegrations?.() ?? Promise.resolve(null),
+    ]);
+    if (requestId !== detailsLoadSequence.current || accountScopeRef.current !== requestScope) return;
+    if (modelsRes.status === 'fulfilled' && modelsRes.value) setModels(modelsRes.value.models);
+    if (quotaRes.status === 'fulfilled' && quotaRes.value) setQuota(quotaRes.value);
+    if (reqRes.status === 'fulfilled' && reqRes.value) setRequests(reqRes.value.requests);
+    if (integrationsRes.status === 'fulfilled' && integrationsRes.value) setIntegrations(integrationsRes.value.connections);
+  }, [accountScope]);
+
   const refreshWorkspace = useCallback(async () => {
     const requestId = ++workspaceLoadSequence.current;
     const requestScope = accountScope;
@@ -788,6 +1163,7 @@ export default function BusinessGrowWorkspace() {
     if (requestId !== workspaceLoadSequence.current || accountScopeRef.current !== requestScope) return;
     if (statusResult.status === 'fulfilled' && conversationsResult.status === 'fulfilled') {
       setBackendReady(true);
+      void loadOperationalDetails();
       return;
     }
     setBackendReady(false);
@@ -796,7 +1172,7 @@ export default function BusinessGrowWorkspace() {
       : conversationsResult.status === 'rejected' && conversationsResult.reason instanceof Error
         ? conversationsResult.reason.message
         : 'Le backend Business Grow n’est pas encore installé ou accessible.');
-  }, [accountScope, hasSession, loadConversations, loadStatus, sessionToken]);
+  }, [accountScope, hasSession, loadConversations, loadOperationalDetails, loadStatus, sessionToken]);
 
   useEffect(() => {
     void refreshWorkspace();
@@ -807,14 +1183,19 @@ export default function BusinessGrowWorkspace() {
     const requestScope = accountScope;
     if (!selectedConversationId || !backendReady) {
       setMessages([]);
+      setTools([]);
       setLoadingMessages(false);
       return;
     }
     setLoadingMessages(true);
     try {
-      const result = await businessGrowApi.listMessages(selectedConversationId);
+      const [result, toolsResult] = await Promise.all([
+        businessGrowApi.listMessages(selectedConversationId),
+        businessGrowApi.listTools?.(selectedConversationId).catch(() => null) ?? Promise.resolve(null),
+      ]);
       if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) {
         setMessages(result.messages);
+        if (toolsResult) setTools(toolsResult.tools);
         setError(null);
       }
     } catch (loadError) {
@@ -862,6 +1243,7 @@ export default function BusinessGrowWorkspace() {
       if (accountScopeRef.current !== requestScope) return;
       setSelectedConversationId(result.conversationId);
       setMessages([]);
+      setTools([]);
     } catch (createError) {
       if (accountScopeRef.current === requestScope) {
         setError(createError instanceof Error ? createError.message : 'Impossible de créer la conversation.');
@@ -897,6 +1279,7 @@ export default function BusinessGrowWorkspace() {
       if (selectedConversationId === conversationId) {
         setSelectedConversationId(null);
         setMessages([]);
+        setTools([]);
       }
       await loadConversations();
       if (accountScopeRef.current !== requestScope) return false;
@@ -921,13 +1304,38 @@ export default function BusinessGrowWorkspace() {
         conversationId = result.conversationId;
         setSelectedConversationId(conversationId);
       }
-      await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID());
+      const sendOptions: BusinessSendOptions | undefined =
+        roleKey === 'business_advisor' && routingMode === 'auto' && !workspaceId
+          ? undefined
+          : {
+            roleKey,
+            ...(workspaceId ? { workspaceId } : {}),
+            ...(routingMode === 'manual'
+              ? {
+                routing: {
+                  selectionMode: 'manual',
+                  preferredProviderKey: preferredProviderKey || null,
+                  preferredModelKey: preferredModelKey || null,
+                  allowFallback: false,
+                },
+              }
+              : {}),
+          };
+      if (sendOptions) {
+        await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID(), sendOptions);
+      } else {
+        await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID());
+      }
       if (accountScopeRef.current !== requestScope) return false;
       await Promise.all([
         loadConversations(),
         businessGrowApi.listMessages(conversationId).then((result) => {
           if (accountScopeRef.current === requestScope) setMessages(result.messages);
         }),
+        businessGrowApi.listTools?.(conversationId).then((res) => {
+          if (accountScopeRef.current === requestScope && res) setTools(res.tools);
+        }).catch(() => undefined),
+        loadOperationalDetails(),
       ]);
       return accountScopeRef.current === requestScope;
     } catch (sendError) {
@@ -940,6 +1348,7 @@ export default function BusinessGrowWorkspace() {
       if (code && [
         'NO_VERIFIED_PROVIDER',
         'PROVIDER_NOT_CONFIGURED',
+        'PROVIDER_ADAPTER_NOT_IMPLEMENTED',
         'PROVIDER_MODEL_MISMATCH',
         'PROVIDER_AUTH_FAILED',
         'PROVIDER_RATE_LIMITED',
@@ -949,6 +1358,7 @@ export default function BusinessGrowWorkspace() {
         'PROVIDER_REQUEST_REJECTED',
         'PROVIDER_INVALID_RESPONSE',
         'PROVIDER_EMPTY_RESPONSE',
+        'BG_INSUFFICIENT_QUOTA',
       ].includes(code)) {
         setError(sendError instanceof Error ? sendError.message : 'Aucun fournisseur IA vérifié n’est disponible.');
         await Promise.allSettled([
@@ -960,14 +1370,71 @@ export default function BusinessGrowWorkspace() {
             : Promise.resolve(),
         ]);
         return true;
-      } else {
-        setError(sendError instanceof Error ? sendError.message : 'Impossible d’envoyer la demande.');
-        return false;
+      }
+      setError(sendError instanceof Error ? sendError.message : 'Impossible d’envoyer la demande.');
+      return false;
+    } finally {
+      if (accountScopeRef.current === requestScope) setBusy(false);
+    }
+  }, [accountScope, loadConversations, loadOperationalDetails, preferredModelKey, preferredProviderKey, roleKey, routingMode, selectedConversationId, workspaceId]);
+
+  const resolveTool = useCallback(async (executionId: string, decision: 'approved' | 'rejected') => {
+    const requestScope = accountScope;
+    if (!businessGrowApi.resolveTool) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await businessGrowApi.resolveTool(executionId, decision);
+      if (accountScopeRef.current !== requestScope) return;
+      if (selectedConversationId && businessGrowApi.listTools) {
+        const res = await businessGrowApi.listTools(selectedConversationId);
+        if (accountScopeRef.current === requestScope) setTools(res.tools);
+      }
+    } catch (resolveError) {
+      if (accountScopeRef.current === requestScope) {
+        setError(resolveError instanceof Error ? resolveError.message : 'Impossible de traiter cette action.');
       }
     } finally {
       if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [accountScope, loadConversations, selectedConversationId, workspaceId]);
+  }, [accountScope, selectedConversationId]);
+
+  const verifyProvider = useCallback(async (providerKey: string) => {
+    const requestScope = accountScope;
+    if (!businessGrowApi.verifyProvider) return;
+    setVerifyingKey(providerKey);
+    setVerifyMessage(null);
+    try {
+      const result: BusinessVerificationResult = await businessGrowApi.verifyProvider(providerKey);
+      if (accountScopeRef.current !== requestScope) return;
+      setVerifyMessage(
+        `${result.providerKey} (${result.modelKey}) vérifié avec succès (${result.latencyMs} ms).`,
+      );
+      await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
+    } catch (verifyError) {
+      if (accountScopeRef.current === requestScope) {
+        setVerifyMessage(verifyError instanceof Error ? verifyError.message : 'La vérification du fournisseur a échoué.');
+      }
+    } finally {
+      if (accountScopeRef.current === requestScope) setVerifyingKey(null);
+    }
+  }, [accountScope, loadOperationalDetails, loadStatus]);
+
+  const saveRouting = useCallback(async (pref: BusinessRoutingPreference) => {
+    const requestScope = accountScope;
+    if (!businessGrowApi.saveRouting) return;
+    setVerifyMessage(null);
+    try {
+      await businessGrowApi.saveRouting(pref);
+      if (accountScopeRef.current === requestScope) {
+        setVerifyMessage(`Règle de routage enregistrée pour ${pref.roleKey}.`);
+      }
+    } catch (saveError) {
+      if (accountScopeRef.current === requestScope) {
+        setVerifyMessage(saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le routage.');
+      }
+    }
+  }, [accountScope]);
 
   const saveMemoryConsent = useCallback(async (enabled: boolean) => {
     const requestScope = accountScope;
@@ -1078,12 +1545,24 @@ export default function BusinessGrowWorkspace() {
             <AssistantView
               backendReady={backendReady}
               providers={providers}
+              models={models}
+              quota={quota}
+              tools={tools}
               conversations={conversations}
               selectedConversationId={selectedConversationId}
               messages={messages}
               loading={loadingMessages}
               error={error}
               busy={busy}
+              roleKey={roleKey}
+              routingMode={routingMode}
+              preferredProviderKey={preferredProviderKey}
+              preferredModelKey={preferredModelKey}
+              onChangeRole={setRoleKey}
+              onChangeRoutingMode={setRoutingMode}
+              onChangePreferredProvider={setPreferredProviderKey}
+              onChangePreferredModel={setPreferredModelKey}
+              onResolveTool={resolveTool}
               onNewConversation={() => { void createConversation(); }}
               onRenameConversation={renameConversation}
               onDeleteConversation={deleteConversation}
@@ -1106,7 +1585,20 @@ export default function BusinessGrowWorkspace() {
               onRetry={() => { void loadMemory(); }}
             />
           )}
-          {section === 'providers' && <ProvidersView statuses={providers} />}
+          {section === 'providers' && (
+            <ProvidersView
+              backendReady={backendReady}
+              statuses={providers}
+              models={models}
+              requests={requests}
+              quota={quota}
+              verifyingKey={verifyingKey}
+              verifyMessage={verifyMessage}
+              onVerifyProvider={verifyProvider}
+              onSaveRouting={saveRouting}
+            />
+          )}
+          {section === 'integrations' && <IntegrationsView connections={integrations} />}
         </div>
       </div>
     </div>

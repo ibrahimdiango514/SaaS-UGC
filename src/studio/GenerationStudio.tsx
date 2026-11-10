@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, ArrowRight, CheckCircle2, Clapperboard, Coins, Database, Info,
   Layers3, Plus, RefreshCw, Scissors, Square,
@@ -70,8 +70,10 @@ function asParams(v: unknown): Record<string, ParamValue> {
 export default function GenerationStudio() {
   const toast = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { workspaceId, quota, refreshQuota } = useAuth();
   const [search] = useSearchParams();
+  const handedOffBrief = asRecord((location.state as { ugcBrief?: unknown } | null)?.ugcBrief);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -84,7 +86,17 @@ export default function GenerationStudio() {
   const [health, setHealth] = useState<Record<string, boolean> | null>(null);
   const [healthBusy, setHealthBusy] = useState(true);
   const [healthError, setHealthError] = useState('');
-  const [form, setForm] = useState<GenerationFormState>(initialFormState);
+  const [form, setForm] = useState<GenerationFormState>(() => {
+    const base = initialFormState();
+    const promptParts = [handedOffBrief.hook, handedOffBrief.angle, handedOffBrief.summary, handedOffBrief.cta]
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+    if (!promptParts.length) return base;
+    return {
+      ...base,
+      prompt: promptParts.join(' — '),
+      script: typeof handedOffBrief.summary === 'string' ? handedOffBrief.summary : base.script,
+    };
+  });
   const [selectedSector, setSelectedSector] = useState<SectorId>('cosmetique');
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);

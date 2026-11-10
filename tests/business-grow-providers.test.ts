@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   callProvider,
+  getProviderAdapter,
+  listRemoteModels,
+  probeProvider,
+  PROVIDER_ADAPTERS,
   ProviderCallError,
   providerOrder,
   type ChatMessage,
@@ -118,5 +122,80 @@ describe('Business Grow provider clients', () => {
   it('parses a unique, supported server provider order and uses the safe default', () => {
     expect(providerOrder('gemini,groq,gemini,unknown')).toEqual(['gemini', 'groq']);
     expect(providerOrder('unknown')).toEqual(['groq', 'gemini']);
+  });
+
+  it('registers prepared extensible adapters without claiming live execution', async () => {
+    expect(PROVIDER_ADAPTERS.get('openai')?.implemented).toBe(false);
+    expect(PROVIDER_ADAPTERS.get('anthropic')?.implemented).toBe(false);
+    expect(PROVIDER_ADAPTERS.get('deepseek')?.implemented).toBe(false);
+    expect(PROVIDER_ADAPTERS.get('mistral')?.implemented).toBe(false);
+    expect(getProviderAdapter('groq')?.implemented).toBe(true);
+    expect(getProviderAdapter('gemini')?.implemented).toBe(true);
+
+    const fetcher = vi.fn();
+    await expect(
+      callProvider('openai' as unknown as 'groq', { apiKey: 'test-key', model: 'gpt-4o-mini' }, messages, fetcher),
+    ).rejects.toMatchObject({ code: 'PROVIDER_ADAPTER_NOT_IMPLEMENTED', retryable: false });
+    await expect(
+      getProviderAdapter('openai')!.complete({ apiKey: 'test-key', model: 'gpt-4o-mini' }, messages, fetcher),
+    ).rejects.toMatchObject({ code: 'PROVIDER_ADAPTER_NOT_IMPLEMENTED', retryable: false });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('discovers remote models for Groq and Gemini from official endpoints', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('api.groq.com')) {
+        return new Response(JSON.stringify({
+          data: [{ id: 'llama-3.3-70b-versatile' }, { id: 'mixtral-8x7b-32768' }],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        models: [
+          { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
+          { name: 'models/embedding-001', supportedGenerationMethods: ['embedContent'] },
+        ],
+      }), { status: 200 });
+    });
+
+    await expect(listRemoteModels('groq', { apiKey: 'groq-secret', model: 'llama-3.3-70b-versatile' }, fetcher))
+      .resolves.toEqual(['llama-3.3-70b-versatile', 'mixtral-8x7b-32768']);
+    await expect(listRemoteModels('gemini', { apiKey: 'gemini-secret', model: 'gemini-2.5-flash' }, fetcher))
+      .resolves.toEqual(['gemini-2.5-flash']);
+  });
+
+  it('performs real server-side probe checks and never reports healthy on failure', async () => {
+    const healthyFetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/models')) {
+        return new Response(JSON.stringify({ data: [{ id: 'llama-3.3-70b-versatile' }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: 'OK' } }],
+        usage: { prompt_tokens: 4, completion_tokens: 1 },
+      }), { status: 200 });
+    });
+
+    const probeOk = await probeProvider('groq', { apiKey: 'secret', model: 'llama-3.3-70b-versatile' }, healthyFetcher);
+    expect(probeOk).toMatchObject({
+      providerKey: 'groq',
+      modelKey: 'llama-3.3-70b-versatile',
+      status: 'healthy',
+      errorCode: null,
+      availableModels: ['llama-3.3-70b-versatile'],
+    });
+
+    const failingFetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/models')) {
+        return new Response(JSON.stringify({ data: [{ id: 'llama-3.3-70b-versatile' }] }), { status: 200 });
+      }
+      return new Response('unauthorized', { status: 401 });
+    });
+
+    const probeFail = await probeProvider('groq', { apiKey: 'bad-secret', model: 'llama-3.3-70b-versatile' }, failingFetcher);
+    expect(probeFail).toMatchObject({
+      providerKey: 'groq',
+      status: 'failed',
+      errorCode: 'PROVIDER_AUTH_FAILED',
+    });
   });
 });

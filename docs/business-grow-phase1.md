@@ -17,17 +17,18 @@ Gemini, Groq, Gonka, Kilo, OpenRouter et LLM7 sont listés comme fournisseurs ca
 
 L’adaptateur Business Grow ne déclenche pas d’appel fournisseur ni de débit payant à ce stade. En l’absence de route vérifiée, une demande est historisée et son statut IA échoue explicitement; aucune réponse n’est simulée. Les usages et coûts Business Grow restent distincts des crédits et quotas Studio.
 
-## État de la base
+## État de la base et du déploiement
 
-Le dossier SQL de [conception Business Grow](./business-grow-sql-design.md) n’a pas été exécuté. La vérification précédente du projet `xbuuhfwobrafcbgtdgjx` indiquait que `saas_business` et ses objets n’y étaient pas présents. Aucune migration n’a été appliquée. La migration additive et ses objets exacts doivent être présentés pour approbation avant toute écriture dans le projet de production.
+Les migrations SQL additives locales (`supabase/migrations/20261110000001_business_grow_saas_business.sql` et `supabase/migrations/20261110000002_business_grow_ai_extensions.sql`) préparent le schéma privé `saas_business`, les rôles (`bg_owner`, `bg_edge`, `bg_billing_worker`, `bg_erasure`), le routage par tâche (`auto`/`manual`), les propositions d’outils soumises à approbation utilisateur et le portefeuille/quota isolé Business Grow.
 
-Les adaptateurs REST serveur Groq/Gemini et le fallback traçable sont implémentés localement, mais ne sont pas déployés et ne peuvent pas encore traiter de messages : le schéma `saas_business`, les nouvelles fonctions SQL et les secrets/variables serveur requis ne sont pas installés. Aucun fournisseur n’est réputé opérationnel sur le projet tant qu’une vérification de modèle et un appel de test autorisé n’ont pas réussi. Aucun compte de paiement ou intégration externe n’est déclaré opérationnel.
+Elles restent **non appliquées** sur le projet Supabase `xbuuhfwobrafcbgtdgjx`, où ni `saas_business` ni la fonction Edge `business-grow` ni les secrets serveur (`BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, etc.) ne sont encore déployés. Aucun fournisseur ni aucune intégration externe (`facebook`, `instagram`, `youtube`, `tiktok`, `shopify`, `woocommerce`) n’est déclaré disponible tant que les secrets serveur et les vérifications réelles (`providers.verify`) n’ont pas réussi.
 
 ## Fichiers principaux
 
-- `src/business/BusinessGrowWorkspace.tsx` : interface de chat, historique, statut des fournisseurs et gestion de la mémoire.
-- `src/business/api.ts` : client authentifié vers l’Edge Function.
-- `src/business/ai/registry.ts` : catalogue initial et capacités proposées.
-- `supabase/functions/business-grow/` : validation d’identité, contrat d’API et accès serveur privé.
-- `supabase/config.toml` : fonction configurée avec validation JWT.
-- `tests/business-grow.test.tsx` et `tests/business-grow-edge.test.ts` : tests UI et du handler Edge sans connexion à une base ni appel fournisseur.
+- `src/business/BusinessGrowWorkspace.tsx` : interface de chat, routage auto/manuel par rôle métier, approbation d’actions assistées, transfert sans débit vers `/app/studio`, statut/vérification des fournisseurs, mémoire consentie et intégrations planifiées.
+- `src/business/api.ts` : client authentifié vers l’Edge Function `business-grow`.
+- `src/business/ai/registry.ts` : catalogue initial, adaptateurs extensibles préparés (`openai`, `anthropic`, `deepseek`, `mistral`) et rôles Business Grow.
+- `supabase/functions/business-grow/` : validation d’identité, adaptateurs serveur (`providers.ts`), contexte et outils (`intelligence.ts`), orchestration centrale (`handler.ts`) et pont PostgreSQL `saas_business` (`index.ts`).
+- `supabase/migrations/20261110000001_business_grow_saas_business.sql` et `20261110000002_business_grow_ai_extensions.sql` : migrations additives isolées prêtes pour application après validation.
+- `supabase/config.toml` : fonction configurée avec validation JWT (`[functions.business-grow]`).
+- `tests/business-grow*.test.{ts,tsx}` : tests UI, API client, frontières Studio/Business, adaptateurs fournisseurs et handler Edge.

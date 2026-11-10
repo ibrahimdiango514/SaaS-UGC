@@ -404,4 +404,302 @@ describe('Business Grow Edge handler', () => {
     expect(loggedDetails).toContain('conversations.list');
     logError.mockRestore();
   });
+
+  it('verifies providers live via probeProvider and persists verification result', async () => {
+    const { dependencies, store } = fixture();
+    const recordHealthCheck = vi.fn(async () => undefined);
+    store.recordHealthCheck = recordHealthCheck;
+    const probeMock = vi.fn(async (providerKey: 'groq' | 'gemini', config: { apiKey: string; model: string }) => {
+      if (!config.apiKey || !config.model) {
+        return {
+          providerKey,
+          modelKey: config.model || '',
+          status: 'failed' as const,
+          latencyMs: 0,
+          errorCode: 'PROVIDER_NOT_CONFIGURED',
+          availableModels: [],
+        };
+      }
+      return {
+        providerKey,
+        modelKey: config.model,
+        status: 'healthy' as const,
+        latencyMs: 42,
+        errorCode: null,
+        availableModels: ['verified-groq-model', 'other-model'],
+      };
+    });
+    dependencies.probe = probeMock;
+
+    const handler = createBusinessGrowHandler(dependencies);
+    const okRes = await handler(request({ action: 'providers.verify', providerKey: 'groq' }));
+    expect(okRes.status).toBe(200);
+    expect(await okRes.json()).toMatchObject({
+      data: { providerKey: 'groq', status: 'healthy', latencyMs: 42 },
+    });
+    expect(recordHealthCheck).toHaveBeenCalledWith(expect.objectContaining({
+      providerKey: 'groq',
+      modelKey: 'verified-groq-model',
+      status: 'healthy',
+    }));
+
+    dependencies.providerConfigs.gemini = { apiKey: '', model: '' };
+    const missingRes = await handler(request({ action: 'providers.verify', providerKey: 'gemini' }));
+    expect(missingRes.status).toBe(503);
+    expect(await missingRes.json()).toMatchObject({ error: { code: 'PROVIDER_NOT_CONFIGURED' } });
+
+    probeMock.mockResolvedValueOnce({
+      providerKey: 'groq',
+      modelKey: 'verified-groq-model',
+      status: 'failed',
+      latencyMs: 90,
+      errorCode: 'PROVIDER_AUTH_FAILED',
+      availableModels: [],
+    });
+    const failedRes = await handler(request({ action: 'providers.verify', providerKey: 'groq' }));
+    expect(failedRes.status).toBe(502);
+    expect(recordHealthCheck).toHaveBeenLastCalledWith(expect.objectContaining({
+      providerKey: 'groq',
+      status: 'failed',
+      errorCode: 'PROVIDER_AUTH_FAILED',
+    }));
+  });
+
+  it('supports roles, routing preferences, models discovery, quota, requests and integrations endpoints', async () => {
+    const { dependencies, store } = fixture();
+    store.listModels = vi.fn(async () => [{
+      provider_key: 'groq',
+      model_key: 'groq-main',
+      provider_model_key: 'verified-groq-model',
+      display_name: 'Groq Main',
+      capabilities: { reasoning: true },
+      enabled: true,
+      verification_status: 'verified',
+      max_input_tokens: 8192,
+      max_output_tokens: 4096,
+      verified_at: '2026-11-09T00:00:00Z',
+    }]);
+    store.listRoles = vi.fn(async () => []);
+    store.getRoutingPreferences = vi.fn(async () => [{
+      id: 'pref-1',
+      role_key: 'marketing_campaign',
+      selection_mode: 'manual',
+      preferred_provider_key: 'groq',
+      preferred_model_key: 'verified-groq-model',
+      allow_fallback: false,
+      updated_at: '2026-11-09T00:00:00Z',
+    }]);
+    const upsertRoutingPreference = vi.fn(async () => 'pref-1');
+    store.upsertRoutingPreference = upsertRoutingPreference;
+    store.getQuota = vi.fn(async () => ({
+      domain: 'business_grow' as const,
+      studio_ugc_untouched: true as const,
+      available_units: 950,
+      reserved_units: 0,
+      monthly_allowance: 1000,
+    }));
+    store.listRecentRequests = vi.fn(async () => [{ id: requestA, status: 'succeeded' }]);
+    store.listIntegrationConnections = vi.fn(async () => []);
+    dependencies.discoverModels = vi.fn(async () => ['verified-groq-model']);
+
+    const handler = createBusinessGrowHandler(dependencies);
+    const modelsRes = await handler(request({ action: 'models.list', providerKey: 'groq', includeRemote: true }));
+    expect(modelsRes.status).toBe(200);
+    expect(await modelsRes.json()).toMatchObject({
+      data: {
+        models: [{ provider_key: 'groq', verification_status: 'verified' }],
+        remoteModels: { groq: ['verified-groq-model'] },
+      },
+    });
+
+    const rolesRes = await handler(request({ action: 'roles.list' }));
+    expect(rolesRes.status).toBe(200);
+
+    const savePrefRes = await handler(request({
+      action: 'routing.save',
+      roleKey: 'marketing_campaign',
+      selectionMode: 'manual',
+      preferredProviderKey: 'groq',
+      preferredModelKey: 'verified-groq-model',
+      allowFallback: false,
+    }));
+    expect(savePrefRes.status).toBe(200);
+    expect(upsertRoutingPreference).toHaveBeenCalledWith(userA, 'marketing_campaign', {
+      selectionMode: 'manual',
+      preferredProviderKey: 'groq',
+      preferredModelKey: 'verified-groq-model',
+      allowFallback: false,
+    });
+
+    const quotaRes = await handler(request({ action: 'quota.status' }));
+    expect(await quotaRes.json()).toMatchObject({
+      data: { domain: 'business_grow', studio_ugc_untouched: true, available_units: 950 },
+    });
+
+    expect((await handler(request({ action: 'routing.get' }))).status).toBe(200);
+    expect((await handler(request({ action: 'requests.list' }))).status).toBe(200);
+    expect((await handler(request({ action: 'integrations.list' }))).status).toBe(200);
+  });
+
+  it('enforces isolated Business Grow quota and releases reservation on failed requests', async () => {
+    const { dependencies, store } = fixture();
+    const reserveQuota = vi.fn(async () => {
+      throw new Error('BG_INSUFFICIENT_QUOTA');
+    });
+    const releaseQuota = vi.fn(async () => 1000);
+    const captureQuota = vi.fn(async () => 999);
+    store.reserveQuota = reserveQuota;
+    store.releaseQuota = releaseQuota;
+    store.captureQuota = captureQuota;
+
+    const handler = createBusinessGrowHandler(dependencies);
+    const blocked = await handler(request({
+      action: 'messages.send',
+      conversationId: conversationA,
+      content: 'Test quota',
+      idempotencyKey,
+    }));
+    expect(blocked.status).toBe(402);
+    expect(await blocked.json()).toMatchObject({ error: { code: 'BG_INSUFFICIENT_QUOTA' } });
+    expect(store.failRequest).toHaveBeenCalledWith(userA, requestA, 'BG_INSUFFICIENT_QUOTA');
+
+    reserveQuota.mockResolvedValueOnce({
+      reserved: true, available_units: 999, reserved_units: 1, monthly_allowance: 1000,
+    } as never);
+    const releasedRes = await handler(request({
+      action: 'messages.send',
+      conversationId: conversationA,
+      content: 'Route manquante',
+      idempotencyKey,
+    }));
+    expect(releasedRes.status).toBe(503);
+    expect(releaseQuota).toHaveBeenCalledWith(userA, requestA, 1, 'NO_VERIFIED_PROVIDER');
+    expect(captureQuota).not.toHaveBeenCalled();
+  });
+
+  it('honors manual routing without fallback and injects workspace + consented memory context', async () => {
+    const { dependencies, store } = fixture();
+    store.getMemory = vi.fn(async () => ({
+      consent: true,
+      profile: { industry: 'Beauté naturelle' },
+      items: [{ id: 'm1', category: 'audience', content: { text: 'Femmes 25-40 ans' }, created_at: '2026-01-01', updated_at: '2026-01-01' }],
+    }));
+    store.getWorkspaceContext = vi.fn(async () => ({
+      workspace: { id: '11111111-1111-4111-8111-111111111111', name: 'Atelier Bamako', country_code: 'ML', default_language: 'fr' },
+      brands: [{ name: 'Karité Pure', industry: 'Cosmétique', description: null, voice_guidelines: 'Direct et rassurant' }],
+      products: [{ name: 'Baume Éclat', description: 'Hydratation intense', key_benefits: ['Naturel'], price_amount: 12000, price_currency: 'XOF' }],
+    }));
+    vi.mocked(store.selectRoute).mockResolvedValue({
+      attemptId: '99999999-9999-4999-8999-999999999999',
+      providerKey: 'gemini',
+      modelKey: 'gemini-logical',
+      providerModelKey: 'verified-gemini-model',
+    });
+    vi.mocked(dependencies.complete).mockResolvedValueOnce({
+      content: 'Voici la stratégie marketing.\n<!--REELORA_TOOL_PROPOSALS:[{"toolName":"handoff_ugc_brief","summary":"Créer un brief vidéo","arguments":{"hook":"Peau radieuse dès demain","cta":"Commandez maintenant"}}]-->',
+      inputTokens: 40,
+      outputTokens: 30,
+    });
+    store.createToolExecution = vi.fn(async () => 'tool-exec-1');
+
+    const handler = createBusinessGrowHandler(dependencies);
+    const res = await handler(request({
+      action: 'messages.send',
+      conversationId: conversationA,
+      workspaceId: '11111111-1111-4111-8111-111111111111',
+      roleKey: 'marketing_campaign',
+      content: 'Propose une campagne et un brief UGC.',
+      idempotencyKey,
+      routing: {
+        selectionMode: 'manual',
+        preferredProviderKey: 'gemini',
+        preferredModelKey: 'verified-gemini-model',
+        allowFallback: false,
+      },
+    }));
+
+    expect(res.status).toBe(200);
+    const json = await res.json() as {
+      data: {
+        roleKey: string;
+        toolProposals: Array<{ id: string | null; toolName: string; riskLevel: string }>;
+      };
+    };
+    expect(json.data.roleKey).toBe('marketing_campaign');
+    expect(json.data.toolProposals).toHaveLength(1);
+    expect(json.data.toolProposals[0]).toMatchObject({
+      id: 'tool-exec-1',
+      toolName: 'handoff_ugc_brief',
+      riskLevel: 'write_requires_approval',
+    });
+
+    const [, , sentMessages] = vi.mocked(dependencies.complete).mock.calls[0];
+    expect(sentMessages[0].content).toContain('Atelier Bamako');
+    expect(sentMessages[0].content).toContain('Karité Pure');
+    expect(sentMessages[0].content).toContain('Baume Éclat');
+    expect(sentMessages[0].content).toContain('Femmes 25-40 ans');
+    expect(store.selectRoute).toHaveBeenCalledWith(
+      userA, requestA, conversationA, 1, null, null, ['gemini'], [], 'verified-gemini-model',
+    );
+    expect(store.finalizeAttempt).toHaveBeenCalledWith(
+      userA, requestA, '99999999-9999-4999-8999-999999999999',
+      expect.objectContaining({ outputContent: 'Voici la stratégie marketing.' }),
+    );
+  });
+
+  it('requires active consent to approve memory-write tool proposals and executes non-debiting UGC handoff', async () => {
+    const { dependencies, store } = fixture();
+    let activeToolName = 'propose_memory_save';
+    let activeInputArgs: Record<string, unknown> = { category: 'positioning', text: 'Positionnement premium accessible' };
+    store.resolveToolExecution = vi.fn(async (_userId, executionId, decision, outputResult) => ({
+      id: executionId,
+      tool_name: activeToolName,
+      status: decision,
+      input_args: activeInputArgs,
+      output_result: outputResult,
+    }));
+
+    const handler = createBusinessGrowHandler(dependencies);
+    const denied = await handler(request({
+      action: 'tools.resolve',
+      executionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+      decision: 'approved',
+    }));
+    expect(denied.status).toBe(409);
+    expect(await denied.json()).toMatchObject({ error: { code: 'business_memory_consent_required' } });
+    expect(store.putMemoryItem).not.toHaveBeenCalled();
+
+    vi.mocked(store.getMemory).mockResolvedValueOnce({ consent: true, items: [] });
+    const approvedMem = await handler(request({
+      action: 'tools.resolve',
+      executionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+      decision: 'approved',
+    }));
+    expect(approvedMem.status).toBe(200);
+    expect(store.putMemoryItem).toHaveBeenCalledWith(userA, null, 'positioning', {
+      text: 'Positionnement premium accessible',
+      category: 'positioning',
+    });
+
+    activeToolName = 'handoff_ugc_brief';
+    activeInputArgs = { product: 'Baume Éclat', hook: 'Stop les taches brunes', angle: 'Routine 7 jours' };
+    const ugcRes = await handler(request({
+      action: 'tools.resolve',
+      executionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+      decision: 'approved',
+    }));
+    expect(ugcRes.status).toBe(200);
+    expect(await ugcRes.json()).toMatchObject({
+      data: {
+        status: 'executed',
+        output_result: {
+          handoffDraft: {
+            product: 'Baume Éclat',
+            hook: 'Stop les taches brunes',
+            consumesStudioCredits: false,
+          },
+        },
+      },
+    });
+  });
 });
