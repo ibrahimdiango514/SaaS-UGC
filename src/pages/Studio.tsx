@@ -119,14 +119,14 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
     setLoading(true); setLoadError('');
     try {
       const [p, s, svc, m, a, j] = await Promise.all([
-        listProjects(), listScripts(), listServices(), listVideoModels().catch(() => [] as MuApiModel[]),
-        listAssets(6).catch(() => [] as GeneratedAsset[]), listJobs(20).catch(() => [] as GenerationJob[]),
+        listProjects(), listScripts(), listServices(), listVideoModels(),
+        listAssets(6), listJobs(20),
       ]);
       setProjects(p); setScripts(s); setServices(svc.filter((x) => x.active));
       setModels(m.filter((x) => x.is_enabled && !x.is_coming_soon)); setAssets(a); setJobs(j);
       try { setHealth((await healthCheck()).configured); } catch { setHealth(null); }
       if (workspaceId) {
-        const av = await listAvatars(workspaceId).catch(() => [] as Avatar[]);
+        const av = await listAvatars(workspaceId);
         setAvatars(av.filter((x) => x.status === 'active'));
       }
       const pid = params.get('projet') ?? '';

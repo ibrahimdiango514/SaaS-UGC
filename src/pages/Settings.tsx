@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Building2, KeyRound, Mail, Package, PlugZap, Plus, Trash2, UserRound, Users } from 'lucide-react';
-import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Banner, LoadingState, ErrorState, EmptyState, Tabs, ConfirmDialog } from '../components/ui';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Building2, KeyRound, Mail, Package, Pencil, PlugZap, Plus, Trash2, UserRound, Users, X } from 'lucide-react';
+import { PageHeader, Card, CardHeader, Button, Input, Select, Textarea, Badge, Banner, LoadingState, ErrorState, EmptyState, Tabs, ConfirmDialog } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
 import { formatDate } from '../lib/format';
+import { INTEGRATION_DEFINITIONS } from '../integrations/contracts';
 import {
   createBrand, createProduct, deleteBrand, deleteProduct, getMembers, healthCheck,
-  listBrands, listProducts, updateEmail, updatePassword, updateProfile, updateWorkspace,
+  listBrands, listProducts, updateBrand, updateEmail, updatePassword, updateProduct, updateProfile, updateWorkspace,
 } from '../lib/api';
 import type { Brand, Product, WorkspaceMember } from '../lib/types';
 
@@ -32,23 +33,43 @@ export default function Settings() {
   const [newEmail, setNewEmail] = useState('');
   const [brandName, setBrandName] = useState('');
   const [productName, setProductName] = useState('');
+  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [brandDraft, setBrandDraft] = useState({ name: '', website_url: '', industry: '', description: '', voice_guidelines: '' });
+  const [productDraft, setProductDraft] = useState({ name: '', description: '', key_benefits: '', features: '', price_amount: '', price_currency: 'XOF', product_url: '' });
   const [toDelete, setToDelete] = useState<{ id: string; kind: 'brand' | 'product'; name: string } | null>(null);
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true); setError('');
+    setMembers([]); setBrands([]); setProducts([]);
+    setHealth(null);
     try {
       setDisplayName(profile?.display_name ?? ''); setCountry(profile?.country_code ?? 'ML'); setLanguage(profile?.preferred_language ?? 'fr');
       setWsName(workspace?.name ?? ''); setWsLanguage(workspace?.default_language ?? 'fr');
       if (workspace) {
         const [m, b, p] = await Promise.all([getMembers(workspace.id), listBrands(workspace.id), listProducts(workspace.id)]);
+        if (requestId !== loadRequestRef.current) return;
         setMembers(m); setBrands(b); setProducts(p);
       }
-      try { setHealth((await healthCheck()).configured); } catch { setHealth(null); }
-    } catch (err) { setError(asAppError(err).message); }
-    finally { setLoading(false); }
+      try {
+        const status = await healthCheck();
+        if (requestId === loadRequestRef.current) setHealth(status.configured);
+      } catch {
+        if (requestId === loadRequestRef.current) setHealth(null);
+      }
+    } catch (err) {
+      if (requestId === loadRequestRef.current) setError(asAppError(err).message);
+    } finally {
+      if (requestId === loadRequestRef.current) setLoading(false);
+    }
   }, [profile, workspace]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadRequestRef.current += 1; };
+  }, [load]);
 
   const onSaveProfile = async (e: FormEvent) => {
     e.preventDefault(); if (!user) return;
@@ -97,6 +118,78 @@ export default function Settings() {
     setBusy('product');
     try { await createProduct({ workspace_id: workspace.id, name: productName.trim() }); setProductName(''); toast.success('Produit ajouté.'); await load(); }
     catch (err) { toast.error(asAppError(err).message); }
+    finally { setBusy(null); }
+  };
+
+  const beginBrandEdit = (brand: Brand) => {
+    setEditingBrand(brand);
+    setEditingProduct(null);
+    setBrandDraft({
+      name: brand.name,
+      website_url: brand.website_url ?? '',
+      industry: brand.industry ?? '',
+      description: brand.description ?? '',
+      voice_guidelines: brand.voice_guidelines ?? '',
+    });
+  };
+
+  const onSaveBrand = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingBrand || !brandDraft.name.trim()) return;
+    setBusy('brand-edit');
+    try {
+      await updateBrand(editingBrand.id, {
+        name: brandDraft.name.trim(),
+        website_url: brandDraft.website_url.trim() || null,
+        industry: brandDraft.industry.trim() || null,
+        description: brandDraft.description.trim() || null,
+        voice_guidelines: brandDraft.voice_guidelines.trim() || null,
+      });
+      setEditingBrand(null);
+      toast.success('Marque mise à jour.');
+      await load();
+    } catch (err) { toast.error(asAppError(err).message); }
+    finally { setBusy(null); }
+  };
+
+  const beginProductEdit = (product: Product) => {
+    setEditingProduct(product);
+    setEditingBrand(null);
+    setProductDraft({
+      name: product.name,
+      description: product.description ?? '',
+      key_benefits: product.key_benefits.join('\n'),
+      features: product.features.join('\n'),
+      price_amount: product.price_amount === null ? '' : String(product.price_amount),
+      price_currency: product.price_currency ?? 'XOF',
+      product_url: product.product_url ?? '',
+    });
+  };
+
+  const onSaveProduct = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct || !productDraft.name.trim()) return;
+    const rawPrice = productDraft.price_amount.trim();
+    const price = rawPrice ? Number(rawPrice) : null;
+    if (price !== null && (!Number.isFinite(price) || price < 0)) {
+      toast.warning('Le prix doit être un nombre positif.');
+      return;
+    }
+    setBusy('product-edit');
+    try {
+      await updateProduct(editingProduct.id, {
+        name: productDraft.name.trim(),
+        description: productDraft.description.trim() || null,
+        key_benefits: productDraft.key_benefits.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
+        features: productDraft.features.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
+        price_amount: price,
+        price_currency: price === null ? null : productDraft.price_currency.trim().toUpperCase() || 'XOF',
+        product_url: productDraft.product_url.trim() || null,
+      });
+      setEditingProduct(null);
+      toast.success('Produit mis à jour.');
+      await load();
+    } catch (err) { toast.error(asAppError(err).message); }
     finally { setBusy(null); }
   };
 
@@ -187,7 +280,26 @@ export default function Settings() {
             </form>
             {brands.length === 0 ? <EmptyState icon={<Building2 size={22} />} title="Aucune marque" /> : (
               <div className="divide-y divide-white/[0.06]">{brands.map((b) => (
-                <div key={b.id} className="flex items-center justify-between px-5 py-3"><div><p className="text-sm text-white">{b.name}</p><p className="text-[11px] text-slate-500">{b.industry || 'Secteur non renseigné'}</p></div><Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setToDelete({ id: b.id, kind: 'brand', name: b.name })} /></div>
+                <div key={b.id} className="px-5 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div><p className="text-sm text-white">{b.name}</p><p className="text-[11px] text-slate-500">{b.industry || 'Secteur non renseigné'}</p></div>
+                    <div className="flex items-center">
+                      <Button size="sm" variant="ghost" icon={<Pencil size={13} />} aria-label={`Modifier ${b.name}`} onClick={() => beginBrandEdit(b)} />
+                      <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} aria-label={`Supprimer ${b.name}`} onClick={() => setToDelete({ id: b.id, kind: 'brand', name: b.name })} />
+                    </div>
+                  </div>
+                  {editingBrand?.id === b.id && (
+                    <form onSubmit={(e) => void onSaveBrand(e)} className="mt-4 space-y-3 rounded-xl border border-white/[0.08] bg-black/15 p-4">
+                      <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-white">Modifier la marque</h3><Button type="button" size="sm" variant="ghost" icon={<X size={14} />} aria-label="Annuler la modification" onClick={() => setEditingBrand(null)} /></div>
+                      <Input label="Nom" required value={brandDraft.name} onChange={(e) => setBrandDraft({ ...brandDraft, name: e.target.value })} />
+                      <Input label="Secteur" value={brandDraft.industry} onChange={(e) => setBrandDraft({ ...brandDraft, industry: e.target.value })} />
+                      <Input label="Site web" type="url" value={brandDraft.website_url} onChange={(e) => setBrandDraft({ ...brandDraft, website_url: e.target.value })} />
+                      <Textarea label="Description" value={brandDraft.description} onChange={(e) => setBrandDraft({ ...brandDraft, description: e.target.value })} />
+                      <Textarea label="Ton de communication" value={brandDraft.voice_guidelines} onChange={(e) => setBrandDraft({ ...brandDraft, voice_guidelines: e.target.value })} />
+                      <Button type="submit" loading={busy === 'brand-edit'}>Enregistrer la marque</Button>
+                    </form>
+                  )}
+                </div>
               ))}</div>
             )}
           </Card>
@@ -198,7 +310,30 @@ export default function Settings() {
             </form>
             {products.length === 0 ? <EmptyState icon={<Package size={22} />} title="Aucun produit" /> : (
               <div className="divide-y divide-white/[0.06]">{products.map((p) => (
-                <div key={p.id} className="flex items-center justify-between px-5 py-3"><div><p className="text-sm text-white">{p.name}</p><p className="text-[11px] text-slate-500">{p.description || 'Description à compléter'}</p></div><Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setToDelete({ id: p.id, kind: 'product', name: p.name })} /></div>
+                <div key={p.id} className="px-5 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div><p className="text-sm text-white">{p.name}</p><p className="text-[11px] text-slate-500">{p.description || 'Description à compléter'}</p></div>
+                    <div className="flex items-center">
+                      <Button size="sm" variant="ghost" icon={<Pencil size={13} />} aria-label={`Modifier ${p.name}`} onClick={() => beginProductEdit(p)} />
+                      <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} aria-label={`Supprimer ${p.name}`} onClick={() => setToDelete({ id: p.id, kind: 'product', name: p.name })} />
+                    </div>
+                  </div>
+                  {editingProduct?.id === p.id && (
+                    <form onSubmit={(e) => void onSaveProduct(e)} className="mt-4 space-y-3 rounded-xl border border-white/[0.08] bg-black/15 p-4">
+                      <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-white">Modifier le produit ou service</h3><Button type="button" size="sm" variant="ghost" icon={<X size={14} />} aria-label="Annuler la modification" onClick={() => setEditingProduct(null)} /></div>
+                      <Input label="Nom" required value={productDraft.name} onChange={(e) => setProductDraft({ ...productDraft, name: e.target.value })} />
+                      <Textarea label="Description" value={productDraft.description} onChange={(e) => setProductDraft({ ...productDraft, description: e.target.value })} />
+                      <Textarea label="Bénéfices clés (un par ligne)" value={productDraft.key_benefits} onChange={(e) => setProductDraft({ ...productDraft, key_benefits: e.target.value })} />
+                      <Textarea label="Caractéristiques (une par ligne)" value={productDraft.features} onChange={(e) => setProductDraft({ ...productDraft, features: e.target.value })} />
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Input label="Prix" type="number" min="0" step="any" value={productDraft.price_amount} onChange={(e) => setProductDraft({ ...productDraft, price_amount: e.target.value })} />
+                        <Input label="Devise" maxLength={3} value={productDraft.price_currency} onChange={(e) => setProductDraft({ ...productDraft, price_currency: e.target.value })} />
+                      </div>
+                      <Input label="Lien produit" type="url" value={productDraft.product_url} onChange={(e) => setProductDraft({ ...productDraft, product_url: e.target.value })} />
+                      <Button type="submit" loading={busy === 'product-edit'}>Enregistrer le produit</Button>
+                    </form>
+                  )}
+                </div>
               ))}</div>
             )}
           </Card>
@@ -206,23 +341,55 @@ export default function Settings() {
       )}
 
       {tab === 'integrations' && (
-        <Card className="max-w-3xl"><CardHeader title="État des intégrations serveur" description="Les valeurs proviennent de reelora-health ; aucun secret n’est exposé." />
-          <div className="space-y-3 p-5">
-            {health === null && <Banner tone="warning" title="État indisponible">La fonction reelora-health n’a pas répondu. Vérifiez le déploiement des Edge Functions.</Banner>}
-            {health && [
-              ['Groq (scripts & prompts)', health.groq, 'GROQ_API_KEY'],
-              ['MuAPI (génération vidéo)', health.muapi, 'MUAPI_API_KEY'],
-              ['Worker MuAPI (webhook + cron)', health.worker, 'jeton stocké dans Supabase Vault'],
-              ['Supabase', health.supabase, 'injecté par la plateforme'],
-            ].map(([label, ok, hint]) => (
-              <div key={String(label)} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] px-4 py-3">
-                <div><p className="text-sm font-medium text-white">{label}</p><p className="text-[11px] text-slate-500">{hint}</p></div>
-                <Badge tone={ok ? 'success' : 'warning'}>{ok ? 'Configuré' : 'À configurer'}</Badge>
-              </div>
-            ))}
-            <Banner tone="info" title="Configuration requise">Les secrets se définissent dans Supabase → Project Settings → Edge Functions → Secrets. Ils ne doivent jamais être préfixés VITE_ ni être placés dans le frontend.</Banner>
-          </div>
-        </Card>
+        <div className="max-w-3xl space-y-5">
+          <Card><CardHeader title="État des intégrations serveur" description="Les valeurs proviennent de reelora-health ; aucun secret n’est exposé." />
+            <div className="space-y-3 p-5">
+              {health === null && <Banner tone="warning" title="État indisponible">La fonction reelora-health n’a pas répondu. Vérifiez le déploiement des Edge Functions.</Banner>}
+              {health && [
+                ['Groq (scripts & prompts)', health.groq, 'GROQ_API_KEY'],
+                ['MuAPI (génération vidéo)', health.muapi, 'MUAPI_API_KEY'],
+                ['Worker MuAPI (webhook + cron)', health.worker, 'jeton stocké dans Supabase Vault'],
+                ['Supabase', health.supabase, 'injecté par la plateforme'],
+              ].map(([label, ok, hint]) => (
+                <div key={String(label)} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] px-4 py-3">
+                  <div><p className="text-sm font-medium text-white">{label}</p><p className="text-[11px] text-slate-500">{hint}</p></div>
+                  <Badge tone={ok ? 'success' : 'warning'}>{ok ? 'Configuré' : 'À configurer'}</Badge>
+                </div>
+              ))}
+              <Banner tone="info" title="Configuration requise">Les secrets se définissent dans Supabase → Project Settings → Edge Functions → Secrets. Ils ne doivent jamais être préfixés VITE_ ni être placés dans le frontend.</Banner>
+            </div>
+          </Card>
+          <Card>
+            <CardHeader
+              title="Connecteurs sociaux et e-commerce"
+              description="Architecture préparée pour les futurs comptes de ce même workspace Reelora."
+            />
+            <div className="grid gap-3 p-5 sm:grid-cols-2">
+              {INTEGRATION_DEFINITIONS.map((integration) => (
+                <article key={integration.id} className="rounded-xl border border-line bg-white/[0.03] p-4" data-testid={`integration-${integration.id}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">{integration.name}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {integration.kind === 'social' ? 'Réseau social' : 'Commerce'} · {integration.authorization === 'oauth2' ? 'OAuth 2.0' : 'Installation sécurisée'}
+                      </p>
+                    </div>
+                    <Badge tone="neutral">Non connecté</Badge>
+                  </div>
+                  <p className="mt-3 text-xs leading-relaxed text-slate-400">{integration.note}</p>
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
+                    Capacités envisagées : {integration.proposedCapabilities.join(', ')}. Aucune action distante n’est activée.
+                  </p>
+                </article>
+              ))}
+            </div>
+            <div className="px-5 pb-5">
+              <Banner tone="info" title="Pas de connexions simulées">
+                Une intégration ne sera activée qu’avec l’autorisation officielle, une persistance protégée par RLS et des tests réels. Les identifiants resteront côté serveur.
+              </Banner>
+            </div>
+          </Card>
+        </div>
       )}
 
       <ConfirmDialog open={Boolean(toDelete)} title="Supprimer cet élément ?" danger confirmLabel="Supprimer" loading={busy === 'delete'} onClose={() => setToDelete(null)} onConfirm={() => void onDelete()}

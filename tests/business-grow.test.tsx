@@ -1,12 +1,23 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BusinessGrow from '../src/business/BusinessGrow';
 import type { ReactNode } from 'react';
+import type { Brand, Product } from '../src/lib/types';
 import {
   BUSINESS_PROVIDERS, isBusinessProviderAvailable,
 } from '../src/business/ai/registry';
+
+const authMocks = vi.hoisted(() => ({ workspace: null as null | {
+  id: string;
+  owner_user_id: string;
+  name: string;
+  country_code: string;
+  default_language: string;
+  created_at: string;
+  updated_at: string;
+} }));
 
 vi.mock('../src/context/AuthContext', () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => children,
@@ -14,7 +25,7 @@ vi.mock('../src/context/AuthContext', () => ({
     const user = { id: 'business-grow-test-user', email: 'business-grow@example.test' };
     const session = { access_token: 'test-token' };
     return () => ({
-      user, session, profile: null, workspace: null, workspaceId: null, quota: null,
+      user, session, profile: null, workspace: authMocks.workspace, workspaceId: authMocks.workspace?.id ?? null, quota: null,
       isAdmin: false, loading: false, bootstrapError: null,
       refreshQuota: vi.fn(), refreshAll: vi.fn(), logout: vi.fn(),
     });
@@ -31,6 +42,8 @@ const businessMocks = vi.hoisted(() => {
       created_at: string;
       request_status?: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
       request_error_code?: string | null;
+      request_provider_key?: string | null;
+      request_model_key?: string | null;
     }>;
     memory: { consent: boolean; policyVersion: string | null; profile: Record<string, unknown> | null; items: Array<{ id: string; category: string; content: unknown; created_at: string; updated_at: string }> };
   } = { conversations: [], messages: [], memory: { consent: false, policyVersion: null, profile: null, items: [] } };
@@ -38,6 +51,18 @@ const businessMocks = vi.hoisted(() => {
   return {
     state,
     createdId,
+    listBrands: vi.fn(async (_workspaceId: string): Promise<Brand[]> => [{
+      id: 'brand-1', workspace_id: 'workspace-1', name: 'Atelier Test', website_url: null,
+      industry: 'Cosmétiques', description: 'Soins naturels', logo_storage_path: null,
+      brand_colors: [], voice_guidelines: 'Chaleureux et direct',
+      created_at: '2026-01-01', updated_at: '2026-01-01',
+    }]),
+    listProducts: vi.fn(async (_workspaceId: string): Promise<Product[]> => [{
+      id: 'product-1', workspace_id: 'workspace-1', brand_id: 'brand-1', name: 'Sérum Éclat',
+      description: 'Sérum naturel', key_benefits: ['Hydrate'], features: [], price_amount: null,
+      price_currency: null, product_url: null, reference_image_paths: [], product_facts: {},
+      created_at: '2026-01-01', updated_at: '2026-01-01',
+    }]),
     getStatus: vi.fn(async () => ({ providers: [] })),
     listConversations: vi.fn(async () => ({ conversations: state.conversations })),
     createConversation: vi.fn(async (title: string) => {
@@ -57,7 +82,10 @@ const businessMocks = vi.hoisted(() => {
       return { deleted: state.conversations.length !== originalLength };
     }),
     listMessages: vi.fn(async (_conversationId?: string) => ({ messages: state.messages })),
-    sendMessage: vi.fn(async (_id?: string, _content?: string) => {
+    sendMessage: vi.fn(async (_id?: string, _content?: string): Promise<{
+      requestId: string; inputMessageId: string; status: string; providerAvailable: boolean;
+      provider?: { key: string; model: string };
+    }> => {
       throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
     }),
     getMemory: vi.fn(async () => state.memory),
@@ -80,12 +108,18 @@ vi.mock('../src/business/api', () => ({
 
 vi.mock('../src/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/api')>();
-  return { ...actual, listNotifications: async () => [] };
+  return {
+    ...actual,
+    listNotifications: async () => [],
+    listBrands: businessMocks.listBrands,
+    listProducts: businessMocks.listProducts,
+  };
 });
 
 import App from '../src/App';
 
 beforeEach(() => {
+  authMocks.workspace = null;
   businessMocks.state.conversations = [];
   businessMocks.state.messages = [];
   businessMocks.state.memory = { consent: false, policyVersion: null, profile: null, items: [] };
@@ -96,6 +130,8 @@ beforeEach(() => {
   businessMocks.sendMessage.mockImplementation(async () => {
     throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
   });
+  businessMocks.listBrands.mockClear();
+  businessMocks.listProducts.mockClear();
 });
 
 afterEach(cleanup);
@@ -132,6 +168,67 @@ describe('Business Grow', () => {
     expect(screen.getByTestId('provider-groq')).toBeTruthy();
     expect(screen.getByText('Rédaction')).toBeTruthy();
     expect(screen.getByTestId('provider-muapi').textContent).toContain('Hors du routage conversationnel');
+  });
+
+  it('affiche les marques et produits persistés dans le même espace Reelora', async () => {
+    authMocks.workspace = {
+      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier Reelora',
+      country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
+    };
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Entreprise' }));
+
+    expect(await screen.findByText('Atelier Reelora')).toBeTruthy();
+    expect(await screen.findByText('Atelier Test')).toBeTruthy();
+    expect(await screen.findByText('Sérum Éclat')).toBeTruthy();
+    expect(screen.getByText('Ces données proviennent de l’espace Reelora partagé. Elles ne sont pas copiées dans la mémoire IA.')).toBeTruthy();
+    expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1');
+    expect(businessMocks.listProducts).toHaveBeenCalledWith('workspace-1');
+    expect(screen.getByRole('link', { name: /Gérer les informations/ }).getAttribute('href')).toBe('/app/parametres');
+  });
+
+  it('ignore les résultats retardés des marques et produits de l’espace précédent', async () => {
+    let resolveOldBrands!: (brands: Brand[]) => void;
+    businessMocks.listBrands.mockImplementation(async (workspaceId: string) => {
+      if (workspaceId === 'workspace-1') {
+        return new Promise((resolve) => { resolveOldBrands = resolve; });
+      }
+      return [{
+        id: 'brand-new', workspace_id: workspaceId, name: 'Marque du nouvel espace', website_url: null,
+        industry: 'Services', description: null, logo_storage_path: null, brand_colors: [],
+        voice_guidelines: null, created_at: '2026-02-01', updated_at: '2026-02-01',
+      }] satisfies Brand[];
+    });
+    businessMocks.listProducts.mockImplementation(async (workspaceId: string) => workspaceId === 'workspace-1' ? [{
+      id: 'product-old', workspace_id: workspaceId, brand_id: null, name: 'Produit ancien',
+      description: null, key_benefits: [], features: [], price_amount: null, price_currency: null,
+      product_url: null, reference_image_paths: [], product_facts: {},
+      created_at: '2026-01-01', updated_at: '2026-01-01',
+    }] : []);
+    authMocks.workspace = {
+      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Ancien espace',
+      country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
+    };
+    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Entreprise' }));
+    await waitFor(() => expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1'));
+
+    authMocks.workspace = {
+      id: 'workspace-2', owner_user_id: 'business-grow-test-user', name: 'Nouvel espace',
+      country_code: 'FR', default_language: 'fr', created_at: '2026-02-01', updated_at: '2026-02-01',
+    };
+    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText('Marque du nouvel espace')).toBeTruthy();
+
+    resolveOldBrands([{
+      id: 'brand-old', workspace_id: 'workspace-1', name: 'Marque de l’ancien espace',
+      website_url: null, industry: 'Commerce', description: null, logo_storage_path: null,
+      brand_colors: [], voice_guidelines: null, created_at: '2026-01-01', updated_at: '2026-01-01',
+    }]);
+    await waitFor(() => expect(screen.queryByText('Marque de l’ancien espace')).toBeNull());
+    expect(screen.queryByText('Produit ancien')).toBeNull();
+    expect(screen.getByText('Marque du nouvel espace')).toBeTruthy();
   });
 
   it('crée et affiche une conversation seulement après confirmation de création serveur', async () => {
@@ -174,14 +271,18 @@ describe('Business Grow', () => {
     businessMocks.state.messages = [
       { id: 'm1', author_role: 'user', content: '1', created_at: '2026-01-01', request_status: 'queued' },
       { id: 'm2', author_role: 'user', content: '2', created_at: '2026-01-01', request_status: 'running' },
-      { id: 'm3', author_role: 'assistant', content: '3', created_at: '2026-01-01', request_status: 'succeeded' },
+      {
+        id: 'm3', author_role: 'assistant', content: '3', created_at: '2026-01-01',
+        request_status: 'succeeded', request_provider_key: 'gemini', request_model_key: 'model-via-fixture',
+      },
       { id: 'm4', author_role: 'user', content: '4', created_at: '2026-01-01', request_status: 'failed', request_error_code: 'NO_VERIFIED_PROVIDER' },
     ];
 
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('En attente')).toBeTruthy();
     expect(screen.getByText('Traitement en cours')).toBeTruthy();
-    expect(screen.getByText('Traitement réussi')).toBeTruthy();
+    expect(screen.getByText(/Traitement réussi/)).toBeTruthy();
+    expect(screen.getByText(/Réponse fournie par Gemini · model-via-fixture/)).toBeTruthy();
     expect(screen.getByText('Erreur (NO_VERIFIED_PROVIDER)')).toBeTruthy();
   });
 
@@ -210,6 +311,39 @@ describe('Business Grow', () => {
     expect(await screen.findByText('Aucun fournisseur vérifié. Aucune réponse simulée.')).toBeTruthy();
     expect(await screen.findByText('Aidez-moi à planifier.')).toBeTruthy();
     expect(await screen.findByText('Erreur (NO_VERIFIED_PROVIDER)')).toBeTruthy();
+  });
+
+  it('affiche la réponse réellement persistée et le fournisseur après un envoi réussi', async () => {
+    businessMocks.sendMessage.mockImplementationOnce(async (_conversationId?: string, content?: string) => {
+      businessMocks.state.messages = [
+        {
+          id: 'real-user-message', author_role: 'user', content: content ?? '',
+          created_at: '2026-01-01', request_status: 'succeeded',
+        },
+        {
+          id: 'real-assistant-message', author_role: 'assistant', content: 'Réponse issue du fournisseur.',
+          created_at: '2026-01-01', request_status: 'succeeded',
+          request_provider_key: 'gemini', request_model_key: 'verified-gemini-model',
+        },
+      ];
+      return {
+        requestId: '55555555-5555-4555-8555-555555555555',
+        inputMessageId: '66666666-6666-4666-8666-666666666666',
+        status: 'succeeded',
+        providerAvailable: true,
+        provider: { key: 'gemini', model: 'verified-gemini-model' },
+      };
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText(/Aucun fournisseur IA vérifié n’est actuellement disponible/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Réponds réellement.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    expect(await screen.findByText('Réponse issue du fournisseur.')).toBeTruthy();
+    expect(screen.getByTestId('business-message-assistant').textContent).toContain(
+      'Réponse fournie par Gemini · verified-gemini-model',
+    );
   });
 
   it('n’affiche pas le backend comme disponible si Supabase/Edge ne répond pas', async () => {

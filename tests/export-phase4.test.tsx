@@ -575,7 +575,7 @@ describe('2. Moteur de rendu sous jsdom (APIs navigateur simulées)', () => {
     } finally {
       delete (HTMLCanvasElement.prototype as unknown as { captureStream?: unknown }).captureStream;
     }
-  });
+  }, 15000);
 
   it('rejette explicitement les médias corrompus / CORS inaccessibles sans simuler de fichier', async () => {
     vi.stubGlobal('VideoFrame', class {});

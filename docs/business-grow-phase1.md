@@ -21,7 +21,7 @@ L’adaptateur Business Grow ne déclenche pas d’appel fournisseur ni de débi
 
 Le dossier SQL de [conception Business Grow](./business-grow-sql-design.md) n’a pas été exécuté. La vérification précédente du projet `xbuuhfwobrafcbgtdgjx` indiquait que `saas_business` et ses objets n’y étaient pas présents. Aucune migration n’a été appliquée. La migration additive et ses objets exacts doivent être présentés pour approbation avant toute écriture dans le projet de production.
 
-L’Edge Function, la configuration locale, le client frontend et les contrats de lecture/écriture SQL sont préparés dans le dépôt, mais le parcours persistant reste indisponible tant que le schéma et les secrets serveur requis ne sont pas installés. Aucun fournisseur, compte de paiement ou intégration externe n’est déclaré opérationnel.
+Les adaptateurs REST serveur Groq/Gemini et le fallback traçable sont implémentés localement, mais ne sont pas déployés et ne peuvent pas encore traiter de messages : le schéma `saas_business`, les nouvelles fonctions SQL et les secrets/variables serveur requis ne sont pas installés. Aucun fournisseur n’est réputé opérationnel sur le projet tant qu’une vérification de modèle et un appel de test autorisé n’ont pas réussi. Aucun compte de paiement ou intégration externe n’est déclaré opérationnel.
 
 ## Fichiers principaux
 

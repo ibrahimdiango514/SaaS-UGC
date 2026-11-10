@@ -1,4 +1,29 @@
-import { supabase } from '../lib/supabase';
+import { supabase, SUPABASE_PUBLISHABLE_KEY } from '../lib/supabase';
+
+function localFunctionUrl(): string | null {
+  if (!import.meta.env.DEV) return null;
+  const configured = (import.meta.env as Record<string, string | undefined>)
+    .VITE_BUSINESS_GROW_FUNCTION_URL?.trim();
+  if (!configured) return null;
+  try {
+    const url = new URL(configured);
+    if (
+      url.protocol === 'http:'
+      && ['localhost', '127.0.0.1'].includes(url.hostname)
+      && url.port === '54321'
+      && url.pathname === '/functions/v1/business-grow'
+    ) return url.toString();
+  } catch {
+    throw new BusinessGrowApiError(
+      'VITE_BUSINESS_GROW_FUNCTION_URL doit cibler la fonction Supabase locale sur localhost:54321.',
+      'INVALID_LOCAL_FUNCTION_URL',
+    );
+  }
+  throw new BusinessGrowApiError(
+    'VITE_BUSINESS_GROW_FUNCTION_URL doit cibler la fonction Supabase locale sur localhost:54321.',
+    'INVALID_LOCAL_FUNCTION_URL',
+  );
+}
 
 export interface BusinessConversation {
   id: string;
@@ -15,6 +40,8 @@ export interface BusinessMessage {
   created_at: string;
   request_status?: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | null;
   request_error_code?: string | null;
+  request_provider_key?: string | null;
+  request_model_key?: string | null;
 }
 
 export interface BusinessMemoryItem {
@@ -57,6 +84,46 @@ async function invoke<T>(action: string, values: Record<string, unknown> = {}): 
   if (sessionError) throw new BusinessGrowApiError(sessionError.message, 'SESSION_ERROR');
   if (!sessionData.session) throw new BusinessGrowApiError('Connectez-vous pour utiliser Business Grow.', 'UNAUTHENTICATED', 401);
 
+  const localUrl = localFunctionUrl();
+  if (localUrl) {
+    let response: Response;
+    try {
+      response = await fetch(localUrl, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action, ...values }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new BusinessGrowApiError(
+          'Le serveur local Business Grow ne répond pas dans le délai prévu.',
+          'BUSINESS_GROW_TIMEOUT',
+        );
+      }
+      throw new BusinessGrowApiError(
+        'Le serveur local Business Grow est injoignable. Vérifiez que la fonction Edge locale est démarrée.',
+        'BUSINESS_GROW_UNAVAILABLE',
+      );
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new BusinessGrowApiError(
+        'Le serveur Business Grow a renvoyé une réponse invalide.',
+        'INVALID_RESPONSE',
+        response.status,
+      );
+    }
+    return parseResponse<T>(payload, response.status);
+  }
+
   const { data, error } = await supabase.functions.invoke('business-grow', {
     body: { action, ...values },
   });
@@ -70,23 +137,41 @@ async function invoke<T>(action: string, values: Record<string, unknown> = {}): 
     const detail = body.error && typeof body.error === 'object'
       ? body.error as Record<string, unknown>
       : {};
+    const status = error.context instanceof Response ? error.context.status : undefined;
+    if (error.name === 'FunctionsFetchError' || status === 404) {
+      throw new BusinessGrowApiError(
+        'Le backend Business Grow est absent ou injoignable. La fonction serveur n’est peut-être pas déployée.',
+        'BUSINESS_GROW_UNAVAILABLE',
+        status,
+      );
+    }
     throw new BusinessGrowApiError(
       typeof detail.message === 'string' ? detail.message : error.message,
       typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED',
-      error.context instanceof Response ? error.context.status : undefined,
+      status,
     );
   }
 
-  if (!data || typeof data !== 'object') {
-    throw new BusinessGrowApiError('Réponse Business Grow invalide.', 'INVALID_RESPONSE');
+  return parseResponse<T>(data, 200);
+}
+
+function parseResponse<T>(payload: unknown, status: number): T {
+  if (!payload || typeof payload !== 'object') {
+    throw new BusinessGrowApiError('Réponse Business Grow invalide.', 'INVALID_RESPONSE', status);
   }
-  const response = data as Record<string, unknown>;
-  if (response.error && typeof response.error === 'object') {
-    const detail = response.error as Record<string, unknown>;
+  const response = payload as Record<string, unknown>;
+  if (status < 200 || status >= 300 || response.error) {
+    const detail = response.error && typeof response.error === 'object'
+      ? response.error as Record<string, unknown>
+      : {};
     throw new BusinessGrowApiError(
       typeof detail.message === 'string' ? detail.message : 'La demande Business Grow a échoué.',
       typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED',
+      status,
     );
+  }
+  if (!('data' in response)) {
+    throw new BusinessGrowApiError('Réponse Business Grow invalide.', 'INVALID_RESPONSE', status);
   }
   return response.data as T;
 }
@@ -108,6 +193,7 @@ export const businessGrowApi = {
       inputMessageId: string;
       status: string;
       providerAvailable: boolean;
+      provider?: { key: string; model: string };
     }>('messages.send', { conversationId, content, idempotencyKey }),
   getMemory: () => invoke<BusinessMemory>('memory.get'),
   setMemoryConsent: (enabled: boolean) =>

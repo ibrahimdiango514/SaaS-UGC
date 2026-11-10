@@ -632,13 +632,19 @@ CREATE FUNCTION saas_business.bg_list_messages(
   p_user_id uuid,p_conversation_id uuid,p_limit integer DEFAULT 200
 ) RETURNS TABLE(
   id uuid,author_role text,content text,created_at timestamptz,
-  request_status text,request_error_code text
+  request_status text,request_error_code text,
+  request_provider_key text,request_model_key text
 )
 LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,saas_business AS $$
-  SELECT m.id,m.author_role,m.content,m.created_at,r.status,r.error_code
+  SELECT m.id,m.author_role,m.content,m.created_at,r.status,r.error_code,
+    r.provider_key,r.model_key
   FROM saas_business.messages m
   LEFT JOIN LATERAL (
-    SELECT req.status,req.error_code FROM saas_business.ai_requests req
+    SELECT req.status,req.error_code,req.provider_key,
+      COALESCE(model.provider_model_key,req.model_key) AS model_key
+    FROM saas_business.ai_requests req
+    LEFT JOIN saas_business.ai_models model
+      ON model.provider_key=req.provider_key AND model.model_key=req.model_key
     WHERE req.user_id=m.user_id AND (req.input_message_id=m.id OR req.output_message_id=m.id)
     ORDER BY req.created_at DESC LIMIT 1
   ) r ON true
@@ -676,11 +682,23 @@ END $$;
 CREATE FUNCTION saas_business.bg_list_providers()
 RETURNS TABLE(
   provider_key text,display_name text,enabled boolean,status text,
-  config_status text,checked_at timestamptz
+  config_status text,checked_at timestamptz,verified_model_keys text[]
 )
 LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,saas_business AS $$
   SELECT p.provider_key,p.display_name,p.enabled,p.status,
-         COALESCE(pc.config_status,'missing'),p.checked_at
+         COALESCE(pc.config_status,'missing'),p.checked_at,
+         ARRAY(
+           SELECT m.provider_model_key
+           FROM saas_business.ai_models m
+           WHERE m.provider_key=p.provider_key AND m.enabled
+             AND m.verification_status='verified'
+             AND EXISTS (
+               SELECT 1 FROM saas_business.ai_provider_health_checks h
+               WHERE h.provider_key=m.provider_key AND h.model_key=m.model_key
+                 AND h.status='healthy' AND h.checked_at >= now()-interval '5 minutes'
+             )
+           ORDER BY m.model_key
+         )
   FROM saas_business.ai_providers p
   LEFT JOIN saas_business.ai_provider_configs pc USING(provider_key)
   WHERE p.provider_key <> 'muapi'
@@ -957,23 +975,60 @@ BEGIN
 END $$;
 ```
 
+For a successful provider call, the assistant message and request finalization must be committed atomically. The Edge Function calls this wrapper instead of inserting an assistant message and finalizing the attempt in separate transactions:
+
+```sql
+CREATE FUNCTION saas_business.bg_complete_attempt(
+  p_attempt_id uuid,p_request_id uuid,p_user_id uuid,p_output_content text,
+  p_input_tokens integer,p_output_tokens integer,p_latency_ms integer
+) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,saas_business AS $$
+DECLARE v_conversation_id uuid; v_message_id uuid;
+BEGIN
+  IF p_output_content IS NULL OR btrim(p_output_content)=''
+     OR (p_input_tokens IS NOT NULL AND p_input_tokens<0)
+     OR (p_output_tokens IS NOT NULL AND p_output_tokens<0)
+     OR (p_latency_ms IS NOT NULL AND p_latency_ms<0) THEN
+    RAISE EXCEPTION 'invalid provider result';
+  END IF;
+  SELECT conversation_id INTO v_conversation_id
+  FROM saas_business.ai_request_attempts
+  WHERE id=p_attempt_id AND request_id=p_request_id AND user_id=p_user_id
+    AND status='running'
+  FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'attempt is not running'; END IF;
+
+  v_message_id := saas_business.bg_append_message(
+    p_user_id,v_conversation_id,'assistant',p_output_content
+  );
+  PERFORM saas_business.bg_finalize_attempt(
+    p_attempt_id,p_request_id,p_user_id,'succeeded',p_input_tokens,p_output_tokens,
+    NULL,p_latency_ms,NULL,NULL,NULL,'succeeded',v_message_id
+  );
+  RETURN v_message_id;
+END $$;
+```
+
 ### AI Director et contrôles au moment du routage
 
-Cette fonction sélectionne et enregistre la première cible éligible. La fraîcheur est fixée ici à cinq minutes; les capacités sont comparées en tant qu'objets JSONB requis/contenus. Toute absence de candidat est une erreur explicite. Les appels fournisseur restent dans l'Edge Function et ne sont pas simulés.
+Cette fonction sélectionne et enregistre la première cible éligible. La fraîcheur est fixée ici à cinq minutes; les capacités sont comparées en tant qu'objets JSONB requis/contenus. En l'absence de candidat, elle renvoie zéro ligne; l'Edge Function convertit ce cas attendu en `NO_VERIFIED_PROVIDER`. Les autres erreurs SQL restent des échecs de sélection, et ne sont pas masquées comme une indisponibilité fournisseur. Les appels fournisseur restent dans l'Edge Function et ne sont pas simulés.
 
 ```sql
 CREATE FUNCTION saas_business.bg_select_route(
   p_request_id uuid,p_user_id uuid,p_conversation_id uuid,p_attempt_number integer,
-  p_fallback_from uuid,p_fallback_reason text
-) RETURNS TABLE(attempt_id uuid,provider_key text,model_key text)
+  p_fallback_from uuid,p_fallback_reason text,
+  p_preferred_provider_keys text[] DEFAULT ARRAY[]::text[],
+  p_excluded_provider_keys text[] DEFAULT ARRAY[]::text[]
+) RETURNS TABLE(attempt_id uuid,provider_key text,model_key text,provider_model_key text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,saas_business AS $$
-DECLARE v_role text; v_provider text; v_model text;
+DECLARE v_role text; v_provider text; v_model text; v_provider_model text;
 BEGIN
   SELECT role_key INTO v_role FROM saas_business.ai_requests
    WHERE id=p_request_id AND user_id=p_user_id AND conversation_id=p_conversation_id
      AND status='running' FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'running request not found'; END IF;
-  SELECT rr.provider_key,rr.model_key INTO v_provider,v_model
+  SELECT rr.provider_key,rr.model_key,m.provider_model_key
+    INTO v_provider,v_model,v_provider_model
   FROM saas_business.ai_routing_rules rr
   JOIN saas_business.ai_roles ar ON ar.role_key=rr.role_key AND ar.enabled
   JOIN saas_business.ai_providers p ON p.provider_key=rr.provider_key
@@ -984,6 +1039,9 @@ BEGIN
      AND m.model_key=rr.model_key AND m.enabled
      AND m.verification_status='verified'
   WHERE rr.role_key=v_role AND rr.enabled
+    AND (cardinality(p_preferred_provider_keys)=0
+      OR rr.provider_key=ANY(p_preferred_provider_keys))
+    AND NOT (rr.provider_key=ANY(COALESCE(p_excluded_provider_keys,ARRAY[]::text[])))
     AND NOT EXISTS (
       SELECT 1 FROM jsonb_each(ar.required_capabilities) req
       WHERE m.capabilities->req.key IS DISTINCT FROM req.value
@@ -994,11 +1052,16 @@ BEGIN
     AND EXISTS (SELECT 1 FROM saas_business.ai_provider_health_checks h
       WHERE h.provider_key=m.provider_key AND h.model_key=m.model_key
         AND h.status='healthy' AND h.checked_at >= now()-interval '5 minutes')
-  ORDER BY rr.priority LIMIT 1;
-  IF v_provider IS NULL THEN RAISE EXCEPTION 'no verified and healthy route'; END IF;
+  ORDER BY
+    CASE WHEN cardinality(p_preferred_provider_keys)>0
+      THEN array_position(p_preferred_provider_keys,rr.provider_key) END NULLS LAST,
+    rr.priority
+  LIMIT 1;
+  IF v_provider IS NULL THEN RETURN; END IF;
   attempt_id := saas_business.bg_add_attempt(p_request_id,p_user_id,p_conversation_id,
     p_attempt_number,v_provider,v_model,p_fallback_from,p_fallback_reason);
-  provider_key:=v_provider; model_key:=v_model; RETURN NEXT;
+  provider_key:=v_provider; model_key:=v_model;
+  provider_model_key:=v_provider_model; RETURN NEXT;
 END $$;
 
 CREATE FUNCTION saas_business.bg_record_health_check(
@@ -1284,7 +1347,8 @@ GRANT EXECUTE ON FUNCTION saas_business.bg_submit_user_message(uuid,uuid,text,te
 GRANT EXECUTE ON FUNCTION saas_business.bg_start_request(uuid,uuid) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_fail_request(uuid,uuid,text) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_finalize_attempt(uuid,uuid,uuid,text,integer,integer,bigint,integer,text,bigint,char,text,uuid) TO bg_edge;
-GRANT EXECUTE ON FUNCTION saas_business.bg_select_route(uuid,uuid,uuid,integer,uuid,text) TO bg_edge;
+GRANT EXECUTE ON FUNCTION saas_business.bg_complete_attempt(uuid,uuid,uuid,text,integer,integer,integer) TO bg_edge;
+GRANT EXECUTE ON FUNCTION saas_business.bg_select_route(uuid,uuid,uuid,integer,uuid,text,text[],text[]) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_record_health_check(text,text,text,integer,text) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_receive_billing_event(text,text,text,text,jsonb,timestamptz) TO bg_billing_worker;
 GRANT EXECUTE ON FUNCTION saas_business.bg_claim_billing_event(integer) TO bg_billing_worker;
@@ -1313,9 +1377,30 @@ Présence dans le dépôt (au moment de la vérification) :
 | `reelora-video` | Oui | Catalogue, devis, démarrage et état des tâches vidéo MuAPI | `verify_jwt=true`; appels backend/service-role et contrôles Auth côté code |
 | `reelora-video-worker` | Oui | Callback MuAPI et réconciliation planifiée | `verify_jwt=false`; jeton worker stocké côté serveur; callback traité comme signal non fiable, statut relu auprès de MuAPI |
 | `reelora-health` | Oui | Indique la présence de secrets serveur, sans en révéler les valeurs | `verify_jwt=false`; endpoint de santé non authentifié |
-| Business Grow / AI Director (`supabase/functions/business-grow/`) | Présent localement | Contrat d'API préparé pour conversations, messages, mémoire, statut fournisseur et cycle de requête IA; pas d'appel fournisseur live | `verify_jwt=true`; validation supplémentaire du JWT par Auth. Les opérations persistent restent inactives tant que le schéma et le secret DB ne sont pas installés |
+| Business Grow / AI Director (`supabase/functions/business-grow/`) | Présent localement | Conversations/messages/mémoire via RPC privées; adaptateurs REST Groq/Gemini, sélection configurée, historique et fallback traçable; non déployé et non configuré sur le projet | `verify_jwt=true`; validation supplémentaire du JWT par Auth. Les opérations persistent restent inactives tant que le schéma et le secret DB ne sont pas installés |
 
 `supabase/config.toml` montre `schemas = ["public"]` en local, et `verify_jwt` pour les fonctions ci-dessus. Il ne prouve pas la configuration Data API live.
+
+### Contrat d'exécution Groq / Gemini
+
+L'Edge Function utilise les API HTTPS officielles avec `fetch`, sans SDK fournisseur supplémentaire :
+
+- Groq Chat Completions : `POST https://api.groq.com/openai/v1/chat/completions`.
+- Gemini REST : `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, clé transmise dans l'en-tête serveur `x-goog-api-key`, pas dans l'URL.
+
+Les secrets sont exclusivement des secrets Edge Supabase dédiés à Business Grow : `BUSINESS_GROW_GROQ_API_KEY` et `BUSINESS_GROW_GEMINI_API_KEY`. Les identifiants de modèles sont configurés séparément via `BUSINESS_GROW_GROQ_MODEL` et `BUSINESS_GROW_GEMINI_MODEL`; aucun modèle n'est figé dans le code. Ces variables sont volontairement distinctes des clés Groq du Studio afin de séparer leur configuration et leur facturation fournisseur. `BUSINESS_GROW_PROVIDER_ORDER` accepte `groq,gemini` ou l'ordre inverse. Les modèles configurés doivent correspondre au `provider_model_key` de la cible validée par l'AI Director; la base reste la source de vérité pour `enabled`, la vérification individuelle et les contrôles de santé récents.
+
+Ne pas mettre ces valeurs dans `VITE_*`, un fichier `.env` suivi, une réponse HTTP ou un log. Les secrets ne sont pas configurés dans cette étape; ne pas réutiliser une clé déjà partagée dans une conversation. Les clés précédemment communiquées doivent être révoquées/renouvelées avant un test réel.
+
+L'Edge Function récupère l'historique de la conversation avec l'UUID dérivé de la session Auth et l'UUID de conversation, filtre les rôles `user`/`assistant`, impose un message système serveur, applique un délai limite de 25 secondes et limite le contexte aux 40 derniers messages. Un fallback n'est tenté qu'en enregistrant un nouvel `ai_request_attempts`, après exclusion du fournisseur déjà essayé; la réponse révèle explicitement le fournisseur/modèle qui a répondu. Les erreurs fournisseur sont réduites à des codes sûrs; le corps et les en-têtes fournisseurs (qui peuvent contenir des informations sensibles) ne sont ni renvoyés ni consignés.
+
+À la réussite, `bg_complete_attempt` écrit le message assistant, les tokens/latence et clôt la tentative/la requête au sein d'une même transaction. Aucun coût n'est estimé ou facturé par ce client tant qu'un prix vérifiable n'est pas disponible. Les crédits et tables Studio ne sont pas utilisés.
+
+**Prérequis de déploiement non satisfaits par le dépôt seul :** le schéma `saas_business`, les fonctions `bg_select_route` mises à jour et `bg_complete_attempt` doivent exister dans un environnement autorisé; `BUSINESS_GROW_DATABASE_URL`, `SUPABASE_URL`, la clé publique Supabase, les clés fournisseur Business Grow dédiées, les modèles vérifiés et l'ordre du routeur doivent être configurés comme secrets/variables serveur. Aucun de ces secrets ne doit être ajouté au frontend. Après installation en staging, exécuter les tests d'isolation A/B puis seulement un test de chat non payant autorisé.
+
+### État d'installation vérifié le 2026-11-10
+
+L'inspection distante en lecture seule n'a trouvé aucune table dans `saas_business`. Le projet n'a qu'une branche Supabase `main` par défaut; aucune branche ou cible staging isolée n'a été identifiée. `business-grow` n'apparaît pas dans la liste des fonctions Edge déployées. Le DDL ci-dessus demeure une proposition non appliquée : ne pas l'exécuter sur `main`/production. Réaliser l'installation et les tests transactionnels uniquement après mise à disposition d'une base staging isolée et confirmation de ses paramètres de connexion. Aucun secret fournisseur n'a été configuré.
 
 ## 6. Script de vérification des droits effectifs
 
@@ -1418,7 +1503,7 @@ BEGIN
        AND f.proname NOT IN ('bg_set_memory_consent','bg_create_conversation',
          'bg_append_message','bg_upsert_memory_profile','bg_put_memory_item',
          'bg_delete_memory_item','bg_clear_memory','bg_create_request',
-         'bg_start_request','bg_finalize_attempt','bg_select_route',
+         'bg_start_request','bg_finalize_attempt','bg_complete_attempt','bg_select_route',
          'bg_record_health_check') THEN
       RAISE EXCEPTION 'bg_edge has unexpected EXECUTE on %',f.oid::regprocedure;
     END IF;
@@ -1439,7 +1524,7 @@ BEGIN
       AND p.proname IN ('bg_set_memory_consent','bg_create_conversation','bg_append_message',
         'bg_upsert_memory_profile','bg_put_memory_item','bg_delete_memory_item',
         'bg_clear_memory','bg_create_request','bg_start_request','bg_finalize_attempt',
-        'bg_select_route','bg_record_health_check')
+        'bg_complete_attempt','bg_select_route','bg_record_health_check')
       AND NOT has_function_privilege('bg_edge',p.oid,'EXECUTE')
   ) THEN RAISE EXCEPTION 'expected bg_edge EXECUTE grant missing'; END IF;
   IF EXISTS (
@@ -1509,7 +1594,7 @@ Dans une transaction de test, prendre les comptes des tables Studio avant et apr
 
 **Écrit dans ce livrable :** un document SQL autonome dans `docs/`, contenant les 18 tables, RLS, privilèges, fonctions proposées, chemin Edge, script de vérification et tests.
 
-**Contrôles statiques effectués :** existence des Edge Functions et lecture de leur mode d'authentification; config locale (`schemas=["public"]`, JWT des fonctions); aucun dossier Business Grow Edge détecté; absence de `psql`, `postgres`, `initdb` et `docker` dans l'environnement.
+**Contrôles statiques effectués :** présence locale des Edge Functions et lecture de leur mode d'authentification; config locale (`schemas=["public"]`, JWT des fonctions); la CLI Supabase liste le projet Reelora `xbuuhfwobrafcbgtdgjx`, mais aucun projet n'est lié au dépôt et l'inspection locale est bloquée par l'absence de Docker/Podman. L'état live des tables/fonctions Business Grow n'est donc pas vérifié dans cette révision. Aucun SQL mutatif ni migration n'a été exécuté.
 
 **Non exécuté / non compilé :** tout le SQL de ce document, le script de droits et les tests transactionnels. Aucun test PostgreSQL réel n'a été exécuté. Restent à tester en PostgreSQL 17 les transitions et cascades, l'identité de session `bg_erasure`, les capacités JSON du routage, la reprise concurrente des leases et l'intégration Edge des rôles de connexion. La validation de signature des paiements demeure spécifique au prestataire qui sera choisi. Le document ne doit pas être qualifié de « DDL validé » avant compilation et tests sur une base PostgreSQL 17 isolée.
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, Copy, Pencil, Plus, Sparkles, Star, Trash2, Wand2, Variable } from 'lucide-react';
 import { PageHeader, Card, Button, Input, Textarea, Select, Badge, Modal, LoadingState, ErrorState, EmptyState, ConfirmDialog, Banner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -14,13 +14,17 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const EMPTY = { title: '', category: 'script' as PromptTemplate['category'], content: '', is_favorite: false };
+const PROMPT_PAGE_SIZE = 24;
 
 export default function Prompts() {
   const toast = useToast();
   const { user, workspaceId, refreshQuota } = useAuth();
   const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [loadMoreError, setLoadMoreError] = useState('');
+  const [hasMore, setHasMore] = useState(false);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<PromptTemplate | null>(null);
   const [form, setForm] = useState(EMPTY);
@@ -28,16 +32,49 @@ export default function Prompts() {
   const [improving, setImproving] = useState(false);
   const [toDelete, setToDelete] = useState<PromptTemplate | null>(null);
   const [testValues, setTestValues] = useState<Record<string, string>>({});
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | PromptTemplate['category']>('all');
+  const requestId = useRef(0);
+  const loadMoreRequestId = useRef(0);
+  const categoryRef = useRef(categoryFilter);
+  categoryRef.current = categoryFilter;
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setPrompts(await listPrompts()); }
-    catch (err) { setError(asAppError(err).message); }
-    finally { setLoading(false); }
-  }, []);
+    const currentRequest = ++requestId.current;
+    ++loadMoreRequestId.current;
+    setLoadingMore(false); setLoading(true); setError(''); setLoadMoreError('');
+    try {
+      const page = await listPrompts(categoryFilter === 'all' ? undefined : categoryFilter, PROMPT_PAGE_SIZE + 1);
+      if (currentRequest !== requestId.current) return;
+      setPrompts(page.slice(0, PROMPT_PAGE_SIZE));
+      setHasMore(page.length > PROMPT_PAGE_SIZE);
+    } catch (err) {
+      if (currentRequest === requestId.current) setError(asAppError(err).message);
+    } finally {
+      if (currentRequest === requestId.current) setLoading(false);
+    }
+  }, [categoryFilter]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    const currentRequest = ++loadMoreRequestId.current;
+    const currentLoad = requestId.current;
+    const currentCategory = categoryRef.current;
+    setLoadingMore(true); setLoadMoreError('');
+    try {
+      const page = await listPrompts(currentCategory === 'all' ? undefined : currentCategory, PROMPT_PAGE_SIZE + 1, prompts.length);
+      if (currentRequest !== loadMoreRequestId.current || currentLoad !== requestId.current || currentCategory !== categoryRef.current) return;
+      setPrompts((current) => [...current, ...page.slice(0, PROMPT_PAGE_SIZE)]);
+      setHasMore(page.length > PROMPT_PAGE_SIZE);
+    } catch (err) {
+      if (currentRequest === loadMoreRequestId.current && currentLoad === requestId.current && currentCategory === categoryRef.current) {
+        setLoadMoreError(asAppError(err).message);
+      }
+    } finally {
+      if (currentRequest === loadMoreRequestId.current) setLoadingMore(false);
+    }
+  };
 
   const openCreate = () => { setEditing(null); setForm(EMPTY); setTestValues({}); setModal(true); };
   const openEdit = (p: PromptTemplate) => { setEditing(p); setForm({ title: p.title, category: p.category, content: p.content, is_favorite: p.is_favorite }); setTestValues({}); setModal(true); };
@@ -91,7 +128,7 @@ export default function Prompts() {
   };
 
   const variables = extractVariables(form.content);
-  const filtered = categoryFilter === 'all' ? prompts : prompts.filter((p) => p.category === categoryFilter);
+  const filtered = prompts;
 
   return (
     <>
@@ -101,15 +138,15 @@ export default function Prompts() {
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 
       <Card className="mb-5 flex flex-wrap items-center gap-3 p-4">
-        <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="w-auto min-w-[180px]" aria-label="Filtrer par catégorie">
+        <Select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value === 'all' ? 'all' : CATEGORIES.find((category) => category === e.target.value) ?? 'all')} className="w-auto min-w-[180px]" aria-label="Filtrer par catégorie">
           <option value="all">Toutes les catégories</option>
           {CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
         </Select>
-        <span className="text-xs text-slate-500">{filtered.length} prompt(s)</span>
+        <span className="text-xs text-slate-500">{filtered.length} prompt(s) chargé(s){hasMore ? ' · d’autres résultats sont disponibles' : ''}</span>
         <Button variant="ghost" size="sm" className="ml-auto" onClick={() => void load()}>Actualiser</Button>
       </Card>
 
-      {loading ? <LoadingState /> : filtered.length === 0 ? (
+      {loading ? <LoadingState /> : error ? null : filtered.length === 0 ? (
         <EmptyState icon={<BookOpen size={24} />} title="Aucun prompt" description="Créez votre premier modèle ou utilisez les modèles système fournis." action={<Button icon={<Plus size={15} />} onClick={openCreate}>Créer un prompt</Button>} />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -133,6 +170,21 @@ export default function Prompts() {
             </Card>
           ))}
         </div>
+      )}
+      {!loading && !error && filtered.length > 0 && (
+        <>
+          {loadMoreError && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3" role="alert">
+              <p className="text-sm text-rose-100">{loadMoreError}</p>
+              <Button size="sm" variant="outline" onClick={() => void loadMore()}>Réessayer</Button>
+            </div>
+          )}
+          {hasMore && (
+            <div className="mt-6 flex justify-center">
+              <Button variant="outline" loading={loadingMore} onClick={() => void loadMore()}>Charger plus de prompts</Button>
+            </div>
+          )}
+        </>
       )}
 
       <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Modifier le prompt' : 'Nouveau prompt'} description="Utilisez {{variable}} pour rendre le modèle réutilisable." size="lg"

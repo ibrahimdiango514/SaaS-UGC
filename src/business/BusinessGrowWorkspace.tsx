@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  ArrowUpRight, Brain, Building2, Check, FileText, Lightbulb, LockKeyhole,
-  MessageSquare, Pencil, Send, ShieldCheck, Sparkles, Trash2, X, Zap,
+  ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Lightbulb, LockKeyhole,
+  MessageSquare, Package, Pencil, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, X, Zap,
 } from 'lucide-react';
-import { Badge, Button, Toggle, cn } from '../components/ui';
+import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { listBrands, listProducts } from '../lib/api';
+import type { Brand, Product, Workspace } from '../lib/types';
 import {
   BusinessGrowApiError, businessGrowApi,
   type BusinessConversation, type BusinessMemory, type BusinessMessage, type BusinessProviderStatus,
@@ -13,13 +16,153 @@ import {
   BUSINESS_PROVIDERS, type BusinessCapability,
 } from './ai/registry';
 
-type BusinessSection = 'chat' | 'memory' | 'providers';
+type BusinessSection = 'chat' | 'company' | 'memory' | 'providers';
 
 const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare }[] = [
   { id: 'chat', label: 'Assistant', icon: MessageSquare },
+  { id: 'company', label: 'Entreprise', icon: Building2 },
   { id: 'memory', label: 'Mémoire métier', icon: Building2 },
   { id: 'providers', label: 'Fournisseurs IA', icon: Zap },
 ];
+
+function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
+
+  const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    if (!workspace) {
+      setBrands([]);
+      setProducts([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setBrands([]);
+    setProducts([]);
+    try {
+      const [nextBrands, nextProducts] = await Promise.all([
+        listBrands(workspace.id),
+        listProducts(workspace.id),
+      ]);
+      if (requestId !== loadRequestRef.current) return;
+      setBrands(nextBrands);
+      setProducts(nextProducts);
+    } catch (loadError) {
+      if (requestId === loadRequestRef.current) {
+        setError(loadError instanceof Error ? loadError.message : 'Impossible de charger les données de l’entreprise.');
+      }
+    } finally {
+      if (requestId === loadRequestRef.current) setLoading(false);
+    }
+  }, [workspace]);
+
+  useEffect(() => {
+    void load();
+    return () => { loadRequestRef.current += 1; };
+  }, [load]);
+
+  return (
+    <section className="space-y-4" data-testid="business-company-context">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-6">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-brand-200">Compte Reelora partagé</p>
+          <h2 className="mt-1 text-lg font-semibold text-white">{workspace?.name ?? 'Aucun espace de travail actif'}</h2>
+          {workspace && (
+            <p className="mt-1 text-sm text-slate-400">
+              {workspace.country_code} · Langue par défaut : {workspace.default_language}
+            </p>
+          )}
+        </div>
+        <Link to="/app/parametres" className="btn btn-outline btn-sm">
+          Gérer les informations <ExternalLink size={14} />
+        </Link>
+      </div>
+
+      {!workspace ? (
+        <EmptyState
+          icon={<Building2 size={22} />}
+          title="Espace de travail indisponible"
+          description="Reconnectez-vous à Reelora ou réessayez le chargement de votre espace."
+        />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void load()} />
+      ) : loading ? (
+        <LoadingState label="Chargement des données de l’entreprise…" />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-white/[0.08] bg-panel/50">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Marques</h3>
+                <p className="mt-1 text-xs text-slate-500">{brands.length} enregistrée(s) dans l’espace commun</p>
+              </div>
+              <Building2 size={17} className="text-brand-300" />
+            </div>
+            {brands.length ? (
+              <div className="divide-y divide-white/[0.06]">
+                {brands.map((brand) => (
+                  <article key={brand.id} className="px-5 py-3.5">
+                    <h4 className="text-sm font-medium text-slate-100">{brand.name}</h4>
+                    <p className="mt-1 text-xs text-slate-400">{brand.industry || 'Secteur non renseigné'}</p>
+                    {brand.description && <p className="mt-2 text-xs leading-relaxed text-slate-500">{brand.description}</p>}
+                    {brand.voice_guidelines && (
+                      <p className="mt-2 rounded-lg bg-white/[0.03] p-2 text-xs text-slate-400">
+                        Ton : {brand.voice_guidelines}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon={<Building2 size={20} />} title="Aucune marque enregistrée" description="Ajoutez les marques de votre entreprise depuis les paramètres Reelora." />
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-white/[0.08] bg-panel/50">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Produits et services</h3>
+                <p className="mt-1 text-xs text-slate-500">{products.length} enregistré(s) dans l’espace commun</p>
+              </div>
+              <Package size={17} className="text-cyan-300" />
+            </div>
+            {products.length ? (
+              <div className="divide-y divide-white/[0.06]">
+                {products.map((product) => (
+                  <article key={product.id} className="px-5 py-3.5">
+                    <h4 className="text-sm font-medium text-slate-100">{product.name}</h4>
+                    {product.description && <p className="mt-1 text-xs leading-relaxed text-slate-400">{product.description}</p>}
+                    {product.key_benefits.length > 0 && (
+                      <p className="mt-2 text-xs text-slate-500">Bénéfices : {product.key_benefits.join(' · ')}</p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon={<Package size={20} />} title="Aucun produit enregistré" description="Ajoutez vos produits ou services depuis les paramètres Reelora." />
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3">
+        <p className="text-xs text-slate-400">
+          Ces données proviennent de l’espace Reelora partagé. Elles ne sont pas copiées dans la mémoire IA.
+        </p>
+        <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => void load()} disabled={loading || !workspace}>
+          Actualiser
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 const PROMPT_IDEAS = [
   { label: 'Rédiger', text: 'Aidez-moi à rédiger un contenu pour mon activité.', icon: FileText },
@@ -45,8 +188,11 @@ const CAPABILITY_LABELS: Record<BusinessCapability, string> = {
 
 function providerStatus(provider: BusinessProviderStatus | undefined) {
   if (!provider) return { label: 'Non vérifié', description: 'Le statut serveur n’a pas pu être vérifié.' };
-  if (!provider.enabled || provider.config_status !== 'configured') {
+  if (provider.config_status !== 'configured') {
     return { label: 'Non configuré', description: 'Aucune configuration serveur utilisable n’est disponible.' };
+  }
+  if (!provider.enabled) {
+    return { label: 'Non vérifié', description: 'Le modèle configuré n’a pas été vérifié récemment.' };
   }
   if (provider.status === 'available') {
     return { label: 'Disponible', description: 'La disponibilité a été vérifiée côté serveur.' };
@@ -222,6 +368,9 @@ function AssistantView({
                   {message.request_status === 'succeeded' && 'Traitement réussi'}
                   {message.request_status === 'failed' && `Erreur (${message.request_error_code || 'erreur inconnue'})`}
                   {message.request_status === 'canceled' && 'Traitement annulé'}
+                  {message.request_status === 'succeeded' && message.author_role === 'assistant' && message.request_provider_key
+                    ? `Réponse fournie par ${BUSINESS_PROVIDERS.find((provider) => provider.id === message.request_provider_key)?.name ?? message.request_provider_key}${message.request_model_key ? ` · ${message.request_model_key}` : ''}`
+                    : null}
                 </p>
               )}
             </article>
@@ -557,7 +706,7 @@ function ProvidersView({ statuses }: { statuses: BusinessProviderStatus[] | null
 }
 
 export default function BusinessGrowWorkspace() {
-  const { user, session, workspaceId } = useAuth();
+  const { user, session, workspace, workspaceId } = useAuth();
   const [section, setSection] = useState<BusinessSection>('chat');
   const [providers, setProviders] = useState<BusinessProviderStatus[] | null>(null);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
@@ -705,15 +854,18 @@ export default function BusinessGrowWorkspace() {
   const sendMessage = useCallback(async (content: string): Promise<boolean> => {
     setError(null);
     setBusy(true);
+    let conversationId = selectedConversationId;
     try {
-      let conversationId = selectedConversationId;
       if (!conversationId) {
         const result = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
         conversationId = result.conversationId;
         setSelectedConversationId(conversationId);
       }
       await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID());
-      await Promise.all([loadConversations(), loadMessages()]);
+      await Promise.all([
+        loadConversations(),
+        businessGrowApi.listMessages(conversationId).then((result) => setMessages(result.messages)),
+      ]);
       return true;
     } catch (sendError) {
       const code = sendError instanceof BusinessGrowApiError
@@ -721,9 +873,26 @@ export default function BusinessGrowWorkspace() {
         : typeof sendError === 'object' && sendError !== null && 'code' in sendError && typeof sendError.code === 'string'
           ? sendError.code
           : null;
-      if (code && ['NO_VERIFIED_PROVIDER', 'PROVIDER_ADAPTER_NOT_CONFIGURED'].includes(code)) {
+      if (code && [
+        'NO_VERIFIED_PROVIDER',
+        'PROVIDER_NOT_CONFIGURED',
+        'PROVIDER_MODEL_MISMATCH',
+        'PROVIDER_AUTH_FAILED',
+        'PROVIDER_RATE_LIMITED',
+        'PROVIDER_UNAVAILABLE',
+        'PROVIDER_TIMEOUT',
+        'PROVIDER_NETWORK_ERROR',
+        'PROVIDER_REQUEST_REJECTED',
+        'PROVIDER_INVALID_RESPONSE',
+        'PROVIDER_EMPTY_RESPONSE',
+      ].includes(code)) {
         setError(sendError instanceof Error ? sendError.message : 'Aucun fournisseur IA vérifié n’est disponible.');
-        await Promise.allSettled([loadConversations(), loadMessages()]);
+        await Promise.allSettled([
+          loadConversations(),
+          conversationId
+            ? businessGrowApi.listMessages(conversationId).then((result) => setMessages(result.messages))
+            : Promise.resolve(),
+        ]);
         return true;
       } else {
         setError(sendError instanceof Error ? sendError.message : 'Impossible d’envoyer la demande.');
@@ -845,6 +1014,7 @@ export default function BusinessGrowWorkspace() {
               onRetry={() => { void refreshWorkspace(); void loadMessages(); }}
             />
           )}
+          {section === 'company' && <CompanyContextView workspace={workspace} />}
           {section === 'memory' && (
             <MemoryView
               memory={memory}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Check, Copy, FileText, Sparkles, Trash2, Wand2, AlertCircle, Layers, Save } from 'lucide-react';
+import { Check, Copy, FileText, Sparkles, Trash2, Wand2, Layers, Save } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Textarea, Select, Badge, Banner, LoadingState, ErrorState, EmptyState, Tabs, ConfirmDialog } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
@@ -8,6 +8,8 @@ import { asAppError } from '../lib/errors';
 import { formatDate, statusLabel, truncate } from '../lib/format';
 import { deleteScript, generateHooks, generateScript, listProjects, listPrompts, listScripts, saveScenes, saveScript, updateScript } from '../lib/api';
 import type { AiScriptResult, Project, PromptTemplate, Script } from '../lib/types';
+
+const SCRIPTS_PAGE_SIZE = 24;
 
 export default function Scripts() {
   const toast = useToast();
@@ -19,7 +21,11 @@ export default function Scripts() {
   const [result, setResult] = useState<AiScriptResult | null>(null);
   const [hooks, setHooks] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [loadMoreError, setLoadMoreError] = useState('');
+  const [hasMoreScripts, setHasMoreScripts] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('generer');
@@ -31,19 +37,37 @@ export default function Scripts() {
   });
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setLoadError(''); setLoadMoreError('');
     try {
-      const [p, s, t] = await Promise.all([listProjects(), listScripts(), listPrompts()]);
-      setProjects(p); setScripts(s); setTemplates(t.filter((x) => x.category === 'script' || x.category === 'hook'));
+      const [p, s, t] = await Promise.all([
+        listProjects(), listScripts(undefined, SCRIPTS_PAGE_SIZE + 1), listPrompts(),
+      ]);
+      setProjects(p); setScripts(s.slice(0, SCRIPTS_PAGE_SIZE));
+      setHasMoreScripts(s.length > SCRIPTS_PAGE_SIZE);
+      setTemplates(t.filter((x) => x.category === 'script' || x.category === 'hook'));
       if (params.get('projet')) {
         const found = p.find((x) => x.id === params.get('projet'));
         if (found) setForm((f) => ({ ...f, project_id: found.id, product: found.title, audience: f.audience || found.target_audience || '', brief: f.brief || found.brief || '' }));
       }
-    } catch (err) { setError(asAppError(err).message); }
+    } catch (err) { setLoadError(asAppError(err).message); }
     finally { setLoading(false); }
   }, [params]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadMoreScripts = async () => {
+    if (loadingMore || !hasMoreScripts) return;
+    setLoadingMore(true); setLoadMoreError('');
+    try {
+      const next = await listScripts(undefined, SCRIPTS_PAGE_SIZE + 1, scripts.length);
+      setScripts((current) => [...current, ...next.slice(0, SCRIPTS_PAGE_SIZE)]);
+      setHasMoreScripts(next.length > SCRIPTS_PAGE_SIZE);
+    } catch (err) {
+      setLoadMoreError(asAppError(err).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const scriptTemplates = useMemo(() => templates.filter((t) => t.category === 'script'), [templates]);
 
@@ -119,8 +143,14 @@ export default function Scripts() {
 
       <Tabs active={tab} onChange={setTab} tabs={[
         { id: 'generer', label: 'Générer', icon: <Wand2 size={14} /> },
-        { id: 'bibliotheque', label: `Mes scripts (${scripts.length})`, icon: <FileText size={14} /> },
+        { id: 'bibliotheque', label: 'Mes scripts', icon: <FileText size={14} /> },
       ]} />
+      {loadError && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3" role="alert">
+          <p className="text-sm text-rose-100">{loadError}</p>
+          <Button size="sm" variant="outline" onClick={() => void load()}>Réessayer</Button>
+        </div>
+      )}
 
       {tab === 'generer' && (
         <div className="grid gap-5 lg:grid-cols-5">
@@ -191,9 +221,10 @@ export default function Scripts() {
       )}
 
       {tab === 'bibliotheque' && (
-        <Card><CardHeader title="Scripts enregistrés" description={loading ? 'Chargement…' : `${scripts.length} version(s) conservée(s)`} />
-          {loading ? <LoadingState /> : scripts.length === 0 ? <EmptyState icon={<FileText size={22} />} title="Aucun script enregistré" description="Générez puis enregistrez un script pour le retrouver ici." /> : (
-            <div className="divide-y divide-white/[0.06]">{scripts.map((s) => (
+        <Card><CardHeader title="Scripts enregistrés" description={loading ? 'Chargement…' : `${scripts.length} script(s) chargés${hasMoreScripts ? ' · d’autres scripts sont disponibles' : ''}`} />
+          {loading ? <LoadingState /> : loadError ? null : scripts.length === 0 ? <EmptyState icon={<FileText size={22} />} title="Aucun script enregistré" description="Générez puis enregistrez un script pour le retrouver ici." /> : (
+            <>
+              <div className="divide-y divide-white/[0.06]">{scripts.map((s) => (
               <div key={s.id} className="px-5 py-4">
                 <div className="flex flex-wrap items-center gap-2"><Badge status={s.status}>{statusLabel(s.status)}</Badge><span className="text-xs text-slate-500">v{s.version} · {formatDate(s.created_at, true)}</span></div>
                 {s.hook && <p className="mt-2 text-sm font-semibold text-brand-200">{s.hook}</p>}
@@ -204,12 +235,23 @@ export default function Scripts() {
                   <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => setToDelete(s)}>Supprimer</Button>
                 </div>
               </div>
-            ))}</div>
+              ))}</div>
+              {loadMoreError && (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3" role="alert">
+                  <p className="text-sm text-rose-200">{loadMoreError}</p>
+                  <Button size="sm" variant="outline" onClick={() => void loadMoreScripts()}>Réessayer</Button>
+                </div>
+              )}
+              {hasMoreScripts && (
+                <div className="flex justify-center border-t border-line p-4">
+                  <Button variant="outline" loading={loadingMore} onClick={() => void loadMoreScripts()}>Charger plus de scripts</Button>
+                </div>
+              )}
+            </>
           )}
         </Card>
       )}
 
-      {error && tab === 'bibliotheque' && <div className="mt-4"><Banner tone="danger" title="Erreur"><AlertCircle size={13} className="inline" /> {error}</Banner></div>}
       <ConfirmDialog open={Boolean(toDelete)} title="Supprimer ce script ?" danger confirmLabel="Supprimer" onClose={() => setToDelete(null)} onConfirm={() => void onDelete()} message="Cette version du script sera définitivement supprimée." />
     </>
   );

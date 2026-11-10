@@ -1,3 +1,11 @@
+import {
+  ProviderCallError,
+  type BusinessProvider,
+  type ChatMessage,
+  type ProviderConfig,
+  type ProviderReply,
+} from './providers';
+
 export type BusinessAction =
   | 'status'
   | 'conversations.list'
@@ -36,19 +44,54 @@ export interface BusinessGrowStore {
     userId: string,
     requestId: string,
     conversationId: string,
-  ): Promise<{ attemptId: string; providerKey: string; modelKey: string }>;
+    attemptNumber: number,
+    fallbackFromAttemptId: string | null,
+    fallbackReason: string | null,
+    preferredProviders: BusinessProvider[],
+    excludedProviders: BusinessProvider[],
+  ): Promise<{ attemptId: string; providerKey: string; modelKey: string; providerModelKey: string }>;
   failRequest(userId: string, requestId: string, errorCode: string): Promise<void>;
-  finalizeAttempt(userId: string, requestId: string, attemptId: string, errorCode: string): Promise<void>;
+  finalizeAttempt(
+    userId: string,
+    requestId: string,
+    attemptId: string,
+    result: {
+      status: 'succeeded' | 'failed';
+      errorCode: string | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+      latencyMs: number;
+      outputContent?: string;
+      finalizeRequest?: boolean;
+    },
+  ): Promise<void>;
+}
+
+export class NoVerifiedProviderRouteError extends Error {
+  constructor() {
+    super('No verified provider route is available.');
+    this.name = 'NoVerifiedProviderRouteError';
+  }
 }
 
 export interface BusinessGrowDependencies {
   store: BusinessGrowStore;
   getUserId: (authorization: string) => Promise<string | null>;
   allowedOrigins: string[];
+  providerConfigs: Partial<Record<BusinessProvider, ProviderConfig>>;
+  providerOrder: BusinessProvider[];
+  complete: (
+    provider: BusinessProvider,
+    config: ProviderConfig,
+    messages: ChatMessage[],
+  ) => Promise<ProviderReply>;
 }
 
 const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
 const maxMessageLength = 12_000;
+const maxHistoryMessages = 40;
+const maxHistoryCharacters = 60_000;
+const systemMessage = 'Vous êtes le copilote Business Grow de Reelora. Répondez en français, sauf demande contraire. Distinguez les faits connus des hypothèses et n’inventez pas les données métier absentes.';
 
 function response(
   body: unknown,
@@ -91,11 +134,36 @@ async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function chatHistory(value: unknown[], maxCharacters = maxHistoryCharacters): ChatMessage[] {
+  const candidates: ChatMessage[] = [];
+  for (const item of value.slice(-maxHistoryMessages)) {
+    const message = object(item);
+    if ((message.author_role === 'user' || message.author_role === 'assistant')
+      && typeof message.content === 'string'
+      && message.content.trim()) {
+      candidates.push({ role: message.author_role, content: message.content.slice(0, maxMessageLength) });
+    }
+  }
+  const history: ChatMessage[] = [];
+  let remainingCharacters = Math.max(0, maxCharacters);
+  for (const message of candidates.reverse()) {
+    if (remainingCharacters <= 0) break;
+    const content = message.content.slice(-remainingCharacters);
+    history.unshift({ role: message.role, content });
+    remainingCharacters -= content.length;
+  }
+  return [{ role: 'system', content: systemMessage }, ...history];
+}
+
+function isProvider(value: string): value is BusinessProvider {
+  return value === 'groq' || value === 'gemini';
+}
+
 export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies) {
   return async (request: Request): Promise<Response> => {
     const origin = request.headers.get('Origin');
     const corsHeaders = new Headers({
-      'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
+      'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Max-Age': '86400',
     });
@@ -104,12 +172,12 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
       corsHeaders.set('Vary', 'Origin');
     }
 
-    if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
-    if (request.method !== 'POST') {
-      return response(failure('METHOD_NOT_ALLOWED', 'Méthode non autorisée.'), 405, origin, dependencies.allowedOrigins);
-    }
     if (origin && !dependencies.allowedOrigins.includes(origin)) {
       return response(failure('ORIGIN_NOT_ALLOWED', 'Origine non autorisée.'), 403, null, dependencies.allowedOrigins);
+    }
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
+    if (request.method !== 'POST') {
+      return response(failure('METHOD_NOT_ALLOWED', 'Méthode non autorisée.'), 405, origin, dependencies.allowedOrigins);
     }
 
     const authorization = request.headers.get('Authorization') ?? '';
@@ -200,6 +268,11 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             return response(failure('INVALID_MESSAGE', 'Conversation, demande et clé d’idempotence sont obligatoires.'), 400, origin, dependencies.allowedOrigins);
           }
           const requestHash = await sha256(`${conversationId}\n${content}`);
+          const history = chatHistory(
+            await dependencies.store.listMessages(userId, conversationId),
+            maxHistoryCharacters - content.length,
+          );
+          history.push({ role: 'user', content });
           const submitted = await dependencies.store.submitUserMessage(
             userId, conversationId, content, idempotencyKey, requestHash,
           );
@@ -209,38 +282,119 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           }
 
           await dependencies.store.startRequest(userId, submitted.requestId);
-          try {
-            const route = await dependencies.store.selectRoute(userId, submitted.requestId, conversationId);
-            await dependencies.store.finalizeAttempt(
-              userId, submitted.requestId, route.attemptId, 'PROVIDER_ADAPTER_NOT_CONFIGURED',
-            );
+          const excludedProviders: BusinessProvider[] = [];
+          let previousAttemptId: string | null = null;
+          let fallbackReason: string | null = null;
+          let lastErrorCode = 'NO_VERIFIED_PROVIDER';
+
+          for (let attemptNumber = 1; attemptNumber <= dependencies.providerOrder.length; attemptNumber += 1) {
+            let route: Awaited<ReturnType<BusinessGrowStore['selectRoute']>>;
+            try {
+              route = await dependencies.store.selectRoute(
+                userId,
+                submitted.requestId,
+                conversationId,
+                attemptNumber,
+                previousAttemptId,
+                fallbackReason,
+                dependencies.providerOrder,
+                excludedProviders,
+              );
+            } catch (error) {
+              if (error instanceof NoVerifiedProviderRouteError) {
+                lastErrorCode = 'NO_VERIFIED_PROVIDER';
+                break;
+              }
+              lastErrorCode = 'ROUTE_SELECTION_FAILED';
+              await dependencies.store.failRequest(userId, submitted.requestId, lastErrorCode);
+              return response(
+                failure(lastErrorCode, 'La sélection sécurisée du fournisseur a échoué. Réessayez plus tard.'),
+                503,
+                origin,
+                dependencies.allowedOrigins,
+              );
+            }
+
+            if (!isProvider(route.providerKey)) {
+              await dependencies.store.finalizeAttempt(userId, submitted.requestId, route.attemptId, {
+                status: 'failed',
+                errorCode: 'UNSUPPORTED_PROVIDER',
+                inputTokens: null,
+                outputTokens: null,
+                latencyMs: 0,
+                finalizeRequest: false,
+              });
+              lastErrorCode = 'NO_VERIFIED_PROVIDER';
+              break;
+            }
+
+            const provider = route.providerKey;
+            const config = dependencies.providerConfigs[provider];
+            if (!config || !config.apiKey || !config.model || config.model !== route.providerModelKey) {
+              lastErrorCode = config?.model && config.model !== route.providerModelKey
+                ? 'PROVIDER_MODEL_MISMATCH'
+                : 'PROVIDER_NOT_CONFIGURED';
+              await dependencies.store.finalizeAttempt(userId, submitted.requestId, route.attemptId, {
+                status: 'failed',
+                errorCode: lastErrorCode,
+                inputTokens: null,
+                outputTokens: null,
+                latencyMs: 0,
+                finalizeRequest: false,
+              });
+              excludedProviders.push(provider);
+              previousAttemptId = route.attemptId;
+              fallbackReason = lastErrorCode;
+              continue;
+            }
+
+            const startedAt = Date.now();
+            let result: ProviderReply;
+            try {
+              result = await dependencies.complete(provider, config, history);
+            } catch (error) {
+              const providerError = error instanceof ProviderCallError
+                ? error
+                : new ProviderCallError('PROVIDER_UNAVAILABLE', true);
+              lastErrorCode = providerError.code;
+              await dependencies.store.finalizeAttempt(userId, submitted.requestId, route.attemptId, {
+                status: 'failed',
+                errorCode: providerError.code,
+                inputTokens: null,
+                outputTokens: null,
+                latencyMs: Date.now() - startedAt,
+                finalizeRequest: false,
+              });
+              excludedProviders.push(provider);
+              previousAttemptId = route.attemptId;
+              fallbackReason = providerError.code;
+              continue;
+            }
+
+            await dependencies.store.finalizeAttempt(userId, submitted.requestId, route.attemptId, {
+              status: 'succeeded',
+              errorCode: null,
+              inputTokens: result.inputTokens,
+              outputTokens: result.outputTokens,
+              latencyMs: Date.now() - startedAt,
+              outputContent: result.content,
+            });
             data = {
               ...submitted,
-              status: 'failed',
-              providerAvailable: false,
-              error: {
-                code: 'PROVIDER_ADAPTER_NOT_CONFIGURED',
-                message: 'Aucun adaptateur fournisseur Business Grow n’est activé. Aucun appel IA ni coût fournisseur n’a été engagé.',
-              },
+              status: 'succeeded',
+              providerAvailable: true,
+              provider: { key: provider, model: route.providerModelKey },
             };
-            return response(data, 503, origin, dependencies.allowedOrigins);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : '';
-            const code = message.toLowerCase().includes('route') || message.toLowerCase().includes('healthy')
-              ? 'NO_VERIFIED_PROVIDER'
-              : 'AI_DIRECTOR_ERROR';
-            await dependencies.store.failRequest(userId, submitted.requestId, code);
-            data = {
-              ...submitted,
-              status: 'failed',
-              providerAvailable: false,
-              error: {
-                code,
-                message: 'Aucun fournisseur vérifié et disponible pour cette demande. Le message est conservé dans votre historique, aucune réponse n’a été simulée.',
-              },
-            };
-            return response(data, 503, origin, dependencies.allowedOrigins);
+            return response({ data }, 200, origin, dependencies.allowedOrigins);
           }
+
+          await dependencies.store.failRequest(userId, submitted.requestId, lastErrorCode);
+          return response(failure(
+            lastErrorCode,
+            lastErrorCode === 'NO_VERIFIED_PROVIDER'
+              ? 'Aucun fournisseur configuré, vérifié et disponible pour cette demande. Le message utilisateur a été conservé; aucune réponse n’a été simulée.'
+              : `Les fournisseurs configurés n’ont pas pu traiter la demande (code : ${lastErrorCode}). Le message est conservé; consultez le statut et réessayez.`,
+          ), 503, origin, dependencies.allowedOrigins);
         }
         case 'memory.get':
           data = await dependencies.store.getMemory(userId);
@@ -282,10 +436,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
 
       return response({ data }, 200, origin, dependencies.allowedOrigins);
     } catch (error) {
-      console.error('business-grow request failed', {
-        action,
-        message: error instanceof Error ? error.message : 'unknown error',
-      });
+      console.error('business-grow request failed', { action });
       return response(
         failure('BUSINESS_GROW_BACKEND_ERROR', 'Le service Business Grow est temporairement indisponible.'),
         500,

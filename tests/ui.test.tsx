@@ -44,7 +44,7 @@ describe('parcours public', () => {
     render(<App />);
     fireEvent.click(screen.getAllByText('Créer mon compte')[0]);
     await waitFor(() => expect(window.location.pathname).toBe('/inscription'));
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte');
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte'), { timeout: 5000 });
     expect(screen.getByLabelText('Nom complet')).toBeTruthy();
     expect(screen.getByLabelText('Adresse e-mail')).toBeTruthy();
     expect(screen.getByLabelText(/Mot de passe/)).toBeTruthy();

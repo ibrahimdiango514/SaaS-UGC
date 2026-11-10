@@ -8,14 +8,14 @@ import { PageHeader, StatCard, Card, CardHeader, Badge, Button, LoadingState, Er
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
 import { formatDate, relativeDate, statusLabel, truncate } from '../lib/format';
-import { healthCheck, listAssets, listJobs, listProjects } from '../lib/api';
-import type { GeneratedAsset, GenerationJob, Project } from '../lib/types';
+import { countAssets, healthCheck, listJobs, listProjects } from '../lib/api';
+import type { GenerationJob, Project } from '../lib/types';
 
 export default function Dashboard() {
   const { profile, quota, refreshQuota } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
-  const [assets, setAssets] = useState<GeneratedAsset[]>([]);
+  const [assetCount, setAssetCount] = useState(0);
   const [health, setHealth] = useState<Record<string, boolean> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -23,8 +23,10 @@ export default function Dashboard() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [p, j, a] = await Promise.all([listProjects(), listJobs(8), listAssets(6)]);
-      setProjects(p); setJobs(j); setAssets(a);
+      const [p, j, totalAssets] = await Promise.all([
+        listProjects(), listJobs(8), countAssets(),
+      ]);
+      setProjects(p); setJobs(j); setAssetCount(totalAssets);
       try { setHealth((await healthCheck()).configured); } catch { setHealth(null); }
       await refreshQuota();
     } catch (err) { setError(asAppError(err).message); }
@@ -61,10 +63,10 @@ export default function Dashboard() {
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Projets actifs" value={loading ? '…' : projects.filter((p) => p.status !== 'archived').length} icon={<FolderKanban size={19} />} hint={`${quota?.plan?.max_projects ?? 0} autorisés par votre formule`} />
-        <StatCard label="Vidéos générées" value={loading ? '…' : jobs.filter((j) => j.status === 'succeeded').length + assets.length} icon={<Clapperboard size={19} />} hint="Toutes générations confondues" tone="cyan" />
+        <StatCard label="Projets actifs" value={loading ? '…' : quota?.projects ?? 0} icon={<FolderKanban size={19} />} hint={`${quota?.plan?.max_projects ?? 0} autorisés par votre formule`} />
+        <StatCard label="Vidéos ce mois-ci" value={quota?.usage?.video ?? '—'} icon={<Clapperboard size={19} />} hint={`Période ${quota?.period ?? 'indisponible'}`} tone="cyan" />
         <StatCard label="Crédits disponibles" value={quota?.credits ?? 0} icon={<Coins size={19} />} hint={`Formule ${quota?.plan?.display_name ?? '—'}`} tone="amber" />
-        <StatCard label="Créations en bibliothèque" value={loading ? '…' : assets.length} icon={<Sparkles size={19} />} hint="Fichiers stockés de façon privée" tone="emerald" />
+        <StatCard label="Créations en bibliothèque" value={loading ? '…' : assetCount} icon={<Sparkles size={19} />} hint="Total enregistré, fichiers privés" tone="emerald" />
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-3">

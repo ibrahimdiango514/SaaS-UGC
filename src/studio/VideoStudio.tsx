@@ -124,8 +124,8 @@ export default function VideoStudio() {
     setLoading(true); setLoadError('');
     try {
       const [p, svc, m, j, a] = await Promise.all([
-        listProjects(), listServices(), listVideoModels().catch(() => [] as MuApiModel[]),
-        listJobs(100).catch(() => [] as GenerationJob[]), listAssets(8).catch(() => [] as GeneratedAsset[]),
+        listProjects(), listServices(), listVideoModels(),
+        listJobs(100), listAssets(8),
       ]);
       const activeModels = m.filter(isModelAvailable);
       const activeServices = svc.filter((s) => s.active);
