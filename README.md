@@ -1,6 +1,6 @@
 # Reelora — Studio UGC propulsé par l'IA (MuAPI)
 
-SaaS francophone de création de contenus UGC : scripts publicitaires générés par **Groq**, génération vidéo réelle par **MuAPI** (fournisseur vidéo principal), bibliothèque privée, crédits/quotas et administration. Ce dépôt contient l'intégralité des sources (frontend, migrations SQL, Edge Functions, configuration, tests). Rien n'est une maquette : chaque écran est relié à Supabase et aux services d'IA côté serveur.
+SaaS francophone de création de contenus UGC et de croissance d'activité : le **Studio UGC** conserve ses parcours d'intégration serveur Groq/MuAPI, tandis que **Business Grow** dispose d'une interface, d'un client backend et d'une Edge Function préparés, sans fournisseur IA vérifié. Ce dépôt contient l'intégralité des sources (frontend, migrations SQL, Edge Functions, configuration, tests) ; les statuts de connexion et capacités affichés doivent distinguer les intégrations vérifiées des espaces préparés.
 
 > **Important** — `MUAPI_API_KEY` est enregistré comme **secret serveur Supabase** (jamais recopié dans le dépôt, le frontend, `VITE_*` ou les logs) ; la sonde de santé confirme sa **présence** (`muapi:true`), pas sa validité auprès de MuAPI. `GROQ_API_KEY` reste **absent** : l'assistance IA répond `GROQ_NOT_CONFIGURED` et ne produit **aucune réponse simulée**. **Aucune génération vidéo réelle n'a été lancée**, aucun crédit dépensé, aucun job créé : un test réel exige d'abord le devis (`docs/devis-test-muapi.md`) puis une confirmation explicite. Tous les tests automatisés utilisent des mocks. Voir [§7](#7-configuration-requise-intervention-utilisateur).
 
@@ -15,6 +15,7 @@ SaaS francophone de création de contenus UGC : scripts publicitaires générés
 | Tableau de bord | Statistiques réelles, quotas, dernières générations, état des intégrations Groq / MuAPI / worker |
 | Projets | Création, recherche, filtre par statut, fiche détaillée, édition du brief, scripts, scènes, générations, suppression |
 | **UGC Studio MuAPI** | 5 étapes : projet/produit/objectif → script Groq → scènes & prompts → **catalogue de modèles MuAPI + paramètres vérifiés** → coût estimé, confirmation explicite, progression, erreur lisible, **lecteur vidéo de prévisualisation**, téléchargement, vidéos précédentes et reprise d'un suivi |
+| **Business Grow** | `/app/business` : espace chat séparé avec AI Director, mémoire métier, registre initial de fournisseurs, client backend et Edge Function préparés. Le schéma SQL reste une proposition non appliquée : conversations, messages et mémoire ne sont pas encore persistés en production. Aucun fournisseur vérifié, aucune réponse IA simulée et aucun crédit du Studio utilisé. |
 | Avatars | CRUD, **image de référence** uploadée dans `ugc-assets` pour les modèles MuAPI image → vidéo, avatar par défaut |
 | Scripts IA | Groq (accroche, script, CTA, angle, allégations à éviter, storyboard), accroches alternatives, enregistrement en base, approbation |
 | Prompts | CRUD de modèles, variables `{{...}}`, aperçu, favoris, modèles système, amélioration par Groq |

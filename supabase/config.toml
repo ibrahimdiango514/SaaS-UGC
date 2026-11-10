@@ -34,6 +34,9 @@ verify_jwt = true
 [functions.reelora-video]
 verify_jwt = true
 
+[functions.business-grow]
+verify_jwt = true
+
 # Callback MuAPI + réconciliation pg_cron : MuAPI ne peut pas envoyer de JWT
 # Supabase. La protection repose sur le jeton Vault `reelora_worker_token`
 # (comparaison à temps constant) + re-vérification serveur de l'état réel.

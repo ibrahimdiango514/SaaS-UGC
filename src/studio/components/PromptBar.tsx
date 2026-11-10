@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   AlertCircle, ChevronDown, ChevronUp, Coins, Database, ImagePlus, Info, Languages,
-  Lock, Mic2, Play, Settings2, Sparkles, Subtitles, Users, X,
+  Lock, Mic2, Play, RefreshCw, Settings2, Sparkles, Subtitles, Users, X,
 } from 'lucide-react';
 import { Button, Select, Toggle, cn } from '../../components/ui';
 import type { Avatar, MuApiModel, ServiceCatalogItem, VideoCostEstimate } from '../../lib/types';
@@ -56,6 +56,9 @@ interface Props {
   onAiPlan: () => void;
   aiBusy: boolean;
   aiMessage: string;
+  healthBusy: boolean;
+  healthError: string;
+  onRetryHealth: () => void;
   catalogOpen: boolean;
   onOpenCatalog: () => void;
   catalogSummary: string;
@@ -69,6 +72,7 @@ const SHORT_MODES: Record<CreationModeId, string> = {
 export function PromptBar({
   state, onPatch, model, services, estimate, balance, blockedReason, busy,
   generateLabel, onGenerate, health, avatars, onAiPlan, aiBusy, aiMessage,
+  healthBusy, healthError, onRetryHealth,
   catalogOpen, onOpenCatalog, catalogSummary,
 }: Props) {
   const [advanced, setAdvanced] = useState(false);
@@ -278,6 +282,16 @@ export function PromptBar({
                   <Info size={10} className="mr-1 inline" /> Assistance IA indisponible : <code>GROQ_API_KEY</code> absent côté serveur.
                   Aucune réponse IA n’est simulée. Le plan local déterministe reste disponible et construit vos scènes à partir de votre seule instruction.
                 </p>
+              )}
+              {health?.groq !== true && health?.groq !== false && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-amber-200" role={healthError ? 'alert' : 'status'}>
+                  <span>{healthBusy ? 'Vérification de la disponibilité de Groq…' : `Vérification Groq indisponible : ${healthError || 'aucune réponse du serveur.'}`}</span>
+                  {!healthBusy && (
+                    <Button size="sm" variant="ghost" icon={<RefreshCw size={11} />} onClick={onRetryHealth}>
+                      Réessayer
+                    </Button>
+                  )}
+                </div>
               )}
               {aiMessage && <p className="mt-2 text-[11px] text-slate-300">{aiMessage}</p>}
             </div>

@@ -82,6 +82,8 @@ export default function GenerationStudio() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [avatars, setAvatars] = useState<Avatar[]>([]);
   const [health, setHealth] = useState<Record<string, boolean> | null>(null);
+  const [healthBusy, setHealthBusy] = useState(true);
+  const [healthError, setHealthError] = useState('');
   const [form, setForm] = useState<GenerationFormState>(initialFormState);
   const [selectedSector, setSelectedSector] = useState<SectorId>('cosmetique');
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
@@ -116,6 +118,19 @@ export default function GenerationStudio() {
 
   const patch = useCallback((p: Partial<GenerationFormState>) => setForm((f) => ({ ...f, ...p })), []);
   const balance = quota?.credits ?? 0;
+
+  const checkHealth = useCallback(async () => {
+    setHealthBusy(true);
+    setHealthError('');
+    try {
+      setHealth((await healthCheck()).configured);
+    } catch (err) {
+      setHealth(null);
+      setHealthError(asAppError(err).message);
+    } finally {
+      setHealthBusy(false);
+    }
+  }, []);
 
   const modeDef = CREATION_MODES.find((m) => m.id === form.mode) ?? CREATION_MODES[0];
   const simplifiedModel = useMemo(
@@ -155,6 +170,7 @@ export default function GenerationStudio() {
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError('');
+    void checkHealth();
     try {
       const [p, svc, c, av] = await Promise.all([
         listProjects(), listServices(), getVideoCatalog(),
@@ -165,11 +181,10 @@ export default function GenerationStudio() {
       setCatalogError(c.catalog?.error ?? '');
       setAvatars(av);
       setProjectId((current) => current || p[0]?.id || '');
-      try { setHealth((await healthCheck()).configured); } catch { setHealth(null); }
     } catch (err) {
       setLoadError(asAppError(err).message);
     } finally { setLoading(false); }
-  }, [workspaceId]);
+  }, [checkHealth, workspaceId]);
   useEffect(() => { void load(); }, [load]);
 
   // Reuse an existing job's real parameters (no invented values).
@@ -557,7 +572,14 @@ export default function GenerationStudio() {
   };
 
   const onAiPlan = async () => {
-    if (health?.groq !== true) { toast.warning('Assistance IA indisponible : GROQ_API_KEY absent côté serveur. Aucune réponse n’est simulée.'); return; }
+    if (health?.groq !== true) {
+      const message = health?.groq === false
+        ? 'Assistance IA indisponible : GROQ_API_KEY absent côté serveur. Aucune réponse n’est simulée.'
+        : healthError || 'Configuration Groq non vérifiée. Réessayez la vérification avant de continuer.';
+      setAiMessage(message);
+      toast.warning(message);
+      return;
+    }
     setAiBusy(true); setAiMessage('');
     try {
       const script = await generateScript({ product: plan.product || 'le produit', brief: form.prompt.slice(0, 800), duration: plan.totalDuration, language: 'fr' });
@@ -763,6 +785,7 @@ export default function GenerationStudio() {
         balance={balance} blockedReason={blockedReason} busy={starting || confirmOpen || quoteBusy}
         onGenerate={() => setConfirmOpen(true)} health={health} avatars={avatars}
         onAiPlan={() => void onAiPlan()} aiBusy={aiBusy} aiMessage={aiMessage}
+        healthBusy={healthBusy} healthError={healthError} onRetryHealth={() => void checkHealth()}
         catalogOpen={catalogOpen} onOpenCatalog={onOpenCatalog} catalogSummary={catalogSummary} />
 
       {model && estimate && (

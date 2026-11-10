@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Bell, BookOpen, ChevronDown, Clapperboard, Coins, CreditCard, FolderKanban,
+  Bell, BookOpen, Brain, ChevronDown, Clapperboard, Coins, CreditCard, FolderKanban,
   History, LayoutDashboard, LogOut, Menu, Search, Settings, Shield, Sparkles,
   Users, Wand2, X, CheckCheck, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react';
@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { to: '/app', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/app/projets', label: 'Projets', icon: FolderKanban },
   { to: '/app/studio', label: 'Video Studio', icon: Clapperboard },
+  { to: '/app/business', label: 'Business Grow', icon: Brain },
   { to: '/app/avatars', label: 'Avatars', icon: Users },
   { to: '/app/scripts', label: 'Scripts IA', icon: Wand2 },
   { to: '/app/prompts', label: 'Prompts', icon: BookOpen },
@@ -28,7 +29,9 @@ const NAV: NavItem[] = [
   { to: '/app/parametres', label: 'Paramètres', icon: Settings },
 ];
 
-const MOBILE_NAV = [NAV[0], NAV[1], NAV[2], NAV[6], NAV[8]];
+const MOBILE_NAV = NAV.filter((item) =>
+  ['/app', '/app/projets', '/app/studio', '/app/business', '/app/historique'].includes(item.to),
+);
 
 function Logo({ compact = false }: { compact?: boolean }) {
   return (

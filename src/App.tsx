@@ -25,6 +25,7 @@ import GenerationStudio from './studio/GenerationStudio';
 import VideoEditor from './studio/VideoEditor';
 import { PreparedSpace } from './studio/components/PreparedSpace';
 import { StudioGenerations, StudioLegacy, StudioProjects, StudioSaved } from './studio/StudioPages';
+import BusinessGrow from './business/BusinessGrow';
 
 export default function App() {
   return (
@@ -47,6 +48,7 @@ export default function App() {
                   <Route path="projets" element={<StudioProjects />} />
                   <Route path="projets/:id" element={<ProjectDetail />} />
                   <Route path="studio" element={<GenerationStudio />} />
+                  <Route path="business" element={<BusinessGrow />} />
                   <Route path="studio/classique" element={<VideoStudio />} />
                   <Route path="studio/montage" element={<VideoEditor />} />
                   <Route path="studio/avance" element={<StudioLegacy />} />
