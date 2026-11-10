@@ -87,13 +87,13 @@ const store: BusinessGrowStore = {
         ? provider.verified_model_keys as string[]
         : [];
       const runtimeModelVerified = Boolean(
-        config?.apiKey && config.model && verifiedModelKeys.includes(config.model),
+        config?.apiKey && verifiedModelKeys.length > 0 && (!config.model || verifiedModelKeys.includes(config.model)),
       );
       return {
         ...provider,
         enabled: Boolean(provider.enabled && runtimeModelVerified),
         status: runtimeModelVerified ? provider.status : 'unverified',
-        config_status: config?.apiKey && config.model ? 'configured' : 'missing',
+        config_status: config?.apiKey && (config.model || verifiedModelKeys.length > 0) ? 'configured' : 'missing',
       };
     });
   },
@@ -329,8 +329,8 @@ const store: BusinessGrowStore = {
       select * from saas_business.bg_select_route(
         ${requestId}::uuid, ${userId}::uuid, ${conversationId}::uuid,
         ${attemptNumber}, ${fallbackFromAttemptId}::uuid, ${fallbackReason},
-        ${requiredSql().array(preferredProviders)}::text[],
-        ${requiredSql().array(excludedProviders)}::text[],
+        ${requiredSql().array(preferredProviders, 25)}::text[],
+        ${requiredSql().array(excludedProviders, 25)}::text[],
         ${preferredModelKey}
       )
     `;
@@ -371,7 +371,18 @@ const store: BusinessGrowStore = {
   },
 };
 
-const allowedOrigins = (env('BUSINESS_GROW_ALLOWED_ORIGINS') || 'http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,http://127.0.0.1:4173,https://reelora.netlify.app')
+const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:4173',
+  'https://sbc-ai-agency-dashbord.netlify.app',
+  'https://reelora.netlify.app',
+  'https://5173-iu476i6ok9qrn5o47a39w.e2b.app',
+  'https://4173-iu476i6ok9qrn5o47a39w.e2b.app',
+].join(',');
+
+const allowedOrigins = (env('BUSINESS_GROW_ALLOWED_ORIGINS') || defaultAllowedOrigins)
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);

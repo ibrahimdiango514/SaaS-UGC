@@ -175,20 +175,83 @@ export function buildBusinessSystemInstruction(input: {
   }
 
   sections.push(
-    'Si et seulement si une action structurée concrète doit être soumise à l’approbation de l’utilisateur (mémoriser un fait clé, créer un plan d’action, préparer un brief de campagne, ou préparer un brief vidéo vers Studio UGC), tu peux ajouter à la toute fin de ta réponse un bloc caché exact : <!--REELORA_TOOL_PROPOSALS:[{"toolName":"propose_memory_save|propose_action_plan|propose_campaign_brief|handoff_ugc_brief","summary":"...","arguments":{...}}]-->. N’exécute jamais d’action sans validation humaine.',
+    'Si et seulement si une action structurée concrète doit être soumise à l’approbation de l’utilisateur (mémoriser un fait clé, créer un plan d’action, préparer un brief de campagne, ou préparer un brief vidéo vers Studio UGC), tu peux ajouter à la toute fin de ta réponse un bloc caché compact (< 400 caractères) exact, toujours fermé par --> : <!--REELORA_TOOL_PROPOSALS:[{"toolName":"propose_memory_save|propose_action_plan|propose_campaign_brief|handoff_ugc_brief","summary":"...","arguments":{...}}]-->. Pour handoff_ugc_brief, utilise les clés product, angle, hook, targetAudience. N’exécute jamais d’action sans validation humaine.',
   );
 
   return sections.join('\n\n');
 }
 
-const TOOL_BLOCK_RE = /<!--REELORA_TOOL_PROPOSALS:([\s\S]*?)-->/g;
+const TOOL_BLOCK_RE = /\n*(?:---\s*\n*)?<!--REELORA_TOOL_PROPOSALS:([\s\S]*?)-->/g;
+const TRUNCATED_TOOL_BLOCK_RE = /\n*(?:---\s*\n*)?<!--REELORA_TOOL_PROPOSALS:[\s\S]*$/;
+
+function cleanOptString(value: unknown, maxLen: number): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLen) : undefined;
+}
+
+export function normalizeToolProposalArguments(
+  toolName: BusinessToolName,
+  rawArgs: Record<string, unknown>,
+  fallbackSummary = '',
+): Record<string, unknown> {
+  if (toolName === 'handoff_ugc_brief') {
+    const product = cleanOptString(rawArgs.product, 160)
+      ?? cleanOptString(rawArgs.productName, 160)
+      ?? cleanOptString(rawArgs.produit, 160)
+      ?? cleanOptString(fallbackSummary, 160)
+      ?? '';
+    const angle = cleanOptString(rawArgs.angle, 400)
+      ?? cleanOptString(rawArgs.campaignAngle, 400)
+      ?? cleanOptString(rawArgs.creativeAngle, 400)
+      ?? cleanOptString(rawArgs.summary, 400)
+      ?? cleanOptString(fallbackSummary, 400)
+      ?? '';
+    const hook = cleanOptString(rawArgs.hook, 300)
+      ?? cleanOptString(rawArgs.accroche, 300)
+      ?? '';
+    const targetAudience = cleanOptString(rawArgs.targetAudience, 300)
+      ?? cleanOptString(rawArgs.audience, 300)
+      ?? cleanOptString(rawArgs.cible, 300)
+      ?? '';
+    const cta = cleanOptString(rawArgs.cta, 200)
+      ?? cleanOptString(rawArgs.callToAction, 200);
+    const ratioRaw = rawArgs.preferredRatio ?? rawArgs.ratio;
+    const preferredRatio = ratioRaw === '9:16' || ratioRaw === '1:1' || ratioRaw === '16:9'
+      ? ratioRaw
+      : undefined;
+
+    return {
+      ...rawArgs,
+      product,
+      angle,
+      hook,
+      targetAudience,
+      ...(cta ? { cta } : {}),
+      ...(preferredRatio ? { preferredRatio } : {}),
+      consumesStudioCredits: false,
+    };
+  }
+
+  if (toolName === 'propose_memory_save') {
+    const category = cleanOptString(rawArgs.category, 80) ?? 'business_context';
+    const summary = cleanOptString(rawArgs.summary, 1000)
+      ?? cleanOptString(rawArgs.text, 1000)
+      ?? cleanOptString(fallbackSummary, 1000);
+    return {
+      ...rawArgs,
+      category,
+      ...(summary ? { summary } : {}),
+    };
+  }
+
+  return rawArgs;
+}
 
 export function extractToolProposals(rawText: string): {
   cleanText: string;
   proposals: ExtractedToolProposal[];
 } {
   const proposals: ExtractedToolProposal[] = [];
-  const cleanText = rawText.replace(TOOL_BLOCK_RE, (_match, rawJson: string) => {
+  const withoutClosedBlocks = rawText.replace(TOOL_BLOCK_RE, (_match, rawJson: string) => {
     try {
       const parsed: unknown = JSON.parse(rawJson.trim());
       if (Array.isArray(parsed)) {
@@ -201,14 +264,14 @@ export function extractToolProposals(rawText: string): {
           const summary = typeof record.summary === 'string' && record.summary.trim()
             ? record.summary.trim().slice(0, 240)
             : typedTool;
-          const args = record.arguments && typeof record.arguments === 'object' && !Array.isArray(record.arguments)
+          const rawArgs = record.arguments && typeof record.arguments === 'object' && !Array.isArray(record.arguments)
             ? record.arguments as Record<string, unknown>
             : {};
           proposals.push({
             toolName: typedTool,
             riskLevel: TOOL_RISK_MAP[typedTool],
             summary,
-            arguments: args,
+            arguments: normalizeToolProposalArguments(typedTool, rawArgs, summary),
           });
         }
       }
@@ -216,7 +279,8 @@ export function extractToolProposals(rawText: string): {
       // Malformed hidden tool proposal block is safely ignored without failing the reply.
     }
     return '';
-  }).trim();
+  });
+  const cleanText = withoutClosedBlocks.replace(TRUNCATED_TOOL_BLOCK_RE, '').trim();
 
   return { cleanText: cleanText || rawText.trim(), proposals };
 }

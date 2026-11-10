@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, Clapperboard, Coins, FolderKanban, Play, Plus, Sparkles, Wand2,
+  ArrowRight, Brain, Clapperboard, Coins, FolderKanban, Play, Plus, Sparkles, Wand2,
   CheckCircle2, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import { PageHeader, StatCard, Card, CardHeader, Badge, Button, LoadingState, ErrorState, EmptyState, ProgressBar, Banner } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { businessGrowBridge } from '../business';
+import { buildBusinessGrowLocationState, type BusinessGrowPlatformSnapshot } from '../contracts/business-grow';
 import { asAppError } from '../lib/errors';
 import { formatDate, relativeDate, statusLabel, truncate } from '../lib/format';
 import { countAssets, healthCheck, listJobs, listProjects } from '../lib/api';
@@ -17,16 +19,19 @@ export default function Dashboard() {
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [assetCount, setAssetCount] = useState(0);
   const [health, setHealth] = useState<Record<string, boolean> | null>(null);
+  const [businessSnapshot, setBusinessSnapshot] = useState<BusinessGrowPlatformSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [p, j, totalAssets] = await Promise.all([
+      const [p, j, totalAssets, bgSnap] = await Promise.all([
         listProjects(), listJobs(8), countAssets(),
+        businessGrowBridge.getSnapshot().catch(() => null),
       ]);
       setProjects(p); setJobs(j); setAssetCount(totalAssets);
+      setBusinessSnapshot(bgSnap);
       try { setHealth((await healthCheck()).configured); } catch { setHealth(null); }
       await refreshQuota();
     } catch (err) { setError(asAppError(err).message); }
@@ -136,17 +141,31 @@ export default function Dashboard() {
           <div className="grid gap-3 p-5 sm:grid-cols-2">
             {[
               { to: '/app/studio', icon: Clapperboard, title: 'UGC Studio', text: 'Composer une vidéo' },
+              {
+                to: '/app/business',
+                icon: Brain,
+                title: 'Business Grow',
+                text: businessSnapshot?.backendReachable
+                  ? `${businessSnapshot.availableProviderCount} fournisseur(s) IA prêt(s)`
+                  : 'Copilote stratégique IA',
+                state: buildBusinessGrowLocationState({ section: 'chat', roleKey: 'business_advisor', sourceRoute: '/app' }),
+              },
               { to: '/app/scripts', icon: Wand2, title: 'Scripts IA', text: 'Générer un script' },
               { to: '/app/avatars', icon: Sparkles, title: 'Avatars', text: 'Gérer les présentateurs' },
-              { to: '/app/bibliotheque', icon: Play, title: 'Bibliothèque', text: 'Voir mes vidéos' },
             ].map((x) => (
-              <Link key={x.to} to={x.to} className="group rounded-xl border border-line bg-white/[0.025] p-4 hover:border-brand-400/30 hover:bg-brand-500/5">
+              <Link key={x.to} to={x.to} state={x.state} className="group rounded-xl border border-line bg-white/[0.025] p-4 hover:border-brand-400/30 hover:bg-brand-500/5">
                 <x.icon size={18} className="text-brand-300" />
                 <p className="mt-3 text-sm font-semibold text-white">{x.title}</p>
                 <p className="text-xs text-slate-500">{x.text}</p>
               </Link>
             ))}
           </div>
+          {businessSnapshot?.backendReachable && businessSnapshot.quota && (
+            <div className="border-t border-white/[0.06] px-5 py-3 text-xs text-slate-400">
+              Quota Business Grow isolé : <strong className="text-slate-200">{businessSnapshot.quota.availableUnits ?? '—'}</strong> unités
+              {businessSnapshot.quota.studioUgcUntouched ? ' · Crédits Studio UGC séparés' : ''}
+            </div>
+          )}
         </Card>
       </div>
       <p className="mt-4 text-xs text-slate-600">Période d’usage : {quota?.period ?? '—'} · Renouvellement le {quota ? formatDate(quota.period_end) : '—'}.</p>

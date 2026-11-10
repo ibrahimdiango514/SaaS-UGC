@@ -3,6 +3,7 @@ import {
   BUSINESS_ROLE_SPECS,
   extractToolProposals,
   normalizeRoleKey,
+  normalizeToolProposalArguments,
   type BusinessRoleKey,
   type ExtractedToolProposal,
   type MemorySnapshot,
@@ -446,11 +447,23 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           if (!dependencies.store.resolveToolExecution) {
             return response(failure('TOOLS_NOT_CONFIGURED', 'Le module d’outils n’est pas activé.'), 501, origin, dependencies.allowedOrigins);
           }
-          if (decision === 'rejected') {
-            data = await dependencies.store.resolveToolExecution(userId, executionId, 'rejected', { rejectedByUser: true });
-            break;
+          let resolved: Record<string, unknown>;
+          try {
+            if (decision === 'rejected') {
+              data = await dependencies.store.resolveToolExecution(userId, executionId, 'rejected', { rejectedByUser: true });
+              break;
+            }
+            resolved = await dependencies.store.resolveToolExecution(userId, executionId, 'approved');
+          } catch (toolError) {
+            const msg = toolError instanceof Error ? toolError.message : '';
+            if (msg.includes('already resolved')) {
+              return response(failure('TOOL_ALREADY_RESOLVED', 'Cette proposition d’outil a déjà été traitée.'), 409, origin, dependencies.allowedOrigins);
+            }
+            if (msg.includes('tool execution not found')) {
+              return response(failure('TOOL_NOT_FOUND', 'Proposition d’outil introuvable.'), 404, origin, dependencies.allowedOrigins);
+            }
+            throw toolError;
           }
-          const resolved = await dependencies.store.resolveToolExecution(userId, executionId, 'approved');
           const args = object(resolved.input_args);
           if (resolved.tool_name === 'propose_memory_save') {
             const memory = (await dependencies.store.getMemory(userId)) as MemorySnapshot | null;
@@ -474,12 +487,14 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             break;
           }
           if (resolved.tool_name === 'handoff_ugc_brief') {
+            const normalizedHandoff = normalizeToolProposalArguments('handoff_ugc_brief', args);
             data = await dependencies.store.resolveToolExecution(userId, executionId, 'executed', {
               handoffDraft: {
-                product: string(args.product, 160),
-                angle: string(args.angle, 400),
-                hook: string(args.hook, 300),
-                targetAudience: string(args.targetAudience, 300),
+                ...normalizedHandoff,
+                product: string(normalizedHandoff.product, 160) || string(args.summary, 160),
+                angle: string(normalizedHandoff.angle, 400) || string(args.summary, 400),
+                hook: string(normalizedHandoff.hook, 300),
+                targetAudience: string(normalizedHandoff.targetAudience, 300),
                 consumesStudioCredits: false,
               },
             });
@@ -570,7 +585,27 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             return response(failure('INVALID_MESSAGE', 'Conversation, demande et clé d’idempotence sont obligatoires.'), 400, origin, dependencies.allowedOrigins);
           }
           const roleKey = normalizeRoleKey(body.roleKey);
-          const routing = parseRoutingOptions(body.routing);
+          const explicitRouting = body.routing && typeof body.routing === 'object' && !Array.isArray(body.routing)
+            ? body.routing
+            : null;
+          let routing = parseRoutingOptions(explicitRouting);
+          if (!explicitRouting && dependencies.store.getRoutingPreferences) {
+            try {
+              const savedPrefs = await dependencies.store.getRoutingPreferences(userId);
+              const matched = savedPrefs.find((pref) => object(pref).role_key === roleKey);
+              if (matched) {
+                const prefRecord = object(matched);
+                routing = parseRoutingOptions({
+                  selectionMode: prefRecord.selection_mode,
+                  preferredProviderKey: prefRecord.preferred_provider_key,
+                  preferredModelKey: prefRecord.preferred_model_key,
+                  allowFallback: prefRecord.allow_fallback,
+                });
+              }
+            } catch {
+              // Keep default auto routing if preference lookup fails.
+            }
+          }
           const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
           if (body.workspaceId != null && !workspaceId) {
             return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
@@ -667,7 +702,8 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
             let route: Awaited<ReturnType<BusinessGrowStore['selectRoute']>>;
             try {
-              route = routing.preferredModelKey
+              const usePreferredModel = Boolean(routing.preferredModelKey && attemptNumber === 1);
+              route = usePreferredModel
                 ? await dependencies.store.selectRoute(
                     userId,
                     submitted.requestId,
@@ -676,7 +712,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
                     previousAttemptId,
                     fallbackReason,
                     preferredOrder,
-                    excludedProviders,
+                    [...excludedProviders],
                     routing.preferredModelKey,
                   )
                 : await dependencies.store.selectRoute(
@@ -687,7 +723,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
                     previousAttemptId,
                     fallbackReason,
                     preferredOrder,
-                    excludedProviders,
+                    [...excludedProviders],
                   );
             } catch (error) {
               if (error instanceof NoVerifiedProviderRouteError) {
@@ -722,10 +758,9 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
 
             const provider = route.providerKey;
             const config = dependencies.providerConfigs[provider];
-            if (!config || !config.apiKey || !config.model || config.model !== route.providerModelKey) {
-              lastErrorCode = config?.model && config.model !== route.providerModelKey
-                ? 'PROVIDER_MODEL_MISMATCH'
-                : 'PROVIDER_NOT_CONFIGURED';
+            const selectedModel = route.providerModelKey || config?.model || '';
+            if (!config || !config.apiKey || !selectedModel) {
+              lastErrorCode = 'PROVIDER_NOT_CONFIGURED';
               await dependencies.store.finalizeAttempt(userId, submitted.requestId, route.attemptId, {
                 status: 'failed',
                 errorCode: lastErrorCode,
@@ -740,10 +775,14 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               continue;
             }
 
+            const effectiveConfig: ProviderConfig = config.model === selectedModel
+              ? config
+              : { apiKey: config.apiKey, model: selectedModel };
+
             const startedAt = Date.now();
             let result: ProviderReply;
             try {
-              result = await dependencies.complete(provider, config, history);
+              result = await dependencies.complete(provider, effectiveConfig, history);
             } catch (error) {
               const providerError = error instanceof ProviderCallError
                 ? error
@@ -800,6 +839,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               roleKey,
               fallbackUsed: attemptNumber > 1,
               attemptsCount: attemptNumber,
+              assistantReply: cleanText,
               usage: {
                 inputTokens: result.inputTokens,
                 outputTokens: result.outputTokens,
@@ -843,7 +883,23 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           if (body.itemId != null && !itemId) {
             return response(failure('INVALID_MEMORY_ITEM', 'Identifiant mémoire invalide.'), 400, origin, dependencies.allowedOrigins);
           }
-          data = { itemId: await dependencies.store.putMemoryItem(userId, itemId, category, body.content) };
+          try {
+            data = { itemId: await dependencies.store.putMemoryItem(userId, itemId, category, body.content) };
+          } catch (memoryError) {
+            const msg = memoryError instanceof Error ? memoryError.message : '';
+            if (msg.includes('active memory consent required')) {
+              return response(
+                failure('business_memory_consent_required', 'Activez le consentement mémoire avant d’enregistrer une note métier.'),
+                409,
+                origin,
+                dependencies.allowedOrigins,
+              );
+            }
+            if (msg.includes('memory item not found')) {
+              return response(failure('MEMORY_ITEM_NOT_FOUND', 'Note mémoire introuvable.'), 404, origin, dependencies.allowedOrigins);
+            }
+            throw memoryError;
+          }
           break;
         }
         case 'memory.item.delete': {

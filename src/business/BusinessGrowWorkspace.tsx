@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, LockKeyhole,
   MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, X, Zap,
@@ -7,6 +7,11 @@ import {
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { listBrands, listProducts } from '../lib/api';
+import {
+  buildStudioLocationStateFromBrief,
+  parseBusinessGrowEntryIntent,
+  type BusinessGrowEntryIntent,
+} from '../contracts/business-grow';
 import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
 import type { Brand, Product, Workspace } from '../lib/types';
 import {
@@ -258,10 +263,14 @@ function AssistantView({
   routingMode,
   preferredProviderKey,
   preferredModelKey,
+  manualAllowFallback,
+  entryIntent,
   onChangeRole,
   onChangeRoutingMode,
   onChangePreferredProvider,
   onChangePreferredModel,
+  onChangeManualAllowFallback,
+  onDismissEntryIntent,
   onResolveTool,
   onNewConversation,
   onRenameConversation,
@@ -285,10 +294,14 @@ function AssistantView({
   routingMode: RoutingSelectionMode;
   preferredProviderKey: string;
   preferredModelKey: string;
+  manualAllowFallback: boolean;
+  entryIntent: BusinessGrowEntryIntent | null;
   onChangeRole: (role: BusinessRoleKey) => void;
   onChangeRoutingMode: (mode: RoutingSelectionMode) => void;
   onChangePreferredProvider: (providerKey: string) => void;
   onChangePreferredModel: (modelKey: string) => void;
+  onChangeManualAllowFallback: (allow: boolean) => void;
+  onDismissEntryIntent: () => void;
   onResolveTool: (executionId: string, decision: 'approved' | 'rejected') => Promise<void>;
   onNewConversation: () => void;
   onRenameConversation: (id: string, title: string) => Promise<boolean>;
@@ -307,6 +320,16 @@ function AssistantView({
   );
   const verifiedModels = models.filter((model) => model.verification_status === 'verified' && model.enabled);
   const pendingTools = tools.filter((tool) => tool.status === 'pending_approval');
+  const executedHandoffs = tools.filter((tool) => tool.tool_name === 'handoff_ugc_brief' && tool.status === 'executed');
+  const resolvedOtherTools = tools.filter(
+    (tool) => tool.tool_name !== 'handoff_ugc_brief' && tool.status !== 'pending_approval',
+  );
+
+  useEffect(() => {
+    if (entryIntent?.initialDraft) {
+      setDraft((current) => current || entryIntent.initialDraft || '');
+    }
+  }, [entryIntent]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -391,6 +414,16 @@ function AssistantView({
                     ))}
                 </select>
               )}
+              <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-[11px] text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={manualAllowFallback}
+                  onChange={(event) => onChangeManualAllowFallback(event.target.checked)}
+                  aria-label="Autoriser le secours automatique en mode manuel"
+                  className="accent-brand-400"
+                />
+                <span>Secours auto</span>
+              </label>
             </>
           )}
           {quota && quota.available_units !== null && (
@@ -402,6 +435,19 @@ function AssistantView({
         </div>
 
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6" aria-live="polite">
+          {entryIntent && (entryIntent.projectTitle || entryIntent.brandName || entryIntent.productName || entryIntent.sourceRoute) && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.06] px-3 py-2 text-xs text-brand-100" data-testid="business-entry-intent-banner">
+              <span>
+                Contexte importé
+                {entryIntent.projectTitle ? ` · Projet : ${entryIntent.projectTitle}` : ''}
+                {entryIntent.brandName ? ` · Marque : ${entryIntent.brandName}` : ''}
+                {entryIntent.productName ? ` · Produit : ${entryIntent.productName}` : ''}
+              </span>
+              <button type="button" onClick={onDismissEntryIntent} className="text-[11px] text-brand-200 underline">
+                Masquer
+              </button>
+            </div>
+          )}
           {error && (
             <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-3 text-xs text-rose-100" role="alert">
               <span>{error}</span>
@@ -499,13 +545,64 @@ function AssistantView({
                       Rejeter
                     </Button>
                     {tool.tool_name === 'handoff_ugc_brief' && (
-                      <Link to="/app/studio" state={{ ugcBrief: tool.input_args }} className="btn btn-outline btn-sm">
+                      <Link
+                        to="/app/studio"
+                        state={buildStudioLocationStateFromBrief(tool.input_args, {
+                          executionId: tool.id,
+                          conversationId: tool.conversation_id,
+                        }) ?? { ugcBrief: tool.input_args }}
+                        className="btn btn-outline btn-sm"
+                      >
                         Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
                       </Link>
                     )}
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {executedHandoffs.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.05] p-3" data-testid="business-handoff-ready">
+              {executedHandoffs.slice(0, 3).map((tool) => {
+                const draftPayload = (tool.output_result?.handoffDraft && typeof tool.output_result.handoffDraft === 'object')
+                  ? tool.output_result.handoffDraft as Record<string, unknown>
+                  : tool.input_args;
+                return (
+                  <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-emerald-100">Brief approuvé prêt pour Studio UGC</span>
+                    <Link
+                      to="/app/studio"
+                      state={buildStudioLocationStateFromBrief(draftPayload, {
+                        executionId: tool.id,
+                        conversationId: tool.conversation_id,
+                      }) ?? { ugcBrief: draftPayload }}
+                      className="btn btn-outline btn-sm"
+                    >
+                      Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {resolvedOtherTools.length > 0 && (
+            <div className="space-y-1.5 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-xs" data-testid="business-tools-history">
+              <p className="font-semibold text-slate-300">Historique des actions traitées</p>
+              {resolvedOtherTools.slice(0, 4).map((tool) => {
+                const statusBadge = tool.status === 'executed'
+                  ? 'Exécutée'
+                  : tool.status === 'rejected'
+                    ? 'Rejetée'
+                    : tool.status === 'failed'
+                      ? 'Échec'
+                      : 'Approuvée';
+                return (
+                  <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-[#0c111b] px-2.5 py-2">
+                    <span className="text-slate-200">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
+                    <Badge tone={tool.status === 'executed' ? 'success' : 'neutral'}>{statusBadge}</Badge>
+                  </div>
+                );
+              })}
             </div>
           )}
           {backendReady && !availableProviders.length && (
@@ -805,6 +902,7 @@ function ProvidersView({
   statuses,
   models,
   requests,
+  savedRouting,
   quota,
   verifyingKey,
   verifyMessage,
@@ -815,10 +913,11 @@ function ProvidersView({
   statuses: BusinessProviderStatus[] | null;
   models: BusinessModelRecord[];
   requests: Array<Record<string, unknown>>;
+  savedRouting: Array<Record<string, unknown>>;
   quota: BusinessQuotaStatus | null;
   verifyingKey: string | null;
   verifyMessage: string | null;
-  onVerifyProvider: (providerKey: string) => Promise<void>;
+  onVerifyProvider: (providerKey: string, modelKey?: string) => Promise<void>;
   onSaveRouting: (pref: BusinessRoutingPreference) => Promise<void>;
 }) {
   const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
@@ -826,6 +925,26 @@ function ProvidersView({
   const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
   const [routingProvider, setRoutingProvider] = useState('');
   const [routingModel, setRoutingModel] = useState('');
+  const [routingAllowFallback, setRoutingAllowFallback] = useState(true);
+
+  const configurableProviders = (statuses ?? []).filter(
+    (status) => status.provider_key !== 'muapi' && (status.config_status === 'configured' || status.enabled),
+  );
+  const modelsForSelectedProvider = models.filter(
+    (model) => model.enabled && (!routingProvider || model.provider_key === routingProvider),
+  );
+
+  const handleSelectRoutingRole = (nextRole: BusinessRoleKey) => {
+    setRoutingRole(nextRole);
+    const existing = savedRouting.find((pref) => pref.role_key === nextRole);
+    if (existing) {
+      const nextMode: RoutingSelectionMode = existing.selection_mode === 'manual' ? 'manual' : 'auto';
+      setRoutingMode(nextMode);
+      setRoutingProvider(typeof existing.preferred_provider_key === 'string' ? existing.preferred_provider_key : '');
+      setRoutingModel(typeof existing.preferred_model_key === 'string' ? existing.preferred_model_key : '');
+      setRoutingAllowFallback(typeof existing.allow_fallback === 'boolean' ? existing.allow_fallback : nextMode === 'auto');
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -937,7 +1056,7 @@ function ProvidersView({
             <select
               aria-label="Rôle routage"
               value={routingRole}
-              onChange={(event) => setRoutingRole(event.target.value as BusinessRoleKey)}
+              onChange={(event) => handleSelectRoutingRole(event.target.value as BusinessRoleKey)}
               className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
             >
               {BUSINESS_ROLES.map((role) => (
@@ -947,7 +1066,11 @@ function ProvidersView({
             <select
               aria-label="Mode de routage par rôle"
               value={routingMode}
-              onChange={(event) => setRoutingMode(event.target.value as RoutingSelectionMode)}
+              onChange={(event) => {
+                const nextMode = event.target.value as RoutingSelectionMode;
+                setRoutingMode(nextMode);
+                if (nextMode === 'auto') setRoutingAllowFallback(true);
+              }}
               className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
             >
               <option value="auto">Automatique</option>
@@ -955,20 +1078,51 @@ function ProvidersView({
             </select>
             {routingMode === 'manual' && (
               <>
-                <input
-                  value={routingProvider}
-                  onChange={(event) => setRoutingProvider(event.target.value)}
-                  placeholder="Fournisseur (ex: groq)"
+                <select
                   aria-label="Fournisseur préféré"
-                  className="w-40 rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
-                />
-                <input
+                  value={routingProvider}
+                  onChange={(event) => {
+                    setRoutingProvider(event.target.value);
+                    setRoutingModel('');
+                  }}
+                  className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+                >
+                  <option value="">Fournisseur…</option>
+                  {(configurableProviders.length > 0
+                    ? configurableProviders
+                    : BUSINESS_PROVIDERS.filter((p) => p.id !== 'muapi').map((p) => ({
+                        provider_key: p.id,
+                        display_name: p.name,
+                      }))
+                  ).map((provider) => (
+                    <option key={provider.provider_key} value={provider.provider_key}>
+                      {provider.display_name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Modèle préféré"
                   value={routingModel}
                   onChange={(event) => setRoutingModel(event.target.value)}
-                  placeholder="Modèle (optionnel)"
-                  aria-label="Modèle préféré"
-                  className="w-48 rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
-                />
+                  className="max-w-[240px] truncate rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+                >
+                  <option value="">Modèle par défaut</option>
+                  {modelsForSelectedProvider.map((model) => (
+                    <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>
+                      {model.display_name}
+                    </option>
+                  ))}
+                </select>
+                <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-[#0c111b] px-2.5 py-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={routingAllowFallback}
+                    onChange={(event) => setRoutingAllowFallback(event.target.checked)}
+                    aria-label="Autoriser le secours automatique"
+                    className="accent-brand-400"
+                  />
+                  <span>Secours auto</span>
+                </label>
               </>
             )}
             <Button
@@ -979,13 +1133,25 @@ function ProvidersView({
                   selectionMode: routingMode,
                   preferredProviderKey: routingMode === 'manual' && routingProvider.trim() ? routingProvider.trim() : null,
                   preferredModelKey: routingMode === 'manual' && routingModel.trim() ? routingModel.trim() : null,
-                  allowFallback: routingMode === 'auto',
+                  allowFallback: routingMode === 'auto' ? true : routingAllowFallback,
                 });
               }}
             >
               Enregistrer la règle
             </Button>
           </div>
+          {savedRouting.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-1.5" data-testid="saved-routing-rules">
+              {savedRouting.map((pref) => (
+                <span key={String(pref.role_key)} className="rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-1 text-[11px] text-slate-300">
+                  {String(pref.role_key)} : {String(pref.selection_mode)}
+                  {pref.preferred_provider_key ? ` · ${String(pref.preferred_provider_key)}` : ''}
+                  {pref.preferred_model_key ? ` / ${String(pref.preferred_model_key)}` : ''}
+                  {pref.allow_fallback === false ? ' (sans secours)' : ''}
+                </span>
+              ))}
+            </div>
+          )}
           {requests.length > 0 && (
             <div className="mt-5">
               <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
@@ -994,7 +1160,7 @@ function ProvidersView({
               <div className="space-y-1.5 text-[11px]">
                 {requests.slice(0, 6).map((req) => (
                   <div key={String(req.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-slate-300">
-                    <span>{String(req.task_role_key ?? 'business_advisor')} · {String(req.selected_provider_key ?? 'aucun')} / {String(req.selected_model_key ?? '—')}</span>
+                    <span>{String(req.role_key ?? req.task_role_key ?? 'business_advisor')} · {String(req.provider_key ?? req.selected_provider_key ?? 'aucun')} / {String(req.model_key ?? req.selected_model_key ?? '—')}</span>
                     <span className="text-slate-500">
                       {String(req.status ?? '')}
                       {req.latency_ms ? ` · ${String(req.latency_ms)} ms` : ''}
@@ -1045,10 +1211,13 @@ function IntegrationsView({ connections }: { connections: BusinessIntegrationCon
 }
 
 export default function BusinessGrowWorkspace() {
+  const location = useLocation();
   const { user, session, workspace, workspaceId } = useAuth();
   const accountScope = `${user?.id ?? ''}:${workspaceId ?? ''}`;
   const hasSession = Boolean(user && session);
   const sessionToken = session?.access_token ?? null;
+  const parsedIntent = useMemo(() => parseBusinessGrowEntryIntent(location.state), [location.state]);
+  const [entryIntent, setEntryIntent] = useState<BusinessGrowEntryIntent | null>(null);
   const [section, setSection] = useState<BusinessSection>('chat');
   const [providers, setProviders] = useState<BusinessProviderStatus[] | null>(null);
   const [models, setModels] = useState<BusinessModelRecord[]>([]);
@@ -1072,6 +1241,8 @@ export default function BusinessGrowWorkspace() {
   const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
   const [preferredProviderKey, setPreferredProviderKey] = useState('');
   const [preferredModelKey, setPreferredModelKey] = useState('');
+  const [manualAllowFallback, setManualAllowFallback] = useState(false);
+  const [savedRouting, setSavedRouting] = useState<Array<Record<string, unknown>>>([]);
   const messageLoadSequence = useRef(0);
   const accountScopeRef = useRef(accountScope);
   const workspaceLoadSequence = useRef(0);
@@ -1079,6 +1250,13 @@ export default function BusinessGrowWorkspace() {
   const statusLoadSequence = useRef(0);
   const memoryLoadSequence = useRef(0);
   const detailsLoadSequence = useRef(0);
+
+  useEffect(() => {
+    if (!parsedIntent) return;
+    setEntryIntent(parsedIntent);
+    if (parsedIntent.section) setSection(parsedIntent.section);
+    if (parsedIntent.roleKey) setRoleKey(parsedIntent.roleKey);
+  }, [parsedIntent]);
 
   useEffect(() => {
     accountScopeRef.current = accountScope;
@@ -1094,6 +1272,7 @@ export default function BusinessGrowWorkspace() {
     setRequests([]);
     setTools([]);
     setIntegrations([]);
+    setSavedRouting([]);
     setConversations([]);
     setSelectedConversationId(null);
     setMessages([]);
@@ -1132,17 +1311,21 @@ export default function BusinessGrowWorkspace() {
   const loadOperationalDetails = useCallback(async () => {
     const requestId = ++detailsLoadSequence.current;
     const requestScope = accountScope;
-    const [modelsRes, quotaRes, reqRes, integrationsRes] = await Promise.allSettled([
+    const [modelsRes, quotaRes, reqRes, integrationsRes, routingRes] = await Promise.allSettled([
       businessGrowApi.listModels?.() ?? Promise.resolve(null),
       businessGrowApi.getQuota?.() ?? Promise.resolve(null),
       businessGrowApi.listRequests?.() ?? Promise.resolve(null),
       businessGrowApi.listIntegrations?.() ?? Promise.resolve(null),
+      businessGrowApi.getRouting?.() ?? Promise.resolve(null),
     ]);
     if (requestId !== detailsLoadSequence.current || accountScopeRef.current !== requestScope) return;
     if (modelsRes.status === 'fulfilled' && modelsRes.value) setModels(modelsRes.value.models);
     if (quotaRes.status === 'fulfilled' && quotaRes.value) setQuota(quotaRes.value);
     if (reqRes.status === 'fulfilled' && reqRes.value) setRequests(reqRes.value.requests);
     if (integrationsRes.status === 'fulfilled' && integrationsRes.value) setIntegrations(integrationsRes.value.connections);
+    if (routingRes.status === 'fulfilled' && routingRes.value && Array.isArray(routingRes.value.preferences)) {
+      setSavedRouting(routingRes.value.preferences);
+    }
   }, [accountScope]);
 
   const refreshWorkspace = useCallback(async () => {
@@ -1316,7 +1499,7 @@ export default function BusinessGrowWorkspace() {
                   selectionMode: 'manual',
                   preferredProviderKey: preferredProviderKey || null,
                   preferredModelKey: preferredModelKey || null,
-                  allowFallback: false,
+                  allowFallback: manualAllowFallback,
                 },
               }
               : {}),
@@ -1376,7 +1559,7 @@ export default function BusinessGrowWorkspace() {
     } finally {
       if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [accountScope, loadConversations, loadOperationalDetails, preferredModelKey, preferredProviderKey, roleKey, routingMode, selectedConversationId, workspaceId]);
+  }, [accountScope, loadConversations, loadOperationalDetails, manualAllowFallback, preferredModelKey, preferredProviderKey, roleKey, routingMode, selectedConversationId, workspaceId]);
 
   const resolveTool = useCallback(async (executionId: string, decision: 'approved' | 'rejected') => {
     const requestScope = accountScope;
@@ -1399,13 +1582,15 @@ export default function BusinessGrowWorkspace() {
     }
   }, [accountScope, selectedConversationId]);
 
-  const verifyProvider = useCallback(async (providerKey: string) => {
+  const verifyProvider = useCallback(async (providerKey: string, modelKey?: string) => {
     const requestScope = accountScope;
     if (!businessGrowApi.verifyProvider) return;
     setVerifyingKey(providerKey);
     setVerifyMessage(null);
     try {
-      const result: BusinessVerificationResult = await businessGrowApi.verifyProvider(providerKey);
+      const result: BusinessVerificationResult = modelKey
+        ? await businessGrowApi.verifyProvider(providerKey, modelKey)
+        : await businessGrowApi.verifyProvider(providerKey);
       if (accountScopeRef.current !== requestScope) return;
       setVerifyMessage(
         `${result.providerKey} (${result.modelKey}) vérifié avec succès (${result.latencyMs} ms).`,
@@ -1428,13 +1613,31 @@ export default function BusinessGrowWorkspace() {
       await businessGrowApi.saveRouting(pref);
       if (accountScopeRef.current === requestScope) {
         setVerifyMessage(`Règle de routage enregistrée pour ${pref.roleKey}.`);
+        void loadOperationalDetails();
       }
     } catch (saveError) {
       if (accountScopeRef.current === requestScope) {
         setVerifyMessage(saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le routage.');
       }
     }
-  }, [accountScope]);
+  }, [accountScope, loadOperationalDetails]);
+
+  const handleChangeRole = useCallback((nextRole: BusinessRoleKey) => {
+    setRoleKey(nextRole);
+    const saved = savedRouting.find((pref) => pref.role_key === nextRole);
+    if (saved) {
+      const nextMode: RoutingSelectionMode = saved.selection_mode === 'manual' ? 'manual' : 'auto';
+      setRoutingMode(nextMode);
+      setPreferredProviderKey(typeof saved.preferred_provider_key === 'string' ? saved.preferred_provider_key : '');
+      setPreferredModelKey(typeof saved.preferred_model_key === 'string' ? saved.preferred_model_key : '');
+      setManualAllowFallback(typeof saved.allow_fallback === 'boolean' ? saved.allow_fallback : false);
+    }
+  }, [savedRouting]);
+
+  const handleChangePreferredProvider = useCallback((nextProvider: string) => {
+    setPreferredProviderKey(nextProvider);
+    setPreferredModelKey('');
+  }, []);
 
   const saveMemoryConsent = useCallback(async (enabled: boolean) => {
     const requestScope = accountScope;
@@ -1558,10 +1761,14 @@ export default function BusinessGrowWorkspace() {
               routingMode={routingMode}
               preferredProviderKey={preferredProviderKey}
               preferredModelKey={preferredModelKey}
-              onChangeRole={setRoleKey}
+              manualAllowFallback={manualAllowFallback}
+              entryIntent={entryIntent}
+              onChangeRole={handleChangeRole}
               onChangeRoutingMode={setRoutingMode}
-              onChangePreferredProvider={setPreferredProviderKey}
+              onChangePreferredProvider={handleChangePreferredProvider}
               onChangePreferredModel={setPreferredModelKey}
+              onChangeManualAllowFallback={setManualAllowFallback}
+              onDismissEntryIntent={() => setEntryIntent(null)}
               onResolveTool={resolveTool}
               onNewConversation={() => { void createConversation(); }}
               onRenameConversation={renameConversation}
@@ -1591,6 +1798,7 @@ export default function BusinessGrowWorkspace() {
               statuses={providers}
               models={models}
               requests={requests}
+              savedRouting={savedRouting}
               quota={quota}
               verifyingKey={verifyingKey}
               verifyMessage={verifyMessage}

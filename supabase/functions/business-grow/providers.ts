@@ -60,7 +60,7 @@ export class ProviderCallError extends Error {
 
 const requestTimeoutMs = 25_000;
 const probeTimeoutMs = 15_000;
-const defaultMaxOutputTokens = 2_048;
+const defaultMaxOutputTokens = 4_096;
 
 function providerError(status: number): ProviderCallError {
   if (status === 401 || status === 403) return new ProviderCallError('PROVIDER_AUTH_FAILED', false);
@@ -167,7 +167,9 @@ const groqAdapter: BusinessProviderAdapter = {
     const choices = Array.isArray(result.choices) ? result.choices : [];
     const choice = asRecord(choices[0]);
     const message = asRecord(choice.message);
-    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    const rawContent = typeof message.content === 'string' ? message.content.trim() : '';
+    const withoutThink = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const content = withoutThink || rawContent;
     if (!content) throw new ProviderCallError('PROVIDER_EMPTY_RESPONSE', true);
     const usage = asRecord(result.usage);
     return {
@@ -212,7 +214,7 @@ const groqAdapter: BusinessProviderAdapter = {
         config,
         [{ role: 'user', content: 'Réponds uniquement OK.' }],
         fetcher,
-        { maxOutputTokens: 16, temperature: 0 },
+        { maxOutputTokens: 256, temperature: 0 },
       );
       return {
         providerKey: 'groq',
@@ -273,6 +275,7 @@ const geminiAdapter: BusinessProviderAdapter = {
     const candidateContent = asRecord(candidate.content);
     const parts = Array.isArray(candidateContent.parts) ? candidateContent.parts : [];
     const text = parts
+      .filter((part) => asRecord(part).thought !== true)
       .map((part) => asRecord(part).text)
       .filter((part): part is string => typeof part === 'string')
       .join('')
@@ -290,7 +293,7 @@ const geminiAdapter: BusinessProviderAdapter = {
     if (!config.apiKey) throw new ProviderCallError('PROVIDER_NOT_CONFIGURED', false);
     const result = await requestJson(
       fetcher,
-      'https://generativelanguage.googleapis.com/v1beta/models',
+      'https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',
       'GET',
       { 'x-goog-api-key': config.apiKey },
       undefined,
@@ -328,7 +331,7 @@ const geminiAdapter: BusinessProviderAdapter = {
         config,
         [{ role: 'user', content: 'Réponds uniquement OK.' }],
         fetcher,
-        { maxOutputTokens: 16, temperature: 0 },
+        { maxOutputTokens: 256, temperature: 0 },
       );
       return {
         providerKey: 'gemini',
@@ -437,6 +440,22 @@ export async function listRemoteModels(
   const adapter = getProviderAdapter(provider);
   if (!adapter || !adapter.implemented) return [];
   return await adapter.listModels(config, fetcher);
+}
+
+export function listAdapterDescriptors(): Array<{
+  id: ExtensibleProviderId;
+  displayName: string;
+  envKeyVar: string;
+  envModelVar: string;
+  implemented: boolean;
+}> {
+  return [...PROVIDER_ADAPTERS.values()].map((adapter) => ({
+    id: adapter.id,
+    displayName: adapter.displayName,
+    envKeyVar: adapter.envKeyVar,
+    envModelVar: adapter.envModelVar,
+    implemented: adapter.implemented,
+  }));
 }
 
 export function providerOrder(value: string): BusinessProvider[] {

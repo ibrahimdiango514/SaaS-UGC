@@ -8,6 +8,7 @@ import type { Brand, Product } from '../src/lib/types';
 import {
   BUSINESS_PROVIDERS, isBusinessProviderAvailable,
 } from '../src/business/ai/registry';
+import { buildBusinessGrowLocationState } from '../src/contracts/business-grow';
 
 const authMocks = vi.hoisted(() => ({
   userId: 'business-grow-test-user',
@@ -608,5 +609,48 @@ describe('Business Grow', () => {
     expect(screen.getByTestId('connector-facebook').textContent).toContain('Planifié');
     expect(screen.getByTestId('connector-shopify').textContent).toContain('Planifié');
     expect(screen.getByTestId('connector-woocommerce')).toBeTruthy();
+  });
+
+  it('applique le contrat BusinessGrowEntryIntent et permet d’activer le secours auto en routage manuel', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [{
+        provider_key: 'groq',
+        display_name: 'Groq',
+        enabled: true,
+        status: 'available',
+        config_status: 'configured',
+        checked_at: '2026-11-10T00:00:00Z',
+      }],
+    });
+    const intentState = buildBusinessGrowLocationState({
+      section: 'chat',
+      roleKey: 'action_plan',
+      projectTitle: 'Gamme Karité',
+      initialDraft: 'Planifie le lancement 30 jours pour Gamme Karité.',
+      sourceRoute: '/app/projets/proj-karite',
+    });
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/app/business', state: intentState }]}>
+        <BusinessGrow />
+      </MemoryRouter>,
+    );
+
+    const banner = await screen.findByTestId('business-entry-intent-banner');
+    expect(banner.textContent).toContain('Gamme Karité');
+    expect((screen.getByLabelText('Rôle de la tâche IA') as HTMLSelectElement).value).toBe('action_plan');
+    expect((screen.getByLabelText('Votre demande') as HTMLTextAreaElement).value).toContain('Gamme Karité');
+
+    fireEvent.change(screen.getByLabelText('Mode de routage'), { target: { value: 'manual' } });
+    fireEvent.change(screen.getByLabelText('Fournisseur manuel'), { target: { value: 'groq' } });
+    fireEvent.click(screen.getByLabelText('Autoriser le secours automatique en mode manuel'));
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
+    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    expect(options).toMatchObject({
+      roleKey: 'action_plan',
+      routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: true },
+    });
   });
 });

@@ -21,12 +21,14 @@ BEGIN
 END $$;
 
 GRANT bg_owner TO postgres;
+GRANT USAGE ON SCHEMA saas_ugc TO bg_owner;
+GRANT REFERENCES, SELECT ON saas_ugc.ugc_workspaces TO bg_owner;
+GRANT SELECT ON saas_ugc.ugc_workspace_members, saas_ugc.ugc_brands, saas_ugc.ugc_products TO bg_owner;
 
 CREATE SCHEMA saas_business AUTHORIZATION bg_owner;
 REVOKE ALL ON SCHEMA saas_business FROM PUBLIC, anon, authenticated, service_role;
+GRANT ALL ON SCHEMA saas_business TO postgres, bg_owner;
 GRANT USAGE ON SCHEMA saas_business TO bg_edge, bg_billing_worker, bg_erasure;
-
-SET ROLE bg_owner;
 
 CREATE TABLE saas_business.ai_providers (
   provider_key text PRIMARY KEY,
@@ -418,8 +420,8 @@ RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, saas_business AS $$
 BEGIN
   IF p_user_id IS NULL THEN RAISE EXCEPTION 'user id required'; END IF;
-  PERFORM 1 FROM auth.users WHERE id=p_user_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'user not found'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('bg_mem:' || p_user_id::text, 0));
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user_id) THEN RAISE EXCEPTION 'user not found'; END IF;
   DELETE FROM saas_business.memory_consent_events WHERE user_id=p_user_id;
   DELETE FROM saas_business.memory_profiles WHERE user_id=p_user_id;
   DELETE FROM saas_business.memory_items WHERE user_id=p_user_id;
@@ -435,8 +437,8 @@ BEGIN
   IF p_user_id IS NULL OR p_policy_version IS NULL OR btrim(p_policy_version) = '' THEN
     RAISE EXCEPTION 'invalid consent request';
   END IF;
-  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'user not found'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('bg_mem:' || p_user_id::text, 0));
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user_id) THEN RAISE EXCEPTION 'user not found'; END IF;
   v_action := CASE WHEN p_enabled THEN 'granted' ELSE 'revoked' END;
   INSERT INTO saas_business.memory_consent_events(user_id, action, policy_version)
   VALUES (p_user_id, v_action, p_policy_version)
@@ -455,8 +457,8 @@ CREATE FUNCTION saas_business.bg_upsert_memory_profile(
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, saas_business AS $$
 BEGIN
-  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR UPDATE;
-  IF NOT FOUND OR NOT EXISTS (
+  PERFORM pg_advisory_xact_lock(hashtextextended('bg_mem:' || p_user_id::text, 0));
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user_id) OR NOT EXISTS (
     SELECT 1 FROM saas_business.memory_consent_events
     WHERE user_id = p_user_id
     ORDER BY event_id DESC LIMIT 1
@@ -477,8 +479,8 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, saas_business AS $$
 DECLARE v_id uuid := COALESCE(p_item_id, gen_random_uuid());
 BEGIN
-  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR UPDATE;
-  IF NOT FOUND OR COALESCE((
+  PERFORM pg_advisory_xact_lock(hashtextextended('bg_mem:' || p_user_id::text, 0));
+  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user_id) OR COALESCE((
     SELECT action FROM saas_business.memory_consent_events
     WHERE user_id = p_user_id ORDER BY event_id DESC LIMIT 1
   ), 'revoked') <> 'granted' THEN RAISE EXCEPTION 'active memory consent required'; END IF;
@@ -509,7 +511,7 @@ CREATE FUNCTION saas_business.bg_clear_memory(p_user_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, saas_business AS $$
 BEGIN
-  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR UPDATE;
+  PERFORM pg_advisory_xact_lock(hashtextextended('bg_mem:' || p_user_id::text, 0));
   DELETE FROM saas_business.memory_profiles WHERE user_id = p_user_id;
   DELETE FROM saas_business.memory_items WHERE user_id = p_user_id;
 END $$;
@@ -661,7 +663,7 @@ LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,saas_business AS $$
              AND EXISTS (
                SELECT 1 FROM saas_business.ai_provider_health_checks h
                WHERE h.provider_key=m.provider_key AND h.model_key=m.model_key
-                 AND h.status='healthy' AND h.checked_at >= now()-interval '5 minutes'
+                 AND h.status='healthy' AND h.checked_at >= now()-interval '24 hours'
              )
            ORDER BY m.model_key
          )
@@ -998,10 +1000,10 @@ BEGIN
     )
     AND EXISTS (SELECT 1 FROM saas_business.ai_provider_health_checks h
       WHERE h.provider_key=p.provider_key AND h.model_key IS NULL
-        AND h.status='healthy' AND h.checked_at >= now()-interval '5 minutes')
+        AND h.status='healthy' AND h.checked_at >= now()-interval '24 hours')
     AND EXISTS (SELECT 1 FROM saas_business.ai_provider_health_checks h
       WHERE h.provider_key=m.provider_key AND h.model_key=m.model_key
-        AND h.status='healthy' AND h.checked_at >= now()-interval '5 minutes')
+        AND h.status='healthy' AND h.checked_at >= now()-interval '24 hours')
   ORDER BY
     CASE WHEN cardinality(p_preferred_provider_keys)>0
       THEN array_position(p_preferred_provider_keys,rr.provider_key) END NULLS LAST,
@@ -1266,6 +1268,12 @@ ALTER DEFAULT PRIVILEGES FOR ROLE bg_owner IN SCHEMA saas_business
   REVOKE ALL ON TABLES FROM PUBLIC,anon,authenticated,service_role;
 ALTER DEFAULT PRIVILEGES FOR ROLE bg_owner IN SCHEMA saas_business
   REVOKE ALL ON SEQUENCES FROM PUBLIC,anon,authenticated,service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA saas_business
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC,anon,authenticated,service_role,bg_edge,bg_billing_worker,bg_erasure;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA saas_business
+  REVOKE ALL ON TABLES FROM PUBLIC,anon,authenticated,service_role;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA saas_business
+  REVOKE ALL ON SEQUENCES FROM PUBLIC,anon,authenticated,service_role;
 
 GRANT EXECUTE ON FUNCTION saas_business.bg_set_memory_consent(uuid,boolean,text) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_create_conversation(uuid,text,uuid) TO bg_edge;
@@ -1296,7 +1304,6 @@ GRANT EXECUTE ON FUNCTION saas_business.bg_ignore_billing_event(uuid,uuid,text) 
 GRANT EXECUTE ON FUNCTION saas_business.bg_prepare_account_erasure(uuid) TO bg_erasure;
 
 GRANT USAGE ON SCHEMA saas_business TO bg_edge,bg_billing_worker,bg_erasure;
-RESET ROLE;
 
 -- Permet à une connexion Edge via SUPABASE_DB_URL (si utilisée en fallback) ou
 -- à un rôle dédié BUSINESS_GROW_DATABASE_URL d'invoquer les fonctions accordées.

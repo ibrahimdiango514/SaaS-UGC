@@ -702,4 +702,128 @@ describe('Business Grow Edge handler', () => {
       },
     });
   });
+
+  it('drops preferredModelKey on secondary provider fallback and loads saved role preferences when routing is omitted', async () => {
+    const { dependencies, store } = fixture();
+    store.getRoutingPreferences = vi.fn(async () => [
+      {
+        role_key: 'action_plan',
+        selection_mode: 'manual',
+        preferred_provider_key: 'groq',
+        preferred_model_key: 'openai/gpt-oss-120b',
+        allow_fallback: true,
+      },
+    ]);
+    vi.mocked(store.selectRoute)
+      .mockResolvedValueOnce({
+        attemptId: '99999999-9999-4999-8999-999999999991',
+        providerKey: 'groq',
+        modelKey: 'openai-gpt-oss-120b',
+        providerModelKey: 'openai/gpt-oss-120b',
+      })
+      .mockResolvedValueOnce({
+        attemptId: '99999999-9999-4999-8999-999999999992',
+        providerKey: 'gemini',
+        modelKey: 'gemini-2.5-flash',
+        providerModelKey: 'gemini-2.5-flash',
+      });
+    vi.mocked(dependencies.complete)
+      .mockRejectedValueOnce(new ProviderCallError('PROVIDER_UNAVAILABLE', true))
+      .mockResolvedValueOnce({ content: 'Plan de secours Gemini.', inputTokens: 20, outputTokens: 25 });
+
+    const handler = createBusinessGrowHandler(dependencies);
+    const res = await handler(request({
+      action: 'messages.send',
+      conversationId: conversationA,
+      roleKey: 'action_plan',
+      content: 'Construis un plan 30/60/90.',
+      idempotencyKey,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: {
+        status: 'succeeded',
+        fallbackUsed: true,
+        attemptsCount: 2,
+        provider: { key: 'gemini', model: 'gemini-2.5-flash' },
+      },
+    });
+    expect(store.selectRoute).toHaveBeenNthCalledWith(
+      1, userA, requestA, conversationA, 1, null, null, ['groq', 'gemini'], [], 'openai/gpt-oss-120b',
+    );
+    expect(store.selectRoute).toHaveBeenNthCalledWith(
+      2, userA, requestA, conversationA, 2, '99999999-9999-4999-8999-999999999991', 'PROVIDER_UNAVAILABLE', ['groq', 'gemini'], ['groq'],
+    );
+  });
+
+  it('strips unclosed/truncated REELORA_TOOL_PROPOSALS markers and normalizes handoff_ugc_brief field aliases', async () => {
+    const { dependencies, store } = fixture();
+    vi.mocked(store.selectRoute).mockResolvedValueOnce({
+      attemptId: '99999999-9999-4999-8999-999999999999',
+      providerKey: 'gemini',
+      modelKey: 'gemini-2.5-flash',
+      providerModelKey: 'gemini-2.5-flash',
+    });
+    vi.mocked(dependencies.complete).mockResolvedValueOnce({
+      content: 'Voici ton plan.\n---\n<!--REELORA_TOOL_PROPOSALS:[{"toolName":"propose_action_plan","summary":"Plan tronqué',
+      inputTokens: 15,
+      outputTokens: 20,
+    });
+    const handler = createBusinessGrowHandler(dependencies);
+    const msgRes = await handler(request({
+      action: 'messages.send',
+      conversationId: conversationA,
+      roleKey: 'action_plan',
+      content: 'Plan rapide',
+      idempotencyKey,
+    }));
+    expect(msgRes.status).toBe(200);
+    expect(store.finalizeAttempt).toHaveBeenCalledWith(
+      userA, requestA, '99999999-9999-4999-8999-999999999999',
+      expect.objectContaining({ status: 'succeeded', outputContent: 'Voici ton plan.' }),
+    );
+
+    store.resolveToolExecution = vi.fn(async (_u, executionId, decision, outputResult) => ({
+      id: executionId,
+      status: decision,
+      tool_name: 'handoff_ugc_brief',
+      input_args: { productName: 'Sérum Éclat', campaignAngle: 'Éclat naturel 7 jours', audience: 'Femmes 25-45' },
+      output_result: outputResult,
+    }));
+    const handoffRes = await handler(request({
+      action: 'tools.resolve',
+      executionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3',
+      decision: 'approved',
+    }));
+    expect(handoffRes.status).toBe(200);
+    expect(await handoffRes.json()).toMatchObject({
+      data: {
+        status: 'executed',
+        output_result: {
+          handoffDraft: {
+            product: 'Sérum Éclat',
+            angle: 'Éclat naturel 7 jours',
+            targetAudience: 'Femmes 25-45',
+            consumesStudioCredits: false,
+          },
+        },
+      },
+    });
+  });
+
+  it('returns 409 business_memory_consent_required when memory.item.put is called without active consent', async () => {
+    const { dependencies, store } = fixture();
+    vi.mocked(store.putMemoryItem).mockRejectedValueOnce(new Error('active memory consent required'));
+    const handler = createBusinessGrowHandler(dependencies);
+    const res = await handler(request({
+      action: 'memory.item.put',
+      category: 'objectif',
+      content: { text: 'Test' },
+    }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'business_memory_consent_required' },
+    });
+  });
 });

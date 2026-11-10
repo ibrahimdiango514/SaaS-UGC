@@ -181,3 +181,38 @@ export const BUSINESS_ROLES: readonly BusinessRoleDefinition[] = [
 export function isBusinessProviderAvailable(provider: BusinessProviderDefinition): boolean {
   return provider.connectionState === 'available';
 }
+
+export const MODEL_CAPABILITY_LABELS: Record<string, string> = {
+  reasoning: 'Raisonnement stratégique',
+  analysis: 'Analyse structurée',
+  writing: 'Rédaction & synthèse',
+  scripts: 'Scripts & hooks rapides',
+  hooks: 'Accroches marketing',
+  documents: 'Synthèse documentaire',
+  images: 'Compréhension multimodale',
+  'economic-routing': 'Routage économique',
+  fallback: 'Secours haute disponibilité',
+  'specialized-models': 'Modèles spécialisés',
+  'model-comparison': 'Comparaison multi-modèles',
+  experimentation: 'Expérimentation',
+  'video-generation': 'Génération vidéo Studio',
+  structured_output: 'Sortie structurée',
+  tool_planning: 'Propositions d’actions',
+  multilingual: 'Multilingue (FR/EN)',
+  fast_response: 'Réponse rapide',
+  high_throughput: 'Haut débit',
+};
+
+export const BUSINESS_ROUTING_DEFAULTS = {
+  defaultRoleKey: 'business_advisor' as BusinessRoleKey,
+  defaultSelectionMode: 'auto' as RoutingSelectionMode,
+  defaultAllowFallbackInAuto: true,
+  defaultAllowFallbackInManual: false,
+} as const;
+
+export function describeModelCapabilities(capabilities: Record<string, unknown>): string[] {
+  return Object.entries(capabilities)
+    .filter(([, enabled]) => enabled === true)
+    .map(([key]) => MODEL_CAPABILITY_LABELS[key] ?? key);
+}
+

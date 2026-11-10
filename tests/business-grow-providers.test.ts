@@ -198,4 +198,21 @@ describe('Business Grow provider clients', () => {
       errorCode: 'PROVIDER_AUTH_FAILED',
     });
   });
+
+  it('strips <think> reasoning tags from Groq completions when visible text remains', async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify({
+        choices: [{ message: { content: '<think>Raisonnement interne</think>\nRéponse finale claire.' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 20 },
+      }), { status: 200 }),
+    );
+
+    const result = await callProvider(
+      'groq',
+      { apiKey: 'test-groq-secret', model: 'qwen/qwen3.8-27b' },
+      messages,
+      fetcher,
+    );
+    expect(result.content).toBe('Réponse finale claire.');
+  });
 });

@@ -39,6 +39,9 @@ import {
   validateProductionPlan, type ProductionPlan, type SectorId,
 } from './plan';
 import { loadLocalDraft, saveLocalDraft as createLocalEditorDraft } from './editor/persistence';
+import {
+  extractUgcHandoffBriefFromLocationState, formatUgcPromptFromBrief,
+} from '../contracts/business-grow';
 
 const ACTIVE = ['queued', 'reserved', 'processing'];
 const MAX_REFERENCE_BYTES = 8 * 1024 * 1024;
@@ -73,7 +76,7 @@ export default function GenerationStudio() {
   const location = useLocation();
   const { workspaceId, quota, refreshQuota } = useAuth();
   const [search] = useSearchParams();
-  const handedOffBrief = asRecord((location.state as { ugcBrief?: unknown } | null)?.ugcBrief);
+  const handedOffBrief = extractUgcHandoffBriefFromLocationState(location.state);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -88,16 +91,21 @@ export default function GenerationStudio() {
   const [healthError, setHealthError] = useState('');
   const [form, setForm] = useState<GenerationFormState>(() => {
     const base = initialFormState();
-    const promptParts = [handedOffBrief.hook, handedOffBrief.angle, handedOffBrief.summary, handedOffBrief.cta]
-      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-    if (!promptParts.length) return base;
+    if (!handedOffBrief) return base;
+    const formattedPrompt = formatUgcPromptFromBrief(handedOffBrief);
     return {
       ...base,
-      prompt: promptParts.join(' — '),
-      script: typeof handedOffBrief.summary === 'string' ? handedOffBrief.summary : base.script,
+      ...(formattedPrompt ? { prompt: formattedPrompt } : {}),
+      ...(handedOffBrief.summary ? { script: handedOffBrief.summary } : {}),
+      ...(handedOffBrief.preferredRatio ? { ratio: handedOffBrief.preferredRatio } : {}),
     };
   });
-  const [selectedSector, setSelectedSector] = useState<SectorId>('cosmetique');
+  const [selectedSector, setSelectedSector] = useState<SectorId>(() => {
+    const valid: SectorId[] = ['cosmetique', 'food', 'ecommerce', 'fitness', 'mode', 'technologie', 'general'];
+    return handedOffBrief?.suggestedSector && valid.includes(handedOffBrief.suggestedSector as SectorId)
+      ? handedOffBrief.suggestedSector as SectorId
+      : 'cosmetique';
+  });
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -645,6 +653,14 @@ export default function GenerationStudio() {
         </div>
       </div>
 
+      {handedOffBrief && (
+        <div className="mt-3" data-testid="studio-handoff-banner">
+          <Banner tone="info" title={`Brief importé depuis Business Grow${handedOffBrief.product ? ` · ${handedOffBrief.product}` : ''}`}>
+            {handedOffBrief.targetAudience ? `Cible : ${handedOffBrief.targetAudience}. ` : ''}
+            Aucun crédit Studio consommé lors du transfert : relisez le prompt puis obtenez un devis avant tout lancement.
+          </Banner>
+        </div>
+      )}
       {catalogError && (
         <div className="mt-3"><Banner tone="danger" title="Catalogue MuAPI partiellement indisponible">{catalogError}</Banner></div>
       )}

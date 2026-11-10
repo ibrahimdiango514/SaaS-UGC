@@ -4,8 +4,6 @@
 -- Aucune modification ni lecture des crédits Studio UGC (ugc_wallets, etc.).
 -- =============================================================================
 
-SET ROLE bg_owner;
-
 -- 1) Extension catalogue fournisseurs (adaptateurs extensibles prêts)
 INSERT INTO saas_business.ai_providers(provider_key, display_name, enabled, status)
 VALUES
@@ -326,10 +324,10 @@ BEGIN
     )
     AND EXISTS (SELECT 1 FROM saas_business.ai_provider_health_checks h
       WHERE h.provider_key = p.provider_key AND h.model_key IS NULL
-        AND h.status = 'healthy' AND h.checked_at >= now() - interval '5 minutes')
+        AND h.status = 'healthy' AND h.checked_at >= now() - interval '24 hours')
     AND EXISTS (SELECT 1 FROM saas_business.ai_provider_health_checks h
       WHERE h.provider_key = m.provider_key AND h.model_key = m.model_key
-        AND h.status = 'healthy' AND h.checked_at >= now() - interval '5 minutes')
+        AND h.status = 'healthy' AND h.checked_at >= now() - interval '24 hours')
   ORDER BY
     CASE WHEN cardinality(p_preferred_provider_keys) > 0
       THEN array_position(p_preferred_provider_keys, rr.provider_key) END NULLS LAST,
@@ -400,7 +398,11 @@ CREATE OR REPLACE FUNCTION saas_business.bg_sync_verified_model(
   p_latency_ms integer, p_error_code text DEFAULT NULL
 ) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, saas_business AS $$
-DECLARE v_model_key text; v_check_id uuid;
+DECLARE
+  v_model_key text;
+  v_check_id uuid;
+  v_role text;
+  v_next_priority smallint;
 BEGIN
   SELECT model_key INTO v_model_key
   FROM saas_business.ai_models
@@ -412,7 +414,8 @@ BEGIN
       provider_key, model_key, provider_model_key, display_name, capabilities, enabled, verification_status
     ) VALUES (
       p_provider_key, v_model_key, p_provider_model_key, p_provider_model_key,
-      '{"writing":true,"reasoning":true}'::jsonb, (p_status = 'healthy'), 'unverified'
+      '{"writing":true,"reasoning":true,"scripts":true,"hooks":true}'::jsonb,
+      (p_status = 'healthy'), 'unverified'
     )
     ON CONFLICT (provider_key, model_key) DO NOTHING;
   ELSE
@@ -422,6 +425,25 @@ BEGIN
 
   PERFORM saas_business.bg_record_health_check(p_provider_key, NULL, p_status, p_latency_ms, p_error_code);
   v_check_id := saas_business.bg_record_health_check(p_provider_key, v_model_key, p_status, p_latency_ms, p_error_code);
+
+  IF p_status = 'healthy' THEN
+    FOR v_role IN SELECT role_key FROM saas_business.ai_roles WHERE enabled LOOP
+      IF NOT EXISTS (
+        SELECT 1 FROM saas_business.ai_routing_rules r
+        WHERE r.role_key = v_role AND r.provider_key = p_provider_key AND r.model_key = v_model_key
+      ) THEN
+        SELECT COALESCE(max(r2.priority) + 1, 1)::smallint
+          INTO v_next_priority
+        FROM saas_business.ai_routing_rules r2
+        WHERE r2.role_key = v_role;
+
+        INSERT INTO saas_business.ai_routing_rules(role_key, provider_key, model_key, priority, enabled)
+        VALUES (v_role, p_provider_key, v_model_key, v_next_priority, true)
+        ON CONFLICT (role_key, priority) DO NOTHING;
+      END IF;
+    END LOOP;
+  END IF;
+
   RETURN v_check_id;
 END $$;
 
@@ -466,14 +488,29 @@ CREATE OR REPLACE FUNCTION saas_business.bg_upsert_routing_preference(
   p_allow_fallback boolean DEFAULT true
 ) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, saas_business AS $$
-DECLARE v_id uuid;
+DECLARE
+  v_id uuid;
+  v_provider text := NULLIF(btrim(p_preferred_provider_key), '');
+  v_model_input text := NULLIF(btrim(p_preferred_model_key), '');
+  v_resolved_model text := NULL;
 BEGIN
+  IF v_provider IS NOT NULL AND v_model_input IS NOT NULL THEN
+    SELECT model_key INTO v_resolved_model
+    FROM saas_business.ai_models
+    WHERE provider_key = v_provider
+      AND (model_key = v_model_input OR provider_model_key = v_model_input)
+    LIMIT 1;
+    IF v_resolved_model IS NULL THEN
+      RAISE EXCEPTION 'preferred model not found for provider';
+    END IF;
+  END IF;
+
   INSERT INTO saas_business.user_routing_preferences(
     user_id, role_key, selection_mode, preferred_provider_key, preferred_model_key, allow_fallback
   ) VALUES (
     p_user_id, COALESCE(NULLIF(p_role_key, ''), 'business_advisor'),
     COALESCE(NULLIF(p_selection_mode, ''), 'auto'),
-    NULLIF(p_preferred_provider_key, ''), NULLIF(p_preferred_model_key, ''),
+    v_provider, v_resolved_model,
     COALESCE(p_allow_fallback, true)
   )
   ON CONFLICT (user_id, role_key) DO UPDATE SET
@@ -645,5 +682,3 @@ GRANT EXECUTE ON FUNCTION saas_business.bg_resolve_tool_execution(uuid, uuid, te
 GRANT EXECUTE ON FUNCTION saas_business.bg_list_recent_requests(uuid, integer) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_get_workspace_context(uuid, uuid) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_list_integration_connections(uuid) TO bg_edge;
-
-RESET ROLE;
