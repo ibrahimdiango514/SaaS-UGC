@@ -734,30 +734,51 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
 
           for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
             let route: Awaited<ReturnType<BusinessGrowStore['selectRoute']>>;
+            const usePreferredModel = Boolean(routing.preferredModelKey && attemptNumber === 1);
             try {
-              const usePreferredModel = Boolean(routing.preferredModelKey && attemptNumber === 1);
-              route = usePreferredModel
-                ? await dependencies.store.selectRoute(
+              try {
+                route = usePreferredModel
+                  ? await dependencies.store.selectRoute(
+                      userId,
+                      submitted.requestId,
+                      conversationId,
+                      attemptNumber,
+                      previousAttemptId,
+                      fallbackReason,
+                      preferredOrder,
+                      [...excludedProviders],
+                      routing.preferredModelKey,
+                    )
+                  : await dependencies.store.selectRoute(
+                      userId,
+                      submitted.requestId,
+                      conversationId,
+                      attemptNumber,
+                      previousAttemptId,
+                      fallbackReason,
+                      preferredOrder,
+                      [...excludedProviders],
+                    );
+              } catch (firstRouteError) {
+                if (
+                  firstRouteError instanceof NoVerifiedProviderRouteError
+                  && usePreferredModel
+                  && routing.allowFallback !== false
+                ) {
+                  route = await dependencies.store.selectRoute(
                     userId,
                     submitted.requestId,
                     conversationId,
                     attemptNumber,
                     previousAttemptId,
-                    fallbackReason,
-                    preferredOrder,
-                    [...excludedProviders],
-                    routing.preferredModelKey,
-                  )
-                : await dependencies.store.selectRoute(
-                    userId,
-                    submitted.requestId,
-                    conversationId,
-                    attemptNumber,
-                    previousAttemptId,
-                    fallbackReason,
+                    fallbackReason ?? 'PREFERRED_MODEL_UNAVAILABLE',
                     preferredOrder,
                     [...excludedProviders],
                   );
+                } else {
+                  throw firstRouteError;
+                }
+              }
             } catch (error) {
               if (error instanceof NoVerifiedProviderRouteError) {
                 lastErrorCode = 'NO_VERIFIED_PROVIDER';

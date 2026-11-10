@@ -850,4 +850,39 @@ describe('Business Grow Edge handler', () => {
     expect(spoofedPreflight.status).toBe(403);
     expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
+
+  it('falls back cleanly when preferredModelKey is unavailable and allowFallback is true', async () => {
+    const { dependencies, store } = fixture();
+    vi.mocked(store.selectRoute).mockImplementation(async (_u, _r, _c, _attempt, _prev, _reason, _order, _ex, preferredModel) => {
+      if (preferredModel) throw new NoVerifiedProviderRouteError();
+      return {
+        attemptId: '11111111-1111-4111-8111-111111111111',
+        providerKey: 'groq',
+        modelKey: 'openai-gpt-oss-120b',
+        providerModelKey: 'openai/gpt-oss-120b',
+      };
+    });
+    const handler = createBusinessGrowHandler(dependencies);
+    const res = await handler(request({
+      action: 'messages.send',
+      conversationId: conversationA,
+      content: 'Test fallback modèle indisponible',
+      idempotencyKey,
+      routing: {
+        selectionMode: 'manual',
+        preferredProviderKey: 'gemini',
+        preferredModelKey: 'gemini-pro-latest',
+        allowFallback: true,
+      },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      data: {
+        status: 'succeeded',
+        provider: { key: 'groq', model: 'openai/gpt-oss-120b' },
+      },
+    });
+    expect(store.selectRoute).toHaveBeenCalledTimes(2);
+  });
 });
