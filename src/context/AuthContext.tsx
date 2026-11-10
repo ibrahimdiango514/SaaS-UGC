@@ -15,7 +15,7 @@ interface AuthContextValue {
   isAdmin: boolean;
   loading: boolean;
   bootstrapError: string | null;
-  refreshQuota: () => Promise<void>;
+  refreshQuota: () => Promise<boolean>;
   refreshAll: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -32,52 +32,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const currentUid = useRef<string | null>(null);
+  const dataRequestId = useRef(0);
+  const authEventVersion = useRef(0);
 
   const loadUserData = useCallback(async (activeUser: User) => {
+    const requestId = ++dataRequestId.current;
     setBootstrapError(null);
     try {
       const boot = await bootstrap();
+      if (requestId !== dataRequestId.current || currentUid.current !== activeUser.id) return;
       setIsAdmin(Boolean(boot.is_admin));
       const [p, q, ws] = await Promise.all([
         getProfile(activeUser.id),
         getQuota(),
         getWorkspaces(),
       ]);
+      if (requestId !== dataRequestId.current || currentUid.current !== activeUser.id) return;
       setProfile(p);
       setQuota(q);
       setWorkspace(ws.find((w) => w.id === boot.workspace_id) ?? ws[0] ?? null);
+      setLoading(false);
     } catch (error) {
+      if (requestId !== dataRequestId.current || currentUid.current !== activeUser.id) return;
       setBootstrapError(asAppError(error, 'Impossible de charger votre espace Reelora.').message);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    const initialAuthVersion = authEventVersion.current;
 
     supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return;
+      if (cancelled || authEventVersion.current !== initialAuthVersion) return;
       setSession(data.session);
       setUser(data.session?.user ?? null);
       if (data.session?.user) {
         currentUid.current = data.session.user.id;
-        void loadUserData(data.session.user).finally(() => { if (!cancelled) setLoading(false); });
+        void loadUserData(data.session.user);
       } else {
         setLoading(false);
       }
-    }).catch(() => { if (!cancelled) setLoading(false); });
+    }).catch(() => {
+      if (!cancelled && authEventVersion.current === initialAuthVersion) setLoading(false);
+    });
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (cancelled) return;
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'SIGNED_OUT') {
+        authEventVersion.current += 1;
+      }
       setSession(nextSession);
       const nextUser = nextSession?.user ?? null;
       setUser(nextUser);
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && nextUser && currentUid.current !== nextUser.id) {
         currentUid.current = nextUser.id;
+        setProfile(null); setWorkspace(null); setQuota(null); setIsAdmin(false);
+        setBootstrapError(null);
         setLoading(true);
-        void loadUserData(nextUser).finally(() => setLoading(false));
+        void loadUserData(nextUser);
       }
       if (event === 'SIGNED_OUT') {
         currentUid.current = null;
+        dataRequestId.current += 1;
         setProfile(null); setWorkspace(null); setQuota(null); setIsAdmin(false);
         setBootstrapError(null);
         setLoading(false);
@@ -88,7 +105,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUserData]);
 
   const refreshQuota = useCallback(async () => {
-    try { setQuota(await getQuota()); } catch { /* keep previous value */ }
+    try {
+      setQuota(await getQuota());
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
 
   const refreshAll = useCallback(async () => {

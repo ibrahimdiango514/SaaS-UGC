@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Clapperboard, FileText, Layers, Pencil, Save, Scissors, Trash2, Wand2 } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Textarea, Select, Badge, LoadingState, ErrorState, EmptyState, Tabs, ConfirmDialog } from '../components/ui';
@@ -25,24 +25,64 @@ export default function ProjectDetail() {
   const [form, setForm] = useState<Partial<Project>>({});
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [hasMoreJobs, setHasMoreJobs] = useState(false);
+  const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
+  const [jobsLoadError, setJobsLoadError] = useState('');
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true); setError('');
+    setJobsLoadError('');
+    setProject(null); setScripts([]); setScenes([]); setJobs([]);
+    setHasMoreJobs(false);
     try {
-      const [p, s, sc, j] = await Promise.all([getProject(id), listScripts(id), listScenes(id), listJobs(200)]);
+      const [p, s, sc, jobPage] = await Promise.all([
+        getProject(id), listScripts(id), listScenes(id), listJobs(51, 0, undefined, id),
+      ]);
+      if (requestId !== loadRequestRef.current) return;
       if (!p) { setError('Projet introuvable ou inaccessible.'); return; }
-      setProject(p); setForm(p); setScripts(s); setScenes(sc); setJobs(j.filter((x) => x.project_id === id));
-    } catch (err) { setError(asAppError(err).message); }
-    finally { setLoading(false); }
+      setProject(p); setForm(p); setScripts(s); setScenes(sc);
+      setJobs(jobPage.slice(0, 50)); setHasMoreJobs(jobPage.length > 50);
+    } catch (err) {
+      if (requestId === loadRequestRef.current) setError(asAppError(err).message);
+    } finally {
+      if (requestId === loadRequestRef.current) setLoading(false);
+    }
   }, [id]);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadMoreJobs = async () => {
+    if (loadingMoreJobs || !hasMoreJobs) return;
+    const requestId = loadRequestRef.current;
+    const offset = jobs.length;
+    setLoadingMoreJobs(true);
+    setJobsLoadError('');
+    try {
+      const jobPage = await listJobs(51, offset, undefined, id);
+      if (requestId !== loadRequestRef.current) return;
+      setJobs((current) => [...current, ...jobPage.slice(0, 50).filter((job) => !current.some((item) => item.id === job.id))]);
+      setHasMoreJobs(jobPage.length > 50);
+    } catch (err) {
+      if (requestId === loadRequestRef.current) setJobsLoadError(asAppError(err).message);
+    } finally {
+      if (requestId === loadRequestRef.current) setLoadingMoreJobs(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    return () => { loadRequestRef.current += 1; };
+  }, [load]);
 
   const onSave = async () => {
+    if (!form.title?.trim()) {
+      toast.warning('Le titre du projet est obligatoire.');
+      return;
+    }
     setSaving(true);
     try {
       await updateProject(id, {
-        title: form.title, brief: form.brief, platform: form.platform, language: form.language,
+        title: form.title.trim(), brief: form.brief, platform: form.platform, language: form.language,
         aspect_ratio: form.aspect_ratio, campaign_objective: form.campaign_objective,
         target_audience: form.target_audience, target_market: form.target_market, status: form.status,
       } as Partial<Project>);
@@ -63,7 +103,7 @@ export default function ProjectDetail() {
     { id: 'apercu', label: 'Aperçu', icon: <Clapperboard size={14} /> },
     { id: 'scripts', label: `Scripts (${scripts.length})`, icon: <FileText size={14} /> },
     { id: 'scenes', label: `Scènes (${scenes.length})`, icon: <Layers size={14} /> },
-    { id: 'generations', label: `Générations (${jobs.length})`, icon: <Wand2 size={14} /> },
+    { id: 'generations', label: `Générations (${jobs.length}${hasMoreJobs ? '+' : ''})`, icon: <Wand2 size={14} /> },
   ];
 
   return (
@@ -159,6 +199,8 @@ export default function ProjectDetail() {
             <div className="table-wrap"><table className="table"><thead><tr><th>Service</th><th>Statut</th><th>Fournisseur</th><th>Crédits</th><th>Date</th></tr></thead>
               <tbody>{jobs.map((j) => <tr key={j.id}><td className="font-medium text-white">{j.service_key}</td><td><Badge status={j.status}>{statusLabel(j.status)}</Badge></td><td>{j.provider ?? '—'}</td><td>{j.credits_charged || j.credits_reserved}</td><td className="text-xs">{formatDate(j.created_at, true)}</td></tr>)}</tbody></table></div>
           )}
+          {jobsLoadError && <p role="alert" className="m-4 rounded-lg border border-rose-400/20 bg-rose-400/[0.05] p-3 text-xs text-rose-200">{jobsLoadError}</p>}
+          {hasMoreJobs && <div className="flex justify-center border-t border-line p-4"><Button variant="outline" loading={loadingMoreJobs} onClick={() => void loadMoreJobs()}>Charger plus de générations</Button></div>}
         </Card>
       )}
 

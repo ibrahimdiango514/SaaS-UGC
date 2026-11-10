@@ -11,7 +11,7 @@ import {
   generateScript, healthCheck, listAssets, listJobs, listProjects, signedStorageUrl,
 } from '../lib/api';
 import { asAppError } from '../lib/errors';
-import type { GeneratedAsset, GenerationJob, Project } from '../lib/types';
+import type { Project } from '../lib/types';
 import { StudioTopBar } from './components/StudioTopBar';
 import {
   buildLocalPlan, mapAiScriptToPlan, planToEditorProject, replanEditorScenes,
@@ -180,8 +180,8 @@ export default function VideoEditor() {
 
       if (loadedMedia.length === 0) {
         const [allAssets, allJobs] = await Promise.all([
-          listAssets(100).catch(() => [] as GeneratedAsset[]),
-          listJobs(100).catch(() => [] as GenerationJob[]),
+          listAssets(100),
+          listJobs(100),
         ]);
         loadedMedia = await signMediaItems(allAssets, allJobs, next.projectId);
       }
@@ -202,7 +202,7 @@ export default function VideoEditor() {
             });
           }
         } else {
-          const all = await listAssets().catch(() => [] as GeneratedAsset[]);
+          const all = await listAssets();
           const asset = all.find((a) => a.generation_job_id === jobId && a.storage_path && a.asset_type?.includes('video'));
           if (asset?.storage_path) {
             try {
@@ -213,12 +213,14 @@ export default function VideoEditor() {
                   kind: 'job', name: 'Vidéo générée', url, storagePath: asset.storage_path, assetId: asset.id, jobId,
                 });
               }
-            } catch { /* media remains explicitly missing */ }
+            } catch (error) {
+              throw new Error(`La vidéo liée à cette génération est inaccessible : ${asAppError(error).message}`);
+            }
           }
         }
       }
 
-      const projects = await listProjects().catch(() => [] as Project[]);
+      const projects = await listProjects();
       setProjectsList(projects);
       setMediaItems(loadedMedia);
       setProject(next);
@@ -600,7 +602,7 @@ export default function VideoEditor() {
     try {
       const [allAssets, allJobs] = await Promise.all([
         listAssets(100),
-        listJobs(100).catch(() => [] as GenerationJob[]),
+        listJobs(100),
       ]);
       const signed = await signMediaItems(allAssets, allJobs, project?.projectId ?? null);
       setMediaItems((prev) => {
@@ -1071,6 +1073,7 @@ export default function VideoEditor() {
                           {item.width && item.height ? ` · ${item.width}×${item.height}` : ''}
                           {item.modelId ? ` · ${item.modelId}` : ''}
                         </p>
+                        {item.urlError && <p className="mt-1 text-[10px] text-rose-300" role="alert">{item.urlError}</p>}
                       </div>
                       <Button
                         size="sm"
@@ -1142,6 +1145,7 @@ export default function VideoEditor() {
                   <span className="mt-1 block text-[10px] text-slate-500">
                     {m.createdAt ? new Date(m.createdAt).toLocaleString('fr-FR') : 'Session locale'} · {m.mimeType ?? m.mediaType}
                   </span>
+                  {m.urlError && <span className="mt-1 block text-[10px] text-rose-300" role="alert">{m.urlError}</span>}
                 </span>
                 <span className="shrink-0 text-[10px] text-cyan-300">
                   {m.mediaType === 'audio'

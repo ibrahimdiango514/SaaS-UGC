@@ -61,6 +61,24 @@ function estimate(overrides: Partial<VideoCostEstimate> = {}): VideoCostEstimate
   };
 }
 
+function promptBarHealthProps(
+  health: Record<string, boolean> | null,
+  healthBusy = false,
+  healthError = '',
+) {
+  const noop = vi.fn();
+  return {
+    state: { ...initialFormState(), prompt: 'Une publicité UGC de quinze secondes pour un sérum naturel.' },
+    onPatch: noop, model: model(), services: [], estimate: estimate({
+      provider_cost_usd: null, provider_quote_source: 'unavailable', model_available: false,
+    }),
+    balance: 36, blockedReason: 'Devis fournisseur à confirmer', busy: false,
+    onGenerate: noop, health, avatars: [], onAiPlan: noop,
+    aiBusy: false, aiMessage: '', healthBusy, healthError,
+    onRetryHealth: vi.fn(), catalogOpen: false, onOpenCatalog: noop, catalogSummary: '',
+  };
+}
+
 /** Aggregate fixture derived from the read-only DB audit (no invented models). */
 function catalogFixture(): MuApiModel[] {
   const activeGroups = [
@@ -461,9 +479,15 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
       onPatch: noop, model: dynamic, services: [], estimate: estimate({ provider_cost_usd: null, provider_quote_source: 'unavailable', model_available: false }),
       balance: 36, blockedReason: 'Devis fournisseur à confirmer', busy: false,
       onGenerate: noop, health: null, avatars: [], onAiPlan: noop,
-      aiBusy: false, aiMessage: '', catalogOpen: false, onOpenCatalog: noop, catalogSummary: '',
+      aiBusy: false, aiMessage: '', healthBusy: false, healthError: 'Connexion impossible.',
+      onRetryHealth: vi.fn(), catalogOpen: false, onOpenCatalog: noop, catalogSummary: '',
     };
     render(<MemoryRouter><PromptBar {...props} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
+    expect(screen.getByRole('alert').textContent).toContain('Connexion impossible.');
+    const retryHealth = props.onRetryHealth;
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    expect(retryHealth).toHaveBeenCalledTimes(1);
     expect((screen.getByTestId('generate-button') as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('studio-provider-quote').textContent).toContain(QUOTE_TO_CONFIRM);
     expect(screen.getByTestId('studio-quote-warning').textContent).toContain('génération bloquée');
@@ -473,6 +497,29 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     render(<MemoryRouter><PromptBar {...props} estimate={estimate()} blockedReason="" /></MemoryRouter>);
     expect((screen.getByTestId('generate-button') as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByTestId('studio-provider-quote').textContent).toContain('1.870 USD');
+  });
+
+  it('annonce la vérification Groq en cours sans afficher une relance prématurée', () => {
+    render(<MemoryRouter><PromptBar {...promptBarHealthProps(null, true)} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
+    expect(screen.getByRole('status').textContent).toContain('Vérification de la disponibilité de Groq');
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+  });
+
+  it('désactive le plan si Groq est absent et l’active si Groq est configuré', () => {
+    const absent = promptBarHealthProps({ groq: false });
+    render(<MemoryRouter><PromptBar {...absent} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
+    expect(screen.getByText('GROQ_API_KEY').parentElement?.textContent).toContain('absent côté serveur');
+    expect(screen.getByRole('button', { name: 'Proposer un plan avec Groq' }).hasAttribute('disabled')).toBe(true);
+
+    cleanup();
+    const available = promptBarHealthProps({ groq: true });
+    render(<MemoryRouter><PromptBar {...available} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Proposer un plan avec Groq' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('n’autorise la modale qu’après checkbox et devis confirmé', () => {

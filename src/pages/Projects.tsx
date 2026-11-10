@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Clapperboard, FolderKanban, Plus, Scissors, Search, Trash2, Wand2, SlidersHorizontal } from 'lucide-react';
 import { PageHeader, Card, Button, Input, Textarea, Select, Modal, Badge, LoadingState, ErrorState, EmptyState, ConfirmDialog } from '../components/ui';
@@ -13,6 +13,7 @@ const EMPTY_FORM = {
   title: '', brief: '', platform: 'TikTok', language: 'fr', aspect_ratio: '9:16',
   campaign_objective: '', target_audience: '', target_market: '',
 };
+const PROJECTS_PAGE_SIZE = 24;
 
 export default function Projects({ embedded = false }: { embedded?: boolean }) {
   const toast = useToast();
@@ -20,7 +21,10 @@ export default function Projects({ embedded = false }: { embedded?: boolean }) {
   const [params, setParams] = useSearchParams();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [loadMoreError, setLoadMoreError] = useState('');
+  const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState(params.get('q') ?? '');
   const [status, setStatus] = useState('all');
   const [modal, setModal] = useState(false);
@@ -29,15 +33,34 @@ export default function Projects({ embedded = false }: { embedded?: boolean }) {
   const [formError, setFormError] = useState('');
   const [toDelete, setToDelete] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const queryKey = `${status}\u0000${search}`;
+  const queryKeyRef = useRef(queryKey);
+  const listRequestId = useRef(0);
+  const loadMoreRequestId = useRef(0);
+  queryKeyRef.current = queryKey;
 
   const load = useCallback(async () => {
+    const requestId = ++listRequestId.current;
+    ++loadMoreRequestId.current;
+    setLoadingMore(false);
     setLoading(true); setError('');
-    try { setProjects(await listProjects({ status, search })); }
-    catch (err) { setError(asAppError(err).message); }
-    finally { setLoading(false); }
+    setLoadMoreError('');
+    try {
+      const firstPage = await listProjects({ status, search }, PROJECTS_PAGE_SIZE + 1);
+      if (requestId !== listRequestId.current) return;
+      setProjects(firstPage.slice(0, PROJECTS_PAGE_SIZE));
+      setHasMore(firstPage.length > PROJECTS_PAGE_SIZE);
+    }
+    catch (err) {
+      if (requestId === listRequestId.current) setError(asAppError(err).message);
+    }
+    finally {
+      if (requestId === listRequestId.current) setLoading(false);
+    }
   }, [status, search]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setSearch(params.get('q') ?? ''); }, [params]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault(); setFormError('');
@@ -48,7 +71,8 @@ export default function Projects({ embedded = false }: { embedded?: boolean }) {
       toast.success('Projet créé.');
       setModal(false); setForm(EMPTY_FORM);
       await refreshQuota();
-      await load();
+      setSearch('');
+      setStatus('all');
       setParams({});
       window.dispatchEvent(new CustomEvent('reelora:project-created', { detail: id }));
     } catch (err) { setFormError(asAppError(err).message); }
@@ -61,6 +85,27 @@ export default function Projects({ embedded = false }: { embedded?: boolean }) {
     try { await deleteProject(toDelete.id); toast.success('Projet supprimé.'); setToDelete(null); await refreshQuota(); await load(); }
     catch (err) { toast.error(asAppError(err).message); }
     finally { setDeleting(false); }
+  };
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    const requestId = ++loadMoreRequestId.current;
+    const requestQuery = queryKeyRef.current;
+    const requestListId = listRequestId.current;
+    setLoadingMore(true);
+    setLoadMoreError('');
+    try {
+      const nextPage = await listProjects({ status, search }, PROJECTS_PAGE_SIZE + 1, projects.length);
+      if (requestId !== loadMoreRequestId.current || requestQuery !== queryKeyRef.current || requestListId !== listRequestId.current) return;
+      setProjects((current) => [...current, ...nextPage.slice(0, PROJECTS_PAGE_SIZE)]);
+      setHasMore(nextPage.length > PROJECTS_PAGE_SIZE);
+    } catch (err) {
+      if (requestId === loadMoreRequestId.current && requestQuery === queryKeyRef.current && requestListId === listRequestId.current) {
+        setLoadMoreError(asAppError(err).message);
+      }
+    } finally {
+      if (requestId === loadMoreRequestId.current) setLoadingMore(false);
+    }
   };
 
   return (
@@ -101,9 +146,10 @@ export default function Projects({ embedded = false }: { embedded?: boolean }) {
       )}
 
       {!loading && !error && projects.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {projects.map((p) => (
-            <Card key={p.id} className="flex flex-col p-5 transition-colors hover:border-brand-400/30">
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {projects.map((p) => (
+              <Card key={p.id} className="flex flex-col p-5 transition-colors hover:border-brand-400/30">
               <div className="flex items-start justify-between gap-3">
                 <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/15 text-brand-300"><Clapperboard size={18} /></div>
                 <Badge status={p.status}>{statusLabel(p.status)}</Badge>
@@ -122,9 +168,21 @@ export default function Projects({ embedded = false }: { embedded?: boolean }) {
                 <Link to={`/app/studio/montage?projet=${p.id}`} className="btn btn-outline btn-sm" title="Ouvrir dans l’éditeur intelligent"><Scissors size={14} /></Link>
                 <button onClick={() => setToDelete(p)} className="btn btn-ghost btn-sm text-rose-300" title="Supprimer"><Trash2 size={14} /></button>
               </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+          {loadMoreError && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-4 py-3" role="alert">
+              <p className="text-sm text-rose-100">{loadMoreError}</p>
+              <Button size="sm" variant="outline" onClick={() => void loadMore()}>Réessayer</Button>
+            </div>
+          )}
+          {hasMore && (
+            <div className="mt-6 flex justify-center">
+              <Button variant="outline" loading={loadingMore} onClick={() => void loadMore()}>Charger plus de projets</Button>
+            </div>
+          )}
+        </>
       )}
 
       <Modal open={modal} onClose={() => setModal(false)} title="Nouveau projet" description="Décrivez la campagne. Ces informations alimenteront la génération IA."

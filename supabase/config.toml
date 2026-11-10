@@ -31,10 +31,10 @@ verify_jwt = false
 [functions.reelora-ai]
 verify_jwt = true
 
-[functions.reelora-ai-engine]
+[functions.reelora-video]
 verify_jwt = true
 
-[functions.reelora-video]
+[functions.business-grow]
 verify_jwt = true
 
 # Callback MuAPI + réconciliation pg_cron : MuAPI ne peut pas envoyer de JWT

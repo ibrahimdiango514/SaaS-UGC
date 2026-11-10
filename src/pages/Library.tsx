@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Download, ExternalLink, Film, FolderKanban, HardDrive, RefreshCw, Sparkles, Trash2,
+  Download, ExternalLink, Film, FolderKanban, HardDrive, LoaderCircle, RefreshCw, Sparkles, Trash2,
 } from 'lucide-react';
 import {
   PageHeader, Card, Button, Badge, LoadingState, ErrorState, EmptyState,
@@ -15,6 +15,8 @@ import {
 } from '../lib/api';
 import type { GeneratedAsset, GenerationJob, Project } from '../lib/types';
 import { paramsSummary, type ParamValue } from '../studio/model';
+
+const LIBRARY_PAGE_SIZE = 24;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -115,21 +117,41 @@ export default function Library({ embedded = false }: { embedded?: boolean }) {
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [loadMoreError, setLoadMoreError] = useState('');
+  const [hasMore, setHasMore] = useState(false);
   const [toDelete, setToDelete] = useState<GeneratedAsset | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
+    setLoadMoreError('');
     try {
       const [a, j, p] = await Promise.all([
-        listAssets(), listJobs(200).catch(() => [] as GenerationJob[]), listProjects().catch(() => [] as Project[]),
+        listAssets(LIBRARY_PAGE_SIZE + 1), listJobs(200), listProjects(),
       ]);
-      setAssets(a); setJobs(j); setProjects(p);
+      setAssets(a.slice(0, LIBRARY_PAGE_SIZE));
+      setHasMore(a.length > LIBRARY_PAGE_SIZE);
+      setJobs(j); setProjects(p);
     } catch (err) { setError(asAppError(err).message); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    setLoadMoreError('');
+    try {
+      const next = await listAssets(LIBRARY_PAGE_SIZE + 1, assets.length);
+      setAssets((current) => [...current, ...next.slice(0, LIBRARY_PAGE_SIZE)]);
+      setHasMore(next.length > LIBRARY_PAGE_SIZE);
+    } catch (err) {
+      setLoadMoreError(asAppError(err).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const onDelete = async () => {
     if (!toDelete) return;
@@ -157,14 +179,29 @@ export default function Library({ embedded = false }: { embedded?: boolean }) {
           actions={<Button variant="ghost" size="sm" onClick={() => void load()}>Actualiser</Button>} />
       )}
       {error && <ErrorState message={error} onRetry={() => void load()} />}
-      {loading ? <LoadingState label="Chargement de la bibliothèque…" /> : assets.length === 0 ? (
+      {loading ? <LoadingState label="Chargement de la bibliothèque…" /> : error ? null : assets.length === 0 ? (
         <EmptyState icon={<Sparkles size={24} />} title="Aucune création" description="Les vidéos produites depuis le Video Studio apparaîtront ici. Aucun fichier de démonstration n’est affiché."
           action={<Link to="/app/studio" className="btn btn-primary btn-sm">Ouvrir le Video Studio</Link>} />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {assets.map((a) => <VideoCard key={a.id} asset={a} job={jobs.find((j) => j.id === a.generation_job_id) ?? null}
-            projects={projects} onDelete={setToDelete} onAttach={(asset, projectId) => onAttach(asset, projectId)} />)}
-        </div>
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {assets.map((a) => <VideoCard key={a.id} asset={a} job={jobs.find((j) => j.id === a.generation_job_id) ?? null}
+              projects={projects} onDelete={setToDelete} onAttach={(asset, projectId) => onAttach(asset, projectId)} />)}
+          </div>
+          {loadMoreError && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.05] p-3 text-sm text-rose-200" role="alert">
+              <span>{loadMoreError}</span>
+              <Button size="sm" variant="outline" onClick={() => void loadMore()}>Réessayer</Button>
+            </div>
+          )}
+          {hasMore && (
+            <div className="mt-5 flex justify-center">
+              <Button variant="outline" loading={loadingMore} disabled={loadingMore} icon={!loadingMore ? <LoaderCircle size={14} /> : undefined} onClick={() => void loadMore()}>
+                Charger plus de créations
+              </Button>
+            </div>
+          )}
+        </>
       )}
       <ConfirmDialog open={Boolean(toDelete)} title="Supprimer cette création ?" danger confirmLabel="Supprimer" onClose={() => setToDelete(null)} onConfirm={() => void onDelete()}
         message="Le fichier vidéo et sa fiche seront supprimés. Cette action est irréversible." />

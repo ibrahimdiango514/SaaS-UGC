@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Bell, BookOpen, ChevronDown, Clapperboard, Coins, CreditCard, FolderKanban,
+  Bell, BookOpen, Brain, ChevronDown, Clapperboard, Coins, CreditCard, FolderKanban,
   History, LayoutDashboard, LogOut, Menu, Search, Settings, Shield, Sparkles,
   Users, Wand2, X, CheckCheck, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react';
@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { to: '/app', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/app/projets', label: 'Projets', icon: FolderKanban },
   { to: '/app/studio', label: 'Video Studio', icon: Clapperboard },
+  { to: '/app/business', label: 'Business Grow', icon: Brain },
   { to: '/app/avatars', label: 'Avatars', icon: Users },
   { to: '/app/scripts', label: 'Scripts IA', icon: Wand2 },
   { to: '/app/prompts', label: 'Prompts', icon: BookOpen },
@@ -28,7 +29,9 @@ const NAV: NavItem[] = [
   { to: '/app/parametres', label: 'Paramètres', icon: Settings },
 ];
 
-const MOBILE_NAV = [NAV[0], NAV[1], NAV[2], NAV[6], NAV[8]];
+const MOBILE_NAV = NAV.filter((item) =>
+  ['/app', '/app/projets', '/app/studio', '/app/business', '/app/historique'].includes(item.to),
+);
 
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
@@ -51,6 +54,11 @@ export default function Layout() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [markingNotificationId, setMarkingNotificationId] = useState<string | null>(null);
+  const [markingAllNotifications, setMarkingAllNotifications] = useState(false);
+  const [quotaRefreshing, setQuotaRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const notifRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
@@ -59,18 +67,29 @@ export default function Layout() {
     ? [...NAV, { to: '/app/admin', label: 'Administration', icon: Shield }]
     : NAV, [isAdmin]);
 
-  const unread = notifications.filter((n) => !n.read_at).length;
+  const notificationItems = Array.isArray(notifications) ? notifications : [];
+  const unread = notificationItems.filter((n) => !n.read_at).length;
 
-  const loadNotifications = async () => {
-    try { setNotifications(await listNotifications()); } catch { /* silent */ }
-  };
+  const loadNotifications = useCallback(async (showLoading = false) => {
+    if (showLoading) setNotificationsLoading(true);
+    try {
+      const result = await listNotifications();
+      if (!Array.isArray(result)) throw new Error('Réponse de notifications invalide.');
+      setNotifications(result);
+      setNotificationsError(null);
+    } catch (error) {
+      setNotificationsError(asAppError(error, 'Impossible de charger les notifications.').message);
+    } finally {
+      if (showLoading) setNotificationsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!user) return;
-    void loadNotifications();
+    void loadNotifications(true);
     const id = window.setInterval(() => void loadNotifications(), 60000);
     return () => window.clearInterval(id);
-  }, [user]);
+  }, [user, loadNotifications]);
 
   useEffect(() => { setDrawerOpen(false); setNotifOpen(false); setUserOpen(false); }, [location.pathname]);
 
@@ -84,17 +103,35 @@ export default function Layout() {
   }, []);
 
   const onMarkRead = async (n: AppNotification) => {
+    if (markingNotificationId || markingAllNotifications) return;
+    setMarkingNotificationId(n.id);
     try {
-      await markNotificationRead(n.id);
+      const marked = await markNotificationRead(n.id);
+      if (!marked) throw new Error('Impossible de marquer cette notification comme lue.');
       setNotifications((list) => list.map((x) => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
     } catch (error) { toast.error(asAppError(error).message); }
+    finally { setMarkingNotificationId(null); }
   };
 
   const onMarkAll = async () => {
+    if (markingAllNotifications || markingNotificationId || unread === 0) return;
+    setMarkingAllNotifications(true);
     try {
       await markAllNotificationsRead();
       setNotifications((list) => list.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
     } catch (error) { toast.error(asAppError(error).message); }
+    finally { setMarkingAllNotifications(false); }
+  };
+
+  const onRefreshQuota = async () => {
+    if (quotaRefreshing) return;
+    setQuotaRefreshing(true);
+    try {
+      if (await refreshQuota()) toast.success('Solde actualisé.');
+      else toast.error('Impossible d’actualiser le solde. Réessayez.');
+    } finally {
+      setQuotaRefreshing(false);
+    }
   };
 
   const onLogout = async () => {
@@ -141,8 +178,8 @@ export default function Layout() {
           </form>
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
-            <button onClick={() => { void refreshQuota(); toast.info('Solde actualisé.'); }}
-              className="hidden items-center gap-1.5 rounded-xl border border-line bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white sm:flex" title="Actualiser le solde">
+            <button onClick={() => void onRefreshQuota()} disabled={quotaRefreshing}
+              className="hidden items-center gap-1.5 rounded-xl border border-line bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:flex" title="Actualiser le solde">
               <Coins size={15} className="text-amber-300" /> {quota?.credits ?? 0}
             </button>
 
@@ -155,12 +192,19 @@ export default function Layout() {
                 <div className="absolute right-0 top-12 z-40 w-[min(92vw,360px)] overflow-hidden rounded-2xl border border-line bg-panel shadow-2xl">
                   <div className="flex items-center justify-between border-b border-line px-4 py-3">
                     <p className="text-sm font-semibold text-white">Notifications</p>
-                    <button onClick={() => void onMarkAll()} className="flex items-center gap-1 text-xs text-brand-300 hover:text-brand-200"><CheckCheck size={14} /> Tout lire</button>
+                    <button onClick={() => void onMarkAll()} disabled={markingAllNotifications || markingNotificationId !== null || unread === 0} className="flex items-center gap-1 text-xs text-brand-300 hover:text-brand-200 disabled:cursor-not-allowed disabled:opacity-50"><CheckCheck size={14} /> Tout lire</button>
                   </div>
                   <div className="max-h-[360px] overflow-y-auto">
-                    {notifications.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-500">Aucune notification.</p>}
-                    {notifications.map((n) => (
-                      <button key={n.id} onClick={() => { void onMarkRead(n); if (n.href) navigate(n.href); }}
+                    {notificationsLoading && <p className="px-4 py-8 text-center text-sm text-slate-400" role="status">Chargement des notifications…</p>}
+                    {!notificationsLoading && notificationsError && (
+                      <div className="space-y-3 px-4 py-6 text-center" role="alert">
+                        <p className="text-sm text-rose-200">{notificationsError}</p>
+                        <button type="button" onClick={() => void loadNotifications(true)} className="text-xs text-brand-300 underline">Réessayer</button>
+                      </div>
+                    )}
+                    {!notificationsLoading && !notificationsError && notificationItems.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-500">Aucune notification.</p>}
+                    {!notificationsLoading && !notificationsError && notificationItems.map((n) => (
+                      <button key={n.id} onClick={() => { void onMarkRead(n); if (n.href) navigate(n.href); }} disabled={markingAllNotifications || markingNotificationId !== null}
                         className={cn('block w-full border-b border-white/[0.06] px-4 py-3 text-left hover:bg-white/5', !n.read_at && 'bg-brand-500/5')}>
                         <div className="flex items-start gap-2">
                           {!n.read_at && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-400" />}

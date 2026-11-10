@@ -1,6 +1,6 @@
 # Reelora — Studio UGC propulsé par l'IA (MuAPI)
 
-SaaS francophone de création de contenus UGC : scripts publicitaires générés par **Groq**, génération vidéo réelle par **MuAPI** (fournisseur vidéo principal), bibliothèque privée, crédits/quotas et administration. Ce dépôt contient l'intégralité des sources (frontend, migrations SQL, Edge Functions, configuration, tests). Rien n'est une maquette : chaque écran est relié à Supabase et aux services d'IA côté serveur.
+SaaS francophone de création de contenus UGC et de croissance d'activité : le **Studio UGC** conserve ses parcours d'intégration serveur Groq/MuAPI, tandis que **Business Grow** comprend une interface, un client backend et des adaptateurs serveur Groq/Gemini. Les fournisseurs ne sont utilisables que si le schéma Business Grow, les secrets serveur et des modèles vérifiés sont configurés; aucune réponse IA n'est simulée. Ce dépôt contient les sources (frontend, migrations SQL, Edge Functions, configuration, tests) ; les statuts de connexion doivent distinguer les intégrations vérifiées des espaces préparés.
 
 > **Important** — `MUAPI_API_KEY` est enregistré comme **secret serveur Supabase** (jamais recopié dans le dépôt, le frontend, `VITE_*` ou les logs) ; la sonde de santé confirme sa **présence** (`muapi:true`), pas sa validité auprès de MuAPI. `GROQ_API_KEY` reste **absent** : l'assistance IA répond `GROQ_NOT_CONFIGURED` et ne produit **aucune réponse simulée**. **Aucune génération vidéo réelle n'a été lancée**, aucun crédit dépensé, aucun job créé : un test réel exige d'abord le devis (`docs/devis-test-muapi.md`) puis une confirmation explicite. Tous les tests automatisés utilisent des mocks. Voir [§7](#7-configuration-requise-intervention-utilisateur).
 
@@ -15,6 +15,7 @@ SaaS francophone de création de contenus UGC : scripts publicitaires générés
 | Tableau de bord | Statistiques réelles, quotas, dernières générations, état des intégrations Groq / MuAPI / worker |
 | Projets | Création, recherche, filtre par statut, fiche détaillée, édition du brief, scripts, scènes, générations, suppression |
 | **UGC Studio MuAPI** | 5 étapes : projet/produit/objectif → script Groq → scènes & prompts → **catalogue de modèles MuAPI + paramètres vérifiés** → coût estimé, confirmation explicite, progression, erreur lisible, **lecteur vidéo de prévisualisation**, téléchargement, vidéos précédentes et reprise d'un suivi |
+| **Business Grow** | `/app/business` : espace chat séparé, contexte conversationnel, attribution du fournisseur, mémoire métier et registre initial. Adaptateurs REST serveur Groq/Gemini avec délai limite, erreurs explicites et fallback traçable; le schéma SQL reste une proposition non appliquée et les secrets doivent être configurés côté Edge avant toute connexion réelle. Aucun crédit du Studio n'est utilisé. |
 | Avatars | CRUD, **image de référence** uploadée dans `ugc-assets` pour les modèles MuAPI image → vidéo, avatar par défaut |
 | Scripts IA | Groq (accroche, script, CTA, angle, allégations à éviter, storyboard), accroches alternatives, enregistrement en base, approbation |
 | Prompts | CRUD de modèles, variables `{{...}}`, aperçu, favoris, modèles système, amélioration par Groq |
@@ -158,6 +159,12 @@ supabase secrets set MUAPI_API_KEY=... GROQ_API_KEY=... --project-ref xbuuhfwobr
 ```
 
 > Aucun secret HeyGen / fal.ai n'est nécessaire ni lu. Les anciennes variables `REELORA_VIDEO_PROVIDER`, `HEYGEN_API_KEY`, `FAL_KEY` ont été retirées de `.env.example` et du code vidéo.
+
+### Business Grow — non configuré
+
+Business Grow utilise des secrets Edge séparés du Studio : `BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, `BUSINESS_GROW_GROQ_MODEL`, `BUSINESS_GROW_GEMINI_MODEL`, `BUSINESS_GROW_PROVIDER_ORDER` et `BUSINESS_GROW_DATABASE_URL`. Ils ne sont pas à ajouter à `.env.local`, à un fichier suivi par Git ou à une variable `VITE_*`. La fonction n'est ni déployée ni configurée; le schéma privé `saas_business` n'est pas installé. Ne configurez aucun fournisseur avant d'avoir un environnement staging isolé, un schéma validé et des clés renouvelées.
+
+Pour un développement local futur, `VITE_BUSINESS_GROW_FUNCTION_URL=http://127.0.0.1:54321/functions/v1/business-grow` (dans `.env.local`, jamais dans un fichier suivi) dirige uniquement le navigateur de développement vers l'Edge Function locale; le code refuse les autres hôtes ou URL afin de ne pas transmettre le jeton Reelora ailleurs. La fonction locale doit elle-même valider le jeton avec Supabase Auth. Cette URL seule ne rend pas le backend opérationnel : il faut encore un runtime Edge local, la base avec le schéma validé et les secrets serveur.
 
 ---
 
