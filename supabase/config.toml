@@ -31,6 +31,9 @@ verify_jwt = false
 [functions.reelora-ai]
 verify_jwt = true
 
+[functions.reelora-ai-engine]
+verify_jwt = true
+
 [functions.reelora-video]
 verify_jwt = true
 

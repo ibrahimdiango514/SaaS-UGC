@@ -15,9 +15,9 @@ const ai = read('supabase/functions/reelora-ai/index.ts');
 const config = read('supabase/config.toml');
 
 describe('Une seule intégration MuAPI, de bout en bout', () => {
-  it('le dépôt ne déclare que les quatre fonctions Edge attendues', () => {
+  it('le dépôt ne déclare que les cinq fonctions Edge attendues', () => {
     const declared = [...config.matchAll(/^\[functions\.([a-z0-9-]+)\]/gm)].map((m) => m[1]);
-    expect(declared.sort()).toEqual(['reelora-ai', 'reelora-health', 'reelora-video', 'reelora-video-worker']);
+    expect(declared.sort()).toEqual(['reelora-ai', 'reelora-ai-engine', 'reelora-health', 'reelora-video', 'reelora-video-worker']);
   });
 
   it('la passerelle vidéo lit uniquement le secret serveur MUAPI_API_KEY', () => {
