@@ -167,6 +167,38 @@ const maxHistoryMessages = 40;
 const maxHistoryCharacters = 60_000;
 const systemMessage = 'Vous êtes le copilote Business Grow de Reelora. Répondez en français, sauf demande contraire. Distinguez les faits connus des hypothèses et n’inventez pas les données métier absentes.';
 
+function isOriginAllowed(origin: string | null, allowedOrigins: string[]): boolean {
+  if (!origin) return false;
+  if (allowedOrigins.includes(origin)) return true;
+
+  let parsedOrigin: URL;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  for (const pattern of allowedOrigins) {
+    if (!pattern.includes('*')) continue;
+    let parsedPattern: URL;
+    try {
+      parsedPattern = new URL(pattern.replaceAll('*', 'xwildcardx'));
+    } catch {
+      continue;
+    }
+    if (parsedOrigin.protocol !== parsedPattern.protocol || parsedOrigin.port !== parsedPattern.port) {
+      continue;
+    }
+    const escapedHost = parsedPattern.hostname
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replaceAll('xwildcardx', '[a-z0-9-]+');
+    if (new RegExp(`^${escapedHost}$`, 'i').test(parsedOrigin.hostname)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function response(
   body: unknown,
   status: number,
@@ -174,7 +206,7 @@ function response(
   allowedOrigins: string[],
 ): Response {
   const headers = new Headers(jsonHeaders);
-  if (origin && allowedOrigins.includes(origin)) {
+  if (isOriginAllowed(origin, allowedOrigins) && origin) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Vary', 'Origin');
   }
@@ -253,17 +285,18 @@ function parseRoutingOptions(raw: unknown): RoutingOptions {
 export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies) {
   return async (request: Request): Promise<Response> => {
     const origin = request.headers.get('Origin');
+    const originAllowed = isOriginAllowed(origin, dependencies.allowedOrigins);
     const corsHeaders = new Headers({
       'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Max-Age': '86400',
     });
-    if (origin && dependencies.allowedOrigins.includes(origin)) {
+    if (origin && originAllowed) {
       corsHeaders.set('Access-Control-Allow-Origin', origin);
       corsHeaders.set('Vary', 'Origin');
     }
 
-    if (origin && !dependencies.allowedOrigins.includes(origin)) {
+    if (origin && !originAllowed) {
       return response(failure('ORIGIN_NOT_ALLOWED', 'Origine non autorisée.'), 403, null, dependencies.allowedOrigins);
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });

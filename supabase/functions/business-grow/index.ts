@@ -376,6 +376,8 @@ const defaultAllowedOrigins = [
   'http://localhost:4173',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:4173',
+  'https://saas-ugc-growth.netlify.app',
+  'https://deploy-preview-*--saas-ugc-growth.netlify.app',
   'https://sbc-ai-agency-dashbord.netlify.app',
   'https://reelora.netlify.app',
   'https://5173-iu476i6ok9qrn5o47a39w.e2b.app',

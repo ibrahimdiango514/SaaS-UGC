@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { getSession, invoke } = vi.hoisted(() => ({
@@ -167,5 +169,61 @@ describe('Business Grow browser API', () => {
         routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
       },
     });
+  });
+
+  it('routes Netlify Deploy Preview calls directly through /api/business-grow with function fallback', async () => {
+    vi.stubGlobal('window', { location: { hostname: 'deploy-preview-4--saas-ugc-growth.netlify.app' } });
+    const fetcher = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      if (String(input) === '/api/business-grow') {
+        return new Response('Not Found', { status: 404 });
+      }
+      return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    try {
+      await expect(businessGrowApi.getStatus()).resolves.toEqual({ providers: [] });
+      expect(invoke).not.toHaveBeenCalled();
+      expect(String(fetcher.mock.calls[0][0])).toBe('/api/business-grow');
+      expect(String(fetcher.mock.calls[1][0])).toBe('/.netlify/functions/business-grow');
+      const headers = new Headers(fetcher.mock.calls[1][1]?.headers);
+      expect(headers.get('Authorization')).toBe('Bearer test-session-token');
+      expect(headers.get('apikey')).toBe('test-publishable-key');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('falls back to /api/business-grow on *.netlify.app when functions.invoke encounters FunctionsFetchError', async () => {
+    vi.stubGlobal('window', { location: { hostname: 'saas-ugc-growth.netlify.app' } });
+    invoke.mockResolvedValueOnce({
+      data: null,
+      error: Object.assign(new Error('Failed to send a request to the Edge Function'), {
+        name: 'FunctionsFetchError',
+        context: new TypeError('fetch failed'),
+      }),
+    });
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ data: { conversations: [{ id: 'c1' }] } }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+
+    try {
+      await expect(businessGrowApi.listConversations()).resolves.toEqual({
+        conversations: [{ id: 'c1' }],
+      });
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(String(fetcher.mock.calls[0][0])).toBe('/api/business-grow');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps the Netlify preview relays free of server secrets and locked to the canonical Supabase project', () => {
+    for (const rel of ['netlify/edge-functions/business-grow.js', 'netlify/functions/business-grow.mjs']) {
+      const src = readFileSync(join(process.cwd(), rel), 'utf8');
+      expect(src).toContain('https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/business-grow');
+      expect(src).not.toMatch(/GROQ_API_KEY|GEMINI_API_KEY|SERVICE_ROLE|Deno\.env\.get|process\.env/);
+    }
   });
 });

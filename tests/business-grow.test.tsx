@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BusinessGrow from '../src/business/BusinessGrow';
+import { BusinessGrowApiError } from '../src/business/api';
 import type { ReactNode } from 'react';
 import type { Brand, Product } from '../src/lib/types';
 import {
@@ -652,5 +653,56 @@ describe('Business Grow', () => {
       roleKey: 'action_plan',
       routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: true },
     });
+  });
+
+  it('n’affiche jamais Vérifié sans preuve serveur réelle et affiche des erreurs exploitables en cas d’échec', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [
+        {
+          provider_key: 'groq',
+          display_name: 'Groq',
+          enabled: true,
+          status: 'available',
+          config_status: 'configured',
+          checked_at: null,
+        },
+        {
+          provider_key: 'gemini',
+          display_name: 'Gemini',
+          enabled: true,
+          status: 'available',
+          config_status: 'configured',
+          checked_at: '2026-11-10T18:00:00Z',
+          verified_model_keys: ['gemini-2.5-flash'],
+        },
+      ],
+    });
+    businessMocks.verifyProvider.mockRejectedValueOnce(
+      new BusinessGrowApiError(
+        'La vérification réelle du fournisseur groq a échoué (PROVIDER_AUTH_FAILED).',
+        'PROVIDER_AUTH_FAILED',
+      ),
+    );
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+    expect(screen.getByTestId('business-overall-status').textContent).toContain('1 fournisseur(s) vérifié(s)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fournisseurs IA' }));
+
+    const groqCard = screen.getByTestId('provider-groq');
+    expect(groqCard.textContent).toContain('Configuré · Non vérifié');
+    expect(groqCard.textContent).not.toContain('Disponible');
+
+    const geminiCard = screen.getByTestId('provider-gemini');
+    expect(geminiCard.textContent).toContain('Vérifié');
+    expect(geminiCard.textContent).toContain('Test serveur réel réussi');
+
+    const verifyBtn = groqCard.querySelector('button');
+    if (verifyBtn) fireEvent.click(verifyBtn);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('PROVIDER_AUTH_FAILED');
+    expect(alert.textContent).toContain('Supabase Edge Functions Secrets');
   });
 });

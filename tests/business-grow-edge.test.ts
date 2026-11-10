@@ -826,4 +826,28 @@ describe('Business Grow Edge handler', () => {
       error: { code: 'business_memory_consent_required' },
     });
   });
+
+  it('supports scoped Netlify deploy preview wildcard origins while blocking spoofs', async () => {
+    const { dependencies } = fixture();
+    const handler = createBusinessGrowHandler({
+      ...dependencies,
+      allowedOrigins: ['https://deploy-preview-*--saas-ugc-growth.netlify.app'],
+    });
+
+    const allowedPreflight = await handler(new Request('https://edge.test/business-grow', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://deploy-preview-4--saas-ugc-growth.netlify.app' },
+    }));
+    expect(allowedPreflight.status).toBe(204);
+    expect(allowedPreflight.headers.get('Access-Control-Allow-Origin')).toBe(
+      'https://deploy-preview-4--saas-ugc-growth.netlify.app',
+    );
+
+    const spoofedPreflight = await handler(new Request('https://edge.test/business-grow', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com' },
+    }));
+    expect(spoofedPreflight.status).toBe(403);
+    expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
 });

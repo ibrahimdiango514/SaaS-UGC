@@ -205,21 +205,110 @@ const TOOL_LABELS: Record<string, string> = {
   request_connector_read: 'Demander une lecture connecteur',
 };
 
-function providerStatus(provider: BusinessProviderStatus | undefined) {
-  if (!provider) return { label: 'Non vérifié', description: 'Le statut serveur n’a pas pu être vérifié.' };
+interface VerifyBanner {
+  tone: 'success' | 'error';
+  message: string;
+  code?: string | null;
+  hint?: string | null;
+}
+
+function isVerifiedProvider(provider: BusinessProviderStatus | undefined): boolean {
+  return Boolean(
+    provider
+      && provider.config_status === 'configured'
+      && provider.enabled
+      && provider.status === 'available'
+      && provider.checked_at,
+  );
+}
+
+function formatProbeTime(checkedAt: string | null | undefined): string {
+  if (!checkedAt) return '';
+  const date = new Date(checkedAt);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function describeProviderFailureHint(code: string | null | undefined): string {
+  switch (code) {
+    case 'PROVIDER_AUTH_FAILED':
+      return 'Clé API rejetée par le fournisseur. Vérifiez ou renouvelez le secret serveur dans Supabase Edge Functions Secrets.';
+    case 'PROVIDER_RATE_LIMITED':
+      return 'Limite de débit ou quota fournisseur atteint pour ce modèle. Sélectionnez un autre modèle vérifié ou basculez vers l’autre fournisseur.';
+    case 'PROVIDER_REQUEST_REJECTED':
+      return 'Le modèle configuré ou la requête a été rejeté par le fournisseur. Vérifiez l’identifiant exact du modèle.';
+    case 'PROVIDER_NOT_CONFIGURED':
+      return 'Clé API ou modèle manquant côté serveur. Renseignez les variables BUSINESS_GROW_* sur Supabase.';
+    case 'PROVIDER_TIMEOUT':
+    case 'PROVIDER_NETWORK_ERROR':
+    case 'PROVIDER_UNAVAILABLE':
+      return 'Le fournisseur n’a pas répondu dans le délai imparti ou est momentanément indisponible. Relancez le test ou activez le secours auto.';
+    case 'ORIGIN_NOT_ALLOWED':
+      return 'Origine du navigateur refusée par CORS sur business-grow. Vérifiez BUSINESS_GROW_ALLOWED_ORIGINS ou utilisez le relais preview Netlify.';
+    case 'BUSINESS_GROW_UNAVAILABLE':
+      return 'Backend Business Grow injoignable depuis le navigateur. Vérifiez le déploiement de la fonction ou le relais Netlify.';
+    default:
+      return 'Relancez une vérification serveur ou inspectez les journaux Supabase Edge Functions pour obtenir le détail.';
+  }
+}
+
+function providerStatus(provider: BusinessProviderStatus | undefined): {
+  label: string;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+  description: string;
+} {
+  if (!provider) {
+    return {
+      label: 'Non vérifié',
+      tone: 'neutral',
+      description: 'Le statut serveur n’a pas encore été interrogé.',
+    };
+  }
   if (provider.config_status !== 'configured') {
-    return { label: 'Non configuré', description: 'Aucune configuration serveur utilisable n’est disponible.' };
+    return {
+      label: 'Non configuré',
+      tone: 'neutral',
+      description: 'Aucune clé API ou configuration serveur utilisable n’est active.',
+    };
   }
-  if (!provider.enabled) {
-    return { label: 'Non vérifié', description: 'Le modèle configuré n’a pas été vérifié récemment.' };
+  if (!provider.checked_at) {
+    return {
+      label: 'Configuré · Non vérifié',
+      tone: 'warning',
+      description: 'Une configuration serveur existe, mais aucun test réel réussi n’a encore validé ce fournisseur.',
+    };
   }
-  if (provider.status === 'available') {
-    return { label: 'Disponible', description: 'La disponibilité a été vérifiée côté serveur.' };
+  if (isVerifiedProvider(provider)) {
+    const at = formatProbeTime(provider.checked_at);
+    const verifiedCount = provider.verified_model_keys?.length ?? 0;
+    const modelSummary = verifiedCount > 0 ? ` · ${verifiedCount} modèle(s) actif(s)` : '';
+    return {
+      label: 'Vérifié',
+      tone: 'success',
+      description: `Test serveur réel réussi${at ? ` le ${at}` : ''}${modelSummary}.`,
+    };
   }
   if (provider.status === 'degraded') {
-    return { label: 'Dégradé', description: 'Le service nécessite une nouvelle vérification.' };
+    const codePart = provider.error_code ? ` (${provider.error_code})` : '';
+    return {
+      label: 'Dégradé',
+      tone: 'warning',
+      description: `Dernier test serveur dégradé${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
+    };
   }
-  return { label: provider.status === 'unavailable' ? 'Indisponible' : 'Non vérifié', description: 'Le fournisseur n’est pas disponible pour le routage.' };
+  if (provider.status === 'unavailable' || provider.error_code) {
+    const codePart = provider.error_code ? ` (${provider.error_code})` : '';
+    return {
+      label: 'Échec vérification',
+      tone: 'danger',
+      description: `Le dernier test serveur a échoué${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
+    };
+  }
+  return {
+    label: 'Configuré · Non vérifié',
+    tone: 'warning',
+    description: 'Le modèle configuré doit réussir un test serveur réel pour être routable.',
+  };
 }
 
 function ProviderStatusList({ statuses, compact = false }: {
@@ -239,7 +328,7 @@ function ProviderStatusList({ statuses, compact = false }: {
               <p className="text-sm font-medium text-slate-200">{provider.name}</p>
               <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{status.description}</p>
             </div>
-            <Badge tone={status.label === 'Disponible' ? 'success' : 'neutral'}>{status.label}</Badge>
+            <Badge tone={status.tone}>{status.label}</Badge>
           </div>
         );
       })}
@@ -315,9 +404,7 @@ function AssistantView({
   const [editingTitle, setEditingTitle] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const activeConversation = conversations.find((conversation) => conversation.id === selectedConversationId);
-  const availableProviders = (providers ?? []).filter((provider) =>
-    provider.enabled && provider.status === 'available' && provider.config_status === 'configured',
-  );
+  const availableProviders = (providers ?? []).filter((provider) => isVerifiedProvider(provider));
   const verifiedModels = models.filter((model) => model.verification_status === 'verified' && model.enabled);
   const pendingTools = tools.filter((tool) => tool.status === 'pending_approval');
   const executedHandoffs = tools.filter((tool) => tool.tool_name === 'handoff_ugc_brief' && tool.status === 'executed');
@@ -905,7 +992,7 @@ function ProvidersView({
   savedRouting,
   quota,
   verifyingKey,
-  verifyMessage,
+  verifyBanner,
   onVerifyProvider,
   onSaveRouting,
 }: {
@@ -916,7 +1003,7 @@ function ProvidersView({
   savedRouting: Array<Record<string, unknown>>;
   quota: BusinessQuotaStatus | null;
   verifyingKey: string | null;
-  verifyMessage: string | null;
+  verifyBanner: VerifyBanner | null;
   onVerifyProvider: (providerKey: string, modelKey?: string) => Promise<void>;
   onSaveRouting: (pref: BusinessRoutingPreference) => Promise<void>;
 }) {
@@ -963,9 +1050,23 @@ function ProvidersView({
             </div>
           )}
         </div>
-        {verifyMessage && (
-          <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs text-slate-200" role="status">
-            {verifyMessage}
+        {verifyBanner && (
+          <div
+            className={cn(
+              'mb-4 rounded-xl border p-3.5 text-xs',
+              verifyBanner.tone === 'success'
+                ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
+                : 'border-rose-400/30 bg-rose-500/10 text-rose-100',
+            )}
+            role={verifyBanner.tone === 'error' ? 'alert' : 'status'}
+          >
+            <p className="font-medium">
+              {verifyBanner.message}
+              {verifyBanner.code ? <span className="ml-2 font-mono text-[10px] opacity-80">[{verifyBanner.code}]</span> : null}
+            </p>
+            {verifyBanner.hint && (
+              <p className="mt-1 text-[11px] opacity-85">{verifyBanner.hint}</p>
+            )}
           </div>
         )}
         <div className="space-y-3">
@@ -982,7 +1083,7 @@ function ProvidersView({
                     <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.description}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge tone={status.label === 'Disponible' ? 'success' : 'neutral'}>{status.label}</Badge>
+                    <Badge tone={status.tone}>{status.label}</Badge>
                     {canProbe && (
                       <Button
                         size="sm"
@@ -1005,19 +1106,35 @@ function ProvidersView({
                 </div>
                 {providerModels.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
-                    {providerModels.map((model) => (
-                      <span
-                        key={model.model_key}
-                        className={cn(
-                          'rounded-md border px-2 py-0.5 text-[10px]',
-                          model.verification_status === 'verified'
-                            ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200'
-                            : 'border-white/10 bg-white/[0.02] text-slate-400',
-                        )}
-                      >
-                        {model.display_name} ({model.verification_status})
-                      </span>
-                    ))}
+                    {providerModels.map((model) => {
+                      const modelStateLabel = model.verification_status === 'verified'
+                        ? 'Vérifié'
+                        : model.verification_status === 'unavailable'
+                          ? `Indisponible${model.error_code ? ` · ${model.error_code}` : ''}`
+                          : 'Non vérifié';
+                      return (
+                        <button
+                          key={model.model_key}
+                          type="button"
+                          disabled={!canProbe || Boolean(verifyingKey)}
+                          title={canProbe ? `Exécuter un test serveur réel sur ${model.provider_model_key}` : undefined}
+                          onClick={() => {
+                            if (canProbe) void onVerifyProvider(provider.id, model.provider_model_key);
+                          }}
+                          className={cn(
+                            'rounded-md border px-2 py-0.5 text-[10px] transition',
+                            model.verification_status === 'verified'
+                              ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
+                              : model.verification_status === 'unavailable'
+                                ? 'border-rose-400/25 bg-rose-400/10 text-rose-200 hover:bg-rose-400/20'
+                                : 'border-white/10 bg-white/[0.02] text-slate-400 hover:bg-white/[0.08]',
+                            (!canProbe || Boolean(verifyingKey)) && 'cursor-default opacity-80',
+                          )}
+                        >
+                          {model.display_name} ({modelStateLabel})
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 {provider.note && <p className="mt-3 text-[11px] text-slate-500">{provider.note}</p>}
@@ -1234,7 +1351,7 @@ export default function BusinessGrowWorkspace() {
   const [loadingMemory, setLoadingMemory] = useState(false);
   const [busy, setBusy] = useState(false);
   const [verifyingKey, setVerifyingKey] = useState<string | null>(null);
-  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
+  const [verifyBanner, setVerifyBanner] = useState<VerifyBanner | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [roleKey, setRoleKey] = useState<BusinessRoleKey>('business_advisor');
@@ -1282,7 +1399,7 @@ export default function BusinessGrowWorkspace() {
     setLoadingMemory(false);
     setBusy(false);
     setVerifyingKey(null);
-    setVerifyMessage(null);
+    setVerifyBanner(null);
     setError(null);
     setMemoryError(null);
   }, [accountScope]);
@@ -1586,19 +1703,29 @@ export default function BusinessGrowWorkspace() {
     const requestScope = accountScope;
     if (!businessGrowApi.verifyProvider) return;
     setVerifyingKey(providerKey);
-    setVerifyMessage(null);
+    setVerifyBanner(null);
     try {
       const result: BusinessVerificationResult = modelKey
         ? await businessGrowApi.verifyProvider(providerKey, modelKey)
         : await businessGrowApi.verifyProvider(providerKey);
       if (accountScopeRef.current !== requestScope) return;
-      setVerifyMessage(
-        `${result.providerKey} (${result.modelKey}) vérifié avec succès (${result.latencyMs} ms).`,
-      );
+      const discoveredCount = Array.isArray(result.availableModels) ? result.availableModels.length : 0;
+      setVerifyBanner({
+        tone: 'success',
+        message: `Test serveur réel : ${result.providerKey} (${result.modelKey}) vérifié avec succès (${result.latencyMs} ms).`,
+        hint: discoveredCount > 0 ? `${discoveredCount} modèle(s) détecté(s) sur l’API du fournisseur.` : null,
+      });
       await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
     } catch (verifyError) {
       if (accountScopeRef.current === requestScope) {
-        setVerifyMessage(verifyError instanceof Error ? verifyError.message : 'La vérification du fournisseur a échoué.');
+        const errorCode = verifyError instanceof BusinessGrowApiError ? verifyError.code : null;
+        setVerifyBanner({
+          tone: 'error',
+          code: errorCode,
+          message: verifyError instanceof Error ? verifyError.message : 'La vérification du fournisseur a échoué.',
+          hint: describeProviderFailureHint(errorCode),
+        });
+        await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
       }
     } finally {
       if (accountScopeRef.current === requestScope) setVerifyingKey(null);
@@ -1608,16 +1735,25 @@ export default function BusinessGrowWorkspace() {
   const saveRouting = useCallback(async (pref: BusinessRoutingPreference) => {
     const requestScope = accountScope;
     if (!businessGrowApi.saveRouting) return;
-    setVerifyMessage(null);
+    setVerifyBanner(null);
     try {
       await businessGrowApi.saveRouting(pref);
       if (accountScopeRef.current === requestScope) {
-        setVerifyMessage(`Règle de routage enregistrée pour ${pref.roleKey}.`);
+        setVerifyBanner({
+          tone: 'success',
+          message: `Règle de routage enregistrée pour ${pref.roleKey}.`,
+        });
         void loadOperationalDetails();
       }
     } catch (saveError) {
       if (accountScopeRef.current === requestScope) {
-        setVerifyMessage(saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le routage.');
+        const errorCode = saveError instanceof BusinessGrowApiError ? saveError.code : null;
+        setVerifyBanner({
+          tone: 'error',
+          code: errorCode,
+          message: saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le routage.',
+          hint: describeProviderFailureHint(errorCode),
+        });
       }
     }
   }, [accountScope, loadOperationalDetails]);
@@ -1692,9 +1828,7 @@ export default function BusinessGrowWorkspace() {
 
   const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
   const ActiveIcon = activeSection.icon;
-  const availableProviderCount = (providers ?? []).filter((provider) =>
-    provider.enabled && provider.status === 'available' && provider.config_status === 'configured',
-  ).length;
+  const availableProviderCount = (providers ?? []).filter((provider) => isVerifiedProvider(provider)).length;
 
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
@@ -1711,8 +1845,16 @@ export default function BusinessGrowWorkspace() {
               Votre espace métier intégré à Reelora, avec le même compte et les mêmes droits que le Studio UGC.
             </p>
           </div>
-          <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/20 bg-amber-400/[0.06] px-3 py-1.5 text-xs font-medium text-amber-100" data-testid="business-overall-status">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+          <span
+            className={cn(
+              'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium',
+              availableProviderCount
+                ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100'
+                : 'border-amber-400/20 bg-amber-400/[0.06] text-amber-100',
+            )}
+            data-testid="business-overall-status"
+          >
+            <span className={cn('h-1.5 w-1.5 rounded-full', availableProviderCount ? 'bg-emerald-300' : 'bg-amber-300')} />
             {availableProviderCount ? `${availableProviderCount} fournisseur(s) vérifié(s)` : backendReady ? 'IA non disponible' : 'Backend en attente'}
           </span>
         </div>
@@ -1801,7 +1943,7 @@ export default function BusinessGrowWorkspace() {
               savedRouting={savedRouting}
               quota={quota}
               verifyingKey={verifyingKey}
-              verifyMessage={verifyMessage}
+              verifyBanner={verifyBanner}
               onVerifyProvider={verifyProvider}
               onSaveRouting={saveRouting}
             />

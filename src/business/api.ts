@@ -1,5 +1,21 @@
 import { supabase, SUPABASE_PUBLISHABLE_KEY } from '../lib/supabase';
 
+const NETLIFY_PREVIEW_HOST_PATTERN = /^deploy-preview-\d+--[a-z0-9-]+\.netlify\.app$/i;
+
+function currentHostname(): string {
+  return typeof window !== 'undefined' && typeof window.location?.hostname === 'string'
+    ? window.location.hostname.toLowerCase()
+    : '';
+}
+
+function isNetlifyDeployPreview(): boolean {
+  return NETLIFY_PREVIEW_HOST_PATTERN.test(currentHostname());
+}
+
+function isNetlifyHost(): boolean {
+  return currentHostname().endsWith('.netlify.app');
+}
+
 function localFunctionUrl(): string | null {
   if (!import.meta.env.DEV) return null;
   const configured = (import.meta.env as Record<string, string | undefined>)
@@ -67,6 +83,7 @@ export interface BusinessProviderStatus {
   config_status: 'missing' | 'configured' | 'error';
   checked_at: string | null;
   verified_model_keys?: string[];
+  error_code?: string | null;
 }
 
 export interface BusinessModelRecord {
@@ -80,6 +97,7 @@ export interface BusinessModelRecord {
   max_input_tokens: number | null;
   max_output_tokens: number | null;
   verified_at: string | null;
+  error_code?: string | null;
 }
 
 export interface BusinessQuotaStatus {
@@ -155,6 +173,74 @@ export class BusinessGrowApiError extends Error {
   }
 }
 
+async function invokeViaNetlifyProxy<T>(
+  action: string,
+  values: Record<string, unknown>,
+  accessToken: string,
+): Promise<T> {
+  const endpoints = ['/api/business-grow', '/.netlify/functions/business-grow'];
+  let lastStatus: number | undefined;
+
+  for (let idx = 0; idx < endpoints.length; idx += 1) {
+    const endpoint = endpoints[idx];
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action, ...values }),
+        signal: AbortSignal.timeout(45_000),
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new BusinessGrowApiError(
+          'Le relais Business Grow ne répond pas dans le délai prévu.',
+          'BUSINESS_GROW_TIMEOUT',
+        );
+      }
+      if (idx + 1 < endpoints.length) continue;
+      throw new BusinessGrowApiError(
+        'Le backend Business Grow est absent ou injoignable depuis cet aperçu Netlify.',
+        'BUSINESS_GROW_UNAVAILABLE',
+      );
+    }
+
+    lastStatus = response.status;
+    if (response.status === 404 && idx + 1 < endpoints.length) {
+      continue;
+    }
+    if (response.status === 404) {
+      throw new BusinessGrowApiError(
+        'Le relais Business Grow n’est pas disponible sur cet aperçu Netlify.',
+        'BUSINESS_GROW_UNAVAILABLE',
+        404,
+      );
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new BusinessGrowApiError(
+        'Le serveur Business Grow a renvoyé une réponse invalide.',
+        'INVALID_RESPONSE',
+        response.status,
+      );
+    }
+    return parseResponse<T>(payload, response.status);
+  }
+
+  throw new BusinessGrowApiError(
+    'Le backend Business Grow est absent ou injoignable.',
+    'BUSINESS_GROW_UNAVAILABLE',
+    lastStatus,
+  );
+}
+
 async function invoke<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) throw new BusinessGrowApiError(sessionError.message, 'SESSION_ERROR');
@@ -200,11 +286,18 @@ async function invoke<T>(action: string, values: Record<string, unknown> = {}): 
     return parseResponse<T>(payload, response.status);
   }
 
+  if (isNetlifyDeployPreview()) {
+    return await invokeViaNetlifyProxy<T>(action, values, sessionData.session.access_token);
+  }
+
   const { data, error } = await supabase.functions.invoke('business-grow', {
     body: { action, ...values },
   });
 
   if (error) {
+    if (error.name === 'FunctionsFetchError' && isNetlifyHost()) {
+      return await invokeViaNetlifyProxy<T>(action, values, sessionData.session.access_token);
+    }
     let payload: unknown = data;
     if (!payload && error.context instanceof Response) {
       try { payload = await error.context.clone().json(); } catch { /* use the SDK error below */ }

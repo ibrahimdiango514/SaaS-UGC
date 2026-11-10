@@ -6,6 +6,11 @@
   NODE_VERSION = "22"
   NPM_FLAGS = "--no-audit --no-fund"
 
+# Relais zero-secret vers Supabase Edge Function business-grow pour les Deploy Previews Netlify
+[[edge_functions]]
+  path = "/api/business-grow"
+  function = "business-grow"
+
 # SPA fallback : toutes les routes React sont servies par index.html
 [[redirects]]
   from = "/*"
