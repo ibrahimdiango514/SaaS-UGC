@@ -68,7 +68,7 @@ import {
   loadEditorProject, loadProjectLocalDraft, saveEditorProject, saveLocalDraft,
 } from '../src/studio/editor/persistence';
 import {
-  assembleFromProjectMedia, hydrateEditorFromProject, type ProjectMediaItem,
+  assembleFromProjectMedia, hydrateEditorFromProject, signMediaItems, type ProjectMediaItem,
 } from '../src/studio/editor/projectMedia';
 import { AssistPanel } from '../src/studio/editor/components/AssistPanel';
 import { SubtitlesVoiceoverPanel } from '../src/studio/editor/components/SubtitlesVoiceoverPanel';
@@ -220,6 +220,53 @@ describe('Logique pure · Timeline (découpage, déplacement, duplication, trim)
 });
 
 describe('Logique pure · Hydratation & assemblage intelligent des médias du projet', () => {
+  it('remonte une erreur de chargement des scripts au lieu de créer un montage apparemment incomplet', async () => {
+    apiMocks.getProject.mockResolvedValue({
+      id: 'proj-real',
+      workspace_id: 'ws-1',
+      brand_id: null,
+      product_id: null,
+      created_by: 'user-1',
+      title: 'Campagne',
+      brief: 'Brief',
+      campaign_objective: null,
+      target_audience: null,
+      target_market: null,
+      platform: 'TikTok',
+      language: 'fr',
+      aspect_ratio: '9:16',
+      status: 'draft',
+      settings: {},
+      created_at: '2026-11-09T10:00:00Z',
+      updated_at: '2026-11-09T10:00:00Z',
+    });
+    apiMocks.listScripts.mockRejectedValue(new Error('Lecture des scripts refusée'));
+
+    await expect(hydrateEditorFromProject('proj-real')).rejects.toThrow('Lecture des scripts refusée');
+  });
+
+  it('conserve l’erreur de signature sur le média plutôt que de le présenter comme attachable', async () => {
+    const asset: GeneratedAsset = {
+      id: 'asset-1',
+      workspace_id: 'ws-1',
+      project_id: 'proj-real',
+      generation_job_id: null,
+      created_by: 'user-1',
+      asset_type: 'video',
+      storage_path: 'ws-1/videos/clip.mp4',
+      mime_type: 'video/mp4',
+      file_size_bytes: 10,
+      metadata: {},
+      created_at: '2026-11-09T10:00:00Z',
+    };
+    apiMocks.signedStorageUrl.mockRejectedValue(new Error('URL signée refusée'));
+
+    const [media] = await signMediaItems([asset], [], 'proj-real');
+
+    expect(media.url).toBeUndefined();
+    expect(media.urlError).toContain('URL signée refusée');
+  });
+
   it('hydrate un projet Reelora existant (scripts, scènes, vidéos) même sans brouillon éditeur sauvegardé', async () => {
     const dbProject: Project = {
       id: 'proj-real', workspace_id: 'ws-1', brand_id: null, product_id: null, created_by: 'u1',

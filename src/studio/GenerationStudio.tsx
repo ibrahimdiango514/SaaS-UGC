@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, ArrowRight, CheckCircle2, Clapperboard, Coins, Database, Info,
   Layers3, Plus, RefreshCw, Scissors, Square,
@@ -39,6 +39,9 @@ import {
   validateProductionPlan, type ProductionPlan, type SectorId,
 } from './plan';
 import { loadLocalDraft, saveLocalDraft as createLocalEditorDraft } from './editor/persistence';
+import {
+  extractUgcHandoffBriefFromLocationState, formatUgcPromptFromBrief,
+} from '../contracts/business-grow';
 
 const ACTIVE = ['queued', 'reserved', 'processing'];
 const MAX_REFERENCE_BYTES = 8 * 1024 * 1024;
@@ -70,8 +73,10 @@ function asParams(v: unknown): Record<string, ParamValue> {
 export default function GenerationStudio() {
   const toast = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { workspaceId, quota, refreshQuota } = useAuth();
   const [search] = useSearchParams();
+  const handedOffBrief = extractUgcHandoffBriefFromLocationState(location.state);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -84,8 +89,23 @@ export default function GenerationStudio() {
   const [health, setHealth] = useState<Record<string, boolean> | null>(null);
   const [healthBusy, setHealthBusy] = useState(true);
   const [healthError, setHealthError] = useState('');
-  const [form, setForm] = useState<GenerationFormState>(initialFormState);
-  const [selectedSector, setSelectedSector] = useState<SectorId>('cosmetique');
+  const [form, setForm] = useState<GenerationFormState>(() => {
+    const base = initialFormState();
+    if (!handedOffBrief) return base;
+    const formattedPrompt = formatUgcPromptFromBrief(handedOffBrief);
+    return {
+      ...base,
+      ...(formattedPrompt ? { prompt: formattedPrompt } : {}),
+      ...(handedOffBrief.summary ? { script: handedOffBrief.summary } : {}),
+      ...(handedOffBrief.preferredRatio ? { ratio: handedOffBrief.preferredRatio } : {}),
+    };
+  });
+  const [selectedSector, setSelectedSector] = useState<SectorId>(() => {
+    const valid: SectorId[] = ['cosmetique', 'food', 'ecommerce', 'fitness', 'mode', 'technologie', 'general'];
+    return handedOffBrief?.suggestedSector && valid.includes(handedOffBrief.suggestedSector as SectorId)
+      ? handedOffBrief.suggestedSector as SectorId
+      : 'cosmetique';
+  });
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [advancedMode, setAdvancedMode] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -633,6 +653,14 @@ export default function GenerationStudio() {
         </div>
       </div>
 
+      {handedOffBrief && (
+        <div className="mt-3" data-testid="studio-handoff-banner">
+          <Banner tone="info" title={`Brief importé depuis Business Grow${handedOffBrief.product ? ` · ${handedOffBrief.product}` : ''}`}>
+            {handedOffBrief.targetAudience ? `Cible : ${handedOffBrief.targetAudience}. ` : ''}
+            Aucun crédit Studio consommé lors du transfert : relisez le prompt puis obtenez un devis avant tout lancement.
+          </Banner>
+        </div>
+      )}
       {catalogError && (
         <div className="mt-3"><Banner tone="danger" title="Catalogue MuAPI partiellement indisponible">{catalogError}</Banner></div>
       )}

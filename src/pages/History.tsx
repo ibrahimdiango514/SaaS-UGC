@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Activity, Coins, Film, FolderKanban, RefreshCw, Scissors, Square, ChevronDown, ChevronUp } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Badge, Select, LoadingState, ErrorState, EmptyState, Tabs } from '../components/ui';
@@ -11,6 +11,8 @@ import type { GenerationJob, LedgerEntry } from '../lib/types';
 import { paramsSummary, type ParamValue } from '../studio/model';
 import { QUALITY_TIERS } from '../studio/quality';
 import { CREATION_MODES } from '../studio/plan';
+
+const HISTORY_PAGE_SIZE = 50;
 
 function usedParams(payload: Record<string, unknown>): Record<string, ParamValue> {
   const out: Record<string, ParamValue> = {};
@@ -30,14 +32,23 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<{ id: string; event_type: string; from_status: string | null; to_status: string | null; created_at: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [eventError, setEventError] = useState('');
+
+  const loadEvents = async () => {
+    setLoading(true);
+    setEventError('');
+    try { setEvents(await listJobEvents(job.id)); }
+    catch (error) { setEventError(asAppError(error).message); }
+    finally { setLoading(false); }
+  };
 
   const toggle = async () => {
-    if (!open && events.length === 0) {
-      setLoading(true);
-      try { setEvents(await listJobEvents(job.id)); } catch { /* displayed as empty */ }
-      finally { setLoading(false); }
+    if (open) {
+      setOpen(false);
+      return;
     }
-    setOpen(!open);
+    setOpen(true);
+    if (events.length === 0) await loadEvents();
   };
 
   return (
@@ -73,8 +84,13 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
               <Link to={`/app/studio?job=${job.id}`} className="btn btn-ghost btn-sm"><Activity size={13} /> Reprendre le suivi</Link>}
           </div>
           <div className="sm:col-span-2">
-            <p className="mb-2 font-semibold text-slate-400">Événements de production</p>
-            {loading ? <LoadingState /> : events.length === 0 ? <p className="text-slate-600">Aucun événement.</p> : (
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="font-semibold text-slate-400">Événements de production</p>
+              {eventError && <Button size="sm" variant="ghost" icon={<RefreshCw size={12} />} onClick={() => void loadEvents()}>Réessayer</Button>}
+            </div>
+            {loading ? <LoadingState /> : eventError ? (
+              <p className="rounded-lg border border-rose-400/20 bg-rose-400/[0.05] p-3 text-xs text-rose-200" role="alert">{eventError}</p>
+            ) : events.length === 0 ? <p className="text-slate-600">Aucun événement enregistré.</p> : (
               <ol className="space-y-1.5 border-l border-line pl-3">{events.map((e) => (
                 <li key={e.id} className="relative"><span className="absolute -left-[17px] top-1.5 h-2 w-2 rounded-full bg-brand-400" />
                   <span className="text-slate-300">{e.event_type}</span> <span className="text-slate-600">{e.from_status ?? '—'} → {e.to_status ?? '—'}</span> <span className="text-slate-600">· {formatDate(e.created_at, true)}</span>
@@ -95,25 +111,85 @@ export default function History({ embedded = false }: { embedded?: boolean }) {
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
+  const [loadingMoreLedger, setLoadingMoreLedger] = useState(false);
   const [error, setError] = useState('');
-  const [status, setStatus] = useState('all');
+  const [status, setStatus] = useState<GenerationJob['status'] | 'all'>('all');
   const [tab, setTab] = useState('jobs');
+  const [hasMoreJobs, setHasMoreJobs] = useState(false);
+  const [hasMoreLedger, setHasMoreLedger] = useState(false);
+  const [jobsOffset, setJobsOffset] = useState(0);
+  const [ledgerOffset, setLedgerOffset] = useState(0);
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     setLoading(true); setError('');
-    try { const [j, l] = await Promise.all([listJobs(200), listLedger(100)]); setJobs(j); setLedger(l); }
-    catch (err) { setError(asAppError(err).message); }
-    finally { setLoading(false); }
-  }, []);
+    setJobs([]); setLedger([]);
+    setHasMoreJobs(false); setHasMoreLedger(false);
+    setJobsOffset(0); setLedgerOffset(0);
+    try {
+      const [jobPage, ledgerPage] = await Promise.all([
+        listJobs(HISTORY_PAGE_SIZE + 1, 0, status === 'all' ? undefined : status),
+        listLedger(HISTORY_PAGE_SIZE + 1, 0),
+      ]);
+      if (requestId !== loadRequestRef.current) return;
+      setJobs(jobPage.slice(0, HISTORY_PAGE_SIZE));
+      setLedger(ledgerPage.slice(0, HISTORY_PAGE_SIZE));
+      setHasMoreJobs(jobPage.length > HISTORY_PAGE_SIZE);
+      setHasMoreLedger(ledgerPage.length > HISTORY_PAGE_SIZE);
+      setJobsOffset(HISTORY_PAGE_SIZE);
+      setLedgerOffset(HISTORY_PAGE_SIZE);
+    } catch (err) {
+      if (requestId === loadRequestRef.current) setError(asAppError(err).message);
+    } finally {
+      if (requestId === loadRequestRef.current) setLoading(false);
+    }
+  }, [status]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadRequestRef.current += 1; };
+  }, [load]);
+
+  const loadMoreJobs = async () => {
+    const requestId = loadRequestRef.current;
+    setLoadingMoreJobs(true);
+    try {
+      const page = await listJobs(HISTORY_PAGE_SIZE + 1, jobsOffset, status === 'all' ? undefined : status);
+      if (requestId !== loadRequestRef.current) return;
+      setJobs((current) => [...current, ...page.slice(0, HISTORY_PAGE_SIZE).filter((job) => !current.some((item) => item.id === job.id))]);
+      setHasMoreJobs(page.length > HISTORY_PAGE_SIZE);
+      setJobsOffset((current) => current + HISTORY_PAGE_SIZE);
+    } catch (err) {
+      if (requestId === loadRequestRef.current) setError(asAppError(err).message);
+    } finally {
+      if (requestId === loadRequestRef.current) setLoadingMoreJobs(false);
+    }
+  };
+
+  const loadMoreLedger = async () => {
+    const requestId = loadRequestRef.current;
+    setLoadingMoreLedger(true);
+    try {
+      const page = await listLedger(HISTORY_PAGE_SIZE + 1, ledgerOffset);
+      if (requestId !== loadRequestRef.current) return;
+      setLedger((current) => [...current, ...page.slice(0, HISTORY_PAGE_SIZE).filter((entry) => !current.some((item) => item.id === entry.id))]);
+      setHasMoreLedger(page.length > HISTORY_PAGE_SIZE);
+      setLedgerOffset((current) => current + HISTORY_PAGE_SIZE);
+    } catch (err) {
+      if (requestId === loadRequestRef.current) setError(asAppError(err).message);
+    } finally {
+      if (requestId === loadRequestRef.current) setLoadingMoreLedger(false);
+    }
+  };
 
   const onCancel = async (id: string) => {
     try { await cancelGeneration(id); toast.success('Génération annulée, crédits restitués.'); await refreshQuota(); await load(); }
     catch (err) { toast.error(asAppError(err).message); }
   };
 
-  const filtered = status === 'all' ? jobs : jobs.filter((j) => j.status === status);
+  const filtered = jobs;
 
   return (
     <>
@@ -123,17 +199,18 @@ export default function History({ embedded = false }: { embedded?: boolean }) {
         <PageHeader eyebrow="Suivi" title="Historique des générations" description="Chaque tâche, événement de production et mouvement de crédits est enregistré."
           actions={<Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>} />
       )}
-      <Tabs active={tab} onChange={setTab} tabs={[{ id: 'jobs', label: `Générations (${jobs.length})`, icon: <Activity size={14} /> }, { id: 'ledger', label: `Crédits (${ledger.length})`, icon: <Coins size={14} /> }]} />
+      <Tabs active={tab} onChange={setTab} tabs={[{ id: 'jobs', label: `Générations (${jobs.length}${hasMoreJobs ? '+' : ''})`, icon: <Activity size={14} /> }, { id: 'ledger', label: `Crédits (${ledger.length}${hasMoreLedger ? '+' : ''})`, icon: <Coins size={14} /> }]} />
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {tab === 'jobs' && (
         <Card>
-          <CardHeader title="Tâches de génération" action={<Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-auto min-w-[150px]" aria-label="Filtrer par statut">
+          <CardHeader title="Tâches de génération" action={<Select value={status} onChange={(e) => setStatus(e.target.value as GenerationJob['status'] | 'all')} className="w-auto min-w-[150px]" aria-label="Filtrer par statut">
             <option value="all">Tous les statuts</option>{['queued', 'reserved', 'processing', 'succeeded', 'failed', 'cancelled'].map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
           </Select>} />
           {loading ? <LoadingState /> : filtered.length === 0 ? <EmptyState icon={<Activity size={22} />} title="Aucune génération" description="Lancez une création depuis l’UGC Studio." action={<Link to="/app/studio" className="btn btn-primary btn-sm">Ouvrir le Studio</Link>} /> : (
             <div>{filtered.map((j) => <JobRow key={j.id} job={j} onCancel={(id) => void onCancel(id)} onRefresh={() => void load()} />)}</div>
           )}
+          {!loading && hasMoreJobs && <div className="flex justify-center border-t border-line p-4"><Button variant="outline" loading={loadingMoreJobs} onClick={() => void loadMoreJobs()}>Charger plus de générations</Button></div>}
         </Card>
       )}
 
@@ -149,6 +226,7 @@ export default function History({ embedded = false }: { embedded?: boolean }) {
                 <td className="text-xs text-slate-400">{l.description || '—'}</td>
               </tr>)}</tbody></table></div>
           )}
+          {!loading && hasMoreLedger && <div className="flex justify-center border-t border-line p-4"><Button variant="outline" loading={loadingMoreLedger} onClick={() => void loadMoreLedger()}>Charger plus de mouvements</Button></div>}
         </Card>
       )}
     </>

@@ -1,20 +1,36 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BusinessGrow from '../src/business/BusinessGrow';
+import { BusinessGrowApiError } from '../src/business/api';
 import type { ReactNode } from 'react';
+import type { Brand, Product } from '../src/lib/types';
 import {
   BUSINESS_PROVIDERS, isBusinessProviderAvailable,
 } from '../src/business/ai/registry';
+import { buildBusinessGrowLocationState } from '../src/contracts/business-grow';
+
+const authMocks = vi.hoisted(() => ({
+  userId: 'business-grow-test-user',
+  workspace: null as null | {
+    id: string;
+    owner_user_id: string;
+    name: string;
+    country_code: string;
+    default_language: string;
+    created_at: string;
+    updated_at: string;
+  },
+}));
 
 vi.mock('../src/context/AuthContext', () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => children,
   useAuth: (() => {
-    const user = { id: 'business-grow-test-user', email: 'business-grow@example.test' };
     const session = { access_token: 'test-token' };
     return () => ({
-      user, session, profile: null, workspace: null, workspaceId: null, quota: null,
+      user: { id: authMocks.userId, email: `${authMocks.userId}@example.test` },
+      session, profile: null, workspace: authMocks.workspace, workspaceId: authMocks.workspace?.id ?? null, quota: null,
       isAdmin: false, loading: false, bootstrapError: null,
       refreshQuota: vi.fn(), refreshAll: vi.fn(), logout: vi.fn(),
     });
@@ -31,6 +47,8 @@ const businessMocks = vi.hoisted(() => {
       created_at: string;
       request_status?: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
       request_error_code?: string | null;
+      request_provider_key?: string | null;
+      request_model_key?: string | null;
     }>;
     memory: { consent: boolean; policyVersion: string | null; profile: Record<string, unknown> | null; items: Array<{ id: string; category: string; content: unknown; created_at: string; updated_at: string }> };
   } = { conversations: [], messages: [], memory: { consent: false, policyVersion: null, profile: null, items: [] } };
@@ -38,7 +56,19 @@ const businessMocks = vi.hoisted(() => {
   return {
     state,
     createdId,
-    getStatus: vi.fn(async () => ({ providers: [] })),
+    listBrands: vi.fn(async (_workspaceId: string): Promise<Brand[]> => [{
+      id: 'brand-1', workspace_id: 'workspace-1', name: 'Atelier Test', website_url: null,
+      industry: 'Cosmétiques', description: 'Soins naturels', logo_storage_path: null,
+      brand_colors: [], voice_guidelines: 'Chaleureux et direct',
+      created_at: '2026-01-01', updated_at: '2026-01-01',
+    }]),
+    listProducts: vi.fn(async (_workspaceId: string): Promise<Product[]> => [{
+      id: 'product-1', workspace_id: 'workspace-1', brand_id: 'brand-1', name: 'Sérum Éclat',
+      description: 'Sérum naturel', key_benefits: ['Hydrate'], features: [], price_amount: null,
+      price_currency: null, product_url: null, reference_image_paths: [], product_facts: {},
+      created_at: '2026-01-01', updated_at: '2026-01-01',
+    }]),
+    getStatus: vi.fn(async (): Promise<{ providers: Array<Record<string, unknown>> }> => ({ providers: [] })),
     listConversations: vi.fn(async () => ({ conversations: state.conversations })),
     createConversation: vi.fn(async (title: string) => {
       state.conversations.unshift({
@@ -57,9 +87,40 @@ const businessMocks = vi.hoisted(() => {
       return { deleted: state.conversations.length !== originalLength };
     }),
     listMessages: vi.fn(async (_conversationId?: string) => ({ messages: state.messages })),
-    sendMessage: vi.fn(async (_id?: string, _content?: string) => {
+    sendMessage: vi.fn(async (_id?: string, _content?: string, _idem?: string, _options?: unknown): Promise<{
+      requestId: string; inputMessageId: string; status: string; providerAvailable: boolean;
+      provider?: { key: string; model: string };
+    }> => {
       throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
     }),
+    verifyProvider: vi.fn(async (providerKey: string) => ({
+      providerKey,
+      modelKey: 'verified-groq-model',
+      status: 'healthy' as const,
+      latencyMs: 38,
+      errorCode: null,
+      availableModels: ['verified-groq-model'],
+    })),
+    listModels: vi.fn(async () => ({ models: [], remoteModels: {} })),
+    getQuota: vi.fn(async (): Promise<{
+      domain: 'business_grow';
+      studio_ugc_untouched: boolean;
+      available_units: number | null;
+      reserved_units: number;
+      monthly_allowance: number | null;
+    }> => ({
+      domain: 'business_grow',
+      studio_ugc_untouched: true,
+      available_units: null,
+      reserved_units: 0,
+      monthly_allowance: null,
+    })),
+    listRequests: vi.fn(async () => ({ requests: [] })),
+    listTools: vi.fn(async () => ({ tools: [] as Array<Record<string, unknown>> })),
+    resolveTool: vi.fn(async (_id: string, _decision: 'approved' | 'rejected') => ({ status: 'executed' })),
+    listIntegrations: vi.fn(async () => ({ connections: [] })),
+    getRouting: vi.fn(async () => ({ preferences: [] as Array<Record<string, unknown>> })),
+    saveRouting: vi.fn(async () => ({ saved: true, id: 'pref-1' })),
     getMemory: vi.fn(async () => state.memory),
     setMemoryConsent: vi.fn(async (enabled: boolean) => {
       state.memory = { ...state.memory, consent: enabled, policyVersion: 'business-grow-memory-v1' };
@@ -80,22 +141,42 @@ vi.mock('../src/business/api', () => ({
 
 vi.mock('../src/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/api')>();
-  return { ...actual, listNotifications: async () => [] };
+  return {
+    ...actual,
+    listNotifications: async () => [],
+    listBrands: businessMocks.listBrands,
+    listProducts: businessMocks.listProducts,
+  };
 });
 
 import App from '../src/App';
 
 beforeEach(() => {
+  authMocks.userId = 'business-grow-test-user';
+  authMocks.workspace = null;
   businessMocks.state.conversations = [];
   businessMocks.state.messages = [];
   businessMocks.state.memory = { consent: false, policyVersion: null, profile: null, items: [] };
   vi.clearAllMocks();
   businessMocks.getStatus.mockResolvedValue({ providers: [] });
+  businessMocks.listModels.mockResolvedValue({ models: [], remoteModels: {} });
+  businessMocks.getQuota.mockResolvedValue({
+    domain: 'business_grow',
+    studio_ugc_untouched: true,
+    available_units: null,
+    reserved_units: 0,
+    monthly_allowance: null,
+  });
+  businessMocks.listRequests.mockResolvedValue({ requests: [] });
+  businessMocks.listTools.mockResolvedValue({ tools: [] });
+  businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
   businessMocks.listConversations.mockImplementation(async () => ({ conversations: businessMocks.state.conversations }));
   businessMocks.listMessages.mockImplementation(async () => ({ messages: businessMocks.state.messages }));
   businessMocks.sendMessage.mockImplementation(async () => {
     throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
   });
+  businessMocks.listBrands.mockClear();
+  businessMocks.listProducts.mockClear();
 });
 
 afterEach(cleanup);
@@ -134,6 +215,67 @@ describe('Business Grow', () => {
     expect(screen.getByTestId('provider-muapi').textContent).toContain('Hors du routage conversationnel');
   });
 
+  it('affiche les marques et produits persistés dans le même espace Reelora', async () => {
+    authMocks.workspace = {
+      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier Reelora',
+      country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
+    };
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Entreprise' }));
+
+    expect(await screen.findByText('Atelier Reelora')).toBeTruthy();
+    expect(await screen.findByText('Atelier Test')).toBeTruthy();
+    expect(await screen.findByText('Sérum Éclat')).toBeTruthy();
+    expect(screen.getByText('Ces données proviennent de l’espace Reelora partagé. Elles ne sont pas copiées dans la mémoire IA.')).toBeTruthy();
+    expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1');
+    expect(businessMocks.listProducts).toHaveBeenCalledWith('workspace-1');
+    expect(screen.getByRole('link', { name: /Gérer les informations/ }).getAttribute('href')).toBe('/app/parametres');
+  });
+
+  it('ignore les résultats retardés des marques et produits de l’espace précédent', async () => {
+    let resolveOldBrands!: (brands: Brand[]) => void;
+    businessMocks.listBrands.mockImplementation(async (workspaceId: string) => {
+      if (workspaceId === 'workspace-1') {
+        return new Promise((resolve) => { resolveOldBrands = resolve; });
+      }
+      return [{
+        id: 'brand-new', workspace_id: workspaceId, name: 'Marque du nouvel espace', website_url: null,
+        industry: 'Services', description: null, logo_storage_path: null, brand_colors: [],
+        voice_guidelines: null, created_at: '2026-02-01', updated_at: '2026-02-01',
+      }] satisfies Brand[];
+    });
+    businessMocks.listProducts.mockImplementation(async (workspaceId: string) => workspaceId === 'workspace-1' ? [{
+      id: 'product-old', workspace_id: workspaceId, brand_id: null, name: 'Produit ancien',
+      description: null, key_benefits: [], features: [], price_amount: null, price_currency: null,
+      product_url: null, reference_image_paths: [], product_facts: {},
+      created_at: '2026-01-01', updated_at: '2026-01-01',
+    }] : []);
+    authMocks.workspace = {
+      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Ancien espace',
+      country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
+    };
+    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Entreprise' }));
+    await waitFor(() => expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1'));
+
+    authMocks.workspace = {
+      id: 'workspace-2', owner_user_id: 'business-grow-test-user', name: 'Nouvel espace',
+      country_code: 'FR', default_language: 'fr', created_at: '2026-02-01', updated_at: '2026-02-01',
+    };
+    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText('Marque du nouvel espace')).toBeTruthy();
+
+    resolveOldBrands([{
+      id: 'brand-old', workspace_id: 'workspace-1', name: 'Marque de l’ancien espace',
+      website_url: null, industry: 'Commerce', description: null, logo_storage_path: null,
+      brand_colors: [], voice_guidelines: null, created_at: '2026-01-01', updated_at: '2026-01-01',
+    }]);
+    await waitFor(() => expect(screen.queryByText('Marque de l’ancien espace')).toBeNull());
+    expect(screen.queryByText('Produit ancien')).toBeNull();
+    expect(screen.getByText('Marque du nouvel espace')).toBeTruthy();
+  });
+
   it('crée et affiche une conversation seulement après confirmation de création serveur', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     const createButton = await screen.findByRole('button', { name: 'Nouvelle conversation' });
@@ -166,6 +308,46 @@ describe('Business Grow', () => {
     expect(businessMocks.listMessages).toHaveBeenCalledWith(second);
   });
 
+  it('ne laisse pas un chargement de messages d’un compte précédent repeupler Business Grow', async () => {
+    const oldConversationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const newConversationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    businessMocks.state.conversations = [{
+      id: oldConversationId, title: 'Conversation privée A', created_at: '2026-01-01', updated_at: '2026-01-01',
+    }];
+    let resolveOldMessages!: (result: { messages: typeof businessMocks.state.messages }) => void;
+    businessMocks.listMessages.mockImplementation(async (conversationId?: string) => {
+      if (conversationId === oldConversationId) {
+        return new Promise((resolve) => { resolveOldMessages = resolve; });
+      }
+      return {
+        messages: [{
+          id: 'new-account-message', author_role: 'assistant',
+          content: 'Contenu privé du nouveau compte', created_at: '2026-02-01',
+        }],
+      };
+    });
+
+    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Conversation privée A' });
+    await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(oldConversationId));
+
+    authMocks.userId = 'business-grow-user-2';
+    businessMocks.state.conversations = [{
+      id: newConversationId, title: 'Conversation du compte B', created_at: '2026-02-01', updated_at: '2026-02-01',
+    }];
+    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText('Contenu privé du nouveau compte')).toBeTruthy();
+
+    resolveOldMessages({
+      messages: [{
+        id: 'old-account-message', author_role: 'assistant',
+        content: 'Contenu privé de l’ancien compte', created_at: '2026-01-01',
+      }],
+    });
+    await waitFor(() => expect(screen.queryByText('Contenu privé de l’ancien compte')).toBeNull());
+    expect(screen.getByText('Contenu privé du nouveau compte')).toBeTruthy();
+  });
+
   it('affiche fidèlement les statuts du traitement conservés dans l’historique', async () => {
     const conversationId = '77777777-7777-4777-8777-777777777777';
     businessMocks.state.conversations = [
@@ -174,14 +356,18 @@ describe('Business Grow', () => {
     businessMocks.state.messages = [
       { id: 'm1', author_role: 'user', content: '1', created_at: '2026-01-01', request_status: 'queued' },
       { id: 'm2', author_role: 'user', content: '2', created_at: '2026-01-01', request_status: 'running' },
-      { id: 'm3', author_role: 'assistant', content: '3', created_at: '2026-01-01', request_status: 'succeeded' },
+      {
+        id: 'm3', author_role: 'assistant', content: '3', created_at: '2026-01-01',
+        request_status: 'succeeded', request_provider_key: 'gemini', request_model_key: 'model-via-fixture',
+      },
       { id: 'm4', author_role: 'user', content: '4', created_at: '2026-01-01', request_status: 'failed', request_error_code: 'NO_VERIFIED_PROVIDER' },
     ];
 
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('En attente')).toBeTruthy();
     expect(screen.getByText('Traitement en cours')).toBeTruthy();
-    expect(screen.getByText('Traitement réussi')).toBeTruthy();
+    expect(screen.getByText(/Traitement réussi/)).toBeTruthy();
+    expect(screen.getByText(/Réponse fournie par Gemini · model-via-fixture/)).toBeTruthy();
     expect(screen.getByText('Erreur (NO_VERIFIED_PROVIDER)')).toBeTruthy();
   });
 
@@ -210,6 +396,39 @@ describe('Business Grow', () => {
     expect(await screen.findByText('Aucun fournisseur vérifié. Aucune réponse simulée.')).toBeTruthy();
     expect(await screen.findByText('Aidez-moi à planifier.')).toBeTruthy();
     expect(await screen.findByText('Erreur (NO_VERIFIED_PROVIDER)')).toBeTruthy();
+  });
+
+  it('affiche la réponse réellement persistée et le fournisseur après un envoi réussi', async () => {
+    businessMocks.sendMessage.mockImplementationOnce(async (_conversationId?: string, content?: string) => {
+      businessMocks.state.messages = [
+        {
+          id: 'real-user-message', author_role: 'user', content: content ?? '',
+          created_at: '2026-01-01', request_status: 'succeeded',
+        },
+        {
+          id: 'real-assistant-message', author_role: 'assistant', content: 'Réponse issue du fournisseur.',
+          created_at: '2026-01-01', request_status: 'succeeded',
+          request_provider_key: 'gemini', request_model_key: 'verified-gemini-model',
+        },
+      ];
+      return {
+        requestId: '55555555-5555-4555-8555-555555555555',
+        inputMessageId: '66666666-6666-4666-8666-666666666666',
+        status: 'succeeded',
+        providerAvailable: true,
+        provider: { key: 'gemini', model: 'verified-gemini-model' },
+      };
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText(/Aucun fournisseur IA vérifié n’est actuellement disponible/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Réponds réellement.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    expect(await screen.findByText('Réponse issue du fournisseur.')).toBeTruthy();
+    expect(screen.getByTestId('business-message-assistant').textContent).toContain(
+      'Réponse fournie par Gemini · verified-gemini-model',
+    );
   });
 
   it('n’affiche pas le backend comme disponible si Supabase/Edge ne répond pas', async () => {
@@ -277,5 +496,256 @@ describe('Business Grow', () => {
       .toEqual(['scripts', 'hooks', 'reasoning']);
     expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'kilo')?.proposedCapabilities)
       .toEqual(['economic-routing', 'fallback']);
+  });
+
+  it('transmet le rôle, le mode manuel de routage et affiche le quota Business Grow isolé', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [
+        {
+          provider_key: 'groq',
+          display_name: 'Groq',
+          enabled: true,
+          status: 'available',
+          config_status: 'configured',
+          checked_at: '2026-11-09T00:00:00Z',
+        },
+      ],
+    });
+    businessMocks.getQuota.mockResolvedValue({
+      domain: 'business_grow',
+      studio_ugc_untouched: true,
+      available_units: 840,
+      reserved_units: 0,
+      monthly_allowance: 1000,
+    });
+    businessMocks.sendMessage.mockResolvedValueOnce({
+      requestId: 'req-1',
+      inputMessageId: 'msg-1',
+      status: 'succeeded',
+      providerAvailable: true,
+      provider: { key: 'groq', model: 'verified-groq-model' },
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByTestId('business-quota-pill')).toBeTruthy();
+    expect(screen.getByTestId('business-quota-pill').textContent).toContain('840 unités');
+
+    fireEvent.change(screen.getByLabelText('Rôle de la tâche IA'), { target: { value: 'marketing_campaign' } });
+    fireEvent.change(screen.getByLabelText('Mode de routage'), { target: { value: 'manual' } });
+    fireEvent.change(await screen.findByLabelText('Fournisseur manuel'), { target: { value: 'groq' } });
+    fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Lance ma campagne.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
+    const [, , , options] = businessMocks.sendMessage.mock.calls[0];
+    expect(options).toMatchObject({
+      roleKey: 'marketing_campaign',
+      routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
+    });
+  });
+
+  it('affiche les propositions d’outils en attente, gère l’approbation et offre un transfert sans débit vers Studio UGC', async () => {
+    const convId = '99999999-9999-4999-8999-999999999999';
+    businessMocks.state.conversations = [{
+      id: convId, title: 'Campagne', created_at: '2026-11-09', updated_at: '2026-11-09',
+    }];
+    businessMocks.listTools.mockResolvedValueOnce({
+      tools: [{
+        id: 'tool-handoff-1',
+        conversation_id: convId,
+        request_id: 'req-1',
+        tool_name: 'handoff_ugc_brief',
+        risk_level: 'write_requires_approval',
+        status: 'pending_approval',
+        input_args: { summary: 'Script UGC produit hydratant', hook: '3 secondes pour briller' },
+        output_result: {},
+        error_message: null,
+        created_at: '2026-11-09',
+      }],
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByTestId('business-tool-proposals')).toBeTruthy();
+    expect(screen.getByText('Transférer vers Studio UGC')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Ouvrir dans Studio UGC \(sans débit\)/ }).getAttribute('href')).toBe('/app/studio');
+
+    businessMocks.listTools.mockResolvedValueOnce({ tools: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Approuver' }));
+    await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-handoff-1', 'approved'));
+  });
+
+  it('permet de vérifier un fournisseur réel et affiche les adaptateurs préparés sans les simuler', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [{
+        provider_key: 'groq',
+        display_name: 'Groq',
+        enabled: true,
+        status: 'unverified',
+        config_status: 'configured',
+        checked_at: null,
+      }],
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+    fireEvent.click(screen.getByRole('button', { name: 'Fournisseurs IA' }));
+
+    expect(screen.getByTestId('adapter-openai').textContent).toContain('Adaptateur prêt');
+    expect(screen.getByTestId('adapter-anthropic')).toBeTruthy();
+    expect(screen.getByTestId('adapter-deepseek')).toBeTruthy();
+    expect(screen.getByTestId('adapter-mistral')).toBeTruthy();
+
+    const groqCard = screen.getByTestId('provider-groq');
+    const verifyBtn = groqCard.querySelector('button');
+    expect(verifyBtn?.textContent).toContain('Vérifier la connexion');
+    if (verifyBtn) fireEvent.click(verifyBtn);
+
+    await waitFor(() => expect(businessMocks.verifyProvider).toHaveBeenCalledWith('groq'));
+    expect(await screen.findByText(/groq \(verified-groq-model\) vérifié avec succès/)).toBeTruthy();
+  });
+
+  it('affiche les intégrations planifiées dans l’onglet Intégrations sans fausse connexion', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    expect(await screen.findByTestId('business-integrations')).toBeTruthy();
+    expect(screen.getByTestId('connector-facebook').textContent).toContain('Planifié');
+    expect(screen.getByTestId('connector-shopify').textContent).toContain('Planifié');
+    expect(screen.getByTestId('connector-woocommerce')).toBeTruthy();
+  });
+
+  it('applique le contrat BusinessGrowEntryIntent et permet d’activer le secours auto en routage manuel', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [{
+        provider_key: 'groq',
+        display_name: 'Groq',
+        enabled: true,
+        status: 'available',
+        config_status: 'configured',
+        checked_at: '2026-11-10T00:00:00Z',
+      }],
+    });
+    const intentState = buildBusinessGrowLocationState({
+      section: 'chat',
+      roleKey: 'action_plan',
+      projectTitle: 'Gamme Karité',
+      initialDraft: 'Planifie le lancement 30 jours pour Gamme Karité.',
+      sourceRoute: '/app/projets/proj-karite',
+    });
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/app/business', state: intentState }]}>
+        <BusinessGrow />
+      </MemoryRouter>,
+    );
+
+    const banner = await screen.findByTestId('business-entry-intent-banner');
+    expect(banner.textContent).toContain('Gamme Karité');
+    expect((screen.getByLabelText('Rôle de la tâche IA') as HTMLSelectElement).value).toBe('action_plan');
+    expect((screen.getByLabelText('Votre demande') as HTMLTextAreaElement).value).toContain('Gamme Karité');
+
+    fireEvent.change(screen.getByLabelText('Mode de routage'), { target: { value: 'manual' } });
+    fireEvent.change(screen.getByLabelText('Fournisseur manuel'), { target: { value: 'groq' } });
+    fireEvent.click(screen.getByLabelText('Autoriser le secours automatique en mode manuel'));
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
+    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    expect(options).toMatchObject({
+      roleKey: 'action_plan',
+      routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: true },
+    });
+  });
+
+  it('n’affiche jamais Vérifié sans preuve serveur réelle et affiche des erreurs exploitables en cas d’échec', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [
+        {
+          provider_key: 'groq',
+          display_name: 'Groq',
+          enabled: true,
+          status: 'available',
+          config_status: 'configured',
+          checked_at: null,
+        },
+        {
+          provider_key: 'gemini',
+          display_name: 'Gemini',
+          enabled: true,
+          status: 'available',
+          config_status: 'configured',
+          checked_at: '2026-11-10T18:00:00Z',
+          verified_model_keys: ['gemini-2.5-flash'],
+        },
+      ],
+    });
+    businessMocks.verifyProvider.mockRejectedValueOnce(
+      new BusinessGrowApiError(
+        'La vérification réelle du fournisseur groq a échoué (PROVIDER_AUTH_FAILED).',
+        'PROVIDER_AUTH_FAILED',
+      ),
+    );
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+    expect(screen.getByTestId('business-overall-status').textContent).toContain('1 fournisseur(s) vérifié(s)');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fournisseurs IA' }));
+
+    const groqCard = screen.getByTestId('provider-groq');
+    expect(groqCard.textContent).toContain('Configuré · Non vérifié');
+    expect(groqCard.textContent).not.toContain('Disponible');
+
+    const geminiCard = screen.getByTestId('provider-gemini');
+    expect(geminiCard.textContent).toContain('Vérifié');
+    expect(geminiCard.textContent).toContain('Test serveur réel réussi');
+
+    const verifyBtn = groqCard.querySelector('button');
+    if (verifyBtn) fireEvent.click(verifyBtn);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('PROVIDER_AUTH_FAILED');
+    expect(alert.textContent).toContain('Supabase Edge Functions Secrets');
+  });
+
+  it('envoie explicitement selectionMode auto si une règle manuelle sauvegardée existe pour le rôle', async () => {
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [{
+        provider_key: 'groq',
+        display_name: 'Groq',
+        enabled: true,
+        status: 'available',
+        config_status: 'configured',
+        checked_at: '2026-11-10T18:00:00Z',
+      }],
+    });
+    businessMocks.getRouting.mockResolvedValueOnce({
+      preferences: [{
+        role_key: 'business_advisor',
+        selection_mode: 'manual',
+        preferred_provider_key: 'gemini',
+        preferred_model_key: 'gemini-2.5-flash',
+        allow_fallback: false,
+      }],
+    });
+    businessMocks.sendMessage.mockResolvedValueOnce({
+      requestId: 'req-auto-override',
+      inputMessageId: 'msg-auto-override',
+      status: 'succeeded',
+      providerAvailable: true,
+      provider: { key: 'groq', model: 'openai/gpt-oss-120b' },
+    });
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Priorités du mois.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+
+    await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
+    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    expect(options).toMatchObject({
+      roleKey: 'business_advisor',
+      routing: { selectionMode: 'auto', allowFallback: true },
+    });
   });
 });

@@ -9,7 +9,8 @@
 import {
   getProject, listAssets, listJobs, listScenes, listScripts, signedStorageUrl,
 } from '../../lib/api';
-import type { GeneratedAsset, GenerationJob, Project, Scene, Script } from '../../lib/types';
+import { asAppError } from '../../lib/errors';
+import type { GeneratedAsset, GenerationJob, Project } from '../../lib/types';
 import { buildLocalPlan, planToEditorProject } from '../plan';
 import { loadEditorProject } from './persistence';
 import {
@@ -27,6 +28,7 @@ export interface ProjectMediaItem {
   jobId?: string | null;
   projectId?: string | null;
   url?: string;
+  urlError?: string;
   createdAt?: string;
   mimeType?: string | null;
   fileSizeBytes?: number | null;
@@ -99,10 +101,11 @@ export async function signMediaItems(
 
   const jobMap = new Map(jobs.map((j) => [j.id, j]));
   const signed = new Map<string, string>();
+  const urlErrors = new Map<string, string>();
   await Promise.all(sorted.map(async (asset) => {
     if (!asset.storage_path) return;
     try { signed.set(asset.storage_path, await signedStorageUrl(asset.storage_path, 3600)); }
-    catch { /* unavailable media remains unattached */ }
+    catch (error) { urlErrors.set(asset.storage_path, asAppError(error).message); }
   }));
 
   return sorted.map((asset) => {
@@ -122,6 +125,7 @@ export async function signMediaItems(
       jobId: asset.generation_job_id,
       projectId: asset.project_id,
       url: signed.get(asset.storage_path),
+      urlError: urlErrors.get(asset.storage_path),
       createdAt: asset.created_at,
       mimeType: asset.mime_type,
       fileSizeBytes: asset.file_size_bytes,
@@ -145,10 +149,10 @@ export async function hydrateEditorFromProject(projectId: string): Promise<Hydra
   const [savedEditor, projectRecord, scripts, dbScenes, assets, jobs] = await Promise.all([
     loadEditorProject(projectId),
     getProject(projectId),
-    listScripts(projectId).catch(() => [] as Script[]),
-    listScenes(projectId).catch(() => [] as Scene[]),
-    listAssets(200).catch(() => [] as GeneratedAsset[]),
-    listJobs(200).catch(() => [] as GenerationJob[]),
+    listScripts(projectId),
+    listScenes(projectId),
+    listAssets(200),
+    listJobs(200),
   ]);
 
   const mediaItems = await signMediaItems(assets, jobs, projectId);

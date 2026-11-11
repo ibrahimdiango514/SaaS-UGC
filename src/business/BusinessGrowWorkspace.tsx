@@ -1,25 +1,179 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
-  ArrowUpRight, Brain, Building2, Check, FileText, Lightbulb, LockKeyhole,
-  MessageSquare, Pencil, Send, ShieldCheck, Sparkles, Trash2, X, Zap,
+  Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, LockKeyhole,
+  MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, X, Zap,
 } from 'lucide-react';
-import { Badge, Button, Toggle, cn } from '../components/ui';
+import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { listBrands, listProducts } from '../lib/api';
+import {
+  buildStudioLocationStateFromBrief,
+  parseBusinessGrowEntryIntent,
+  type BusinessGrowEntryIntent,
+} from '../contracts/business-grow';
+import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
+import type { Brand, Product, Workspace } from '../lib/types';
 import {
   BusinessGrowApiError, businessGrowApi,
-  type BusinessConversation, type BusinessMemory, type BusinessMessage, type BusinessProviderStatus,
+  type BusinessConversation, type BusinessIntegrationConnection, type BusinessMemory,
+  type BusinessMessage, type BusinessModelRecord, type BusinessProviderStatus,
+  type BusinessQuotaStatus, type BusinessRoutingPreference, type BusinessSendOptions,
+  type BusinessToolExecution, type BusinessVerificationResult,
 } from './api';
 import {
-  BUSINESS_PROVIDERS, type BusinessCapability,
+  BUSINESS_PROVIDERS, BUSINESS_ROLES, EXTENSIBLE_PROVIDER_ADAPTERS,
+  type BusinessCapability, type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
 
-type BusinessSection = 'chat' | 'memory' | 'providers';
+type BusinessSection = 'chat' | 'company' | 'memory' | 'providers' | 'integrations';
 
 const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare }[] = [
   { id: 'chat', label: 'Assistant', icon: MessageSquare },
+  { id: 'company', label: 'Entreprise', icon: Building2 },
   { id: 'memory', label: 'Mémoire métier', icon: Building2 },
   { id: 'providers', label: 'Fournisseurs IA', icon: Zap },
+  { id: 'integrations', label: 'Intégrations', icon: Plug },
 ];
+
+function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
+
+  const load = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
+    if (!workspace) {
+      setBrands([]);
+      setProducts([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setBrands([]);
+    setProducts([]);
+    try {
+      const [nextBrands, nextProducts] = await Promise.all([
+        listBrands(workspace.id),
+        listProducts(workspace.id),
+      ]);
+      if (requestId !== loadRequestRef.current) return;
+      setBrands(nextBrands);
+      setProducts(nextProducts);
+    } catch (loadError) {
+      if (requestId === loadRequestRef.current) {
+        setError(loadError instanceof Error ? loadError.message : 'Impossible de charger les données de l’entreprise.');
+      }
+    } finally {
+      if (requestId === loadRequestRef.current) setLoading(false);
+    }
+  }, [workspace]);
+
+  useEffect(() => {
+    void load();
+    return () => { loadRequestRef.current += 1; };
+  }, [load]);
+
+  return (
+    <section className="space-y-4" data-testid="business-company-context">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-6">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-brand-200">Compte Reelora partagé</p>
+          <h2 className="mt-1 text-lg font-semibold text-white">{workspace?.name ?? 'Aucun espace de travail actif'}</h2>
+          {workspace && (
+            <p className="mt-1 text-sm text-slate-400">
+              {workspace.country_code} · Langue par défaut : {workspace.default_language}
+            </p>
+          )}
+        </div>
+        <Link to="/app/parametres" className="btn btn-outline btn-sm">
+          Gérer les informations <ExternalLink size={14} />
+        </Link>
+      </div>
+
+      {!workspace ? (
+        <EmptyState
+          icon={<Building2 size={22} />}
+          title="Espace de travail indisponible"
+          description="Reconnectez-vous à Reelora ou réessayez le chargement de votre espace."
+        />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void load()} />
+      ) : loading ? (
+        <LoadingState label="Chargement des données de l’entreprise…" />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-white/[0.08] bg-panel/50">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Marques</h3>
+                <p className="mt-1 text-xs text-slate-500">{brands.length} enregistrée(s) dans l’espace commun</p>
+              </div>
+              <Building2 size={17} className="text-brand-300" />
+            </div>
+            {brands.length ? (
+              <div className="divide-y divide-white/[0.06]">
+                {brands.map((brand) => (
+                  <article key={brand.id} className="px-5 py-3.5">
+                    <h4 className="text-sm font-medium text-slate-100">{brand.name}</h4>
+                    <p className="mt-1 text-xs text-slate-400">{brand.industry || 'Secteur non renseigné'}</p>
+                    {brand.description && <p className="mt-2 text-xs leading-relaxed text-slate-500">{brand.description}</p>}
+                    {brand.voice_guidelines && (
+                      <p className="mt-2 rounded-lg bg-white/[0.03] p-2 text-xs text-slate-400">
+                        Ton : {brand.voice_guidelines}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon={<Building2 size={20} />} title="Aucune marque enregistrée" description="Ajoutez les marques de votre entreprise depuis les paramètres Reelora." />
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-white/[0.08] bg-panel/50">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Produits et services</h3>
+                <p className="mt-1 text-xs text-slate-500">{products.length} enregistré(s) dans l’espace commun</p>
+              </div>
+              <Package size={17} className="text-cyan-300" />
+            </div>
+            {products.length ? (
+              <div className="divide-y divide-white/[0.06]">
+                {products.map((product) => (
+                  <article key={product.id} className="px-5 py-3.5">
+                    <h4 className="text-sm font-medium text-slate-100">{product.name}</h4>
+                    {product.description && <p className="mt-1 text-xs leading-relaxed text-slate-400">{product.description}</p>}
+                    {product.key_benefits.length > 0 && (
+                      <p className="mt-2 text-xs text-slate-500">Bénéfices : {product.key_benefits.join(' · ')}</p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon={<Package size={20} />} title="Aucun produit enregistré" description="Ajoutez vos produits ou services depuis les paramètres Reelora." />
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3">
+        <p className="text-xs text-slate-400">
+          Ces données proviennent de l’espace Reelora partagé. Elles ne sont pas copiées dans la mémoire IA.
+        </p>
+        <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => void load()} disabled={loading || !workspace}>
+          Actualiser
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 const PROMPT_IDEAS = [
   { label: 'Rédiger', text: 'Aidez-moi à rédiger un contenu pour mon activité.', icon: FileText },
@@ -43,18 +197,118 @@ const CAPABILITY_LABELS: Record<BusinessCapability, string> = {
   'video-generation': 'Génération vidéo',
 };
 
-function providerStatus(provider: BusinessProviderStatus | undefined) {
-  if (!provider) return { label: 'Non vérifié', description: 'Le statut serveur n’a pas pu être vérifié.' };
-  if (!provider.enabled || provider.config_status !== 'configured') {
-    return { label: 'Non configuré', description: 'Aucune configuration serveur utilisable n’est disponible.' };
+const TOOL_LABELS: Record<string, string> = {
+  propose_memory_save: 'Enregistrer dans la mémoire métier',
+  propose_action_plan: 'Structurer un plan d’action',
+  propose_campaign_brief: 'Créer un brief campagne marketing',
+  handoff_ugc_brief: 'Transférer vers Studio UGC',
+  request_connector_read: 'Demander une lecture connecteur',
+};
+
+interface VerifyBanner {
+  tone: 'success' | 'error';
+  message: string;
+  code?: string | null;
+  hint?: string | null;
+}
+
+function isVerifiedProvider(provider: BusinessProviderStatus | undefined): boolean {
+  return Boolean(
+    provider
+      && provider.config_status === 'configured'
+      && provider.enabled
+      && provider.status === 'available'
+      && provider.checked_at,
+  );
+}
+
+function formatProbeTime(checkedAt: string | null | undefined): string {
+  if (!checkedAt) return '';
+  const date = new Date(checkedAt);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function describeProviderFailureHint(code: string | null | undefined): string {
+  switch (code) {
+    case 'PROVIDER_AUTH_FAILED':
+      return 'Clé API rejetée par le fournisseur. Vérifiez ou renouvelez le secret serveur dans Supabase Edge Functions Secrets.';
+    case 'PROVIDER_RATE_LIMITED':
+      return 'Limite de débit ou quota fournisseur atteint pour ce modèle. Sélectionnez un autre modèle vérifié ou basculez vers l’autre fournisseur.';
+    case 'PROVIDER_REQUEST_REJECTED':
+      return 'Le modèle configuré ou la requête a été rejeté par le fournisseur. Vérifiez l’identifiant exact du modèle.';
+    case 'PROVIDER_NOT_CONFIGURED':
+      return 'Clé API ou modèle manquant côté serveur. Renseignez les variables BUSINESS_GROW_* sur Supabase.';
+    case 'PROVIDER_TIMEOUT':
+    case 'PROVIDER_NETWORK_ERROR':
+    case 'PROVIDER_UNAVAILABLE':
+      return 'Le fournisseur n’a pas répondu dans le délai imparti ou est momentanément indisponible. Relancez le test ou activez le secours auto.';
+    case 'ORIGIN_NOT_ALLOWED':
+      return 'Origine du navigateur refusée par CORS sur business-grow. Vérifiez BUSINESS_GROW_ALLOWED_ORIGINS ou utilisez le relais preview Netlify.';
+    case 'BUSINESS_GROW_UNAVAILABLE':
+      return 'Backend Business Grow injoignable depuis le navigateur. Vérifiez le déploiement de la fonction ou le relais Netlify.';
+    default:
+      return 'Relancez une vérification serveur ou inspectez les journaux Supabase Edge Functions pour obtenir le détail.';
   }
-  if (provider.status === 'available') {
-    return { label: 'Disponible', description: 'La disponibilité a été vérifiée côté serveur.' };
+}
+
+function providerStatus(provider: BusinessProviderStatus | undefined): {
+  label: string;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+  description: string;
+} {
+  if (!provider) {
+    return {
+      label: 'Non vérifié',
+      tone: 'neutral',
+      description: 'Le statut serveur n’a pas encore été interrogé.',
+    };
+  }
+  if (provider.config_status !== 'configured') {
+    return {
+      label: 'Non configuré',
+      tone: 'neutral',
+      description: 'Aucune clé API ou configuration serveur utilisable n’est active.',
+    };
+  }
+  if (!provider.checked_at) {
+    return {
+      label: 'Configuré · Non vérifié',
+      tone: 'warning',
+      description: 'Une configuration serveur existe, mais aucun test réel réussi n’a encore validé ce fournisseur.',
+    };
+  }
+  if (isVerifiedProvider(provider)) {
+    const at = formatProbeTime(provider.checked_at);
+    const verifiedCount = provider.verified_model_keys?.length ?? 0;
+    const modelSummary = verifiedCount > 0 ? ` · ${verifiedCount} modèle(s) actif(s)` : '';
+    return {
+      label: 'Vérifié',
+      tone: 'success',
+      description: `Test serveur réel réussi${at ? ` le ${at}` : ''}${modelSummary}.`,
+    };
   }
   if (provider.status === 'degraded') {
-    return { label: 'Dégradé', description: 'Le service nécessite une nouvelle vérification.' };
+    const codePart = provider.error_code ? ` (${provider.error_code})` : '';
+    return {
+      label: 'Dégradé',
+      tone: 'warning',
+      description: `Dernier test serveur dégradé${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
+    };
   }
-  return { label: provider.status === 'unavailable' ? 'Indisponible' : 'Non vérifié', description: 'Le fournisseur n’est pas disponible pour le routage.' };
+  if (provider.status === 'unavailable' || provider.error_code) {
+    const codePart = provider.error_code ? ` (${provider.error_code})` : '';
+    return {
+      label: 'Échec vérification',
+      tone: 'danger',
+      description: `Le dernier test serveur a échoué${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
+    };
+  }
+  return {
+    label: 'Configuré · Non vérifié',
+    tone: 'warning',
+    description: 'Le modèle configuré doit réussir un test serveur réel pour être routable.',
+  };
 }
 
 function ProviderStatusList({ statuses, compact = false }: {
@@ -74,7 +328,7 @@ function ProviderStatusList({ statuses, compact = false }: {
               <p className="text-sm font-medium text-slate-200">{provider.name}</p>
               <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{status.description}</p>
             </div>
-            <Badge tone={status.label === 'Disponible' ? 'success' : 'neutral'}>{status.label}</Badge>
+            <Badge tone={status.tone}>{status.label}</Badge>
           </div>
         );
       })}
@@ -85,12 +339,28 @@ function ProviderStatusList({ statuses, compact = false }: {
 function AssistantView({
   backendReady,
   providers,
+  models,
+  quota,
+  tools,
   conversations,
   selectedConversationId,
   messages,
   loading,
   error,
   busy,
+  roleKey,
+  routingMode,
+  preferredProviderKey,
+  preferredModelKey,
+  manualAllowFallback,
+  entryIntent,
+  onChangeRole,
+  onChangeRoutingMode,
+  onChangePreferredProvider,
+  onChangePreferredModel,
+  onChangeManualAllowFallback,
+  onDismissEntryIntent,
+  onResolveTool,
   onNewConversation,
   onRenameConversation,
   onDeleteConversation,
@@ -100,12 +370,28 @@ function AssistantView({
 }: {
   backendReady: boolean;
   providers: BusinessProviderStatus[] | null;
+  models: BusinessModelRecord[];
+  quota: BusinessQuotaStatus | null;
+  tools: BusinessToolExecution[];
   conversations: BusinessConversation[];
   selectedConversationId: string | null;
   messages: BusinessMessage[];
   loading: boolean;
   error: string | null;
   busy: boolean;
+  roleKey: BusinessRoleKey;
+  routingMode: RoutingSelectionMode;
+  preferredProviderKey: string;
+  preferredModelKey: string;
+  manualAllowFallback: boolean;
+  entryIntent: BusinessGrowEntryIntent | null;
+  onChangeRole: (role: BusinessRoleKey) => void;
+  onChangeRoutingMode: (mode: RoutingSelectionMode) => void;
+  onChangePreferredProvider: (providerKey: string) => void;
+  onChangePreferredModel: (modelKey: string) => void;
+  onChangeManualAllowFallback: (allow: boolean) => void;
+  onDismissEntryIntent: () => void;
+  onResolveTool: (executionId: string, decision: 'approved' | 'rejected') => Promise<void>;
   onNewConversation: () => void;
   onRenameConversation: (id: string, title: string) => Promise<boolean>;
   onDeleteConversation: (id: string) => Promise<boolean>;
@@ -118,9 +404,19 @@ function AssistantView({
   const [editingTitle, setEditingTitle] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const activeConversation = conversations.find((conversation) => conversation.id === selectedConversationId);
-  const availableProviders = (providers ?? []).filter((provider) =>
-    provider.enabled && provider.status === 'available' && provider.config_status === 'configured',
+  const availableProviders = (providers ?? []).filter((provider) => isVerifiedProvider(provider));
+  const verifiedModels = models.filter((model) => model.verification_status === 'verified' && model.enabled);
+  const pendingTools = tools.filter((tool) => tool.status === 'pending_approval');
+  const executedHandoffs = tools.filter((tool) => tool.tool_name === 'handoff_ugc_brief' && tool.status === 'executed');
+  const resolvedOtherTools = tools.filter(
+    (tool) => tool.tool_name !== 'handoff_ugc_brief' && tool.status !== 'pending_approval',
   );
+
+  useEffect(() => {
+    if (entryIntent?.initialDraft) {
+      setDraft((current) => current || entryIntent.initialDraft || '');
+    }
+  }, [entryIntent]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -132,7 +428,7 @@ function AssistantView({
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <section className="flex min-h-[620px] flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090d16]">
-        <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/15 text-brand-200"><Brain size={19} /></span>
             <div>
@@ -151,7 +447,94 @@ function AssistantView({
           </Button>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-white/[0.015] px-4 py-2.5 sm:px-6">
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span>Rôle :</span>
+            <select
+              aria-label="Rôle de la tâche IA"
+              value={roleKey}
+              onChange={(event) => onChangeRole(event.target.value as BusinessRoleKey)}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+            >
+              {BUSINESS_ROLES.map((role) => (
+                <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span>Routage :</span>
+            <select
+              aria-label="Mode de routage"
+              value={routingMode}
+              onChange={(event) => onChangeRoutingMode(event.target.value as RoutingSelectionMode)}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+            >
+              <option value="auto">Automatique (AI Director)</option>
+              <option value="manual">Manuel</option>
+            </select>
+          </label>
+          {routingMode === 'manual' && (
+            <>
+              <select
+                aria-label="Fournisseur manuel"
+                value={preferredProviderKey}
+                onChange={(event) => onChangePreferredProvider(event.target.value)}
+                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+              >
+                <option value="">Fournisseur…</option>
+                {availableProviders.map((provider) => (
+                  <option key={provider.provider_key} value={provider.provider_key}>{provider.display_name}</option>
+                ))}
+              </select>
+              {verifiedModels.length > 0 && (
+                <select
+                  aria-label="Modèle manuel"
+                  value={preferredModelKey}
+                  onChange={(event) => onChangePreferredModel(event.target.value)}
+                  className="max-w-[200px] truncate rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+                >
+                  <option value="">Modèle par défaut</option>
+                  {verifiedModels
+                    .filter((m) => !preferredProviderKey || m.provider_key === preferredProviderKey)
+                    .map((model) => (
+                      <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{model.display_name}</option>
+                    ))}
+                </select>
+              )}
+              <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-[11px] text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={manualAllowFallback}
+                  onChange={(event) => onChangeManualAllowFallback(event.target.checked)}
+                  aria-label="Autoriser le secours automatique en mode manuel"
+                  className="accent-brand-400"
+                />
+                <span>Secours auto</span>
+              </label>
+            </>
+          )}
+          {quota && quota.available_units !== null && (
+            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-300" data-testid="business-quota-pill">
+              <Gauge size={12} className="text-brand-300" />
+              Quota Business Grow : {quota.available_units} unités
+            </span>
+          )}
+        </div>
+
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6" aria-live="polite">
+          {entryIntent && (entryIntent.projectTitle || entryIntent.brandName || entryIntent.productName || entryIntent.sourceRoute) && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.06] px-3 py-2 text-xs text-brand-100" data-testid="business-entry-intent-banner">
+              <span>
+                Contexte importé
+                {entryIntent.projectTitle ? ` · Projet : ${entryIntent.projectTitle}` : ''}
+                {entryIntent.brandName ? ` · Marque : ${entryIntent.brandName}` : ''}
+                {entryIntent.productName ? ` · Produit : ${entryIntent.productName}` : ''}
+              </span>
+              <button type="button" onClick={onDismissEntryIntent} className="text-[11px] text-brand-200 underline">
+                Masquer
+              </button>
+            </div>
+          )}
           {error && (
             <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-3 text-xs text-rose-100" role="alert">
               <span>{error}</span>
@@ -222,10 +605,93 @@ function AssistantView({
                   {message.request_status === 'succeeded' && 'Traitement réussi'}
                   {message.request_status === 'failed' && `Erreur (${message.request_error_code || 'erreur inconnue'})`}
                   {message.request_status === 'canceled' && 'Traitement annulé'}
+                  {message.request_status === 'succeeded' && message.author_role === 'assistant' && message.request_provider_key
+                    ? ` · Réponse fournie par ${BUSINESS_PROVIDERS.find((provider) => provider.id === message.request_provider_key)?.name ?? message.request_provider_key}${message.request_model_key ? ` · ${message.request_model_key}` : ''}`
+                    : null}
                 </p>
               )}
             </article>
           ))}
+          {pendingTools.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.05] p-3" data-testid="business-tool-proposals">
+              <p className="text-xs font-semibold text-brand-100">Actions assistées en attente d’approbation</p>
+              {pendingTools.map((tool) => (
+                <div key={tool.id} className="rounded-lg border border-white/[0.08] bg-[#0c111b] p-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-white">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
+                    <Badge tone="neutral">{tool.risk_level === 'write_requires_approval' ? 'Validation requise' : 'Publication bloquée'}</Badge>
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-slate-400">
+                    {typeof tool.input_args?.summary === 'string' ? tool.input_args.summary : JSON.stringify(tool.input_args)}
+                  </p>
+                  <div className="mt-2.5 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => { void onResolveTool(tool.id, 'approved'); }} disabled={busy}>
+                      Approuver
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { void onResolveTool(tool.id, 'rejected'); }} disabled={busy}>
+                      Rejeter
+                    </Button>
+                    {tool.tool_name === 'handoff_ugc_brief' && (
+                      <Link
+                        to="/app/studio"
+                        state={buildStudioLocationStateFromBrief(tool.input_args, {
+                          executionId: tool.id,
+                          conversationId: tool.conversation_id,
+                        }) ?? { ugcBrief: tool.input_args }}
+                        className="btn btn-outline btn-sm"
+                      >
+                        Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {executedHandoffs.length > 0 && (
+            <div className="space-y-2 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.05] p-3" data-testid="business-handoff-ready">
+              {executedHandoffs.slice(0, 3).map((tool) => {
+                const draftPayload = (tool.output_result?.handoffDraft && typeof tool.output_result.handoffDraft === 'object')
+                  ? tool.output_result.handoffDraft as Record<string, unknown>
+                  : tool.input_args;
+                return (
+                  <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-emerald-100">Brief approuvé prêt pour Studio UGC</span>
+                    <Link
+                      to="/app/studio"
+                      state={buildStudioLocationStateFromBrief(draftPayload, {
+                        executionId: tool.id,
+                        conversationId: tool.conversation_id,
+                      }) ?? { ugcBrief: draftPayload }}
+                      className="btn btn-outline btn-sm"
+                    >
+                      Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {resolvedOtherTools.length > 0 && (
+            <div className="space-y-1.5 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-xs" data-testid="business-tools-history">
+              <p className="font-semibold text-slate-300">Historique des actions traitées</p>
+              {resolvedOtherTools.slice(0, 4).map((tool) => {
+                const statusBadge = tool.status === 'executed'
+                  ? 'Exécutée'
+                  : tool.status === 'rejected'
+                    ? 'Rejetée'
+                    : tool.status === 'failed'
+                      ? 'Échec'
+                      : 'Approuvée';
+                return (
+                  <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-[#0c111b] px-2.5 py-2">
+                    <span className="text-slate-200">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
+                    <Badge tone={tool.status === 'executed' ? 'success' : 'neutral'}>{statusBadge}</Badge>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {backendReady && !availableProviders.length && (
             <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs leading-relaxed text-amber-100/80" role="status">
               Aucun fournisseur IA vérifié n’est actuellement disponible. Votre demande sera conservée dans l’historique, mais aucune réponse ne sera simulée.
@@ -518,36 +984,341 @@ function MemoryView({
   );
 }
 
-function ProvidersView({ statuses }: { statuses: BusinessProviderStatus[] | null }) {
+function ProvidersView({
+  backendReady,
+  statuses,
+  models,
+  requests,
+  savedRouting,
+  quota,
+  verifyingKey,
+  verifyBanner,
+  onVerifyProvider,
+  onSaveRouting,
+}: {
+  backendReady: boolean;
+  statuses: BusinessProviderStatus[] | null;
+  models: BusinessModelRecord[];
+  requests: Array<Record<string, unknown>>;
+  savedRouting: Array<Record<string, unknown>>;
+  quota: BusinessQuotaStatus | null;
+  verifyingKey: string | null;
+  verifyBanner: VerifyBanner | null;
+  onVerifyProvider: (providerKey: string, modelKey?: string) => Promise<void>;
+  onSaveRouting: (pref: BusinessRoutingPreference) => Promise<void>;
+}) {
   const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
+  const [routingRole, setRoutingRole] = useState<BusinessRoleKey>('business_advisor');
+  const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
+  const [routingProvider, setRoutingProvider] = useState('');
+  const [routingModel, setRoutingModel] = useState('');
+  const [routingAllowFallback, setRoutingAllowFallback] = useState(true);
+
+  const configurableProviders = (statuses ?? []).filter(
+    (status) => status.provider_key !== 'muapi' && (status.config_status === 'configured' || status.enabled),
+  );
+  const modelsForSelectedProvider = models.filter(
+    (model) => model.enabled && (!routingProvider || model.provider_key === routingProvider),
+  );
+
+  const handleSelectRoutingRole = (nextRole: BusinessRoleKey) => {
+    setRoutingRole(nextRole);
+    const existing = savedRouting.find((pref) => pref.role_key === nextRole);
+    if (existing) {
+      const nextMode: RoutingSelectionMode = existing.selection_mode === 'manual' ? 'manual' : 'auto';
+      setRoutingMode(nextMode);
+      setRoutingProvider(typeof existing.preferred_provider_key === 'string' ? existing.preferred_provider_key : '');
+      setRoutingModel(typeof existing.preferred_model_key === 'string' ? existing.preferred_model_key : '');
+      setRoutingAllowFallback(typeof existing.allow_fallback === 'boolean' ? existing.allow_fallback : nextMode === 'auto');
+    }
+  };
+
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
-      <div className="mb-5 max-w-2xl">
-        <h2 className="text-lg font-semibold text-white">Registre des fournisseurs</h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Les rôles affichés sont des propositions. L’AI Director ne peut router que vers un fournisseur configuré, vérifié et disponible côté serveur.
-        </p>
-      </div>
-      <div className="space-y-3">
-        {BUSINESS_PROVIDERS.map((provider) => {
-          const status = providerStatus(byKey.get(provider.id));
-          return (
-            <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-white">{provider.name}</h3>
-                  <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.description}</p>
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <h2 className="text-lg font-semibold text-white">Registre des fournisseurs</h2>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              Les rôles affichés sont des propositions. L’AI Director ne peut router que vers un fournisseur configuré, vérifié et disponible côté serveur.
+            </p>
+          </div>
+          {quota && quota.available_units !== null && (
+            <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-xs text-slate-300">
+              <p className="font-semibold text-white">Quota Business Grow isolé</p>
+              <p className="mt-0.5 text-slate-400">{quota.available_units} unité(s) · Studio UGC intact ({quota.studio_ugc_untouched ? 'oui' : 'non'})</p>
+            </div>
+          )}
+        </div>
+        {verifyBanner && (
+          <div
+            className={cn(
+              'mb-4 rounded-xl border p-3.5 text-xs',
+              verifyBanner.tone === 'success'
+                ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
+                : 'border-rose-400/30 bg-rose-500/10 text-rose-100',
+            )}
+            role={verifyBanner.tone === 'error' ? 'alert' : 'status'}
+          >
+            <p className="font-medium">
+              {verifyBanner.message}
+              {verifyBanner.code ? <span className="ml-2 font-mono text-[10px] opacity-80">[{verifyBanner.code}]</span> : null}
+            </p>
+            {verifyBanner.hint && (
+              <p className="mt-1 text-[11px] opacity-85">{verifyBanner.hint}</p>
+            )}
+          </div>
+        )}
+        <div className="space-y-3">
+          {BUSINESS_PROVIDERS.map((provider) => {
+            const rawStatus = byKey.get(provider.id);
+            const status = providerStatus(rawStatus);
+            const providerModels = models.filter((model) => model.provider_key === provider.id);
+            const canProbe = backendReady && provider.id !== 'muapi' && (rawStatus?.config_status === 'configured' || provider.id === 'groq' || provider.id === 'gemini');
+            return (
+              <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-white">{provider.name}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.description}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={status.tone}>{status.label}</Badge>
+                    {canProbe && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        loading={verifyingKey === provider.id}
+                        disabled={Boolean(verifyingKey)}
+                        onClick={() => { void onVerifyProvider(provider.id); }}
+                      >
+                        Vérifier la connexion
+                      </Button>
+                    )}
+                  </div>
                 </div>
-                <Badge tone="neutral">{status.label}</Badge>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {provider.proposedCapabilities.map((capability) => (
+                    <span key={capability} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-400">
+                      {CAPABILITY_LABELS[capability]}
+                    </span>
+                  ))}
+                </div>
+                {providerModels.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {providerModels.map((model) => {
+                      const modelStateLabel = model.verification_status === 'verified'
+                        ? 'Vérifié'
+                        : model.verification_status === 'unavailable'
+                          ? `Indisponible${model.error_code ? ` · ${model.error_code}` : ''}`
+                          : 'Non vérifié';
+                      return (
+                        <button
+                          key={model.model_key}
+                          type="button"
+                          disabled={!canProbe || Boolean(verifyingKey)}
+                          title={canProbe ? `Exécuter un test serveur réel sur ${model.provider_model_key}` : undefined}
+                          onClick={() => {
+                            if (canProbe) void onVerifyProvider(provider.id, model.provider_model_key);
+                          }}
+                          className={cn(
+                            'rounded-md border px-2 py-0.5 text-[10px] transition',
+                            model.verification_status === 'verified'
+                              ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20'
+                              : model.verification_status === 'unavailable'
+                                ? 'border-rose-400/25 bg-rose-400/10 text-rose-200 hover:bg-rose-400/20'
+                                : 'border-white/10 bg-white/[0.02] text-slate-400 hover:bg-white/[0.08]',
+                            (!canProbe || Boolean(verifyingKey)) && 'cursor-default opacity-80',
+                          )}
+                        >
+                          {model.display_name} ({modelStateLabel})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {provider.note && <p className="mt-3 text-[11px] text-slate-500">{provider.note}</p>}
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+        <div className="mb-4 flex items-center gap-2">
+          <SlidersHorizontal size={16} className="text-brand-300" />
+          <h3 className="text-sm font-semibold text-white">Adaptateurs extensibles préparés</h3>
+        </div>
+        <p className="mb-4 text-xs text-slate-400">
+          Ces adaptateurs disposent d’une interface prête côté serveur, sans clé ni exécution distante active tant qu’ils ne sont pas configurés et vérifiés.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {EXTENSIBLE_PROVIDER_ADAPTERS.map((adapter) => (
+            <article key={adapter.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-3.5" data-testid={`adapter-${adapter.id}`}>
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-medium text-white">{adapter.name}</h4>
+                <Badge tone="neutral">{adapter.statusLabel}</Badge>
               </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {provider.proposedCapabilities.map((capability) => (
-                  <span key={capability} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-400">
-                    {CAPABILITY_LABELS[capability]}
-                  </span>
+              <p className="mt-1 text-[11px] text-slate-400">{adapter.statusDescription}</p>
+              <p className="mt-2 font-mono text-[10px] text-slate-500">{adapter.envKeyHint}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      {backendReady && (
+        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+          <h3 className="text-sm font-semibold text-white">Préférence de routage par rôle</h3>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Rôle routage"
+              value={routingRole}
+              onChange={(event) => handleSelectRoutingRole(event.target.value as BusinessRoleKey)}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+            >
+              {BUSINESS_ROLES.map((role) => (
+                <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Mode de routage par rôle"
+              value={routingMode}
+              onChange={(event) => {
+                const nextMode = event.target.value as RoutingSelectionMode;
+                setRoutingMode(nextMode);
+                if (nextMode === 'auto') setRoutingAllowFallback(true);
+              }}
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+            >
+              <option value="auto">Automatique</option>
+              <option value="manual">Manuel</option>
+            </select>
+            {routingMode === 'manual' && (
+              <>
+                <select
+                  aria-label="Fournisseur préféré"
+                  value={routingProvider}
+                  onChange={(event) => {
+                    setRoutingProvider(event.target.value);
+                    setRoutingModel('');
+                  }}
+                  className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+                >
+                  <option value="">Fournisseur…</option>
+                  {(configurableProviders.length > 0
+                    ? configurableProviders
+                    : BUSINESS_PROVIDERS.filter((p) => p.id !== 'muapi').map((p) => ({
+                        provider_key: p.id,
+                        display_name: p.name,
+                      }))
+                  ).map((provider) => (
+                    <option key={provider.provider_key} value={provider.provider_key}>
+                      {provider.display_name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Modèle préféré"
+                  value={routingModel}
+                  onChange={(event) => setRoutingModel(event.target.value)}
+                  className="max-w-[240px] truncate rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
+                >
+                  <option value="">Modèle par défaut</option>
+                  {modelsForSelectedProvider.map((model) => (
+                    <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>
+                      {model.display_name}
+                    </option>
+                  ))}
+                </select>
+                <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-[#0c111b] px-2.5 py-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={routingAllowFallback}
+                    onChange={(event) => setRoutingAllowFallback(event.target.checked)}
+                    aria-label="Autoriser le secours automatique"
+                    className="accent-brand-400"
+                  />
+                  <span>Secours auto</span>
+                </label>
+              </>
+            )}
+            <Button
+              size="sm"
+              onClick={() => {
+                void onSaveRouting({
+                  roleKey: routingRole,
+                  selectionMode: routingMode,
+                  preferredProviderKey: routingMode === 'manual' && routingProvider.trim() ? routingProvider.trim() : null,
+                  preferredModelKey: routingMode === 'manual' && routingModel.trim() ? routingModel.trim() : null,
+                  allowFallback: routingMode === 'auto' ? true : routingAllowFallback,
+                });
+              }}
+            >
+              Enregistrer la règle
+            </Button>
+          </div>
+          {savedRouting.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-1.5" data-testid="saved-routing-rules">
+              {savedRouting.map((pref) => (
+                <span key={String(pref.role_key)} className="rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-1 text-[11px] text-slate-300">
+                  {String(pref.role_key)} : {String(pref.selection_mode)}
+                  {pref.preferred_provider_key ? ` · ${String(pref.preferred_provider_key)}` : ''}
+                  {pref.preferred_model_key ? ` / ${String(pref.preferred_model_key)}` : ''}
+                  {pref.allow_fallback === false ? ' (sans secours)' : ''}
+                </span>
+              ))}
+            </div>
+          )}
+          {requests.length > 0 && (
+            <div className="mt-5">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-300">
+                <Activity size={14} className="text-cyan-300" /> Exécutions récentes ({requests.length})
+              </div>
+              <div className="space-y-1.5 text-[11px]">
+                {requests.slice(0, 6).map((req) => (
+                  <div key={String(req.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-slate-300">
+                    <span>{String(req.role_key ?? req.task_role_key ?? 'business_advisor')} · {String(req.provider_key ?? req.selected_provider_key ?? 'aucun')} / {String(req.model_key ?? req.selected_model_key ?? '—')}</span>
+                    <span className="text-slate-500">
+                      {String(req.status ?? '')}
+                      {req.latency_ms ? ` · ${String(req.latency_ms)} ms` : ''}
+                    </span>
+                  </div>
                 ))}
               </div>
-              {provider.note && <p className="mt-3 text-[11px] text-slate-500">{provider.note}</p>}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function IntegrationsView({ connections }: { connections: BusinessIntegrationConnection[] }) {
+  const byConnector = new Map(connections.map((conn) => [conn.connector_key, conn]));
+  return (
+    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="business-integrations">
+      <div className="mb-5 max-w-2xl">
+        <h2 className="text-lg font-semibold text-white">Connecteurs métier (planifiés)</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+          Les contrats d’intégration définissent les autorisations par espace de travail. Aucune connexion ou publication externe n’est simulée.
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {INTEGRATION_DEFINITIONS.map((contract: IntegrationDefinition) => {
+          const persisted = byConnector.get(contract.id);
+          return (
+            <article key={contract.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`connector-${contract.id}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">{contract.name}</h3>
+                  <p className="mt-1 text-[11px] text-slate-500">Authentification : {contract.authorization}</p>
+                </div>
+                <Badge tone="neutral">{persisted?.status ?? 'Planifié'}</Badge>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Capacités proposées : {contract.proposedCapabilities.join(', ')}
+              </p>
+              <p className="mt-1 text-[11px] text-slate-500">{contract.note}</p>
             </article>
           );
         })}
@@ -557,9 +1328,20 @@ function ProvidersView({ statuses }: { statuses: BusinessProviderStatus[] | null
 }
 
 export default function BusinessGrowWorkspace() {
-  const { user, session, workspaceId } = useAuth();
+  const location = useLocation();
+  const { user, session, workspace, workspaceId } = useAuth();
+  const accountScope = `${user?.id ?? ''}:${workspaceId ?? ''}`;
+  const hasSession = Boolean(user && session);
+  const sessionToken = session?.access_token ?? null;
+  const parsedIntent = useMemo(() => parseBusinessGrowEntryIntent(location.state), [location.state]);
+  const [entryIntent, setEntryIntent] = useState<BusinessGrowEntryIntent | null>(null);
   const [section, setSection] = useState<BusinessSection>('chat');
   const [providers, setProviders] = useState<BusinessProviderStatus[] | null>(null);
+  const [models, setModels] = useState<BusinessModelRecord[]>([]);
+  const [quota, setQuota] = useState<BusinessQuotaStatus | null>(null);
+  const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
+  const [tools, setTools] = useState<BusinessToolExecution[]>([]);
+  const [integrations, setIntegrations] = useState<BusinessIntegrationConnection[]>([]);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BusinessMessage[]>([]);
@@ -568,27 +1350,105 @@ export default function BusinessGrowWorkspace() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingMemory, setLoadingMemory] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [verifyingKey, setVerifyingKey] = useState<string | null>(null);
+  const [verifyBanner, setVerifyBanner] = useState<VerifyBanner | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [roleKey, setRoleKey] = useState<BusinessRoleKey>('business_advisor');
+  const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
+  const [preferredProviderKey, setPreferredProviderKey] = useState('');
+  const [preferredModelKey, setPreferredModelKey] = useState('');
+  const [manualAllowFallback, setManualAllowFallback] = useState(false);
+  const [savedRouting, setSavedRouting] = useState<Array<Record<string, unknown>>>([]);
   const messageLoadSequence = useRef(0);
+  const accountScopeRef = useRef(accountScope);
+  const workspaceLoadSequence = useRef(0);
+  const conversationLoadSequence = useRef(0);
+  const statusLoadSequence = useRef(0);
+  const memoryLoadSequence = useRef(0);
+  const detailsLoadSequence = useRef(0);
+
+  useEffect(() => {
+    if (!parsedIntent) return;
+    setEntryIntent(parsedIntent);
+    if (parsedIntent.section) setSection(parsedIntent.section);
+    if (parsedIntent.roleKey) setRoleKey(parsedIntent.roleKey);
+  }, [parsedIntent]);
+
+  useEffect(() => {
+    accountScopeRef.current = accountScope;
+    workspaceLoadSequence.current += 1;
+    conversationLoadSequence.current += 1;
+    statusLoadSequence.current += 1;
+    memoryLoadSequence.current += 1;
+    messageLoadSequence.current += 1;
+    detailsLoadSequence.current += 1;
+    setProviders(null);
+    setModels([]);
+    setQuota(null);
+    setRequests([]);
+    setTools([]);
+    setIntegrations([]);
+    setSavedRouting([]);
+    setConversations([]);
+    setSelectedConversationId(null);
+    setMessages([]);
+    setMemory(null);
+    setBackendReady(false);
+    setLoadingMessages(false);
+    setLoadingMemory(false);
+    setBusy(false);
+    setVerifyingKey(null);
+    setVerifyBanner(null);
+    setError(null);
+    setMemoryError(null);
+  }, [accountScope]);
 
   const loadConversations = useCallback(async () => {
+    const requestId = ++conversationLoadSequence.current;
+    const requestScope = accountScope;
     const result = await businessGrowApi.listConversations();
+    if (requestId !== conversationLoadSequence.current || accountScopeRef.current !== requestScope) return;
     setConversations(result.conversations);
     setSelectedConversationId((current) =>
       current && result.conversations.some((conversation) => conversation.id === current)
         ? current
         : result.conversations[0]?.id ?? null,
     );
-  }, []);
+  }, [accountScope]);
 
   const loadStatus = useCallback(async () => {
+    const requestId = ++statusLoadSequence.current;
+    const requestScope = accountScope;
     const result = await businessGrowApi.getStatus();
+    if (requestId !== statusLoadSequence.current || accountScopeRef.current !== requestScope) return;
     setProviders(result.providers);
-  }, []);
+  }, [accountScope]);
+
+  const loadOperationalDetails = useCallback(async () => {
+    const requestId = ++detailsLoadSequence.current;
+    const requestScope = accountScope;
+    const [modelsRes, quotaRes, reqRes, integrationsRes, routingRes] = await Promise.allSettled([
+      businessGrowApi.listModels?.() ?? Promise.resolve(null),
+      businessGrowApi.getQuota?.() ?? Promise.resolve(null),
+      businessGrowApi.listRequests?.() ?? Promise.resolve(null),
+      businessGrowApi.listIntegrations?.() ?? Promise.resolve(null),
+      businessGrowApi.getRouting?.() ?? Promise.resolve(null),
+    ]);
+    if (requestId !== detailsLoadSequence.current || accountScopeRef.current !== requestScope) return;
+    if (modelsRes.status === 'fulfilled' && modelsRes.value) setModels(modelsRes.value.models);
+    if (quotaRes.status === 'fulfilled' && quotaRes.value) setQuota(quotaRes.value);
+    if (reqRes.status === 'fulfilled' && reqRes.value) setRequests(reqRes.value.requests);
+    if (integrationsRes.status === 'fulfilled' && integrationsRes.value) setIntegrations(integrationsRes.value.connections);
+    if (routingRes.status === 'fulfilled' && routingRes.value && Array.isArray(routingRes.value.preferences)) {
+      setSavedRouting(routingRes.value.preferences);
+    }
+  }, [accountScope]);
 
   const refreshWorkspace = useCallback(async () => {
-    if (!user || !session) {
+    const requestId = ++workspaceLoadSequence.current;
+    const requestScope = accountScope;
+    if (!hasSession) {
       setBackendReady(false);
       setProviders(null);
       setConversations([]);
@@ -600,8 +1460,10 @@ export default function BusinessGrowWorkspace() {
     setBackendReady(false);
     setError(null);
     const [statusResult, conversationsResult] = await Promise.allSettled([loadStatus(), loadConversations()]);
+    if (requestId !== workspaceLoadSequence.current || accountScopeRef.current !== requestScope) return;
     if (statusResult.status === 'fulfilled' && conversationsResult.status === 'fulfilled') {
       setBackendReady(true);
+      void loadOperationalDetails();
       return;
     }
     setBackendReady(false);
@@ -610,7 +1472,7 @@ export default function BusinessGrowWorkspace() {
       : conversationsResult.status === 'rejected' && conversationsResult.reason instanceof Error
         ? conversationsResult.reason.message
         : 'Le backend Business Grow n’est pas encore installé ou accessible.');
-  }, [loadConversations, loadStatus, session, user]);
+  }, [accountScope, hasSession, loadConversations, loadOperationalDetails, loadStatus, sessionToken]);
 
   useEffect(() => {
     void refreshWorkspace();
@@ -618,166 +1480,363 @@ export default function BusinessGrowWorkspace() {
 
   const loadMessages = useCallback(async () => {
     const sequence = ++messageLoadSequence.current;
+    const requestScope = accountScope;
     if (!selectedConversationId || !backendReady) {
       setMessages([]);
+      setTools([]);
       setLoadingMessages(false);
       return;
     }
     setLoadingMessages(true);
     try {
-      const result = await businessGrowApi.listMessages(selectedConversationId);
-      if (messageLoadSequence.current === sequence) {
+      const [result, toolsResult] = await Promise.all([
+        businessGrowApi.listMessages(selectedConversationId),
+        businessGrowApi.listTools?.(selectedConversationId).catch(() => null) ?? Promise.resolve(null),
+      ]);
+      if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) {
         setMessages(result.messages);
+        if (toolsResult) setTools(toolsResult.tools);
         setError(null);
       }
     } catch (loadError) {
-      if (messageLoadSequence.current === sequence) {
+      if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) {
         setError(loadError instanceof Error ? loadError.message : 'Impossible de charger les messages.');
       }
     } finally {
-      if (messageLoadSequence.current === sequence) setLoadingMessages(false);
+      if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) setLoadingMessages(false);
     }
-  }, [backendReady, selectedConversationId]);
+  }, [accountScope, backendReady, selectedConversationId]);
 
   useEffect(() => {
     void loadMessages();
   }, [loadMessages]);
 
   const loadMemory = useCallback(async () => {
+    const requestId = ++memoryLoadSequence.current;
+    const requestScope = accountScope;
     setLoadingMemory(true);
     setMemoryError(null);
     try {
-      setMemory(await businessGrowApi.getMemory());
+      const result = await businessGrowApi.getMemory();
+      if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) setMemory(result);
     } catch (loadError) {
-      setMemoryError(loadError instanceof Error ? loadError.message : 'Impossible de charger la mémoire.');
+      if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) {
+        setMemoryError(loadError instanceof Error ? loadError.message : 'Impossible de charger la mémoire.');
+      }
     } finally {
-      setLoadingMemory(false);
+      if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) setLoadingMemory(false);
     }
-  }, []);
+  }, [accountScope]);
 
   useEffect(() => {
     if (section === 'memory' && backendReady) void loadMemory();
   }, [backendReady, loadMemory, section]);
 
   const createConversation = useCallback(async () => {
+    const requestScope = accountScope;
     setBusy(true);
     setError(null);
     try {
       const result = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
+      if (accountScopeRef.current !== requestScope) return;
       await loadConversations();
+      if (accountScopeRef.current !== requestScope) return;
       setSelectedConversationId(result.conversationId);
       setMessages([]);
+      setTools([]);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Impossible de créer la conversation.');
+      if (accountScopeRef.current === requestScope) {
+        setError(createError instanceof Error ? createError.message : 'Impossible de créer la conversation.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadConversations, workspaceId]);
+  }, [accountScope, loadConversations, workspaceId]);
 
   const renameConversation = useCallback(async (conversationId: string, title: string): Promise<boolean> => {
+    const requestScope = accountScope;
     setError(null);
     try {
       await businessGrowApi.renameConversation(conversationId, title);
+      if (accountScopeRef.current !== requestScope) return false;
       await loadConversations();
+      if (accountScopeRef.current !== requestScope) return false;
       return true;
     } catch (renameError) {
-      setError(renameError instanceof Error ? renameError.message : 'Impossible de renommer la conversation.');
+      if (accountScopeRef.current === requestScope) {
+        setError(renameError instanceof Error ? renameError.message : 'Impossible de renommer la conversation.');
+      }
       return false;
     }
-  }, [loadConversations]);
+  }, [accountScope, loadConversations]);
 
   const deleteConversation = useCallback(async (conversationId: string): Promise<boolean> => {
+    const requestScope = accountScope;
     setError(null);
     try {
       await businessGrowApi.deleteConversation(conversationId);
+      if (accountScopeRef.current !== requestScope) return false;
       if (selectedConversationId === conversationId) {
         setSelectedConversationId(null);
         setMessages([]);
+        setTools([]);
       }
       await loadConversations();
+      if (accountScopeRef.current !== requestScope) return false;
       return true;
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : 'Impossible de supprimer la conversation.');
+      if (accountScopeRef.current === requestScope) {
+        setError(deleteError instanceof Error ? deleteError.message : 'Impossible de supprimer la conversation.');
+      }
       return false;
     }
-  }, [loadConversations, selectedConversationId]);
+  }, [accountScope, loadConversations, selectedConversationId]);
 
   const sendMessage = useCallback(async (content: string): Promise<boolean> => {
+    const requestScope = accountScope;
     setError(null);
     setBusy(true);
+    let conversationId = selectedConversationId;
     try {
-      let conversationId = selectedConversationId;
       if (!conversationId) {
         const result = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
+        if (accountScopeRef.current !== requestScope) return false;
         conversationId = result.conversationId;
         setSelectedConversationId(conversationId);
       }
-      await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID());
-      await Promise.all([loadConversations(), loadMessages()]);
-      return true;
+      const hasSavedManualOverride = savedRouting.some(
+        (pref) => pref.role_key === roleKey && pref.selection_mode === 'manual',
+      );
+      const sendOptions: BusinessSendOptions | undefined =
+        roleKey === 'business_advisor' && routingMode === 'auto' && !workspaceId && !hasSavedManualOverride
+          ? undefined
+          : {
+            roleKey,
+            ...(workspaceId ? { workspaceId } : {}),
+            ...(routingMode === 'manual'
+              ? {
+                routing: {
+                  selectionMode: 'manual',
+                  preferredProviderKey: preferredProviderKey || null,
+                  preferredModelKey: preferredModelKey || null,
+                  allowFallback: manualAllowFallback,
+                },
+              }
+              : {
+                routing: {
+                  selectionMode: 'auto',
+                  allowFallback: true,
+                },
+              }),
+          };
+      if (sendOptions) {
+        await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID(), sendOptions);
+      } else {
+        await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID());
+      }
+      if (accountScopeRef.current !== requestScope) return false;
+      await Promise.all([
+        loadConversations(),
+        businessGrowApi.listMessages(conversationId).then((result) => {
+          if (accountScopeRef.current === requestScope) setMessages(result.messages);
+        }),
+        businessGrowApi.listTools?.(conversationId).then((res) => {
+          if (accountScopeRef.current === requestScope && res) setTools(res.tools);
+        }).catch(() => undefined),
+        loadOperationalDetails(),
+      ]);
+      return accountScopeRef.current === requestScope;
     } catch (sendError) {
+      if (accountScopeRef.current !== requestScope) return false;
       const code = sendError instanceof BusinessGrowApiError
         ? sendError.code
         : typeof sendError === 'object' && sendError !== null && 'code' in sendError && typeof sendError.code === 'string'
           ? sendError.code
           : null;
-      if (code && ['NO_VERIFIED_PROVIDER', 'PROVIDER_ADAPTER_NOT_CONFIGURED'].includes(code)) {
+      if (code && [
+        'NO_VERIFIED_PROVIDER',
+        'PROVIDER_NOT_CONFIGURED',
+        'PROVIDER_ADAPTER_NOT_IMPLEMENTED',
+        'PROVIDER_MODEL_MISMATCH',
+        'PROVIDER_AUTH_FAILED',
+        'PROVIDER_RATE_LIMITED',
+        'PROVIDER_UNAVAILABLE',
+        'PROVIDER_TIMEOUT',
+        'PROVIDER_NETWORK_ERROR',
+        'PROVIDER_REQUEST_REJECTED',
+        'PROVIDER_INVALID_RESPONSE',
+        'PROVIDER_EMPTY_RESPONSE',
+        'BG_INSUFFICIENT_QUOTA',
+      ].includes(code)) {
         setError(sendError instanceof Error ? sendError.message : 'Aucun fournisseur IA vérifié n’est disponible.');
-        await Promise.allSettled([loadConversations(), loadMessages()]);
+        await Promise.allSettled([
+          loadConversations(),
+          conversationId
+            ? businessGrowApi.listMessages(conversationId).then((result) => {
+              if (accountScopeRef.current === requestScope) setMessages(result.messages);
+            })
+            : Promise.resolve(),
+        ]);
         return true;
-      } else {
-        setError(sendError instanceof Error ? sendError.message : 'Impossible d’envoyer la demande.');
-        return false;
+      }
+      setError(sendError instanceof Error ? sendError.message : 'Impossible d’envoyer la demande.');
+      return false;
+    } finally {
+      if (accountScopeRef.current === requestScope) setBusy(false);
+    }
+  }, [accountScope, loadConversations, loadOperationalDetails, manualAllowFallback, preferredModelKey, preferredProviderKey, roleKey, routingMode, savedRouting, selectedConversationId, workspaceId]);
+
+  const resolveTool = useCallback(async (executionId: string, decision: 'approved' | 'rejected') => {
+    const requestScope = accountScope;
+    if (!businessGrowApi.resolveTool) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await businessGrowApi.resolveTool(executionId, decision);
+      if (accountScopeRef.current !== requestScope) return;
+      if (selectedConversationId && businessGrowApi.listTools) {
+        const res = await businessGrowApi.listTools(selectedConversationId);
+        if (accountScopeRef.current === requestScope) setTools(res.tools);
+      }
+    } catch (resolveError) {
+      if (accountScopeRef.current === requestScope) {
+        setError(resolveError instanceof Error ? resolveError.message : 'Impossible de traiter cette action.');
       }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadConversations, loadMessages, selectedConversationId, workspaceId]);
+  }, [accountScope, selectedConversationId]);
+
+  const verifyProvider = useCallback(async (providerKey: string, modelKey?: string) => {
+    const requestScope = accountScope;
+    if (!businessGrowApi.verifyProvider) return;
+    setVerifyingKey(providerKey);
+    setVerifyBanner(null);
+    try {
+      const result: BusinessVerificationResult = modelKey
+        ? await businessGrowApi.verifyProvider(providerKey, modelKey)
+        : await businessGrowApi.verifyProvider(providerKey);
+      if (accountScopeRef.current !== requestScope) return;
+      const discoveredCount = Array.isArray(result.availableModels) ? result.availableModels.length : 0;
+      setVerifyBanner({
+        tone: 'success',
+        message: `Test serveur réel : ${result.providerKey} (${result.modelKey}) vérifié avec succès (${result.latencyMs} ms).`,
+        hint: discoveredCount > 0 ? `${discoveredCount} modèle(s) détecté(s) sur l’API du fournisseur.` : null,
+      });
+      await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
+    } catch (verifyError) {
+      if (accountScopeRef.current === requestScope) {
+        const errorCode = verifyError instanceof BusinessGrowApiError ? verifyError.code : null;
+        setVerifyBanner({
+          tone: 'error',
+          code: errorCode,
+          message: verifyError instanceof Error ? verifyError.message : 'La vérification du fournisseur a échoué.',
+          hint: describeProviderFailureHint(errorCode),
+        });
+        await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
+      }
+    } finally {
+      if (accountScopeRef.current === requestScope) setVerifyingKey(null);
+    }
+  }, [accountScope, loadOperationalDetails, loadStatus]);
+
+  const saveRouting = useCallback(async (pref: BusinessRoutingPreference) => {
+    const requestScope = accountScope;
+    if (!businessGrowApi.saveRouting) return;
+    setVerifyBanner(null);
+    try {
+      await businessGrowApi.saveRouting(pref);
+      if (accountScopeRef.current === requestScope) {
+        setVerifyBanner({
+          tone: 'success',
+          message: `Règle de routage enregistrée pour ${pref.roleKey}.`,
+        });
+        void loadOperationalDetails();
+      }
+    } catch (saveError) {
+      if (accountScopeRef.current === requestScope) {
+        const errorCode = saveError instanceof BusinessGrowApiError ? saveError.code : null;
+        setVerifyBanner({
+          tone: 'error',
+          code: errorCode,
+          message: saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le routage.',
+          hint: describeProviderFailureHint(errorCode),
+        });
+      }
+    }
+  }, [accountScope, loadOperationalDetails]);
+
+  const handleChangeRole = useCallback((nextRole: BusinessRoleKey) => {
+    setRoleKey(nextRole);
+    const saved = savedRouting.find((pref) => pref.role_key === nextRole);
+    if (saved) {
+      const nextMode: RoutingSelectionMode = saved.selection_mode === 'manual' ? 'manual' : 'auto';
+      setRoutingMode(nextMode);
+      setPreferredProviderKey(typeof saved.preferred_provider_key === 'string' ? saved.preferred_provider_key : '');
+      setPreferredModelKey(typeof saved.preferred_model_key === 'string' ? saved.preferred_model_key : '');
+      setManualAllowFallback(typeof saved.allow_fallback === 'boolean' ? saved.allow_fallback : false);
+    }
+  }, [savedRouting]);
+
+  const handleChangePreferredProvider = useCallback((nextProvider: string) => {
+    setPreferredProviderKey(nextProvider);
+    setPreferredModelKey('');
+  }, []);
 
   const saveMemoryConsent = useCallback(async (enabled: boolean) => {
+    const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
       await businessGrowApi.setMemoryConsent(enabled);
+      if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (consentError) {
-      setMemoryError(consentError instanceof Error ? consentError.message : 'Impossible de modifier le consentement.');
+      if (accountScopeRef.current === requestScope) {
+        setMemoryError(consentError instanceof Error ? consentError.message : 'Impossible de modifier le consentement.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadMemory]);
+  }, [accountScope, loadMemory]);
 
   const saveMemoryProfile = useCallback(async (profile: Record<string, unknown>) => {
+    const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
       await businessGrowApi.saveMemoryProfile(profile);
+      if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (saveError) {
-      setMemoryError(saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le profil.');
+      if (accountScopeRef.current === requestScope) {
+        setMemoryError(saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le profil.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadMemory]);
+  }, [accountScope, loadMemory]);
 
   const mutateMemoryItem = useCallback(async (operation: () => Promise<unknown>) => {
+    const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
       await operation();
+      if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (itemError) {
-      setMemoryError(itemError instanceof Error ? itemError.message : 'Impossible de modifier la mémoire.');
+      if (accountScopeRef.current === requestScope) {
+        setMemoryError(itemError instanceof Error ? itemError.message : 'Impossible de modifier la mémoire.');
+      }
     } finally {
-      setBusy(false);
+      if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [loadMemory]);
+  }, [accountScope, loadMemory]);
 
   const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
   const ActiveIcon = activeSection.icon;
-  const availableProviderCount = (providers ?? []).filter((provider) =>
-    provider.enabled && provider.status === 'available' && provider.config_status === 'configured',
-  ).length;
+  const availableProviderCount = (providers ?? []).filter((provider) => isVerifiedProvider(provider)).length;
 
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
@@ -794,8 +1853,16 @@ export default function BusinessGrowWorkspace() {
               Votre espace métier intégré à Reelora, avec le même compte et les mêmes droits que le Studio UGC.
             </p>
           </div>
-          <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/20 bg-amber-400/[0.06] px-3 py-1.5 text-xs font-medium text-amber-100" data-testid="business-overall-status">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+          <span
+            className={cn(
+              'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium',
+              availableProviderCount
+                ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100'
+                : 'border-amber-400/20 bg-amber-400/[0.06] text-amber-100',
+            )}
+            data-testid="business-overall-status"
+          >
+            <span className={cn('h-1.5 w-1.5 rounded-full', availableProviderCount ? 'bg-emerald-300' : 'bg-amber-300')} />
             {availableProviderCount ? `${availableProviderCount} fournisseur(s) vérifié(s)` : backendReady ? 'IA non disponible' : 'Backend en attente'}
           </span>
         </div>
@@ -831,12 +1898,28 @@ export default function BusinessGrowWorkspace() {
             <AssistantView
               backendReady={backendReady}
               providers={providers}
+              models={models}
+              quota={quota}
+              tools={tools}
               conversations={conversations}
               selectedConversationId={selectedConversationId}
               messages={messages}
               loading={loadingMessages}
               error={error}
               busy={busy}
+              roleKey={roleKey}
+              routingMode={routingMode}
+              preferredProviderKey={preferredProviderKey}
+              preferredModelKey={preferredModelKey}
+              manualAllowFallback={manualAllowFallback}
+              entryIntent={entryIntent}
+              onChangeRole={handleChangeRole}
+              onChangeRoutingMode={setRoutingMode}
+              onChangePreferredProvider={handleChangePreferredProvider}
+              onChangePreferredModel={setPreferredModelKey}
+              onChangeManualAllowFallback={setManualAllowFallback}
+              onDismissEntryIntent={() => setEntryIntent(null)}
+              onResolveTool={resolveTool}
               onNewConversation={() => { void createConversation(); }}
               onRenameConversation={renameConversation}
               onDeleteConversation={deleteConversation}
@@ -845,6 +1928,7 @@ export default function BusinessGrowWorkspace() {
               onRetry={() => { void refreshWorkspace(); void loadMessages(); }}
             />
           )}
+          {section === 'company' && <CompanyContextView workspace={workspace} />}
           {section === 'memory' && (
             <MemoryView
               memory={memory}
@@ -858,7 +1942,21 @@ export default function BusinessGrowWorkspace() {
               onRetry={() => { void loadMemory(); }}
             />
           )}
-          {section === 'providers' && <ProvidersView statuses={providers} />}
+          {section === 'providers' && (
+            <ProvidersView
+              backendReady={backendReady}
+              statuses={providers}
+              models={models}
+              requests={requests}
+              savedRouting={savedRouting}
+              quota={quota}
+              verifyingKey={verifyingKey}
+              verifyBanner={verifyBanner}
+              onVerifyProvider={verifyProvider}
+              onSaveRouting={saveRouting}
+            />
+          )}
+          {section === 'integrations' && <IntegrationsView connections={integrations} />}
         </div>
       </div>
     </div>
