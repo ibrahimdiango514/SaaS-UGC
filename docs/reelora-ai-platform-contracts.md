@@ -1,7 +1,7 @@
-# Contrats IA ↔ Plateforme Reelora (collaboration sans conflit)
+# Contrats IA ↔ Plateforme VYORA (collaboration sans conflit)
 
 Ce document définit les **frontières d’ownership** et les **contrats TypeScript stables** permettant de faire évoluer en parallèle :
-- **La plateforme générale Reelora dans VS Code** (`Dashboard`, `Projects`, `GenerationStudio`, `Editor`, `Settings`, `Subscription`, `PreparedSpace`, connecteurs externes, `saas_ugc`)
+- **La plateforme générale VYORA dans VS Code** (`Dashboard`, `Projects`, `GenerationStudio`, `Editor`, `Settings`, `Subscription`, `PreparedSpace`, connecteurs externes, `saas_ugc`)
 - **Le moteur IA & Business Intelligence Business Grow** (`supabase/functions/business-grow/`, `src/business/`, `saas_business`, fournisseurs, routage, modèles, mémoire métier, outils assistés)
 
 ---
@@ -60,7 +60,7 @@ const snapshot = await businessGrowBridge.getSnapshot();
 // snapshot.quota?.studioUgcUntouched === true
 ```
 
-### C. Exécuter une tâche IA centralisée depuis un espace Reelora (`BusinessAiEnginePort`)
+### C. Exécuter une tâche IA centralisée depuis un espace VYORA (`BusinessAiEnginePort`)
 
 Pour alimenter les futurs espaces préparés (`Marketing Studio`, `Scripts IA`, `Storyboarding`, `Agents`, `Workflows`) via l’AI Director central :
 

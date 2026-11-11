@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Coins, Info, LockKeyhole, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { Button, Modal, cn } from '../../components/ui';
-import type { MuApiModel, VideoCostEstimate } from '../../lib/types';
+import type { MuApiModel, ProviderQuote, VideoCostEstimate } from '../../lib/types';
 import { paramsSummary, type ParamValue } from '../model';
 import { canConfirmGeneration, creditSummary } from '../catalog';
+import { ProviderQuotePanel } from './ProviderQuotePanel';
 
 export function CostSummary({ model, estimate, balance, params, compact }: {
   model: MuApiModel;
@@ -60,10 +61,13 @@ export function CostSummary({ model, estimate, balance, params, compact }: {
   );
 }
 
-export function CostConfirm({ open, onClose, onConfirm, model, estimate, balance, params, loading, blockedReason }: {
+export function CostConfirm({ open, onClose, onConfirm, model, estimate, balance, params, loading, blockedReason,
+  providerQuote = null, providerQuoteBusy = false, onRefreshProviderQuote,
+}: {
   open: boolean; onClose: () => void; onConfirm: () => void;
   model: MuApiModel; estimate: VideoCostEstimate | null; balance: number;
   params: Record<string, ParamValue>; loading?: boolean; blockedReason?: string;
+  providerQuote?: ProviderQuote | null; providerQuoteBusy?: boolean; onRefreshProviderQuote?: () => void;
 }) {
   const [accepted, setAccepted] = useState(false);
   useEffect(() => { if (!open) setAccepted(false); }, [open]);
@@ -84,6 +88,10 @@ export function CostConfirm({ open, onClose, onConfirm, model, estimate, balance
           Je confirme · réserver {costLabel}
         </Button>
       </>}>
+      <div className="mb-3">
+        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Devis fournisseur réel (MyAPI)</p>
+        <ProviderQuotePanel quote={providerQuote} busy={providerQuoteBusy} onRefresh={onRefreshProviderQuote} />
+      </div>
       <CostSummary model={model} estimate={estimate} balance={balance} params={params} />
       {blockedReason && <p className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 py-2.5 text-xs text-rose-200">{blockedReason}</p>}
       {!summary.enough && cost !== null && <p className="mt-3 flex items-center gap-1.5 text-xs text-amber-200"><Info size={13} /> Crédits insuffisants : rechargez depuis l’abonnement avant de lancer.</p>}

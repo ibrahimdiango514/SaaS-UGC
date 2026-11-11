@@ -1,4 +1,4 @@
-# Phase 4 — Moteur d’export vidéo professionnel (`Reelora`)
+# Phase 4 — Moteur d’export vidéo professionnel (`VYORA`)
 
 > **Date :** 2026-11-09  
 > **Branche de session :** `arena/147ca0c8-saas-ugc` (appuyée sur Phase 1, Phase 2 `a30ee86` et Phase 3 `db4b373` ; `main` intact ; PR #3 laissée ouverte et non fusionnée)  

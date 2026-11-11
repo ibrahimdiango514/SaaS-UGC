@@ -152,7 +152,7 @@ export function buildBusinessSystemInstruction(input: {
     const brands = (input.workspaceContext.brands ?? []).slice(0, 5);
     const products = (input.workspaceContext.products ?? []).slice(0, 8);
     sections.push(
-      `Contexte entreprise Reelora (lecture autorisée) : ${safeJsonSlice({
+      `Contexte entreprise VYORA (lecture autorisée) : ${safeJsonSlice({
         workspace: ws?.name ?? null,
         country: ws?.country_code ?? null,
         language: ws?.default_language ?? null,

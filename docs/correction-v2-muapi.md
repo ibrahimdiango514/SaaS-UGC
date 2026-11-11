@@ -16,13 +16,13 @@ Remplacer le catalogue figé et les capacités inventées par les données réel
 | --- | --- |
 | Lignes | 415 |
 | Catégories distinctes | 8 |
-| Actifs compatibles Reelora | 236 |
+| Actifs compatibles VYORA | 236 |
 | `required_fields` non supportés | 176 |
 | `is_coming_soon` | 3 |
 | `is_enabled` | 415 |
 | `__catalog` renseigné | 415 |
 
-« Actif compatible » signifie : activé, non `coming_soon`, et aucun champ requis autre que `prompt` ou `image_url`. Les 176 modèles non supportés exigent notamment `audio_url`, `video_url`, `images_list` ou d’autres entrées média/structurées non connectées dans Reelora. Les 3 `coming_soon` sont `flux-3-omni`, `seedance-2.1-image-to-video`, `seedance-2.1-text-to-video`.
+« Actif compatible » signifie : activé, non `coming_soon`, et aucun champ requis autre que `prompt` ou `image_url`. Les 176 modèles non supportés exigent notamment `audio_url`, `video_url`, `images_list` ou d’autres entrées média/structurées non connectées dans VYORA. Les 3 `coming_soon` sont `flux-3-omni`, `seedance-2.1-image-to-video`, `seedance-2.1-text-to-video`.
 
 Catégories : I2V 194, T2V 117, V2V 83, A2V 14, Lora 3, Training 2, Text to Text 1, other 1.
 
@@ -78,7 +78,7 @@ Captures : `preview-correction-v2/gallery.html`, `preview-correction-v2/verifica
 - Headless navigateur : **7/7 interactions**, 6 captures, 0 erreur console, 0 erreur page, 31 appels backend interceptés, actions `catalog | model-detail | estimate`, `realGenerationLaunched:false`, `muapiCalls:[]`, aucune action `start`.
 - Base live : `ugc_generation_jobs=0`, `ugc_generated_assets=0`, `ugc_credit_ledger` = uniquement le bonus d’inscription `+9` (`signup_bonus`), aucun débit/réservation.
 
-Devis réel préparé mais **non lancé** : `seedance-lite-t2v`, service `ugc_clip_8s`, `{aspect_ratio:'9:16', resolution:'480p', duration:5, camera_fixed:false}`, 9 crédits Reelora, 0,1000 USD, `required_fields=["prompt"]`, modèle actif. Confirmation explicite requise avant toute génération.
+Devis réel préparé mais **non lancé** : `seedance-lite-t2v`, service `ugc_clip_8s`, `{aspect_ratio:'9:16', resolution:'480p', duration:5, camera_fixed:false}`, 9 crédits VYORA, 0,1000 USD, `required_fields=["prompt"]`, modèle actif. Confirmation explicite requise avant toute génération.
 
 ## Limites à ne pas franchir
 

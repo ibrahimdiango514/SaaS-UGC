@@ -1,5 +1,5 @@
 /**
- * Reelora AI Video Editor — domain model (Phase 3 enhanced, v1 backwards-compatible).
+ * VYORA AI Video Editor — domain model (Phase 3 enhanced, v1 backwards-compatible).
  *
  * This is a REAL editing model: scenes, tracks, trims, transitions, voiceover,
  * subtitle styling and user suggestion decisions are persisted in the existing
@@ -94,7 +94,7 @@ export const DEFAULT_SUBTITLE_CONFIG: SubtitleConfig = {
 };
 
 /**
- * A source is either absent, a locally imported file, a real Reelora asset from
+ * A source is either absent, a locally imported file, a real VYORA asset from
  * the private library, or a real generation job. `none` is NEVER rendered as a
  * fake video: the renderer refuses to export while a scene has no media.
  */

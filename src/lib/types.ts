@@ -389,6 +389,9 @@ export interface AdminVideoCatalogResponse {
     detected_video: number;
     active: number;
     unavailable: number;
+    verified?: boolean;
+    reasons?: Record<string, number>;
+    endpoints?: string[];
     error?: string | null;
     account: {
       key_configured: boolean;
@@ -431,6 +434,27 @@ export interface AdminProviderSpendSummary {
 }
 
 /** Opaque customer quote; provider costs and supplier diagnostics stay server-side. */
+export type ProviderQuoteSource = 'provider_estimate' | 'catalog_tariff' | 'none';
+
+/**
+ * Devis fournisseur réel (MuAPI). `available=false` signifie qu'AUCUN montant
+ * n'a pu être vérifié : l'interface ne doit jamais afficher de prix inventé.
+ */
+export interface ProviderQuote {
+  available: boolean;
+  cost_usd: number | null;
+  currency: 'USD' | null;
+  source: ProviderQuoteSource;
+  error_code: string | null;
+  error_message: string | null;
+  checked_at: string;
+  catalog_synced_at: string | null;
+  stale_catalog: boolean;
+  pricing_basis: Record<string, string | number | boolean>;
+  billing_units: string[];
+  estimate_endpoint_available: boolean;
+}
+
 export interface VideoCostEstimate {
   service_key: string;
   credits_cost: number;
@@ -443,6 +467,8 @@ export interface VideoCostEstimate {
   pricing_error?: string | null;
   quote_id?: string | null;
   quote_expires_at?: string | null;
+  /** Devis fournisseur exact, calculé côté serveur, avant toute génération. */
+  provider_quote?: ProviderQuote | null;
 }
 
 export interface VideoActionResult {
@@ -455,4 +481,164 @@ export interface VideoActionResult {
   storage_path?: string;
   message?: string;
   error?: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Métriques administrateur (RPC vyora_admin_metrics, lecture seule)          */
+/* -------------------------------------------------------------------------- */
+
+export interface AdminMetricMonth {
+  month: string;
+}
+
+export interface AdminRevenueMonth extends AdminMetricMonth {
+  collected_minor: number;
+  orders: number;
+}
+
+export interface AdminMrrMonth extends AdminMetricMonth {
+  mrr_minor: number;
+  new_mrr_minor: number;
+  lost_mrr_minor: number;
+  net_mrr_minor: number;
+  active_subscriptions: number;
+}
+
+export interface AdminCountMonth extends AdminMetricMonth {
+  count: number;
+}
+
+export interface AdminStudioMonth extends AdminMetricMonth {
+  jobs: number;
+  succeeded: number;
+  failed: number;
+  credits_charged: number;
+}
+
+export interface AdminGrowthMonth extends AdminMetricMonth {
+  requests: number;
+  succeeded: number;
+  failed: number;
+  input_tokens: number;
+  output_tokens: number;
+  provider_cost_micros: number;
+}
+
+export interface AdminProviderAttempts {
+  provider_key: string;
+  attempts: number;
+  succeeded: number;
+  failed: number;
+  provider_cost_micros: number;
+  last_attempt_at: string | null;
+}
+
+export interface AdminStudioCostEvent {
+  provider: string;
+  currency: string;
+  amount: number | string;
+  events: number;
+  last_event_at: string | null;
+}
+
+export interface AdminMetrics {
+  generated_at: string;
+  months: number;
+  period_start: string;
+  period_end: string;
+  history: {
+    first_activity_at: string | null;
+    exploitable_from: string;
+    has_history: boolean;
+    months_of_history: number;
+  };
+  revenue: {
+    currency: string;
+    collected_total_minor: number;
+    collected_orders: number;
+    pending_orders: number;
+    by_month: AdminRevenueMonth[];
+  };
+  mrr: {
+    currency: string;
+    current_minor: number;
+    active_recurring_subscriptions: number;
+    by_month: AdminMrrMonth[];
+  };
+  subscriptions: {
+    total: number;
+    active: number;
+    cancelled: number;
+    by_plan: Array<{ plan_key: string; plan_name: string; status: string; count: number; monthly_price_minor: number }>;
+    new_by_month: AdminCountMonth[];
+    cancelled_by_month: AdminCountMonth[];
+  };
+  users: {
+    customers: number;
+    with_subscription: number;
+    new_by_month: AdminCountMonth[];
+  };
+  studio: {
+    jobs_total: number;
+    jobs_succeeded: number;
+    jobs_failed: number;
+    credits_charged_total: number;
+    usage_by_kind: Record<string, number>;
+    by_month: AdminStudioMonth[];
+  };
+  business_growth: {
+    requests_total: number;
+    requests_succeeded: number;
+    requests_failed: number;
+    conversations: number;
+    messages: number;
+    memory_items: number;
+    tool_executions: number;
+    tokens_total: number;
+    by_month: AdminGrowthMonth[];
+  };
+  providers: {
+    business_growth: AdminProviderAttempts[];
+    studio_cost_events: AdminStudioCostEvent[];
+  };
+  models: {
+    total: number;
+    selectable: number;
+    coming_soon: number;
+    synced_at: string | null;
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Opérations de crédits administrateur (RPC transactionnelles)               */
+/* -------------------------------------------------------------------------- */
+
+export interface AdminCreditMovement {
+  user_id: string;
+  delta: number;
+  requested_delta: number;
+  reason: string;
+  balance_before: number;
+  balance_after: number;
+  ledger_id: string;
+  replayed: boolean;
+  actor_user_id: string;
+  applied_at: string;
+}
+
+export interface AdminCreditHistoryEntry {
+  id: string;
+  delta: number;
+  reserved_delta: number;
+  operation: string;
+  description: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AdminCreditHistory {
+  user_id: string;
+  balance: number;
+  reserved: number;
+  entries: AdminCreditHistoryEntry[];
 }

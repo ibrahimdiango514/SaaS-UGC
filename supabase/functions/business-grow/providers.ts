@@ -21,6 +21,10 @@ export interface ProviderReply {
   content: string;
   inputTokens: number | null;
   outputTokens: number | null;
+  /** Fournisseur qui a réellement répondu (le moteur central peut basculer). */
+  provider?: ExtensibleProviderId;
+  /** Modèle réellement utilisé côté moteur central. */
+  model?: string;
 }
 
 export interface ProviderProbeResult {
@@ -399,6 +403,74 @@ export function getProviderAdapter(provider: string): BusinessProviderAdapter | 
   return PROVIDER_ADAPTERS.get(provider as ExtensibleProviderId) ?? null;
 }
 
+/** Moteur IA central VYORA : une seule pile fournisseur pour tout le produit. */
+function centralEngineUrl(): string {
+  const url = (env('SUPABASE_URL') ?? '').replace(/\/$/, '');
+  return url ? `${url}/functions/v1/vyora-ai` : '';
+}
+
+export function buildCentralRequest(
+  provider: BusinessProvider,
+  messages: ChatMessage[],
+  options?: ProviderCompletionOptions,
+): Record<string, unknown> {
+  return {
+    action: 'complete',
+    prefer: provider,
+    messages: messages.map(({ role, content }) => ({ role, content })),
+    ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),
+    ...(typeof options?.maxOutputTokens === 'number' ? { max_tokens: options.maxOutputTokens } : {}),
+  };
+}
+
+async function callCentralEngine(
+  provider: BusinessProvider,
+  messages: ChatMessage[],
+  options?: ProviderCompletionOptions,
+): Promise<ProviderReply | null> {
+  const url = centralEngineUrl();
+  const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (!url || !serviceKey) return null;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildCentralRequest(provider, messages, options)),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch {
+    return null; // moteur central injoignable : adapter local en secours
+  }
+  if (res.status === 404 || res.status === 401 || res.status === 403) return null;
+  const text = await res.text();
+  let payload: Record<string, unknown> = {};
+  try { payload = asRecord(JSON.parse(text || '{}')); } catch { payload = {}; }
+  if (!res.ok) {
+    const error = asRecord(payload.error);
+    const code = typeof error.code === 'string' ? error.code : 'PROVIDER_UNAVAILABLE';
+    throw new ProviderCallError(code === 'AI_TIMEOUT' ? 'PROVIDER_TIMEOUT' : code, true);
+  }
+  const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+  if (!content) throw new ProviderCallError('PROVIDER_EMPTY_RESPONSE', true);
+  const usage = asRecord(payload.usage);
+  return {
+    content,
+    inputTokens: tokenCount(usage.input_tokens ?? usage.prompt_tokens),
+    outputTokens: tokenCount(usage.output_tokens ?? usage.completion_tokens),
+    provider: typeof payload.provider === 'string' ? payload.provider as ExtensibleProviderId : provider,
+    model: typeof payload.model === 'string' ? payload.model : provider,
+  };
+}
+
+function env(key: string): string | undefined {
+  const g = globalThis as unknown as {
+    Deno?: { env?: { get?: (k: string) => string } };
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return g.Deno?.env?.get?.(key) ?? g.process?.env?.[key];
+}
+
 export async function callProvider(
   provider: BusinessProvider,
   config: ProviderConfig,
@@ -409,6 +481,12 @@ export async function callProvider(
   const adapter = getProviderAdapter(provider);
   if (!adapter || !adapter.implemented) {
     throw new ProviderCallError('PROVIDER_ADAPTER_NOT_IMPLEMENTED', false);
+  }
+  // Les appels réels passent par le moteur central ; un fetcher injecté (tests,
+  // diagnostics) continue d'utiliser l'adaptateur du fournisseur.
+  if (fetcher === fetch) {
+    const central = await callCentralEngine(provider, messages, options);
+    if (central) return central;
   }
   return await adapter.complete(config, messages, fetcher, options);
 }

@@ -64,6 +64,14 @@ async function authUserId(authorization: string): Promise<string | null> {
   return typeof user.id === 'string' ? user.id : null;
 }
 
+/**
+ * Aides de typage uniquement (aucun effet à l'exécution) :
+ * `postgres` renvoie une RowList itérable là où le store expose des tableaux,
+ * et `json()` attend un JSONValue plus strict que nos `Record<string, unknown>`.
+ */
+const asRows = (rows: unknown): unknown[] => rows as unknown[];
+const asJsonValue = (value: unknown): never => value as never;
+
 const store: BusinessGrowStore = {
   async listProviders() {
     const db = requiredSql();
@@ -124,13 +132,13 @@ const store: BusinessGrowStore = {
     }
   },
   async listModels(providerKey) {
-    return await requiredSql()`select * from saas_business.bg_list_models(${providerKey ?? null})`;
+    return asRows(await requiredSql()`select * from saas_business.bg_list_models(${providerKey ?? null})`);
   },
   async listRoles() {
-    return await requiredSql()`select * from saas_business.bg_list_roles()`;
+    return asRows(await requiredSql()`select * from saas_business.bg_list_roles()`);
   },
   async getRoutingPreferences(userId) {
-    return await requiredSql()`select * from saas_business.bg_get_routing_preferences(${userId}::uuid)`;
+    return asRows(await requiredSql()`select * from saas_business.bg_get_routing_preferences(${userId}::uuid)`);
   },
   async upsertRoutingPreference(userId, roleKey, options) {
     const [row] = await requiredSql()`
@@ -174,7 +182,7 @@ const store: BusinessGrowStore = {
     return row.quota;
   },
   async listRecentRequests(userId, limit = 25) {
-    return await requiredSql()`select * from saas_business.bg_list_recent_requests(${userId}::uuid, ${limit})`;
+    return asRows(await requiredSql()`select * from saas_business.bg_list_recent_requests(${userId}::uuid, ${limit})`);
   },
   async getWorkspaceContext(userId, workspaceId) {
     if (!workspaceId) return null;
@@ -198,9 +206,9 @@ const store: BusinessGrowStore = {
     return row.id as string;
   },
   async listToolExecutions(userId, conversationId = null) {
-    return await requiredSql()`
+    return asRows(await requiredSql()`
       select * from saas_business.bg_list_tool_executions(${userId}::uuid, ${conversationId}::uuid, 30)
-    `;
+    `);
   },
   async resolveToolExecution(userId, executionId, decision, outputResult = {}) {
     const db = requiredSql();
@@ -209,7 +217,7 @@ const store: BusinessGrowStore = {
         ${userId}::uuid,
         ${executionId}::uuid,
         ${decision},
-        ${db.json(outputResult)}
+        ${db.json(asJsonValue(outputResult))}
       ) as resolved
     `;
     return row.resolved as {
@@ -221,13 +229,13 @@ const store: BusinessGrowStore = {
     };
   },
   async listIntegrationConnections(userId) {
-    return await requiredSql()`select * from saas_business.bg_list_integration_connections(${userId}::uuid)`;
+    return asRows(await requiredSql()`select * from saas_business.bg_list_integration_connections(${userId}::uuid)`);
   },
   async listConversations(userId) {
-    return await requiredSql()`select * from saas_business.bg_list_conversations(${userId}::uuid, 50)`;
+    return asRows(await requiredSql()`select * from saas_business.bg_list_conversations(${userId}::uuid, 50)`);
   },
   async listMessages(userId, conversationId) {
-    return await requiredSql()`select * from saas_business.bg_list_messages(${userId}::uuid, ${conversationId}::uuid, 200)`;
+    return asRows(await requiredSql()`select * from saas_business.bg_list_messages(${userId}::uuid, ${conversationId}::uuid, 200)`);
   },
   async createConversation(userId, title, workspaceId) {
     const [row] = await requiredSql()`
@@ -270,7 +278,7 @@ const store: BusinessGrowStore = {
   async saveMemoryProfile(userId, profile) {
     await requiredSql()`
       select saas_business.bg_upsert_memory_profile(
-        ${userId}::uuid, ${requiredSql().json(profile)}
+        ${userId}::uuid, ${requiredSql().json(asJsonValue(profile))}
       )
     `;
   },
@@ -280,7 +288,7 @@ const store: BusinessGrowStore = {
         ${userId}::uuid,
         ${itemId}::uuid,
         ${category},
-        ${requiredSql().json(content)},
+        ${requiredSql().json(asJsonValue(content))},
         'manual',
         null
       ) as id

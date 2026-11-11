@@ -21,7 +21,7 @@ export default async (request) => {
   const authorization = request.headers.get('authorization') ?? '';
   const apikey = request.headers.get('apikey') ?? '';
   if (!authorization.startsWith('Bearer ') || !apikey) {
-    return jsonError(401, 'UNAUTHENTICATED', 'Session Reelora ou clé publique manquante.');
+    return jsonError(401, 'UNAUTHENTICATED', 'Session VYORA ou clé publique manquante.');
   }
 
   const body = await request.text();

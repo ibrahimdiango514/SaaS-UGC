@@ -155,12 +155,14 @@ export default function Layout() {
   return (
     <div className="min-h-screen lg:flex">
       {/* Desktop sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col border-r border-line bg-[#090e15]/90 px-3 py-5 backdrop-blur-xl lg:flex">
-        <div className="px-2 pb-6">
+      <aside className="relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex">
+        <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
+        <div className="relative px-2 pb-6">
           <Logo to={isAdmin ? '/admin' : '/app'} />
-          <p className="mt-1.5 pl-[46px] text-[10px] font-medium uppercase tracking-[0.2em] text-slate-600">Espace de création</p>
+          <p className="mt-1.5 pl-[46px] text-[10px] font-medium uppercase tracking-[0.2em] text-slate-600">Create · Evolve · Grow</p>
         </div>
-        <nav className="flex-1 space-y-5 overflow-y-auto no-scrollbar">
+        <nav className="relative flex-1 space-y-5 overflow-y-auto no-scrollbar">
           {navGroups.map((group) => (
             <section key={group.label}>
               <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">{group.label}</p>
@@ -175,17 +177,23 @@ export default function Layout() {
             </section>
           ))}
         </nav>
-        {!isAdmin && <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-cyan-400/[0.09] via-panel/70 to-violet-500/[0.04] p-3.5">
+        {!isAdmin && <div className="relative mt-4 overflow-hidden rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-cyan-400/[0.10] via-panel/70 to-violet-500/[0.05] p-3.5">
           <div className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Coins size={14} /> Crédits Studio UGC</div>
           <p className="mt-1 text-2xl font-bold tracking-tight text-white">{quota?.credits ?? 0}</p>
-          <p className="mt-1 text-[11px] text-slate-400">{quota?.plan?.display_name ?? 'Formule'} · {quota?.usage?.video ?? 0}/{quota?.plan?.max_videos_per_month ?? 0} vidéos ce mois</p>
+          <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-violet-400 transition-all duration-700"
+              style={{ width: `${Math.min(100, Math.max(2, ((quota?.usage?.video ?? 0) / Math.max(1, quota?.plan?.max_videos_per_month ?? 1)) * 100))}%` }}
+            />
+          </div>
+          <p className="mt-1.5 text-[11px] text-slate-400">{quota?.plan?.display_name ?? 'Formule'} · {quota?.usage?.video ?? 0}/{quota?.plan?.max_videos_per_month ?? 0} vidéos ce mois</p>
           <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/app/abonnement')}>Gérer le Studio</Button>
         </div>}
       </aside>
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-ink/85 px-4 backdrop-blur-xl sm:px-6', studioMobileShell && 'hidden lg:flex')}>
+        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-white/[0.06] bg-[#05080e]/80 px-4 backdrop-blur-2xl sm:px-6', studioMobileShell && 'hidden lg:flex')}>
           <button className="btn btn-ghost btn-icon lg:hidden" onClick={() => setDrawerOpen(true)} aria-label="Ouvrir le menu"><Menu size={20} /></button>
           <div className="lg:hidden"><Logo compact to={isAdmin ? '/admin' : '/app'} /></div>
 
@@ -266,8 +274,9 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className={cn('flex-1 px-4 sm:px-6 lg:pb-10 lg:pt-8', studioMobileShell ? 'pb-0 pt-0' : 'pb-28 pt-6')}>
-          <div className="mx-auto w-full max-w-[1400px]"><Outlet /></div>
+        <main className={cn('relative flex-1 px-4 sm:px-6 lg:pb-10 lg:pt-8', studioMobileShell ? 'pb-0 pt-0' : 'pb-28 pt-6')}>
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_50%_-20%,rgba(34,211,238,0.07),transparent_70%)]" />
+          <div className="relative mx-auto w-full max-w-[1400px]"><Outlet /></div>
         </main>
       </div>
 
@@ -300,10 +309,10 @@ export default function Layout() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-line bg-panel/95 px-1 pt-2 backdrop-blur-xl', studioMobileShell ? 'hidden' : 'lg:hidden')}>
+      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', studioMobileShell ? 'hidden' : 'lg:hidden')}>
         {mobileNav.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end}
-            className={({ isActive }) => cn('flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-1 text-[10px] font-medium', isActive ? 'text-brand-300' : 'text-slate-500')}>
+            className={({ isActive }) => cn('flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition', isActive ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500')}>
             <item.icon size={19} /> <span className="truncate">{item.label.split(' ')[0]}</span>
           </NavLink>
         ))}

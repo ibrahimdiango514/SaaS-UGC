@@ -1,7 +1,7 @@
 /**
  * Project media discovery, hydration and deterministic UGC assembly.
  *
- * Bridges real Reelora projects (`ugc_video_projects`), saved scripts/scenes
+ * Bridges real VYORA projects (`ugc_video_projects`), saved scripts/scenes
  * (`ugc_project_scripts`, `ugc_project_scenes`), and private generated/uploaded
  * assets (`ugc_generated_assets`) into the Video Editor without inventing media.
  */
@@ -143,7 +143,7 @@ export interface HydratedProjectResult {
 
 /**
  * Load an existing saved editor state OR initialize a real editor project from
- * the Reelora project record, its scripts, storyboard scenes, and video assets.
+ * the VYORA project record, its scripts, storyboard scenes, and video assets.
  */
 export async function hydrateEditorFromProject(projectId: string): Promise<HydratedProjectResult> {
   const [savedEditor, projectRecord, scripts, dbScenes, assets, jobs] = await Promise.all([

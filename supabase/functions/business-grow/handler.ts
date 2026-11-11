@@ -8,7 +8,7 @@ import {
   type ExtractedToolProposal,
   type MemorySnapshot,
   type WorkspaceCompanyContext,
-} from './intelligence';
+} from './intelligence.ts';
 import {
   listRemoteModels,
   probeProvider,
@@ -18,7 +18,7 @@ import {
   type ProviderConfig,
   type ProviderProbeResult,
   type ProviderReply,
-} from './providers';
+} from './providers.ts';
 
 export type BusinessAction =
   | 'status'
@@ -165,7 +165,7 @@ const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
 const maxMessageLength = 12_000;
 const maxHistoryMessages = 40;
 const maxHistoryCharacters = 60_000;
-const systemMessage = 'Vous êtes le copilote Business Grow de Reelora. Répondez en français, sauf demande contraire. Distinguez les faits connus des hypothèses et n’inventez pas les données métier absentes.';
+const systemMessage = 'Vous êtes le copilote Business Grow de VYORA. Répondez en français, sauf demande contraire. Distinguez les faits connus des hypothèses et n’inventez pas les données métier absentes.';
 
 function isOriginAllowed(origin: string | null, allowedOrigins: string[]): boolean {
   if (!origin) return false;
@@ -320,7 +320,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
       );
     }
     if (!userId) {
-      return response(failure('UNAUTHENTICATED', 'Session Reelora invalide ou expirée.'), 401, origin, dependencies.allowedOrigins);
+      return response(failure('UNAUTHENTICATED', 'Session VYORA invalide ou expirée.'), 401, origin, dependencies.allowedOrigins);
     }
 
     let body: Record<string, unknown>;
@@ -889,7 +889,11 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               ...submitted,
               status: 'succeeded',
               providerAvailable: true,
-              provider: { key: provider, model: route.providerModelKey },
+              provider: {
+                key: result.provider && result.provider !== provider ? result.provider : provider,
+                model: result.model ?? route.providerModelKey,
+                routedFrom: result.provider && result.provider !== provider ? provider : null,
+              },
               roleKey,
               fallbackUsed: attemptNumber > 1,
               attemptsCount: attemptNumber,

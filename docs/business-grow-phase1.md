@@ -1,10 +1,10 @@
-# Business Grow — socle intégré à Reelora
+# Business Grow — socle intégré à VYORA
 
-Business Grow est le deuxième système fonctionnel de l’application Reelora, aux côtés du Studio UGC. Il utilise le même frontend React, la même session Supabase, le même compte et le même profil. Le schéma `saas_business` sépare les données métier sans créer un second SaaS ni une authentification indépendante.
+Business Grow est le deuxième système fonctionnel de l’application VYORA, aux côtés du Studio UGC. Il utilise le même frontend React, la même session Supabase, le même compte et le même profil. Le schéma `saas_business` sépare les données métier sans créer un second SaaS ni une authentification indépendante.
 
 ## Parcours applicatif
 
-- Route protégée `/app/business` dans la navigation Reelora existante (accessible directement ou via un `BusinessGrowEntryIntent` typé depuis Dashboard, Projets ou Studio).
+- Route protégée `/app/business` dans la navigation VYORA existante (accessible directement ou via un `BusinessGrowEntryIntent` typé depuis Dashboard, Projets ou Studio).
 - Conversations, messages et mémoire sont accessibles à travers la session utilisateur existante.
 - Le navigateur appelle l’Edge Function `business-grow` (`verify_jwt = true`) ; l’identité provient du JWT validé par Supabase Auth, jamais d’un `user_id` fourni par le client.
 - L’Edge Function utilise un rôle PostgreSQL serveur restreint (`bg_edge`) et des fonctions `SECURITY DEFINER` dédiées. Elle ne renvoie aucun secret fournisseur et n’expose pas les tables `saas_business` à PostgREST.
@@ -31,7 +31,7 @@ Business Grow est le deuxième système fonctionnel de l’application Reelora, 
 ## Fichiers principaux & contrats anti-conflit
 
 - `src/contracts/business-grow.ts` : contrats publics partagés (`BusinessGrowUgcHandoffBrief`, `BusinessGrowEntryIntent`, `BusinessGrowStatusPort`, `BusinessAiEnginePort`, `BusinessConnectorReadBridge`).
-- `src/business/bridge.ts` et `src/business/index.ts` : pont officiel exposé aux autres modules Reelora.
+- `src/business/bridge.ts` et `src/business/index.ts` : pont officiel exposé aux autres modules VYORA.
 - `docs/reelora-ai-platform-contracts.md` : guide de séparation des zones d’ownership entre le moteur IA (Arena) et la plateforme générale (VS Code).
 - `src/business/BusinessGrowWorkspace.tsx` : interface de chat, routage auto/manuel par rôle métier, contrôle `allowFallback`, approbation d’actions assistées, transfert typé sans débit vers `/app/studio`, statut/vérification des fournisseurs, mémoire consentie et intégrations planifiées.
 - `src/business/api.ts` et `src/business/ai/registry.ts` : client authentifié vers l’Edge Function `business-grow`, registre des fournisseurs, adaptateurs extensibles et descripteurs de capacités.
