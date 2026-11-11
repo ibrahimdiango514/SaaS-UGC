@@ -394,7 +394,13 @@ describe('Business Grow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     expect(await screen.findByText('Aidez-moi à planifier.')).toBeTruthy();
-    expect(await screen.findAllByText('Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.')).toHaveLength(2);
+    // Le statut réel du message persisté reste lisible, sans détail technique.
+    expect(
+      await screen.findAllByText('Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.'),
+    ).toHaveLength(1);
+    // La bannière globale explique l'action réelle à effectuer (contrôle valable 24 h).
+    expect(screen.getByText(/Aucun service IA n’est vérifié pour le moment\. Ouvrez « Services IA »/)).toBeTruthy();
+    expect(screen.queryByText(/NO_VERIFIED_PROVIDER/)).toBeNull();
   });
 
   it('affiche la réponse réellement persistée sans exposer le service utilisé', async () => {

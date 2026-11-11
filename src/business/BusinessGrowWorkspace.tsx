@@ -225,6 +225,27 @@ function isVerifiedProvider(provider: BusinessProviderStatus | undefined): boole
   );
 }
 
+/** Fenêtre réelle de validité d'un contrôle fournisseur côté SQL : 24 h. */
+const PROVIDER_HEALTH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Sélectionne les fournisseurs réellement configurés côté serveur dont le
+ * dernier contrôle date de plus de 24 h (ou n'existe pas). Ce sont exactement
+ * ceux qui font échouer `messages.send` en `NO_VERIFIED_PROVIDER`.
+ */
+export function providersNeedingVerification(
+  statuses: BusinessProviderStatus[] | null,
+  now = Date.now(),
+): BusinessProviderStatus[] {
+  return (statuses ?? []).filter((provider) => {
+    if (provider.provider_key === 'muapi') return false;
+    if (provider.config_status !== 'configured') return false;
+    if (!provider.checked_at) return true;
+    const checked = Date.parse(provider.checked_at);
+    return !Number.isFinite(checked) || now - checked > PROVIDER_HEALTH_WINDOW_MS;
+  });
+}
+
 function formatProbeTime(checkedAt: string | null | undefined): string {
   if (!checkedAt) return '';
   const date = new Date(checkedAt);
@@ -1664,7 +1685,13 @@ export default function BusinessGrowWorkspace() {
         'BG_INSUFFICIENT_QUOTA',
       ].includes(code)) {
         const errorMessage = humanizeError(code, 'Impossible de traiter votre demande. Réessayez.');
-        setError(errorMessage);
+        // Un service réel non vérifié depuis 24 h donne exactement ce code :
+        // on guide vers la vérification plutôt que d'afficher une panne générique.
+        setError(
+          code === 'NO_VERIFIED_PROVIDER'
+            ? 'Aucun service IA n’est vérifié pour le moment. Ouvrez « Services IA » puis lancez « Vérifier la connexion » sur un fournisseur configuré : votre message reste enregistré et aucun crédit n’a été débité.'
+            : errorMessage,
+        );
         await Promise.allSettled([
           loadConversations(),
           conversationId
@@ -1833,6 +1860,11 @@ export default function BusinessGrowWorkspace() {
   const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
   const ActiveIcon = activeSection.icon;
   const availableProviderCount = (providers ?? []).filter((provider) => isVerifiedProvider(provider)).length;
+  // Un contrôle fournisseur expire au bout de 24 h côté SQL : sans nouveau
+  // sondage explicite, l'envoi de messages échoue en NO_VERIFIED_PROVIDER.
+  const staleProviders = providersNeedingVerification(providers);
+  const showStaleNotice = backendReady && staleProviders.length > 0;
+  const noVerifiedProvider = availableProviderCount === 0;
   const providerStatusTone = availableProviderCount
     ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100'
     : backendReady
@@ -1867,6 +1899,28 @@ export default function BusinessGrowWorkspace() {
           </span>
         </div>
       </header>
+
+      {showStaleNotice && (
+        <section
+          className={cn(
+            'flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-3 text-xs leading-relaxed',
+            noVerifiedProvider
+              ? 'border-amber-400/25 bg-amber-400/[0.06] text-amber-100'
+              : 'border-white/[0.08] bg-white/[0.02] text-slate-300',
+          )}
+          role="status"
+          data-testid="business-stale-providers"
+        >
+          <span className="min-w-0">
+            {noVerifiedProvider
+              ? 'Le contrôle de disponibilité de vos services IA a expiré (validité serveur : 24 h). Aucune réponse ne sera simulée tant qu’un service n’aura pas été re-vérifié.'
+              : `Le secours automatique est dégradé : ${staleProviders.length} service(s) configuré(s) n’a plus de contrôle valide (24 h). Vérifiez-le pour garantir les réponses en cas d’indisponibilité du service principal.`}
+          </span>
+          <Button size="sm" variant="outline" icon={<RefreshCw size={12} />} onClick={() => setSection('providers')}>
+            Ouvrir les services IA
+          </Button>
+        </section>
+      )}
 
       <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
@@ -1963,6 +2017,7 @@ export default function BusinessGrowWorkspace() {
               onOpenAssistant={() => setSection('chat')}
               onOpenIntegrations={() => setSection('integrations')}
               onOpenProviders={() => setSection('providers')}
+              initialTab={entryIntent?.growthTab ?? null}
             />
           )}
           {section === 'company' && <CompanyContextView workspace={workspace} />}

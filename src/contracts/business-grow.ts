@@ -38,6 +38,13 @@ export interface BusinessGrowUgcHandoffBrief {
   cta: string | null;
   preferredRatio: UgcPreferredRatio | null;
   suggestedSector: string | null;
+  /** Produit réel du catalogue VYORA quand le brief provient d'une fiche existante. */
+  productId: string | null;
+  /** Projet publicitaire VYORA à réutiliser, pour éviter un doublon de projet. */
+  projectId: string | null;
+  projectTitle: string | null;
+  /** Plateforme visée par le brief (TikTok, Instagram Reels…), si connue. */
+  platform: string | null;
   consumesStudioCredits: false;
 }
 
@@ -48,6 +55,22 @@ export type BusinessGrowWorkspaceSection =
   | 'memory'
   | 'providers'
   | 'integrations';
+
+/** Onglets réels du cockpit croissance Business Grow. */
+export type BusinessGrowGrowthTab =
+  | 'overview'
+  | 'company'
+  | 'goals'
+  | 'catalog'
+  | 'market'
+  | 'crm'
+  | 'strategy'
+  | 'activity'
+  | 'settings';
+
+const VALID_GROWTH_TABS = new Set<BusinessGrowGrowthTab>([
+  'overview', 'company', 'goals', 'catalog', 'market', 'crm', 'strategy', 'activity', 'settings',
+]);
 
 export interface BusinessGrowEntryIntent {
   version: 'reelora-bg-entry-v1';
@@ -60,6 +83,10 @@ export interface BusinessGrowEntryIntent {
   productName?: string | null;
   initialDraft?: string | null;
   sourceRoute?: string | null;
+  /** Onglet du cockpit croissance à ouvrir après l'arrivée. */
+  growthTab?: BusinessGrowGrowthTab | null;
+  /** Plateforme visée, quand elle vient d'un projet Studio réel. */
+  platform?: string | null;
 }
 
 export interface BusinessGrowProviderSummary {
@@ -164,6 +191,14 @@ function parseRatio(value: unknown): UgcPreferredRatio | null {
   return null;
 }
 
+/** Identifiants VYORA (produit, projet) : UUID uniquement, sinon ignorés. */
+function optionalUuid(value: unknown): string | null {
+  const clean = cleanText(value, 64);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clean)
+    ? clean
+    : null;
+}
+
 /**
  * Normalise un brief provenant de Business Grow (tool `handoff_ugc_brief`,
  * `input_args` ou `output_result.handoffDraft`) en contrat strict pour le Studio UGC.
@@ -212,6 +247,10 @@ export function normalizeUgcHandoffBrief(
     cta,
     preferredRatio: parseRatio(record.preferredRatio ?? record.ratio),
     suggestedSector: optionalText(record.suggestedSector ?? record.sector, 40),
+    productId: optionalUuid(record.productId),
+    projectId: optionalUuid(record.projectId),
+    projectTitle: optionalText(record.projectTitle, 160),
+    platform: optionalText(record.platform, 40),
     consumesStudioCredits: false,
   };
 }
@@ -290,5 +329,76 @@ export function parseBusinessGrowEntryIntent(state: unknown): BusinessGrowEntryI
     productName: optionalText(rawIntent.productName, 160),
     initialDraft: optionalText(rawIntent.initialDraft, 4000),
     sourceRoute: optionalText(rawIntent.sourceRoute, 120),
+    growthTab: typeof rawIntent.growthTab === 'string'
+      && VALID_GROWTH_TABS.has(rawIntent.growthTab as BusinessGrowGrowthTab)
+      ? rawIntent.growthTab as BusinessGrowGrowthTab
+      : null,
+    platform: optionalText(rawIntent.platform, 40),
   };
+}
+
+/**
+ * Contexte réel disponible dans le Studio UGC pour une continuité de travail
+ * Business Grow ↔ Studio. Chaque champ provient d'un projet, d'un produit ou
+ * d'une marque réellement chargés : aucune valeur n'est inventée.
+ */
+export interface StudioToBusinessGrowContext {
+  projectId?: string | null;
+  projectTitle?: string | null;
+  brandName?: string | null;
+  productName?: string | null;
+  campaignObjective?: string | null;
+  targetAudience?: string | null;
+  platform?: string | null;
+  brief?: string | null;
+  scriptText?: string | null;
+}
+
+/**
+ * Construit l'état de navigation Studio UGC → Business Grow.
+ *
+ * Le contexte projet / produit / script devient un brouillon de conversation :
+ * l'utilisateur continue son travail sans ressaisie. Aucune écriture, aucun
+ * appel IA et aucun débit ne sont déclenchés : le brouillon n'est envoyé que
+ * si l'utilisateur clique explicitement sur « Envoyer ».
+ */
+export function buildBusinessGrowLocationStateFromStudio(
+  context: StudioToBusinessGrowContext,
+  options?: { growthTab?: BusinessGrowGrowthTab | null; section?: BusinessGrowWorkspaceSection },
+): { businessGrowIntent: BusinessGrowEntryIntent } | undefined {
+  const projectTitle = optionalText(context.projectTitle, 160);
+  const productName = optionalText(context.productName, 160);
+  const brandName = optionalText(context.brandName, 120);
+  const brief = optionalText(context.brief, 800);
+  const scriptText = optionalText(context.scriptText, 1200);
+  const objective = optionalText(context.campaignObjective, 160);
+  const audience = optionalText(context.targetAudience, 160);
+
+  const draftParts = [
+    projectTitle ? `Projet UGC en cours : ${projectTitle}.` : '',
+    productName ? `Produit : ${productName}.` : '',
+    brandName ? `Marque : ${brandName}.` : '',
+    objective ? `Objectif de campagne : ${objective}.` : '',
+    audience ? `Audience cible : ${audience}.` : '',
+    brief ? `Brief : ${brief}.` : '',
+    scriptText ? `Script existant : ${scriptText}.` : '',
+  ].filter(Boolean);
+  const initialDraft = draftParts.length
+    ? `${draftParts.join(' ')} Propose un plan de croissance et des angles UGC cohérents avec ce contexte.`.slice(0, 4000)
+    : null;
+
+  const projectId = optionalUuid(context.projectId);
+  if (!initialDraft && !projectId && !options?.growthTab) return undefined;
+
+  return buildBusinessGrowLocationState({
+    section: options?.section ?? 'growth',
+    growthTab: options?.growthTab ?? 'strategy',
+    projectId,
+    projectTitle,
+    brandName,
+    productName,
+    initialDraft,
+    platform: optionalText(context.platform, 40),
+    sourceRoute: '/app/studio',
+  });
 }

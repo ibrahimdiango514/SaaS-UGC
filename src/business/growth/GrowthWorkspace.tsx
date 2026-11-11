@@ -30,7 +30,7 @@ import {
   CatalogPanel, CompanyPanel, CrmPanel, GoalsPanel, GrowthKpi, MarketPanel, StrategyPanel,
 } from './GrowthPanels';
 
-type GrowthTab = 'overview' | 'company' | 'goals' | 'catalog' | 'market' | 'crm' | 'strategy' | 'activity' | 'settings';
+export type GrowthTab = 'overview' | 'company' | 'goals' | 'catalog' | 'market' | 'crm' | 'strategy' | 'activity' | 'settings';
 
 const TABS: { id: GrowthTab; label: string; icon: typeof Target }[] = [
   { id: 'overview', label: 'Vue d’ensemble', icon: BarChart3 },
@@ -80,7 +80,7 @@ function extractActions(answer: string): string[] {
 
 export default function GrowthWorkspace({
   workspace, workspaceId, memory, loadingMemory, memoryError, onReloadMemory, onOpenAssistant,
-  onOpenIntegrations, onOpenProviders,
+  onOpenIntegrations, onOpenProviders, initialTab,
 }: {
   workspace: Workspace | null;
   workspaceId: string | null;
@@ -91,9 +91,17 @@ export default function GrowthWorkspace({
   onOpenAssistant: (prompt?: string) => void;
   onOpenIntegrations?: () => void;
   onOpenProviders?: () => void;
+  /** Onglet demandé par une navigation entrante (Business Grow → Croissance). */
+  initialTab?: GrowthTab | null;
 }) {
   const toast = useToast();
-  const [tab, setTab] = useState<GrowthTab>('overview');
+  const [tab, setTab] = useState<GrowthTab>(initialTab ?? 'overview');
+
+  // Navigation entrante (Studio UGC, Dashboard, Projet) : l'onglet demandé est
+  // appliqué une seule fois, puis l'utilisateur reprend la main librement.
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
   const [products, setProducts] = useState<Array<{ name: string; description?: string | null; price?: string | null }>>([]);
   const [productsError, setProductsError] = useState('');
   const [aiBusy, setAiBusy] = useState(false);

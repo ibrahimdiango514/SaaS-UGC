@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertCircle, ArrowRight, CheckCircle2, Clapperboard, Coins, Database, Info,
+  AlertCircle, ArrowRight, Brain, CheckCircle2, Clapperboard, Coins, Database, Info,
   Layers3, Plus, RefreshCw, Scissors, Square,
 } from 'lucide-react';
 import { Banner, Button, ErrorState, LoadingState, Modal, Select, cn } from '../components/ui';
@@ -41,7 +41,8 @@ import {
 } from './plan';
 import { loadLocalDraft, saveLocalDraft as createLocalEditorDraft } from './editor/persistence';
 import {
-  extractUgcHandoffBriefFromLocationState, formatUgcPromptFromBrief,
+  buildBusinessGrowLocationStateFromStudio, extractUgcHandoffBriefFromLocationState,
+  formatUgcPromptFromBrief,
 } from '../contracts/business-grow';
 
 const ACTIVE = ['queued', 'reserved', 'processing'];
@@ -98,6 +99,7 @@ export default function GenerationStudio() {
       ...base,
       ...(formattedPrompt ? { prompt: formattedPrompt } : {}),
       ...(handedOffBrief.summary ? { script: handedOffBrief.summary } : {}),
+      ...(handedOffBrief.product && !formattedPrompt ? { prompt: handedOffBrief.product } : {}),
       ...(handedOffBrief.preferredRatio ? { ratio: handedOffBrief.preferredRatio } : {}),
     };
   });
@@ -114,7 +116,8 @@ export default function GenerationStudio() {
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [estimateError, setEstimateError] = useState('');
   const [reference, setReference] = useState<SignedReference | null>(null);
-  const [projectId, setProjectId] = useState(search.get('projet') ?? '');
+  // Projet demandé par le chemin d'arrivée : Business Grow (brief transféré) ou ?projet=.
+  const [projectId, setProjectId] = useState(search.get('projet') ?? handedOffBrief?.projectId ?? '');
   const [projectModal, setProjectModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [estimate, setEstimate] = useState<VideoCostEstimate | null>(null);
@@ -204,7 +207,7 @@ export default function GenerationStudio() {
       setModels(c.models ?? []); setCatalog(c.catalog ?? null);
       setCatalogError(c.catalog?.error ? 'Le catalogue vidéo est temporairement indisponible.' : '');
       setAvatars(av);
-      setProjectId((current) => current || p[0]?.id || '');
+      setProjectId((current) => (p.some((project) => project.id === current) ? current : p[0]?.id ?? ''));
     } catch (err) {
       setLoadError('Impossible de charger le Studio pour le moment. Vérifiez votre connexion puis réessayez.');
     } finally { setLoading(false); }
@@ -653,9 +656,44 @@ export default function GenerationStudio() {
   const catalogSummary = catalog ? `${catalog.active} modèles disponibles` : 'Actualisation en cours…';
   const catalogModel = selectedModel;
 
+  // Contexte réel transmis à Business Grow pour poursuivre le travail sans ressaisie.
+  const activeProject = projects.find((p) => p.id === projectId) ?? null;
+  const businessContinuityState = buildBusinessGrowLocationStateFromStudio({
+    projectId: activeProject?.id ?? null,
+    projectTitle: activeProject?.title ?? null,
+    campaignObjective: activeProject?.campaign_objective ?? null,
+    targetAudience: activeProject?.target_audience ?? null,
+    platform: activeProject?.platform ?? null,
+    brief: activeProject?.brief ?? form.prompt.slice(0, 800),
+    scriptText: form.script || null,
+    productName: plan.product || null,
+  }, { growthTab: 'strategy', section: 'growth' });
+
   return (
     <div className="studio-v2 animate-fadeUp pb-2">
       <StudioTopBar />
+
+      <section className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-400/20 bg-violet-400/[0.05] px-3 py-2.5" data-testid="studio-business-continuity">
+        <div className="min-w-0 text-[11px] leading-relaxed text-violet-100/90">
+          <span className="font-semibold text-violet-100">Continuité Business Grow</span>
+          {' · '}
+          {activeProject
+            ? `projet « ${activeProject.title} » et brief transmis`
+            : form.prompt.trim() || form.script.trim()
+              ? 'votre brief actuel sera transmis'
+              : 'aucun brief saisi pour le moment'}
+          . Aucun crédit Studio n’est consommé par le transfert.
+        </div>
+        {businessContinuityState && (
+          <Link
+            to="/app/business"
+            state={businessContinuityState}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-300/25 bg-violet-400/10 px-2.5 py-1.5 text-[11px] font-medium text-violet-100 transition hover:border-violet-200/45 hover:bg-violet-400/20"
+          >
+            <Brain size={12} /> Poursuivre dans Business Grow <ArrowRight size={11} />
+          </Link>
+        )}
+      </section>
 
       <section className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="État du studio">
         <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
