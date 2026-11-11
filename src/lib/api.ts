@@ -749,6 +749,71 @@ export async function aiEngineHealth(): Promise<AiEngineHealth> {
   return invokeEdge<AiEngineHealth>('vyora-ai', { action: 'health' });
 }
 
+/* -------------------------------------------------------------------------- */
+/* Surveillance des fournisseurs IA (job pg_cron)                              */
+/* -------------------------------------------------------------------------- */
+
+export interface ProviderHealthCronJob {
+  jobid: number;
+  jobname: string;
+  schedule: string;
+  active: boolean;
+  command: string;
+}
+
+export interface ProviderHealthCronRun {
+  jobid: number;
+  jobname: string | null;
+  status: string;
+  return_message: string | null;
+  start_time: string;
+  end_time: string | null;
+}
+
+export interface ProviderHealthCronProvider {
+  provider_key: string;
+  last_checked_at: string | null;
+  last_status: string | null;
+  last_latency_ms: number | null;
+  last_error_code: string | null;
+  consecutive_failures: number;
+  alert_open: boolean;
+  last_dispatch_at: string | null;
+  last_healthy_at: string | null;
+  verified_model: string | null;
+  provider_status: string | null;
+  provider_enabled: boolean | null;
+}
+
+export interface ProviderHealthCronHistory {
+  provider_key: string;
+  status: string;
+  attempt: number;
+  http_status: number | null;
+  latency_ms: number | null;
+  error_code: string | null;
+  provider_model_key: string | null;
+  checked_at: string | null;
+  created_at: string;
+}
+
+export interface ProviderHealthCronStatus {
+  generated_at: string;
+  jobs: ProviderHealthCronJob[];
+  last_runs: ProviderHealthCronRun[];
+  providers: ProviderHealthCronProvider[];
+  history: ProviderHealthCronHistory[];
+}
+
+/**
+ * État réel du job pg_cron de surveillance : jobs planifiés, dernières
+ * exécutions, dernière vérification de chaque fournisseur. Lecture serveur
+ * (`vyora_provider_health_status`), refusée à tout non-administrateur.
+ */
+export async function adminProviderHealthCron(): Promise<ProviderHealthCronStatus> {
+  return rpc<ProviderHealthCronStatus>('vyora_provider_health_status', {});
+}
+
 export async function adminMetrics(months = 12): Promise<AdminMetrics> {
   return rpc<AdminMetrics>('vyora_admin_metrics', { p_months: months });
 }

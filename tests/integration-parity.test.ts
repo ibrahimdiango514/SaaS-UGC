@@ -17,7 +17,7 @@ const config = read('supabase/config.toml');
 describe('Une seule intégration MuAPI, de bout en bout', () => {
   it('déclare les quatre fonctions Studio, Business Grow et le bootstrap propriétaire', () => {
     const declared = [...config.matchAll(/^\[functions\.([a-z0-9-]+)\]/gm)].map((m) => m[1]);
-    expect(declared.sort()).toEqual(['business-grow', 'reelora-ai', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker']);
+    expect(declared.sort()).toEqual(['business-grow', 'reelora-ai', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker', 'vyora-provider-health']);
     expect(config).toMatch(/\[functions\.business-grow\]\r?\nverify_jwt = true/);
   });
 

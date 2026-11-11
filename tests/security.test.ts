@@ -66,10 +66,20 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(3);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(4);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
+    // Surveillance fournisseur : jeton Vault comparé à temps constant + en-tête
+    // dédié, jamais un JWT utilisateur (le job pg_cron n'en a pas).
+    expect(config).toMatch(/\[functions\.vyora-provider-health\][\s\S]*?verify_jwt\s*=\s*false/);
+    const providerHealth = read('supabase/functions/vyora-provider-health/index.ts');
+    expect(providerHealth).toContain("x-vyora-cron");
+    expect(providerHealth).toContain('constantTimeEqual');
+    expect(providerHealth).toContain('vyora_provider_health_cron_token');
+    // Contrôle catalogue uniquement : aucune complétion, donc aucune génération.
+    expect(providerHealth).not.toContain('chat/completions');
+    expect(providerHealth).not.toContain(':generateContent');
     const worker = read('supabase/functions/reelora-video-worker/index.ts');
     expect(worker).toContain('constantTimeEqual');
     expect(worker).toContain('reelora_worker_token');

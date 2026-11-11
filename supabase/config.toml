@@ -45,3 +45,10 @@ verify_jwt = true
 # (comparaison à temps constant) + re-vérification serveur de l'état réel.
 [functions.reelora-video-worker]
 verify_jwt = false
+
+# Surveillance planifiée des fournisseurs IA (pg_cron -> pg_net). Le job ne peut
+# pas présenter de JWT utilisateur : la protection repose sur un jeton Vault
+# comparé à temps constant + l'en-tête `x-vyora-cron`. Contrôle catalogue
+# uniquement (aucune génération, aucun crédit).
+[functions.vyora-provider-health]
+verify_jwt = false
