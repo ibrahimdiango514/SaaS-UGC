@@ -9,7 +9,7 @@ vi.mock('../src/context/AuthContext', () => ({ useAuth: mocks.useAuth }));
 
 import { AdminRoute, ProtectedRoute } from '../src/components/Routes';
 
-function renderAdminRoute({ user, isAdmin }: { user: object | null; isAdmin: boolean }) {
+function renderAdminRoute({ user, isAdmin, initialPath = '/admin' }: { user: object | null; isAdmin: boolean; initialPath?: string }) {
   mocks.useAuth.mockReturnValue({
     user,
     isAdmin,
@@ -19,13 +19,13 @@ function renderAdminRoute({ user, isAdmin }: { user: object | null; isAdmin: boo
   });
 
   return render(
-    <MemoryRouter initialEntries={['/admin']}>
+    <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route element={<ProtectedRoute />}>
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<p>Administration protégée</p>} />
           </Route>
-          <Route path="/app" element={<p>Espace utilisateur</p>} />
+          <Route path="/app/*" element={<p>Espace utilisateur</p>} />
         </Route>
         <Route path="/connexion" element={<p>Connexion</p>} />
       </Routes>
@@ -49,6 +49,12 @@ describe('route /admin', () => {
     renderAdminRoute({ user: { id: 'regular-user' }, isAdmin: false });
 
     expect(screen.getByText('Espace utilisateur')).toBeTruthy();
+  });
+
+  it('redirige un administrateur hors du dashboard client vers la console', () => {
+    renderAdminRoute({ user: { id: 'admin-user' }, isAdmin: true, initialPath: '/app/studio' });
+
+    expect(screen.getByText('Administration protégée')).toBeTruthy();
   });
 
   it('redirige une session absente vers la connexion', () => {

@@ -9,7 +9,7 @@ import { signUp } from '../lib/api';
 import { asAppError } from '../lib/errors';
 
 export default function Signup() {
-  const { user } = useAuth();
+  const { user, isAdmin, loading } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   const [fullName, setFullName] = useState('');
@@ -22,7 +22,9 @@ export default function Signup() {
   const [error, setError] = useState('');
   const [needConfirmation, setNeedConfirmation] = useState(false);
 
-  useEffect(() => { if (user) navigate('/app', { replace: true }); }, [user, navigate]);
+  useEffect(() => {
+    if (user && !loading) navigate(isAdmin ? '/admin' : '/app', { replace: true });
+  }, [user, loading, isAdmin, navigate]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();

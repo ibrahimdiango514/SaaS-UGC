@@ -57,7 +57,7 @@ async function invokeEdge<T>(name: string, body: Record<string, unknown>): Promi
 /* -------------------------------------------------------------------------- */
 
 export async function bootstrap(): Promise<{
-  user_id: string; workspace_id: string; plan: string; credits: number; is_admin: boolean;
+  user_id: string; workspace_id: string | null; plan: string | null; credits: number; is_admin: boolean;
 }> {
   return rpc('reelora_bootstrap');
 }
@@ -133,7 +133,7 @@ export async function getMembers(workspaceId: string): Promise<WorkspaceMember[]
 export async function signUp(email: string, password: string, fullName: string) {
   const { data, error } = await supabase.auth.signUp({
     email, password,
-    options: { data: { full_name: fullName }, emailRedirectTo: `${SITE_URL}/auth/callback` },
+    options: { data: { full_name: fullName, app_scope: 'vyora' }, emailRedirectTo: `${SITE_URL}/auth/callback` },
   });
   if (error) throw new AppError(humanizeError(error.message), 'SIGNUP_ERROR');
   return data;

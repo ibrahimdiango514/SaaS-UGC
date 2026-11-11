@@ -122,7 +122,7 @@ describe('bibliothèque Reelora : RPC additive et RLS', () => {
 
 describe('bootstrap propriétaire et budget fournisseur', () => {
   const migration = read('supabase/migrations/20261111150407_vyora_owner_admin_provider_breakdown.sql');
-  const bootstrapMigration = read('supabase/migrations/20261111155000_vyora_owner_bootstrap_status.sql');
+  const bootstrapMigration = read('supabase/migrations/20261111160505_vyora_owner_bootstrap_status_20261111.sql');
 
   it('réserve le rôle administrateur au bootstrap unique et protège le rôle propriétaire', () => {
     expect(migration).toContain("where role = 'admin'");

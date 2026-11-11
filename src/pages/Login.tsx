@@ -5,11 +5,11 @@ import AuthShell from '../components/AuthShell';
 import { Button, Card, ErrorState, Input } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { signIn } from '../lib/api';
+import { bootstrap, signIn } from '../lib/api';
 import { asAppError } from '../lib/errors';
 
 export default function Login() {
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -19,7 +19,9 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => { if (!loading && user) navigate('/app', { replace: true }); }, [user, loading, navigate]);
+  useEffect(() => {
+    if (!loading && user) navigate(isAdmin ? '/admin' : '/app', { replace: true });
+  }, [user, loading, isAdmin, navigate]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -28,15 +30,16 @@ export default function Login() {
     setSubmitting(true);
     try {
       await signIn(email.trim(), password);
+      const account = await bootstrap();
       toast.success('Bienvenue sur VYORA !');
       const from = (location.state as { from?: string } | null)?.from;
-      navigate(from && from.startsWith('/app') ? from : '/app', { replace: true });
+      navigate(account.is_admin ? '/admin' : from && from.startsWith('/app') ? from : '/app', { replace: true });
     } catch (err) {
       setError(asAppError(err, 'Connexion impossible.').message);
     } finally { setSubmitting(false); }
   };
 
-  if (!loading && user) return <Navigate to="/app" replace />;
+  if (!loading && user) return <Navigate to={isAdmin ? '/admin' : '/app'} replace />;
 
   return (
     <AuthShell title="Connexion" subtitle="Accédez à votre espace de création VYORA."

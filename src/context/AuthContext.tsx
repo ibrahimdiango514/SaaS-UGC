@@ -42,6 +42,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const boot = await bootstrap();
       if (requestId !== dataRequestId.current || currentUid.current !== activeUser.id) return;
       setIsAdmin(Boolean(boot.is_admin));
+      if (boot.is_admin) {
+        setProfile(null);
+        setQuota(null);
+        setWorkspace(null);
+        setLoading(false);
+        return;
+      }
+      if (!boot.workspace_id) throw new Error('Le serveur n’a pas associé de workspace à ce compte VYORA.');
       const [p, q, ws] = await Promise.all([
         getProfile(activeUser.id),
         getQuota(),

@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Button, ErrorState, LoadingState } from './ui';
 
 export function ProtectedRoute() {
-  const { user, loading, bootstrapError, refreshAll } = useAuth();
+  const { user, isAdmin, loading, bootstrapError, refreshAll } = useAuth();
   const location = useLocation();
   if (loading) return <div className="grid min-h-screen place-items-center"><LoadingState label="Chargement de votre session…" /></div>;
   if (!user) return <Navigate to="/connexion" replace state={{ from: location.pathname }} />;
@@ -15,11 +15,13 @@ export function ProtectedRoute() {
       </div>
     );
   }
+  if (isAdmin && location.pathname.startsWith('/app')) return <Navigate to="/admin" replace />;
   return <Outlet />;
 }
 
 export function AdminRoute() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, loading } = useAuth();
+  if (loading) return <div className="grid min-h-screen place-items-center"><LoadingState label="Vérification des droits administrateur…" /></div>;
   if (!isAdmin) return <Navigate to="/app" replace />;
   return <Outlet />;
 }

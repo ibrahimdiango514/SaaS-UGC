@@ -2,7 +2,7 @@
 
 SaaS francophone de création de contenus UGC et de croissance d'activité. Le Studio vidéo utilise MuAPI côté serveur ; Business Grow dispose de son schéma Supabase et de son Edge Function. Les fournisseurs sont présentés comme opérationnels uniquement lorsque leurs secrets et modèles sont effectivement vérifiés. Ce dépôt contient le frontend, les migrations SQL, les Edge Functions et les tests.
 
-> **État de production vérifié le 11 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. Les migrations de tarification vidéo, plafond fournisseur et bootstrap admin sont appliquées ; `reelora-video` v9 et `reelora-video-worker` v5 sont déployées. Le cron worker est actif. `MUAPI_API_KEY` est présent côté serveur, mais sa validité fournisseur n'a pas été vérifiée ; `GROQ_API_KEY` est absent. Tarification et plafond USD restent **désactivés** tant que l'administrateur n'a pas renseigné les paramètres et un plafond autorisé. Aucune génération payante n'a été lancée. L'historique Supabase contient aussi des migrations historiques d'autres composants du projet qui ne sont pas dans ce dépôt ; aucune réparation globale n'a été effectuée.
+> **État de production vérifié le 12 novembre 2026** — le site public est [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour VYORA sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur ; Groq n'est pas configuré. Aucune génération payante n'a été lancée. Les changements frontend de cette branche doivent encore être publiés avant que la correction de redirection et d'interface soit disponible en production.
 
 ---
 
@@ -14,7 +14,7 @@ SaaS francophone de création de contenus UGC et de croissance d'activité. Le S
 | Authentification | Inscription, connexion, mot de passe oublié, callback Supabase, réinitialisation, déconnexion, session persistante |
 | Tableau de bord | Statistiques réelles, quotas, dernières générations, état des intégrations Groq / MuAPI / worker |
 | Projets | Création, recherche, filtre par statut, fiche détaillée, édition du brief, scripts, scènes, générations, suppression |
-| **UGC Studio MuAPI** | 5 étapes : projet/produit/objectif → script Groq → scènes & prompts → **catalogue de modèles MuAPI + paramètres vérifiés** → coût estimé, confirmation explicite, progression, erreur lisible, **lecteur vidéo de prévisualisation**, téléchargement, vidéos précédentes et reprise d'un suivi |
+| **UGC Studio MuAPI** | Catalogue et suivi présents. Une génération réelle n'est pas autorisée actuellement : le plafond est à 0 USD, la tarification est désactivée et la validité de la clé MuAPI n'a pas été confirmée par le fournisseur. Aucune génération payante n'a été lancée. |
 | **Business Grow** | `/app/business` : espace chat séparé, contexte conversationnel, attribution du fournisseur, mémoire métier et registre initial. Schéma et Edge Function présents en production ; disponibilité IA à confirmer après configuration des secrets et des modèles côté serveur. Aucun crédit du Studio n'est utilisé. |
 | Avatars | CRUD, **image de référence** uploadée dans `ugc-assets` pour les modèles MuAPI image → vidéo, avatar par défaut |
 | Scripts IA | Groq (accroche, script, CTA, angle, allégations à éviter, storyboard), accroches alternatives, enregistrement en base, approbation |
@@ -23,7 +23,7 @@ SaaS francophone de création de contenus UGC et de croissance d'activité. Le S
 | Bibliothèque | Vidéos réellement produites, URL signées (1 h), lecteur, téléchargement, suppression |
 | Historique | Toutes les tâches, modèle MuAPI, `request_id`, événements de production, filtres, annulation, **journal complet du ledger de crédits**, lien « Reprendre le suivi » |
 | Abonnement | 4 formules issues de la base, quotas mensuels, demande de changement, recharges, codes promotionnels |
-| Administration | Vue d'ensemble, utilisateurs/rôles, suspension, formule, ajustement de crédits, recharges, catalogue, paramètres, audit |
+| Administration | Vue d'ensemble, utilisateurs/rôles, suspension, formule, ajustement de crédits, recharges, catalogue, paramètres, audit. Les changements frontend de redirection et d'isolation sont en attente de publication. |
 | Transverse | Interface 100 % française, mobile-first, responsive, états de chargement/erreur/vide, notifications, error boundary |
 
 ## 1bis. Nouvelle expérience « Reelora Video Studio »
@@ -32,7 +32,7 @@ L'entrée principale `/app/studio` est une refonte originale, premium et mobile-
 
 | Espace | Route | État |
 | --- | --- | --- |
-| **Video Studio** | `/app/studio` | **Opérationnel** : catalogue MuAPI vérifié, modes, prompt, crédits, suivi et résultat. Le secret serveur `MUAPI_API_KEY` est configuré ; la génération réelle exige un devis affiché puis une confirmation explicite, et n'a pas encore été lancée. |
+| **Video Studio** | `/app/studio` | Catalogue et suivi présents. Une génération réelle n'est pas autorisée actuellement : le plafond est à 0 USD, la tarification est désactivée et la validité de la clé MuAPI n'a pas été confirmée par le fournisseur. |
 | **My Generations** | `/app/historique`, `/app/studio/generations` | **Opérationnel** : tâches, modèle, paramètres, description, coût, date, événements, ledger, reprise du suivi et relance avec paramètres similaires. |
 | **My Projects** | `/app/projets`, `/app/studio/projects` | **Opérationnel** : projets, scripts, scènes et rattachement des créations. |
 | **Mes créations enregistrées** | `/app/bibliotheque`, `/app/studio/saved` | **Opérationnel** : lecture, téléchargement, modèle, paramètres, coût, date, rattachement à un projet, relance. Fichiers dans `ugc-assets` privé. |
@@ -52,7 +52,7 @@ Avant le lancement, une confirmation explicite avec case à cocher reprend le mo
 - **Schéma** : `saas_ugc` existant **conservé et réutilisé** (32 tables, 31 vues `security_invoker`) + 8 tables Reelora + 1 table `ugc_video_models` + 9 vues `public.reelora_*`
 - **IA textuelle** : Groq (`llama-3.3-70b-versatile`) — scripts, accroches, dialogues, contenus publicitaires
 - **IA vidéo** : **MuAPI uniquement** (`https://api.muapi.ai/api/v1`, en-tête `x-api-key`). HeyGen et fal.ai ne sont **pas** utilisés.
-- **Tests** : Vitest — 106 tests, 9 fichiers (`tests/muapi.test.ts`, `studio-ux.test.ts`, `groq.test.ts`, `integration-parity.test.ts`, `credits.test.ts`, `security.test.ts`, `errors.test.ts`, `format.test.ts`, `ui.test.tsx`)
+- **Tests** : Vitest — 362 tests, 33 fichiers (dont isolation des comptes VYORA, routage admin, contexte d'authentification, MuAPI, sécurité et parité d'intégration)
 - **Déploiement** : frontend de production [`https://vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app), route `/admin` servie par le SPA ; projet Supabase `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Les fonctions vidéo et leurs migrations sont déployées. L'accès admin, les paiements de bout en bout et une génération vidéo réelle restent à valider avec un compte propriétaire et des paramètres commerciaux autorisés.
 
 Projet Supabase cible : `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Le projet Sofia Immobilier Lab (`yswsildmbeomjlyofnrk`) n'est **jamais** modifié.
@@ -115,7 +115,8 @@ Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models
 | `20261108231047_reelora_muapi_progress.sql` | Mirroir de l'état fournisseur dans `result_payload` (vue publique historique à liste de colonnes explicite) |
 | `20261108233629_reelora_studio_library.sql` | RPC RLS `reelora_attach_asset_to_project` : rattacher une création existante à un projet, sans nouvelle architecture de crédits |
 | `20261111150407_vyora_owner_admin_provider_breakdown.sql` | Rôle admin propriétaire unique, verrouillage des paramètres budget génériques et agrégats de dépenses par fournisseur |
-| `20261111155000_vyora_owner_bootstrap_status.sql` | Statut public booléen du premier bootstrap, sans possibilité d’attribuer un rôle |
+| `20261111160505_vyora_owner_bootstrap_status_20261111.sql` | Statut public booléen du premier bootstrap, sans possibilité d’attribuer un rôle |
+| `20261111165732_vyora_customer_isolation_and_admin_entitlement.sql` | Registre privé des clients VYORA, exclusion des autres apps, garde du provisioning et des RPC clients, séparation des droits/crédits admin |
 | `20261108000014…00015_reelora_avatar_provider_*.sql` | Alias `muapi`/`custom`/`legacy` pour les fiches d'avatar, valeurs historiques conservées, aucun fournisseur retiré nommé dans l'application |
 
 Versions live correspondantes : `20261108223923 reelora_muapi_v1`, `20261108224022 reelora_muapi_sync`, `20261108224047 reelora_muapi_catalog_cast`, `20261108231047 reelora_muapi_progress`, puis `reelora_studio_library`, `reelora_avatar_provider_alias` et `reelora_avatar_provider_generic`. **Aucune table, vue ni donnée préexistante n'a été supprimée** (test automatisé).
@@ -134,13 +135,14 @@ Les inscriptions suivantes reçoivent uniquement le rôle `user`. Le RPC de rôl
 
 | Slug | Version | `verify_jwt` |
 | --- | --- | --- |
-| `reelora-health` | v7 | `false` |
+| `reelora-health` | v8 | `false` |
 | `reelora-owner-bootstrap` | v1 | `false` (session, confirmation e-mail et adresse propriétaire vérifiées côté serveur) |
-| `reelora-ai` | v5 | `true` |
-| `reelora-video` | v9 | `true` |
-| `reelora-video-worker` | v5 | `false` (jeton Vault) |
+| `reelora-ai` | v6 | `true` |
+| `reelora-video` | v10 | `true` |
+| `reelora-video-worker` | v6 | `false` (jeton Vault) |
+| `business-grow` | v6 | `true` |
 
-> `reelora-video` et `reelora-video-worker` ont été redéployées après l'application des migrations de tarification et de plafond. Le cron `reelora-video-tick` exécute une requête chaque minute ; ses dernières exécutions vérifiées ont réussi. L'authentification JWT du gateway vidéo et le jeton du worker rejettent les appels non autorisés.
+> Le worker et les fonctions vidéo sont déployés et le cron `reelora-video-tick` est actif. Cela ne signifie pas qu'une génération payante est utilisable : le plafond reste à zéro et la tarification n'est pas configurée.
 
 ---
 
@@ -190,7 +192,7 @@ cp .env.example .env.local        # ajuster VITE_SITE_URL si besoin
 npm ci
 npm run dev                      # http://localhost:5173
 npm run typecheck                # TypeScript strict, sans erreur
-npm test                         # Vitest : 106 tests
+npm test                         # Vitest : 362 tests
 npm run build                    # tsc -b && vite build -> dist/
 npm run preview                  # prévisualisation de la compilation
 ```
@@ -210,16 +212,7 @@ supabase functions deploy reelora-video-worker --no-verify-jwt
 
 ### Parité frontend ↔ Edge Functions
 
-L'audit de reprise a comparé les sources du dépôt aux **corps live** des quatre fonctions (`get_edge_function`). Trois versions live sont en retard sur le dépôt :
-
-| Fonction | Version live | Écart constaté | Correctif présent dans le dépôt |
-| --- | --- | --- | --- |
-| `reelora-video` | v4, `verify_jwt=true` | `buildMuapiBody` à 4 arguments : ni `workspaceImagePath`, ni `last_image`, ni signature serveur des images privées | source locale : 5 arguments, chemins Storage signés côté serveur, `LAST_IMAGE_MISSING` |
-| `reelora-video-worker` | v2, `verify_jwt=false` | `result_payload` sans `params`, `visual_prompt`, `mode`, `credits_reserved` | source locale : métadonnées complètes pour la bibliothèque |
-| `reelora-ai` | v3, `verify_jwt=true` | fallbacks déterministes fabriquant 3 scènes et renvoyant le prompt de l'utilisateur comme texte « amélioré » | source locale : aucune simulation, `AI_EMPTY_RESPONSE`, remboursement unique |
-| `reelora-health` | v5, `verify_jwt=false` | conforme (booléens de présence uniquement) | redéployée à l'identique lors du contrôle de parité |
-
-**Le frontend reste compatible avec les versions live** : il transmet déjà une URL signée `image_url` en plus des chemins privés, et `script_text` est renseigné à partir du prompt. Les correctifs serveur sont donc des durcissements, pas un prérequis au parcours actuel. Les trois corps corrigés sont **prêts mais non redéployés** : un redéploiement modifie le backend Supabase partagé et reste soumis à autorisation explicite (voir `scripts/deploy-edge-functions.sh`). Aucune **seconde intégration** n'a été créée. `tests/integration-parity.test.ts` verrouille le contrat (chemins Storage privés, `last_image`, métadonnées, absence de fournisseur retiré, absence de simulation Groq).
+Les Edge Functions de production sont déployées aux versions indiquées dans le tableau ci-dessus. La présence d'une fonction ou d'un secret ne prouve pas qu'un fournisseur est prêt à recevoir une requête payante : MuAPI n'a pas été appelé pour valider la clé, la tarification est désactivée et le plafond reste à zéro. Les tests de parité et les contrôles d'accès sont automatisés localement ; ils ne remplacent pas un test de génération réel.
 
 ---
 
@@ -228,9 +221,9 @@ L'audit de reprise a comparé les sources du dépôt aux **corps live** des quat
 | Suite | Résultat |
 | --- | --- |
 | `npm run typecheck` | ✅ 0 erreur |
-| `npm test` | ✅ **106/106 tests**, 9 fichiers — 28 MuAPI (auth, clé absente, solde insuffisant, réservation, idempotence, images Storage signées, `last_image`, métadonnées, suivi, remboursement, webhook + cron), 11 UX Studio, **13 Groq** (indisponibilité, aucune simulation, remboursement unique), **8 parité d'intégration**, 17 sécurité, 7 crédits/estimation, 6 erreurs, 10 formatage, 6 UI |
-| `npm run build` | ✅ `dist/index.html` 1,25 kB (0,72 gzip), CSS 51,49 kB (9,25 gzip), JS 702,66 kB (190,75 gzip), 1668 modules |
-| `GET /functions/v1/reelora-health` | ✅ `{"groq":false,"muapi":true,"supabase":true,"worker":true}` — le booléen `muapi` atteste la présence du secret, pas sa validité fournisseur |
+| `npm test` | ✅ **362 tests**, 33 fichiers — couvre notamment l'isolation VYORA, la redirection et les permissions admin, les crédits, MuAPI, les erreurs, la sécurité et la parité d'intégration |
+| `npm run build` | ✅ production Vite build succeeded (1,715 modules) |
+| `GET /functions/v1/reelora-health` | ✅ `{"groq":false,"muapi":true,"supabase":true,"worker":true}` — `muapi:true` atteste seulement la présence du secret, pas sa validité fournisseur |
 | `GET /functions/v1/reelora-video` sans jeton | ✅ `UNAUTHORIZED_NO_AUTH_HEADER` (passerelle JWT) |
 | `GET /functions/v1/reelora-video-worker` | ✅ `METHOD_NOT_ALLOWED` (POST uniquement, fonction déployée) |
 | **Chaîne serveur live** | ✅ `cron.job` `reelora-video-tick` actif, 5 exécutions `succeeded`, `net._http_response` → **HTTP 200** `{"mode":"tick","expired":0,"checked":0,"outcomes":[]}` : pg_cron → pg_net → worker → RPC validé en conditions réelles |
@@ -250,7 +243,7 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 1. **MuAPI** : la sonde confirme la présence de `MUAPI_API_KEY`, sans révéler sa valeur ni valider la clé auprès du fournisseur. Aucun appel de génération payante n'a été effectué pendant la mise en production.
 2. **Groq** : `GROQ_API_KEY` est absent ; `reelora-ai` répond `GROQ_NOT_CONFIGURED` et les fonctions d'aide IA qui en dépendent ne sont pas disponibles. Aucun contenu IA de substitution n'est généré.
 3. **Tarification vidéo et plafond** : les migrations sont appliquées avec une majoration par défaut de 110 %, mais la tarification reste désactivée faute de taux USD/XOF et de valeur de crédit validés. Le plafond fournisseur est à `0 USD`, désactivé. Les générations restent donc bloquées jusqu'à ce qu'un administrateur configure les valeurs réelles et valide explicitement un plafond non nul.
-4. **Premier administrateur** : créer un compte sur `/inscription`, puis, comme propriétaire, exécuter une fois dans Supabase SQL Editor `select public.reelora_bootstrap_first_admin('adresse@example.com');`. La fonction exige un compte Auth confirmé, refuse le navigateur, et refuse tout bootstrap si un admin existe déjà. Se connecter ensuite sur `/connexion` puis ouvrir `/admin`.
+4. **Premier administrateur** : le mécanisme de création est `/proprietaire`, avec confirmation e-mail et attribution via l'Edge Function propriétaire. Le bootstrap refuse toute seconde attribution. Le compte propriétaire existant a déjà le rôle admin ; il n'est pas nécessaire de créer un autre administrateur.
 5. **Worker** : `reelora_worker_token` existe dans Vault sans être exposé. Le cron `reelora-video-tick` est actif et ses exécutions récentes ont réussi.
 6. **Auth et paiements** : l'API Auth publique indique que l'inscription e-mail est activée et l'auto-confirmation active. Les parcours avec un vrai compte et la liste d'URL de redirection n'ont pas été testés. Les fonctions de paiement SasPay sont présentes, mais aucun paiement ou parcours de bout en bout n'a été réalisé.
 7. **Historique SQL** : les 25 migrations Reelora/Business Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.

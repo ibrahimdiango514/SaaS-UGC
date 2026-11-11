@@ -83,6 +83,24 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('isolation des données chargées par AuthContext', () => {
+  it('ne charge ni profil, ni quota, ni workspace pour un administrateur', async () => {
+    mocks.getSession.mockResolvedValue({ data: { session: session('admin') } });
+    mocks.bootstrap.mockResolvedValue({
+      user_id: 'admin',
+      workspace_id: null,
+      plan: null,
+      credits: 0,
+      is_admin: true,
+    });
+
+    renderAuth();
+    await waitFor(() => expect(screen.getByTestId('auth-state').textContent).toBe('admin|no-profile|no-workspace|ready'));
+
+    expect(mocks.getProfile).not.toHaveBeenCalled();
+    expect(mocks.getQuota).not.toHaveBeenCalled();
+    expect(mocks.getWorkspaces).not.toHaveBeenCalled();
+  });
+
   it('efface les données précédentes et ignore une réponse tardive lors du changement de compte', async () => {
     let resolveBootstrapA!: (value: { user_id: string; workspace_id: string; is_admin: boolean }) => void;
     mocks.getSession.mockResolvedValue({ data: { session: session('user-a') } });
