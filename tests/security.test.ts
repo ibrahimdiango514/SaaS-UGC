@@ -64,14 +64,20 @@ describe('configuration des Edge Functions', () => {
     expect(health.match(/Boolean\(Deno\.env\.get\(/g)?.length).toBe(4);
     expect(health).not.toContain('JSON.stringify(Deno.env');
   });
-  it('seules la sonde et le worker MuAPI (protégé par jeton Vault) sont sans JWT', () => {
+  it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(2);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(3);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
+    expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
     const worker = read('supabase/functions/reelora-video-worker/index.ts');
     expect(worker).toContain('constantTimeEqual');
     expect(worker).toContain('reelora_worker_token');
+    const ownerBootstrap = read('supabase/functions/reelora-owner-bootstrap/index.ts');
+    expect(ownerBootstrap).toContain('/auth/v1/user');
+    expect(ownerBootstrap).toContain('VYORA_OWNER_ADMIN_EMAIL');
+    expect(ownerBootstrap).toContain('reelora_bootstrap_first_admin');
+    expect(ownerBootstrap).toContain('email_confirmation_required');
   });
 
   it('la clé MuAPI n’est jamais une variable frontend ni un secret en clair', () => {
@@ -116,12 +122,16 @@ describe('bibliothèque Reelora : RPC additive et RLS', () => {
 
 describe('bootstrap propriétaire et budget fournisseur', () => {
   const migration = read('supabase/migrations/20261111150407_vyora_owner_admin_provider_breakdown.sql');
+  const bootstrapMigration = read('supabase/migrations/20261111155000_vyora_owner_bootstrap_status.sql');
 
   it('réserve le rôle administrateur au bootstrap unique et protège le rôle propriétaire', () => {
     expect(migration).toContain("where role = 'admin'");
     expect(migration).toContain('admin_role_bootstrap_only');
     expect(migration).toContain('owner_admin_role_immutable');
     expect(migration).toContain('reelora_assert_admin');
+    expect(bootstrapMigration).toContain('reelora_first_admin_bootstrap_available');
+    expect(bootstrapMigration).toContain('grant execute on function public.reelora_first_admin_bootstrap_available() to anon, authenticated, service_role');
+    expect(bootstrapMigration).not.toContain('insert into saas_ugc.ugc_user_roles');
   });
 
   it('empêche la modification du plafond par le RPC générique et expose les totaux fournisseurs', () => {

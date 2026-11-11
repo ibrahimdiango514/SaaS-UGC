@@ -11,6 +11,9 @@ import NotFound from './pages/NotFound';
 
 const Login = lazy(() => import('./pages/Login'));
 const Signup = lazy(() => import('./pages/Signup'));
+const OwnerBootstrap = lazy(() => import('./pages/OwnerBootstrap'));
+const OwnerConfirmation = lazy(() => import('./pages/OwnerConfirmation'));
+const OwnerLogin = lazy(() => import('./pages/OwnerLogin'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -43,6 +46,9 @@ export default function App() {
                 <Route path="/" element={<Landing />} />
                 <Route path="/connexion" element={<Login />} />
                 <Route path="/inscription" element={<Signup />} />
+                <Route path="/proprietaire" element={<OwnerBootstrap />} />
+                <Route path="/proprietaire/confirmation" element={<OwnerConfirmation />} />
+                <Route path="/proprietaire/connexion" element={<OwnerLogin />} />
                 <Route path="/mot-de-passe-oublie" element={<ForgotPassword />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
                 <Route path="/confidentialite" element={<Legal kind="confidentialite" />} />

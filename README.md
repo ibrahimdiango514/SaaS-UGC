@@ -115,21 +115,18 @@ Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models
 | `20261108231047_reelora_muapi_progress.sql` | Mirroir de l'état fournisseur dans `result_payload` (vue publique historique à liste de colonnes explicite) |
 | `20261108233629_reelora_studio_library.sql` | RPC RLS `reelora_attach_asset_to_project` : rattacher une création existante à un projet, sans nouvelle architecture de crédits |
 | `20261111150407_vyora_owner_admin_provider_breakdown.sql` | Rôle admin propriétaire unique, verrouillage des paramètres budget génériques et agrégats de dépenses par fournisseur |
+| `20261111155000_vyora_owner_bootstrap_status.sql` | Statut public booléen du premier bootstrap, sans possibilité d’attribuer un rôle |
 | `20261108000014…00015_reelora_avatar_provider_*.sql` | Alias `muapi`/`custom`/`legacy` pour les fiches d'avatar, valeurs historiques conservées, aucun fournisseur retiré nommé dans l'application |
 
 Versions live correspondantes : `20261108223923 reelora_muapi_v1`, `20261108224022 reelora_muapi_sync`, `20261108224047 reelora_muapi_catalog_cast`, `20261108231047 reelora_muapi_progress`, puis `reelora_studio_library`, `reelora_avatar_provider_alias` et `reelora_avatar_provider_generic`. **Aucune table, vue ni donnée préexistante n'a été supprimée** (test automatisé).
 
 ### Premier compte administrateur
 
-1. Le propriétaire crée son compte depuis `/inscription` sur le site de production, puis confirme son adresse e-mail.
-2. Depuis le SQL Editor du projet Supabase de production, il exécute une seule fois (en remplaçant l’adresse) :
-
-   ```sql
-   select public.reelora_bootstrap_first_admin('proprietaire@exemple.com');
-   ```
-
-3. La fonction retrouve uniquement un compte Auth confirmé, verrouille l’initialisation et refuse l’opération si un rôle `admin` existe déjà. Elle n’est exécutable ni par `anon` ni par `authenticated`; ne jamais l’appeler depuis le navigateur.
-4. Le propriétaire se connecte puis ouvre `/admin`. Le rôle affiché dans Paramètres du compte provient du contrôle Auth/RPC basé sur la table de rôles.
+1. Le propriétaire ouvre le lien discret « Espace propriétaire » en bas de la page d’accueil, ou directement `/proprietaire`.
+2. Il crée son compte avec e-mail et mot de passe puis confirme l’adresse via le lien envoyé par Supabase Auth.
+3. La page de confirmation appelle `reelora-owner-bootstrap`. Cette Edge Function vérifie la session, l’adresse confirmée et l’adresse propriétaire conservée dans le secret serveur `VYORA_OWNER_ADMIN_EMAIL`, puis appelle `reelora_bootstrap_first_admin`.
+4. Le RPC serveur verrouille l’initialisation et refuse toute seconde attribution. Le navigateur n’a aucun droit d’exécuter ce RPC. Si le bootstrap est déjà fait, `/proprietaire` propose uniquement la connexion administrateur.
+5. Après connexion, le propriétaire ouvre `/admin`. Le rôle provient du contrôle Auth/RPC basé sur la table de rôles.
 
 Les inscriptions suivantes reçoivent uniquement le rôle `user`. Le RPC de rôles ne permet pas de promouvoir un compte en admin ni de retirer le rôle propriétaire; un index unique garantit qu’il ne peut exister qu’un administrateur. Les RPC admin sensibles appliquent leurs propres vérifications et les données restent soumises à RLS.
 
@@ -138,6 +135,7 @@ Les inscriptions suivantes reçoivent uniquement le rôle `user`. Le RPC de rôl
 | Slug | Version | `verify_jwt` |
 | --- | --- | --- |
 | `reelora-health` | v7 | `false` |
+| `reelora-owner-bootstrap` | v1 | `false` (session, confirmation e-mail et adresse propriétaire vérifiées côté serveur) |
 | `reelora-ai` | v5 | `true` |
 | `reelora-video` | v9 | `true` |
 | `reelora-video-worker` | v5 | `false` (jeton Vault) |
@@ -275,7 +273,7 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 - Le coût en crédits **et** le coût fournisseur estimé sont affichés avant une confirmation explicite. Les crédits ne sont jamais débités pour une génération échouée ; l'historique détaille chaque réservation, consommation et restitution.
 - Le suivi continue côté serveur (webhook + cron) : fermer l'onglet n'interrompt pas la génération. Un job en cours se reprend depuis l'historique ou `?job=<id>`.
 - Les modèles de prompts système sont en lecture seule : copiez-les pour les personnaliser.
-- L'administration est réservée aux utilisateurs avec le rôle `admin` (`ibrahimdiango514@gmail.com` initialisé).
+- L'administration est réservée aux utilisateurs dont le rôle `admin` est vérifié côté serveur. Le bootstrap propriétaire est configuré, mais reste à terminer par le propriétaire depuis `/proprietaire`.
 
 ---
 

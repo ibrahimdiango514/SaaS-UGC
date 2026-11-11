@@ -28,6 +28,9 @@ enable_signup = true
 [functions.reelora-health]
 verify_jwt = false
 
+[functions.reelora-owner-bootstrap]
+verify_jwt = false
+
 [functions.reelora-ai]
 verify_jwt = true
 

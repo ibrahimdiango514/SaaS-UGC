@@ -261,6 +261,9 @@ export default function Landing() {
             <span className="flex items-center gap-1.5"><LockKeyhole size={12} /> Données hébergées dans l’UE</span>
           </div>
         </div>
+        <div className="mx-auto mt-5 max-w-7xl px-4 text-center sm:px-6 sm:text-right">
+          <Link to="/proprietaire" className="text-[10px] text-slate-700 transition-colors hover:text-slate-500">Espace propriétaire</Link>
+        </div>
       </footer>
     </div>
   );

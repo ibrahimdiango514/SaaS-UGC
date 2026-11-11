@@ -62,6 +62,40 @@ export async function bootstrap(): Promise<{
   return rpc('reelora_bootstrap');
 }
 
+export interface OwnerBootstrapStatus {
+  available: boolean;
+  configured: boolean;
+  initialized: boolean;
+}
+
+export async function getOwnerBootstrapStatus(): Promise<OwnerBootstrapStatus> {
+  const { data, error } = await supabase.functions.invoke<OwnerBootstrapStatus>('reelora-owner-bootstrap', {
+    method: 'GET',
+  });
+  if (error) throw new AppError(humanizeError(error.message), 'OWNER_BOOTSTRAP_STATUS_ERROR');
+  if (!data || typeof data.available !== 'boolean' || typeof data.configured !== 'boolean' || typeof data.initialized !== 'boolean') {
+    throw new AppError('Le serveur a retourné un état de bootstrap invalide.', 'OWNER_BOOTSTRAP_STATUS_INVALID');
+  }
+  return data;
+}
+
+export async function claimFirstOwnerAdmin(): Promise<void> {
+  const { data, error } = await supabase.functions.invoke<{ user_id: string }>('reelora-owner-bootstrap', {
+    method: 'POST',
+  });
+  if (error) {
+    let payload: { error?: { code?: string; message?: string } } | null = null;
+    try {
+      const context = (error as { context?: Response }).context;
+      if (context?.json) payload = await context.json();
+    } catch { /* response was not JSON */ }
+    throw new AppError(payload?.error?.message || humanizeError(error.message), payload?.error?.code || 'OWNER_BOOTSTRAP_ERROR');
+  }
+  if (!data || typeof data.user_id !== 'string' || !data.user_id) {
+    throw new AppError('Le serveur n’a pas confirmé le rôle administrateur.', 'OWNER_BOOTSTRAP_INVALID');
+  }
+}
+
 export async function getQuota(): Promise<QuotaStatus> {
   return rpc('reelora_quota_status');
 }
