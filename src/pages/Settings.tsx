@@ -14,7 +14,7 @@ import type { Brand, Product, WorkspaceMember } from '../lib/types';
 
 export default function Settings() {
   const toast = useToast();
-  const { user, profile, workspace, refreshAll } = useAuth();
+  const { user, profile, workspace, isAdmin, refreshAll } = useAuth();
   const [tab, setTab] = useState('profil');
   const [displayName, setDisplayName] = useState('');
   const [country, setCountry] = useState('ML');
@@ -221,6 +221,10 @@ export default function Settings() {
         <Card className="max-w-2xl"><CardHeader title="Informations personnelles" description={`Compte : ${user?.email}`} />
           <form onSubmit={(e) => void onSaveProfile(e)} className="space-y-4 p-5">
             <Input label="Nom affiché" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Votre nom" />
+            <div className="flex items-center justify-between rounded-xl border border-line bg-white/[0.03] px-4 py-3">
+              <span className="text-sm text-slate-400">Rôle du compte</span>
+              <Badge tone={isAdmin ? 'success' : 'neutral'}>{isAdmin ? 'Administrateur' : 'Utilisateur'}</Badge>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Select label="Pays" value={country} onChange={(e) => setCountry(e.target.value)}><option value="ML">Mali</option><option value="FR">France</option><option value="SN">Sénégal</option><option value="CI">Côte d’Ivoire</option></Select>
               <Select label="Langue" value={language} onChange={(e) => setLanguage(e.target.value)}><option value="fr">Français</option><option value="en">English</option><option value="es">Español</option></Select>

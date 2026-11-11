@@ -36,8 +36,8 @@ describe('Business Grow integration boundaries', () => {
   });
 
   it('keeps both Business Grow SQL migrations isolated from Studio credit/quota tables and enforced by RLS', () => {
-    const m1 = read('supabase/migrations/20261110000001_business_grow_saas_business.sql');
-    const m2 = read('supabase/migrations/20261110000002_business_grow_ai_extensions.sql');
+    const m1 = read('supabase/migrations/20261110172827_business_grow_saas_business.sql');
+    const m2 = read('supabase/migrations/20261110172909_business_grow_ai_extensions.sql');
     const intelligence = read('supabase/functions/business-grow/intelligence.ts');
 
     for (const content of [m1, m2, intelligence]) {

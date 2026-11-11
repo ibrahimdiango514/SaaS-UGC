@@ -105,12 +105,31 @@ describe('Video Studio : frontière des secrets et espaces non opérationnels', 
 
 describe('bibliothèque Reelora : RPC additive et RLS', () => {
   it('l’attachement à un projet est défini, vérifié et réservé aux utilisateurs authentifiés', () => {
-    const sql = read('supabase/migrations/20261108000013_reelora_studio_library.sql');
+    const sql = read('supabase/migrations/20261108233629_reelora_studio_library.sql');
     expect(sql).toContain('function public.reelora_attach_asset_to_project(');
     expect(sql).toContain('ugc_private.can_edit_workspace');
     expect(sql).toContain('grant execute on function public.reelora_attach_asset_to_project(uuid, uuid) to authenticated');
     expect(sql).not.toMatch(/disable row level security/i);
     expect(sql).not.toMatch(/drop\s+table/i);
+  });
+});
+
+describe('bootstrap propriétaire et budget fournisseur', () => {
+  const migration = read('supabase/migrations/20261111150407_vyora_owner_admin_provider_breakdown.sql');
+
+  it('réserve le rôle administrateur au bootstrap unique et protège le rôle propriétaire', () => {
+    expect(migration).toContain("where role = 'admin'");
+    expect(migration).toContain('admin_role_bootstrap_only');
+    expect(migration).toContain('owner_admin_role_immutable');
+    expect(migration).toContain('reelora_assert_admin');
+  });
+
+  it('empêche la modification du plafond par le RPC générique et expose les totaux fournisseurs', () => {
+    expect(migration).toContain("'provider_spend_cap'");
+    expect(migration).toContain("'by_provider'");
+    expect(migration).toContain("'actual_spent_usd'");
+    expect(migration).toContain("'reserved_usd'");
+    expect(migration).toContain("'committed_usd'");
   });
 });
 
@@ -129,10 +148,10 @@ describe('contrat RPC frontend ↔ migrations', () => {
   });
 
   it('les remboursements de quota sont protégés côté base', () => {
-    const secure = read('supabase/migrations/20261108000006_reelora_secure_refund.sql');
+    const secure = read('supabase/migrations/20261108170950_reelora_v1_secure_refund.sql');
     expect(secure).toContain('revoke all on function public.reelora_refund_quota(text, uuid, uuid) from public, anon, authenticated');
     expect(secure).toContain("auth.jwt()->>'role'");
-    const legacy = read('supabase/migrations/20261108000007_reelora_legacy_video_refund.sql');
+    const legacy = read('supabase/migrations/20261108171425_reelora_v1_legacy_video_refund.sql');
     expect(legacy).toContain("status in ('failed', 'cancelled')");
   });
 

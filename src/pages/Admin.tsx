@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Activity, Coins, CreditCard, FileClock, Power, PowerOff, RefreshCw, Settings2, Shield, Users, Video, Zap } from 'lucide-react';
+import { Activity, Coins, CreditCard, FileClock, RefreshCw, Settings2, Shield, Users, Video, Zap } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Modal, Banner, LoadingState, ErrorState, EmptyState, Tabs, StatCard } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
 import { formatDate, formatMoney, statusLabel, truncate } from '../lib/format';
+import ProviderBudgetSettings from './admin/ProviderBudgetSettings';
 import {
   adminAdjustCredits, adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminProviderSpendSummary,
   adminSetProviderSpendCap, adminSetVideoPricing,
@@ -22,6 +23,7 @@ const formatUsd = (amount: number) => new Intl.NumberFormat('en-US', {
 export default function Admin() {
   const toast = useToast();
   const [tab, setTab] = useState('overview');
+  const [settingsSection, setSettingsSection] = useState('provider-budget');
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [recharges, setRecharges] = useState<RechargeOrder[]>([]);
@@ -175,7 +177,7 @@ export default function Admin() {
   };
 
   const filteredUsers = users.filter((u) => `${u.email} ${u.display_name ?? ''}`.toLowerCase().includes(search.toLowerCase()));
-  const genericSettings = settings.filter((setting) => setting.setting_key !== 'video_pricing_config');
+  const genericSettings = settings.filter((setting) => !['video_pricing_config', 'provider_spend_cap'].includes(setting.setting_key));
 
   if (loading && !overview) return <LoadingState label="Chargement de l’administration…" />;
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
@@ -276,57 +278,6 @@ export default function Admin() {
       {tab === 'video-pricing' && (
         <div className="space-y-5">
           <Card>
-            <CardHeader title="Plafond de dépenses fournisseur" description="Budget global en USD réservé aux appels vidéo réellement payants. Indépendant des crédits clients et du chiffre d’affaires." />
-            {providerSpendError && <div className="px-5 pb-3"><Banner tone="warning" title="Suivi du budget indisponible">{providerSpendError} Appliquez la migration de suivi avant d’activer des tests payants.</Banner></div>}
-            <form onSubmit={(e) => void onSaveProviderSpendCap(e)} className="space-y-4 p-5">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Plafond maximal</p><p className="mt-1 text-lg font-semibold text-white">{providerSpend ? formatUsd(providerSpend.max_usd) : '—'}</p></div>
-                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Dépenses réelles connues</p><p className="mt-1 text-lg font-semibold text-white">{providerSpend ? formatUsd(providerSpend.actual_spent_usd) : '—'}</p></div>
-                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Budget engagé (estimations incluses)</p><p className="mt-1 text-lg font-semibold text-white">{providerSpend ? formatUsd(providerSpend.committed_usd) : '—'}</p></div>
-                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Budget restant</p><p className={`mt-1 text-lg font-semibold ${providerSpend?.remaining_usd === 0 ? 'text-amber-200' : 'text-emerald-200'}`}>{providerSpend ? formatUsd(providerSpend.remaining_usd) : '—'}</p></div>
-              </div>
-              {providerSpend && (providerSpend.max_usd === 0 || providerSpend.remaining_usd === 0) && (
-                <Banner tone="warning" title={providerSpend.max_usd === 0 ? 'Aucun test payant autorisé' : 'Plafond atteint'}>
-                  Les nouvelles générations payantes sont bloquées côté serveur. Les dépenses réelles restent séparées des réservations et estimations.
-                </Banner>
-              )}
-              {providerSpend && providerSpend.estimated_unpriced_usd > 0 && (
-                <Banner tone="warning" title="Coût réel indisponible pour certaines opérations">
-                  Le montant estimé est conservé séparément et engagé par prudence jusqu’à réception d’un coût réel vérifiable.
-                </Banner>
-              )}
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                <Input label="Plafond maximal autorisé (USD)" type="number" min="0" max="1000000" step="0.01" required
-                  value={providerSpendCapDraft} onChange={(e) => setProviderSpendCapDraft(e.target.value)}
-                  hint="0 USD bloque tous les nouveaux appels payants." />
-                <Button type="submit" loading={busy === 'provider-spend'} icon={<Coins size={14} />}>Enregistrer le plafond</Button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {providerSpend?.enabled
-                  ? <Button type="button" variant="outline" loading={busy === 'provider-spend'} icon={<PowerOff size={14} />} onClick={() => void onDisableProviderSpend()}>Désactiver immédiatement les tests payants</Button>
-                  : <Button type="button" loading={busy === 'provider-spend'} disabled={!providerSpend || providerSpend.max_usd <= 0} icon={<Power size={14} />} onClick={() => void onEnableProviderSpend()}>Autoriser les tests payants</Button>}
-                <span className="self-center text-xs text-slate-500">{providerSpend?.enabled ? 'Autorisation active côté serveur.' : 'Désactivé : aucun appel de génération payant ne peut partir.'}</span>
-              </div>
-              {providerSpend && <p className="text-xs text-slate-500">{providerSpend.tests_count} test(s) lancé(s) · {providerSpend.blocked_count} tentative(s) bloquée(s) · {formatUsd(providerSpend.reserved_usd)} réservé(s) en cours.</p>}
-            </form>
-          </Card>
-
-          <Card>
-            <CardHeader title="Historique des dépenses fournisseur" description="Les coûts estimés et les montants réellement communiqués sont distincts. Aucune valeur n’est inventée." />
-            {!providerSpend?.history.length ? <div className="p-5"><EmptyState icon={<FileClock size={22} />} title="Aucune opération enregistrée" /></div> : (
-              <div className="table-wrap"><table className="table"><thead><tr><th>Date</th><th>Modèle / génération</th><th>Statut</th><th>Coût estimé</th><th>Coût réel</th><th>Référence fournisseur</th></tr></thead>
-                <tbody>{providerSpend.history.map((entry) => <tr key={entry.id}>
-                  <td className="whitespace-nowrap text-xs text-slate-400">{formatDate(entry.created_at, true)}</td>
-                  <td><p className="font-medium text-white">{entry.model_id}</p><p className="font-mono text-[10px] text-slate-500">{entry.generation_job_id}</p></td>
-                  <td><Badge status={entry.status}>{entry.status === 'blocked' ? 'Bloqué' : statusLabel(entry.status)}</Badge>{entry.reason_code && <p className="mt-1 text-[10px] text-slate-500">{entry.reason_code}</p>}</td>
-                  <td>{formatUsd(entry.estimated_cost_usd)}</td>
-                  <td>{entry.actual_cost_usd === null ? <span className="text-xs text-slate-500">Coût réel indisponible</span> : formatUsd(entry.actual_cost_usd)}</td>
-                  <td className="font-mono text-[10px] text-slate-500">{entry.provider_request_id ?? '—'}</td>
-                </tr>)}</tbody></table></div>
-            )}
-          </Card>
-
-          <Card>
             <CardHeader title="Tarification interne — VYORA Studio" description="Les coûts fournisseur et les conversions restent visibles uniquement dans cette console." />
             <form onSubmit={(e) => void onVideoPricing(e)} className="space-y-4 p-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -391,16 +342,33 @@ export default function Admin() {
       )}
 
       {tab === 'settings' && (
-        <Card><CardHeader title="Paramètres de la plateforme" description="Valeurs JSON réellement utilisées par le backend." />
-          {genericSettings.length === 0 ? <EmptyState icon={<Settings2 size={22} />} title="Aucun paramètre" /> : (
-            <div className="divide-y divide-white/[0.06]">{genericSettings.map((s) => (
-              <div key={s.setting_key} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-                <div className="min-w-0 flex-1"><p className="text-sm font-medium text-white">{s.setting_key}</p><p className="truncate font-mono text-[11px] text-slate-500">{JSON.stringify(s.setting_value)}</p></div>
-                <Button size="sm" variant="outline" onClick={() => { setEditingSetting(s); setSettingValue(JSON.stringify(s.setting_value, null, 2)); }}>Modifier</Button>
-              </div>
-            ))}</div>
-          )}
-        </Card>
+        <div className="space-y-5">
+          <Tabs active={settingsSection} onChange={setSettingsSection} tabs={[
+            { id: 'provider-budget', label: 'Budget et fournisseurs IA', icon: <Coins size={14} /> },
+            { id: 'general', label: 'Paramètres généraux', icon: <Settings2 size={14} /> },
+          ]} />
+          {settingsSection === 'provider-budget'
+            ? <ProviderBudgetSettings
+              summary={providerSpend}
+              error={providerSpendError}
+              capDraft={providerSpendCapDraft}
+              busy={busy === 'provider-spend'}
+              onCapDraftChange={setProviderSpendCapDraft}
+              onSave={(event) => void onSaveProviderSpendCap(event)}
+              onEnable={() => void onEnableProviderSpend()}
+              onDisable={() => void onDisableProviderSpend()}
+            />
+            : <Card><CardHeader title="Paramètres de la plateforme" description="Valeurs JSON réellement utilisées par le backend." />
+              {genericSettings.length === 0 ? <EmptyState icon={<Settings2 size={22} />} title="Aucun paramètre" /> : (
+                <div className="divide-y divide-white/[0.06]">{genericSettings.map((s) => (
+                  <div key={s.setting_key} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                    <div className="min-w-0 flex-1"><p className="text-sm font-medium text-white">{s.setting_key}</p><p className="truncate font-mono text-[11px] text-slate-500">{JSON.stringify(s.setting_value)}</p></div>
+                    <Button size="sm" variant="outline" onClick={() => { setEditingSetting(s); setSettingValue(JSON.stringify(s.setting_value, null, 2)); }}>Modifier</Button>
+                  </div>
+                ))}</div>
+              )}
+            </Card>}
+        </div>
       )}
 
       {tab === 'audit' && (

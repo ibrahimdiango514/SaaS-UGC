@@ -428,9 +428,9 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
   });
 
   it('garde les garde-fous SQL existants et la confirmation explicite', () => {
-    const start = read('supabase/migrations/20261108000009_reelora_muapi.sql');
-    const finalize = read('supabase/migrations/20261108000002_reelora_rpc.sql');
-    const security = read('supabase/migrations/20261108000006_reelora_secure_refund.sql');
+    const start = read('supabase/migrations/20261108223923_reelora_muapi_v1.sql');
+    const finalize = read('supabase/migrations/20261108164309_reelora_v1_rpc.sql');
+    const security = read('supabase/migrations/20261108170950_reelora_v1_secure_refund.sql');
     expect(start).toContain('on conflict (created_by, request_key) do nothing');
     expect(start).toContain('reserve-job:');
     expect(finalize).toContain("p_status = 'succeeded'");

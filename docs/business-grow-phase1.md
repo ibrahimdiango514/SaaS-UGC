@@ -23,7 +23,7 @@ Business Grow est le deuxième système fonctionnel de l’application Reelora, 
 
 ## État de la base et du déploiement (`xbuuhfwobrafcbgtdgjx`)
 
-- **Migrations appliquées** : `20261110000001_business_grow_saas_business.sql` à `20261110000005_business_grow_gemini_priority.sql`.
+- **Migrations appliquées** : `20261110172827_business_grow_saas_business.sql` à `20261110180955_business_grow_gemini_priority.sql`.
 - **Edge Function déployée** : `business-grow` (`verify_jwt: true`, statut `ACTIVE`).
 - **Vérification bout-en-bout réalisée** : authentification JWT requise (`401` sans session), vérification live `providers.verify` (`groq`, `gemini`), exécution de tous les rôles métier, secours automatique `gemini -> groq`, mode manuel strict `allowFallback: false` (`503` sans débit), idempotence `messages.send`, quota isolé (`402 BG_INSUFFICIENT_QUOTA`), propositions d’outils (`action_plan`, `handoff_ugc_brief`), mémoire consentie / révocation (`409`) et effacement RGPD (`bg_prepare_account_erasure`).
 - Les connecteurs externes (`facebook`, `instagram`, `youtube`, `tiktok`, `shopify`, `woocommerce`) demeurent à l’état `planned` tant que leurs flux OAuth et secrets serveur dédiés ne sont pas activés.

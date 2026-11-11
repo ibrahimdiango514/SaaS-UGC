@@ -1,8 +1,8 @@
-# Reelora — Studio UGC propulsé par l'IA (MuAPI)
+# VYORA — Create. Evolve. Grow.
 
-SaaS francophone de création de contenus UGC et de croissance d'activité : le **Studio UGC** conserve ses parcours d'intégration serveur Groq/MuAPI, tandis que **Business Grow** comprend une interface, un client backend et des adaptateurs serveur Groq/Gemini. Les fournisseurs ne sont utilisables que si le schéma Business Grow, les secrets serveur et des modèles vérifiés sont configurés; aucune réponse IA n'est simulée. Ce dépôt contient les sources (frontend, migrations SQL, Edge Functions, configuration, tests) ; les statuts de connexion doivent distinguer les intégrations vérifiées des espaces préparés.
+SaaS francophone de création de contenus UGC et de croissance d'activité. Le Studio vidéo utilise MuAPI côté serveur ; Business Grow dispose de son schéma Supabase et de son Edge Function. Les fournisseurs sont présentés comme opérationnels uniquement lorsque leurs secrets et modèles sont effectivement vérifiés. Ce dépôt contient le frontend, les migrations SQL, les Edge Functions et les tests.
 
-> **Important** — `MUAPI_API_KEY` est enregistré comme **secret serveur Supabase** (jamais recopié dans le dépôt, le frontend, `VITE_*` ou les logs) ; la sonde de santé confirme sa **présence** (`muapi:true`), pas sa validité auprès de MuAPI. `GROQ_API_KEY` reste **absent** : l'assistance IA répond `GROQ_NOT_CONFIGURED` et ne produit **aucune réponse simulée**. **Aucune génération vidéo réelle n'a été lancée**, aucun crédit dépensé, aucun job créé : un test réel exige d'abord le devis (`docs/devis-test-muapi.md`) puis une confirmation explicite. Tous les tests automatisés utilisent des mocks. Voir [§7](#7-configuration-requise-intervention-utilisateur).
+> **État de production vérifié le 11 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. Les migrations de tarification vidéo, plafond fournisseur et bootstrap admin sont appliquées ; `reelora-video` v9 et `reelora-video-worker` v5 sont déployées. Le cron worker est actif. `MUAPI_API_KEY` est présent côté serveur, mais sa validité fournisseur n'a pas été vérifiée ; `GROQ_API_KEY` est absent. Tarification et plafond USD restent **désactivés** tant que l'administrateur n'a pas renseigné les paramètres et un plafond autorisé. Aucune génération payante n'a été lancée. L'historique Supabase contient aussi des migrations historiques d'autres composants du projet qui ne sont pas dans ce dépôt ; aucune réparation globale n'a été effectuée.
 
 ---
 
@@ -15,7 +15,7 @@ SaaS francophone de création de contenus UGC et de croissance d'activité : le 
 | Tableau de bord | Statistiques réelles, quotas, dernières générations, état des intégrations Groq / MuAPI / worker |
 | Projets | Création, recherche, filtre par statut, fiche détaillée, édition du brief, scripts, scènes, générations, suppression |
 | **UGC Studio MuAPI** | 5 étapes : projet/produit/objectif → script Groq → scènes & prompts → **catalogue de modèles MuAPI + paramètres vérifiés** → coût estimé, confirmation explicite, progression, erreur lisible, **lecteur vidéo de prévisualisation**, téléchargement, vidéos précédentes et reprise d'un suivi |
-| **Business Grow** | `/app/business` : espace chat séparé, contexte conversationnel, attribution du fournisseur, mémoire métier et registre initial. Adaptateurs REST serveur Groq/Gemini avec délai limite, erreurs explicites et fallback traçable; le schéma SQL reste une proposition non appliquée et les secrets doivent être configurés côté Edge avant toute connexion réelle. Aucun crédit du Studio n'est utilisé. |
+| **Business Grow** | `/app/business` : espace chat séparé, contexte conversationnel, attribution du fournisseur, mémoire métier et registre initial. Schéma et Edge Function présents en production ; disponibilité IA à confirmer après configuration des secrets et des modèles côté serveur. Aucun crédit du Studio n'est utilisé. |
 | Avatars | CRUD, **image de référence** uploadée dans `ugc-assets` pour les modèles MuAPI image → vidéo, avatar par défaut |
 | Scripts IA | Groq (accroche, script, CTA, angle, allégations à éviter, storyboard), accroches alternatives, enregistrement en base, approbation |
 | Prompts | CRUD de modèles, variables `{{...}}`, aperçu, favoris, modèles système, amélioration par Groq |
@@ -53,7 +53,7 @@ Avant le lancement, une confirmation explicite avec case à cocher reprend le mo
 - **IA textuelle** : Groq (`llama-3.3-70b-versatile`) — scripts, accroches, dialogues, contenus publicitaires
 - **IA vidéo** : **MuAPI uniquement** (`https://api.muapi.ai/api/v1`, en-tête `x-api-key`). HeyGen et fal.ai ne sont **pas** utilisés.
 - **Tests** : Vitest — 106 tests, 9 fichiers (`tests/muapi.test.ts`, `studio-ux.test.ts`, `groq.test.ts`, `integration-parity.test.ts`, `credits.test.ts`, `security.test.ts`, `errors.test.ts`, `format.test.ts`, `ui.test.tsx`)
-- **Déploiement** : Preview Netlify de PR #2 `https://deploy-preview-2--saas-ugc-growth.netlify.app` (indépendante de `main`) ; accès soumis à la protection de l'équipe Netlify. Production **non déployée** et `main` inchangé.
+- **Déploiement** : frontend de production [`https://vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app), route `/admin` servie par le SPA ; projet Supabase `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Les fonctions vidéo et leurs migrations sont déployées. L'accès admin, les paiements de bout en bout et une génération vidéo réelle restent à valider avec un compte propriétaire et des paramètres commerciaux autorisés.
 
 Projet Supabase cible : `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Le projet Sofia Immobilier Lab (`yswsildmbeomjlyofnrk`) n'est **jamais** modifié.
 
@@ -109,25 +109,40 @@ Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models
 | Fichier | Rôle |
 | --- | --- |
 | `20261108000001…00008_reelora_*.sql` | Schéma v1, RPC, seed, correctifs quota/remboursement (déjà appliqués en live) |
-| `20261108000009_reelora_muapi.sql` | `pg_net`, table `ugc_video_models` + vue RLS, 5 modèles vérifiés, colonnes de suivi sur `ugc_generation_jobs`, jeton Vault, `reelora_start_generation` idempotent, 4 RPC serveur, paramètres `video_defaults`, cron `reelora-video-tick` |
-| `20261108000010_reelora_muapi_sync.sql` | Wrappers PostgREST `reelora_worker_token` / `reelora_sync_video_models` (service-role only) |
-| `20261108000011_reelora_muapi_catalog_cast.sql` | Normalisation `is_enabled`/`is_coming_soon` numériques du catalogue live |
-| `20261108000012_reelora_muapi_progress.sql` | Mirroir de l'état fournisseur dans `result_payload` (vue publique historique à liste de colonnes explicite) |
-| `20261108000013_reelora_studio_library.sql` | RPC RLS `reelora_attach_asset_to_project` : rattacher une création existante à un projet, sans nouvelle architecture de crédits |
+| `20261108223923_reelora_muapi_v1.sql` | `pg_net`, table `ugc_video_models` + vue RLS, 5 modèles vérifiés, colonnes de suivi sur `ugc_generation_jobs`, jeton Vault, `reelora_start_generation` idempotent, 4 RPC serveur, paramètres `video_defaults`, cron `reelora-video-tick` |
+| `20261108224022_reelora_muapi_sync.sql` | Wrappers PostgREST `reelora_worker_token` / `reelora_sync_video_models` (service-role only) |
+| `20261108224047_reelora_muapi_catalog_cast.sql` | Normalisation `is_enabled`/`is_coming_soon` numériques du catalogue live |
+| `20261108231047_reelora_muapi_progress.sql` | Mirroir de l'état fournisseur dans `result_payload` (vue publique historique à liste de colonnes explicite) |
+| `20261108233629_reelora_studio_library.sql` | RPC RLS `reelora_attach_asset_to_project` : rattacher une création existante à un projet, sans nouvelle architecture de crédits |
+| `20261111150407_vyora_owner_admin_provider_breakdown.sql` | Rôle admin propriétaire unique, verrouillage des paramètres budget génériques et agrégats de dépenses par fournisseur |
 | `20261108000014…00015_reelora_avatar_provider_*.sql` | Alias `muapi`/`custom`/`legacy` pour les fiches d'avatar, valeurs historiques conservées, aucun fournisseur retiré nommé dans l'application |
 
 Versions live correspondantes : `20261108223923 reelora_muapi_v1`, `20261108224022 reelora_muapi_sync`, `20261108224047 reelora_muapi_catalog_cast`, `20261108231047 reelora_muapi_progress`, puis `reelora_studio_library`, `reelora_avatar_provider_alias` et `reelora_avatar_provider_generic`. **Aucune table, vue ni donnée préexistante n'a été supprimée** (test automatisé).
+
+### Premier compte administrateur
+
+1. Le propriétaire crée son compte depuis `/inscription` sur le site de production, puis confirme son adresse e-mail.
+2. Depuis le SQL Editor du projet Supabase de production, il exécute une seule fois (en remplaçant l’adresse) :
+
+   ```sql
+   select public.reelora_bootstrap_first_admin('proprietaire@exemple.com');
+   ```
+
+3. La fonction retrouve uniquement un compte Auth confirmé, verrouille l’initialisation et refuse l’opération si un rôle `admin` existe déjà. Elle n’est exécutable ni par `anon` ni par `authenticated`; ne jamais l’appeler depuis le navigateur.
+4. Le propriétaire se connecte puis ouvre `/admin`. Le rôle affiché dans Paramètres du compte provient du contrôle Auth/RPC basé sur la table de rôles.
+
+Les inscriptions suivantes reçoivent uniquement le rôle `user`. Le RPC de rôles ne permet pas de promouvoir un compte en admin ni de retirer le rôle propriétaire; un index unique garantit qu’il ne peut exister qu’un administrateur. Les RPC admin sensibles appliquent leurs propres vérifications et les données restent soumises à RLS.
 
 ### Edge Functions déployées (live)
 
 | Slug | Version | `verify_jwt` |
 | --- | --- | --- |
-| `reelora-health` | v2 | `false` |
-| `reelora-ai` | v2 | `true` |
-| `reelora-video` | v3 | `true` |
-| `reelora-video-worker` | v1 | `false` (jeton Vault) |
+| `reelora-health` | v7 | `false` |
+| `reelora-ai` | v5 | `true` |
+| `reelora-video` | v9 | `true` |
+| `reelora-video-worker` | v5 | `false` (jeton Vault) |
 
-> Les sources de `reelora-video` et du worker contiennent des améliorations additives pour la signature serveur des images de référence et l'enrichissement des métadonnées de résultat. Ces versions de source ne sont **pas redéployées** pendant la phase Preview : le frontend reste compatible avec les versions live ci-dessus en transmettant des URL Storage signées. Aucun déploiement backend de production n'a été déclenché.
+> `reelora-video` et `reelora-video-worker` ont été redéployées après l'application des migrations de tarification et de plafond. Le cron `reelora-video-tick` exécute une requête chaque minute ; ses dernières exécutions vérifiées ont réussi. L'authentification JWT du gateway vidéo et le jeton du worker rejettent les appels non autorisés.
 
 ---
 
@@ -160,9 +175,9 @@ supabase secrets set MUAPI_API_KEY=... GROQ_API_KEY=... --project-ref xbuuhfwobr
 
 > Aucun secret HeyGen / fal.ai n'est nécessaire ni lu. Les anciennes variables `REELORA_VIDEO_PROVIDER`, `HEYGEN_API_KEY`, `FAL_KEY` ont été retirées de `.env.example` et du code vidéo.
 
-### Business Grow — non configuré
+### Business Grow — fournisseurs à vérifier
 
-Business Grow utilise des secrets Edge séparés du Studio : `BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, `BUSINESS_GROW_GROQ_MODEL`, `BUSINESS_GROW_GEMINI_MODEL`, `BUSINESS_GROW_PROVIDER_ORDER` et `BUSINESS_GROW_DATABASE_URL`. Ils ne sont pas à ajouter à `.env.local`, à un fichier suivi par Git ou à une variable `VITE_*`. La fonction n'est ni déployée ni configurée; le schéma privé `saas_business` n'est pas installé. Ne configurez aucun fournisseur avant d'avoir un environnement staging isolé, un schéma validé et des clés renouvelées.
+Business Grow utilise des secrets Edge séparés du Studio : `BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, `BUSINESS_GROW_GROQ_MODEL`, `BUSINESS_GROW_GEMINI_MODEL`, `BUSINESS_GROW_PROVIDER_ORDER` et `BUSINESS_GROW_DATABASE_URL`. Ils ne sont pas à ajouter à `.env.local`, à un fichier suivi par Git ou à une variable `VITE_*`. Le schéma et la fonction sont déployés sur le projet existant ; la disponibilité effective de chaque fournisseur doit être vérifiée par une sonde côté serveur avant de l'annoncer comme utilisable.
 
 Pour un développement local futur, `VITE_BUSINESS_GROW_FUNCTION_URL=http://127.0.0.1:54321/functions/v1/business-grow` (dans `.env.local`, jamais dans un fichier suivi) dirige uniquement le navigateur de développement vers l'Edge Function locale; le code refuse les autres hôtes ou URL afin de ne pas transmettre le jeton Reelora ailleurs. La fonction locale doit elle-même valider le jeton avec Supabase Auth. Cette URL seule ne rend pas le backend opérationnel : il faut encore un runtime Edge local, la base avec le schéma validé et les secrets serveur.
 
@@ -234,14 +249,13 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 
 ## 7. Configuration requise (intervention utilisateur)
 
-1. **`MUAPI_API_KEY` — fait** : enregistré une seule fois comme secret serveur Supabase après confirmation explicite de l'utilisateur (`ask_user` : outil + « vérification uniquement »). La valeur n'a jamais été recopiée dans un fichier, un log, le README, le frontend, GitHub ou une variable `VITE_*`. La santé renvoie `muapi:true` ; cela ne prouve pas que la clé est acceptée par MuAPI. **Aucun appel de génération, aucun crédit dépensé, aucun job créé.** Rotation/révocation uniquement sur demande explicite. Sans secret valide, `reelora-video` répond `MUAPI_NOT_CONFIGURED` (ou une erreur MuAPI lisible), marque la tâche `failed` et restitue les crédits.
-2. **`GROQ_API_KEY` — encore absent** : `reelora-ai` vérifie le secret avant toute consommation de quota et répond `GROQ_NOT_CONFIGURED` (503). Si Groq renvoie une erreur ou un contenu vide : `AI_PROVIDER_ERROR` / `AI_EMPTY_RESPONSE` (502) avec **remboursement unique** de l'unité de quota. **Aucun script, prompt, accroche ou scène n'est fabriqué localement** (les anciens fallbacks déterministes ont été retirés). Le studio désactive les boutons d'aide IA et affiche l'état. Un script saisi manuellement reste utilisable. Aucune clé Groq n'est définie sans confirmation.
-3. **Vérifier le catalogue live** : après ajout de la clé, ouvrir le Video Studio → « Catalogue MuAPI vérifié » → Actualiser. `reelora-video {action:"models"}` interroge `GET /api/v1/models` et met à jour les coûts/disponibilités. Si un modèle vérifié passe `is_enabled:0`, il est masqué automatiquement.
-4. **Test réel — devis préparé, NON LANCÉ** : voir `docs/devis-test-muapi.md` (modèle `seedance-lite-t2v`, paramètres `9:16 / 480p / 5 s / caméra libre`, **9 crédits Reelora**, **0,1000 USD** fournisseur, conditions et observations). Aucune génération ne sera lancée sans confirmation explicite après lecture de ce devis. Avec un compte disposant d'au moins 9 crédits, un projet et une description d'au moins 20 caractères, cocher la confirmation `CostConfirm` ; vérifier ensuite le `request_id` dans My Generations, la vidéo dans Mes créations enregistrées et les écritures `reserve` → `capture` dans le ledger.
-5. **Webhook** : `reelora-video` construit `?webhook=` automatiquement à partir de `SUPABASE_URL`. Si l'URL publique du projet diffère, définir `REELORA_WEBHOOK_BASE_URL`. Le cron reste actif même si MuAPI n'appelle pas le webhook.
-6. **`site_url`** du projet partagé vaut encore `https://sbc-ai-agency-dashbord.netlify.app`. Reelora passe `emailRedirectTo` explicite et l'allowlist contient `https://reelora.netlify.app/**`. Ajouter l'origine de production avant déploiement.
-7. **Paiement** : les recharges restent `pending` jusqu'à confirmation manuelle par un administrateur. Aucune passerelle automatique simulée.
-8. **Preview Netlify** : la PR #2 publie automatiquement `https://deploy-preview-2--saas-ugc-growth.netlify.app`, sans toucher `main` ni la production. L'URL est actuellement protégée par la politique d'accès de l'équipe Netlify : le propriétaire doit ouvrir la Preview avec son compte Netlify ou désactiver cette protection pour un test public. Aucun déploiement de production n'a été déclenché.
+1. **MuAPI** : la sonde confirme la présence de `MUAPI_API_KEY`, sans révéler sa valeur ni valider la clé auprès du fournisseur. Aucun appel de génération payante n'a été effectué pendant la mise en production.
+2. **Groq** : `GROQ_API_KEY` est absent ; `reelora-ai` répond `GROQ_NOT_CONFIGURED` et les fonctions d'aide IA qui en dépendent ne sont pas disponibles. Aucun contenu IA de substitution n'est généré.
+3. **Tarification vidéo et plafond** : les migrations sont appliquées avec une majoration par défaut de 110 %, mais la tarification reste désactivée faute de taux USD/XOF et de valeur de crédit validés. Le plafond fournisseur est à `0 USD`, désactivé. Les générations restent donc bloquées jusqu'à ce qu'un administrateur configure les valeurs réelles et valide explicitement un plafond non nul.
+4. **Premier administrateur** : créer un compte sur `/inscription`, puis, comme propriétaire, exécuter une fois dans Supabase SQL Editor `select public.reelora_bootstrap_first_admin('adresse@example.com');`. La fonction exige un compte Auth confirmé, refuse le navigateur, et refuse tout bootstrap si un admin existe déjà. Se connecter ensuite sur `/connexion` puis ouvrir `/admin`.
+5. **Worker** : `reelora_worker_token` existe dans Vault sans être exposé. Le cron `reelora-video-tick` est actif et ses exécutions récentes ont réussi.
+6. **Auth et paiements** : l'API Auth publique indique que l'inscription e-mail est activée et l'auto-confirmation active. Les parcours avec un vrai compte et la liste d'URL de redirection n'ont pas été testés. Les fonctions de paiement SasPay sont présentes, mais aucun paiement ou parcours de bout en bout n'a été réalisé.
+7. **Historique SQL** : les 25 migrations Reelora/Business Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.
 
 ---
 

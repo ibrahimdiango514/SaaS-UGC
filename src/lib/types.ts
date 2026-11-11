@@ -426,6 +426,7 @@ export interface AdminProviderSpendSummary {
   remaining_usd: number;
   tests_count: number;
   blocked_count: number;
+  by_provider: { provider: string; actual_spent_usd: number; reserved_usd: number; committed_usd: number }[];
   history: AdminProviderSpendEntry[];
 }
 

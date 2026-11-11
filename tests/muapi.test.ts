@@ -395,7 +395,7 @@ describe('Configuration MuAPI et protection des crédits', () => {
   });
 
   it('refuse un solde insuffisant : la règle SQL lève insufficient_credits avant toute réservation', () => {
-    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261108000009_reelora_muapi.sql'), 'utf8');
+    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261108223923_reelora_muapi_v1.sql'), 'utf8');
     expect(migration).toContain("raise exception 'insufficient_credits'");
     expect(migration).toContain("perform public.reelora_consume_quota('video', v_job");
     // Le contrôle du solde précède la réservation et l'appel fournisseur.
@@ -403,7 +403,7 @@ describe('Configuration MuAPI et protection des crédits', () => {
   });
 
   it('réserve exactement une fois via un identifiant d’idempotence par opération', () => {
-    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261108000009_reelora_muapi.sql'), 'utf8');
+    const migration = readFileSync(join(process.cwd(), 'supabase/migrations/20261108223923_reelora_muapi_v1.sql'), 'utf8');
     expect(migration).toContain('on conflict (created_by, request_key) do nothing');
     expect(migration).toContain("'reserve-job:' || v_job::text");
     expect(migration).toContain("'release-job:'");

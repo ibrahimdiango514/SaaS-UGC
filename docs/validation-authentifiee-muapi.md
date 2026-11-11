@@ -40,7 +40,7 @@ Identifiants et JWT restent **hors dépôt** dans `/tmp/reelora-test-user.json` 
 
 Cause : `public.reelora_video_models` est une vue `security_invoker=true` sur `saas_ugc.ugc_video_models`. La migration `20261108000001` avait fait `grant select on all tables in schema saas_ugc to service_role`, mais la table a été créée **plus tard** (`20261108000009`) et n'avait accordé `SELECT` qu'à `anon, authenticated`. L'Edge lisait donc `[]` : `catalog` survivait grâce aux entrées MuAPI live (d'où `param_schema:{}`, `synced_at:null`), tandis que `loadModel()` ne trouvait aucun modèle.
 
-**Correction autorisée** (`ask_user` → `grant_select`) : migration strictement additive `20261109144500_reelora_video_models_service_select.sql` :
+**Correction autorisée** (`ask_user` → `grant_select`) : migration strictement additive `20261109144611_reelora_video_models_service_select.sql` :
 
 ```sql
 grant select on saas_ugc.ugc_video_models to service_role;
@@ -195,7 +195,7 @@ Ces captures sont des **fixtures navigateur** : elles ne constituent pas une val
 
 | Fichier | Objet |
 | --- | --- |
-| `supabase/migrations/20261109144500_reelora_video_models_service_select.sql` | **Ajout** — GRANT SELECT additif, justifié et validé avant application |
+| `supabase/migrations/20261109144611_reelora_video_models_service_select.sql` | **Ajout** — GRANT SELECT additif, justifié et validé avant application |
 | `supabase/functions/reelora-video/index.ts` | `provider_cost_usd=null` quand `quote_source='unavailable'` |
 | `src/studio/model.ts` | Nouveaux libellés de devis (`QUOTE_TO_CONFIRM`, `providerQuoteCostLabel`, `providerQuoteOriginLabel`, `isExactProviderQuote`) |
 | `src/studio/GenerationStudio.tsx` | Panneau « Devis serveur » : coût et origine non inventés |
