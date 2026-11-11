@@ -66,7 +66,7 @@ export const businessGrowBridge: BusinessGrowStatusPort & BusinessAiEnginePort =
     let conversationId = request.conversationId ?? null;
     if (!conversationId) {
       const created = await businessGrowApi.createConversation(
-        request.conversationTitle?.trim() || 'Tâche IA Reelora',
+        request.conversationTitle?.trim() || 'Tâche IA VYORA',
         request.workspaceId ?? null,
       );
       conversationId = created.conversationId;

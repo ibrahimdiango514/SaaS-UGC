@@ -189,9 +189,9 @@ describe('Business Grow', () => {
     expect(screen.getAllByRole('link', { name: /Business Grow/ }).length).toBeGreaterThan(0);
   });
 
-  it('charge le backend mais ne prétend pas disposer d’un fournisseur IA', async () => {
+  it('charge le backend sans prétendre disposer d’un service IA', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    expect(await screen.findByText(/Aucun fournisseur IA vérifié/)).toBeTruthy();
+    expect(await screen.findByText(/Aucun service IA vérifié/)).toBeTruthy();
     expect(screen.getByTestId('business-overall-status').textContent).toContain('IA non disponible');
 
     const composer = screen.getByLabelText('Votre demande') as HTMLTextAreaElement;
@@ -201,33 +201,33 @@ describe('Business Grow', () => {
     expect(screen.getByText('Aucune conversation enregistrée')).toBeTruthy();
   });
 
-  it('charge la mémoire consentie et affiche les statuts vérifiables des fournisseurs', async () => {
+  it('charge la mémoire consentie et affiche les statuts vérifiables des services IA', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
     expect(screen.getByText('Mémoire métier privée')).toBeTruthy();
     expect(await screen.findByText('La mémoire est désactivée et reste vide.')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Fournisseurs IA' }));
-    expect(screen.getByText('Registre des fournisseurs')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
+    expect(screen.getByText('Services IA VYORA')).toBeTruthy();
     expect(screen.getByTestId('provider-gemini')).toBeTruthy();
     expect(screen.getByTestId('provider-groq')).toBeTruthy();
     expect(screen.getByText('Rédaction')).toBeTruthy();
-    expect(screen.getByTestId('provider-muapi').textContent).toContain('Hors du routage conversationnel');
+    expect(screen.getByTestId('provider-muapi').textContent).toContain('Génération vidéo');
   });
 
-  it('affiche les marques et produits persistés dans le même espace Reelora', async () => {
+  it('affiche les marques et produits persistés dans le même espace VYORA', async () => {
     authMocks.workspace = {
-      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier Reelora',
+      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier VYORA',
       country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
     };
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole('button', { name: 'Entreprise' }));
 
-    expect(await screen.findByText('Atelier Reelora')).toBeTruthy();
+    expect(await screen.findByText('Atelier VYORA')).toBeTruthy();
     expect(await screen.findByText('Atelier Test')).toBeTruthy();
     expect(await screen.findByText('Sérum Éclat')).toBeTruthy();
-    expect(screen.getByText('Ces données proviennent de l’espace Reelora partagé. Elles ne sont pas copiées dans la mémoire IA.')).toBeTruthy();
+    expect(screen.getByText('Ces données proviennent de l’espace VYORA partagé. Elles ne sont pas copiées dans la mémoire IA.')).toBeTruthy();
     expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1');
     expect(businessMocks.listProducts).toHaveBeenCalledWith('workspace-1');
     expect(screen.getByRole('link', { name: /Gérer les informations/ }).getAttribute('href')).toBe('/app/parametres');
@@ -367,11 +367,11 @@ describe('Business Grow', () => {
     expect(await screen.findByText('En attente')).toBeTruthy();
     expect(screen.getByText('Traitement en cours')).toBeTruthy();
     expect(screen.getByText(/Traitement réussi/)).toBeTruthy();
-    expect(screen.getByText(/Réponse fournie par Gemini · model-via-fixture/)).toBeTruthy();
-    expect(screen.getByText('Erreur (NO_VERIFIED_PROVIDER)')).toBeTruthy();
+    expect(screen.getByText(/Réponse générée par l’assistant VYORA/)).toBeTruthy();
+    expect(screen.getByText('Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.')).toBeTruthy();
   });
 
-  it('conserve le message utilisateur et affiche l’erreur réelle quand aucun fournisseur ne répond', async () => {
+  it('conserve le message utilisateur et masque les détails techniques de service en erreur', async () => {
     const conversationId = '88888888-8888-4888-8888-888888888888';
     businessMocks.state.conversations = [
       { id: conversationId, title: 'Question', created_at: '2026-01-01', updated_at: '2026-01-01' },
@@ -393,12 +393,11 @@ describe('Business Grow', () => {
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Aidez-moi à planifier.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
-    expect(await screen.findByText('Aucun fournisseur vérifié. Aucune réponse simulée.')).toBeTruthy();
     expect(await screen.findByText('Aidez-moi à planifier.')).toBeTruthy();
-    expect(await screen.findByText('Erreur (NO_VERIFIED_PROVIDER)')).toBeTruthy();
+    expect(await screen.findAllByText('Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.')).toHaveLength(2);
   });
 
-  it('affiche la réponse réellement persistée et le fournisseur après un envoi réussi', async () => {
+  it('affiche la réponse réellement persistée sans exposer le service utilisé', async () => {
     businessMocks.sendMessage.mockImplementationOnce(async (_conversationId?: string, content?: string) => {
       businessMocks.state.messages = [
         {
@@ -421,14 +420,14 @@ describe('Business Grow', () => {
     });
 
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    expect(await screen.findByText(/Aucun fournisseur IA vérifié n’est actuellement disponible/)).toBeTruthy();
+    expect(await screen.findByText(/Aucun service IA vérifié n’est actuellement disponible/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Réponds réellement.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     expect(await screen.findByText('Réponse issue du fournisseur.')).toBeTruthy();
-    expect(screen.getByTestId('business-message-assistant').textContent).toContain(
-      'Réponse fournie par Gemini · verified-gemini-model',
-    );
+    expect(screen.getByTestId('business-message-assistant').textContent).toContain('Réponse générée par l’assistant VYORA');
+    expect(screen.getByTestId('business-message-assistant').textContent).not.toContain('gemini');
+    expect(screen.getByTestId('business-message-assistant').textContent).not.toContain('verified-gemini-model');
   });
 
   it('n’affiche pas le backend comme disponible si Supabase/Edge ne répond pas', async () => {
@@ -532,7 +531,7 @@ describe('Business Grow', () => {
 
     fireEvent.change(screen.getByLabelText('Rôle de la tâche IA'), { target: { value: 'marketing_campaign' } });
     fireEvent.change(screen.getByLabelText('Mode de routage'), { target: { value: 'manual' } });
-    fireEvent.change(await screen.findByLabelText('Fournisseur manuel'), { target: { value: 'groq' } });
+    fireEvent.change(await screen.findByLabelText('Service IA manuel'), { target: { value: 'groq' } });
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Lance ma campagne.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
@@ -574,7 +573,7 @@ describe('Business Grow', () => {
     await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-handoff-1', 'approved'));
   });
 
-  it('permet de vérifier un fournisseur réel et affiche les adaptateurs préparés sans les simuler', async () => {
+  it('permet de vérifier un service réel et présente les services en préparation sans les simuler', async () => {
     businessMocks.getStatus.mockResolvedValue({
       providers: [{
         provider_key: 'groq',
@@ -588,9 +587,9 @@ describe('Business Grow', () => {
 
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
-    fireEvent.click(screen.getByRole('button', { name: 'Fournisseurs IA' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
 
-    expect(screen.getByTestId('adapter-openai').textContent).toContain('Adaptateur prêt');
+    expect(screen.getByTestId('adapter-openai').textContent).toContain('Service VYORA à venir');
     expect(screen.getByTestId('adapter-anthropic')).toBeTruthy();
     expect(screen.getByTestId('adapter-deepseek')).toBeTruthy();
     expect(screen.getByTestId('adapter-mistral')).toBeTruthy();
@@ -601,7 +600,7 @@ describe('Business Grow', () => {
     if (verifyBtn) fireEvent.click(verifyBtn);
 
     await waitFor(() => expect(businessMocks.verifyProvider).toHaveBeenCalledWith('groq'));
-    expect(await screen.findByText(/groq \(verified-groq-model\) vérifié avec succès/)).toBeTruthy();
+    expect(await screen.findByText(/Connexion vérifiée avec succès/)).toBeTruthy();
   });
 
   it('affiche les intégrations planifiées dans l’onglet Intégrations sans fausse connexion', async () => {
@@ -644,7 +643,7 @@ describe('Business Grow', () => {
     expect((screen.getByLabelText('Votre demande') as HTMLTextAreaElement).value).toContain('Gamme Karité');
 
     fireEvent.change(screen.getByLabelText('Mode de routage'), { target: { value: 'manual' } });
-    fireEvent.change(screen.getByLabelText('Fournisseur manuel'), { target: { value: 'groq' } });
+    fireEvent.change(screen.getByLabelText('Service IA manuel'), { target: { value: 'groq' } });
     fireEvent.click(screen.getByLabelText('Autoriser le secours automatique en mode manuel'));
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
@@ -656,7 +655,7 @@ describe('Business Grow', () => {
     });
   });
 
-  it('n’affiche jamais Vérifié sans preuve serveur réelle et affiche des erreurs exploitables en cas d’échec', async () => {
+  it('n’affiche jamais Vérifié sans preuve serveur réelle et masque les détails techniques des erreurs', async () => {
     businessMocks.getStatus.mockResolvedValue({
       providers: [
         {
@@ -687,9 +686,9 @@ describe('Business Grow', () => {
 
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
-    expect(screen.getByTestId('business-overall-status').textContent).toContain('1 fournisseur(s) vérifié(s)');
+    expect(screen.getByTestId('business-overall-status').textContent).toContain('1 service(s) IA vérifié(s)');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Fournisseurs IA' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
 
     const groqCard = screen.getByTestId('provider-groq');
     expect(groqCard.textContent).toContain('Configuré · Non vérifié');
@@ -697,14 +696,18 @@ describe('Business Grow', () => {
 
     const geminiCard = screen.getByTestId('provider-gemini');
     expect(geminiCard.textContent).toContain('Vérifié');
-    expect(geminiCard.textContent).toContain('Test serveur réel réussi');
+    expect(geminiCard.textContent).toContain('Disponibilité confirmée.');
+    expect(geminiCard.textContent).not.toContain('gemini');
+    expect(geminiCard.textContent).not.toContain('gemini-2.5-flash');
 
     const verifyBtn = groqCard.querySelector('button');
     if (verifyBtn) fireEvent.click(verifyBtn);
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('PROVIDER_AUTH_FAILED');
-    expect(alert.textContent).toContain('Supabase Edge Functions Secrets');
+    expect(alert.textContent).toContain('Impossible de vérifier la connexion au service IA.');
+    expect(alert.textContent).toContain('contactez le support VYORA');
+    expect(alert.textContent).not.toContain('PROVIDER_AUTH_FAILED');
+    expect(alert.textContent).not.toContain('Supabase Edge Functions Secrets');
   });
 
   it('envoie explicitement selectionMode auto si une règle manuelle sauvegardée existe pour le rôle', async () => {

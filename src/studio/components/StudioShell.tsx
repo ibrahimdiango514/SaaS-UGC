@@ -11,7 +11,7 @@ function StudioTab({ to, label, icon: Icon, status, end }: {
     <NavLink to={to} end={end} className={({ isActive }) => cn(
       'group flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-[13px] font-medium transition-all duration-200',
       isActive
-        ? 'border-brand-400/40 bg-brand-500/20 text-white shadow-[0_0_0_1px_rgba(114,85,245,0.12)]'
+        ? 'border-brand-400/40 bg-brand-500/20 text-white shadow-[0_0_0_1px_rgba(34,211,238,0.12)]'
         : 'border-white/[0.06] bg-white/[0.02] text-slate-400 hover:border-white/15 hover:bg-white/[0.05] hover:text-white',
     )}>
       <Icon size={15} className={cn('transition-colors', status === 'live' ? 'text-brand-300' : 'text-slate-500')} />
@@ -29,7 +29,7 @@ export function StudioShell({ children, title, eyebrow, actions }: {
 
   return (
     <div className="animate-fadeUp">
-      {/* Reelora studio identity — original aurora/grain composition, not a copy of MuAPI */}
+      {/* VYORA studio identity — original aurora/grain composition, not a copy of MuAPI */}
       <div className="relative mb-5 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0b0d18] px-5 py-6 sm:px-7 sm:py-7">
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-28 h-64 w-64 rounded-full bg-brand-500/20 blur-[90px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 right-0 h-64 w-64 rounded-full bg-cyan-400/10 blur-[100px]" />
@@ -38,7 +38,7 @@ export function StudioShell({ children, title, eyebrow, actions }: {
           <div>
             <div className="mb-2 flex items-center gap-2">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-500/20 text-brand-200 ring-1 ring-brand-400/25"><Sparkles size={14} /></span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-brand-200/90">Reelora · Creative Space</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-brand-200/90">VYORA · Studio UGC</span>
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">{title}</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { MuApiModel } from '../src/lib/types';
 import {
-  defaultParams, isModelAvailable, modelDurations, modelFamily, modelModes,
+  MODE_DESCRIPTIONS, defaultParams, isModelAvailable, modelDurations, modelFamily, modelModes,
   modelRatios, modelResolutions, modelsForMode, normalizeParamValue, supportedParams,
 } from '../src/studio/model';
 import { EMPTY_STRUCTURE, composeStructuredPrompt } from '../src/studio/prompt';
@@ -86,7 +86,7 @@ describe('suivi professionnel', () => {
     expect(TRACK_STEPS.map((s) => s.id)).toEqual(['draft', 'queued', 'submitting', 'processing', 'finalizing', 'succeeded']);
     expect(trackingState('', null).tone).toBe('idle');
     expect(trackingState('queued', null)).toMatchObject({ label: 'En attente', serverSide: true });
-    expect(trackingState('reserved', null)).toMatchObject({ label: 'Soumission au fournisseur' });
+    expect(trackingState('reserved', null)).toMatchObject({ label: 'Lancement' });
     expect(trackingState('processing', 'processing')).toMatchObject({ label: 'En cours de génération', serverSide: true });
     expect(trackingState('processing', 'completed')).toMatchObject({ label: 'Traitement du résultat' });
     expect(trackingState('succeeded', 'completed')).toMatchObject({ label: 'Terminé', progress: 100, tone: 'success' });
@@ -111,9 +111,22 @@ describe('architecture modulaire et espaces préparés', () => {
     expect(prepared).toContain('Préparé · non opérationnel');
     expect(prepared).toContain('Aucun bouton de génération');
     expect(prepared).not.toMatch(/Générer|Generate/i);
-    const videoStudio = read('src/studio/VideoStudio.tsx');
-    expect(videoStudio).toContain('Video to Video est un espace préparé');
-    expect(videoStudio).toContain('aucun modèle correspondant n’est intégré');
+  });
+
+  it('ne révèle pas les noms des services techniques dans les textes publics du Studio', () => {
+    const tracking = [
+      trackingState('', ''),
+      trackingState('queued', ''),
+      trackingState('processing', 'processing'),
+      trackingState('succeeded', 'completed'),
+      trackingState('failed', ''),
+    ];
+    const publicCopy = [
+      ...Object.values(MODE_DESCRIPTIONS),
+      ...STUDIO_SECTIONS.map((section) => section.description),
+      ...tracking.map((state) => `${state.label} ${state.description}`),
+    ].join(' ');
+    expect(publicCopy).not.toMatch(/MuAPI|Groq|Gemini|USD/i);
   });
 
   it('les images de référence restent privées et compatibles avec les fonctions live', () => {

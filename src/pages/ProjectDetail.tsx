@@ -196,8 +196,8 @@ export default function ProjectDetail() {
         <Card>
           <CardHeader title="Générations liées" action={<Link to="/app/historique" className="text-xs font-semibold text-brand-300">Historique complet</Link>} />
           {jobs.length === 0 ? <EmptyState icon={<Wand2 size={22} />} title="Aucune génération" description="Lancez une vidéo depuis l’UGC Studio." /> : (
-            <div className="table-wrap"><table className="table"><thead><tr><th>Service</th><th>Statut</th><th>Fournisseur</th><th>Crédits</th><th>Date</th></tr></thead>
-              <tbody>{jobs.map((j) => <tr key={j.id}><td className="font-medium text-white">{j.service_key}</td><td><Badge status={j.status}>{statusLabel(j.status)}</Badge></td><td>{j.provider ?? '—'}</td><td>{j.credits_charged || j.credits_reserved}</td><td className="text-xs">{formatDate(j.created_at, true)}</td></tr>)}</tbody></table></div>
+            <div className="table-wrap"><table className="table"><thead><tr><th>Création</th><th>Statut</th><th>Type</th><th>Crédits</th><th>Date</th></tr></thead>
+              <tbody>{jobs.map((j) => <tr key={j.id}><td className="font-medium text-white">Vidéo VYORA</td><td><Badge status={j.status}>{statusLabel(j.status)}</Badge></td><td>Vidéo</td><td>{j.credits_charged || j.credits_reserved}</td><td className="text-xs">{formatDate(j.created_at, true)}</td></tr>)}</tbody></table></div>
           )}
           {jobsLoadError && <p role="alert" className="m-4 rounded-lg border border-rose-400/20 bg-rose-400/[0.05] p-3 text-xs text-rose-200">{jobsLoadError}</p>}
           {hasMoreJobs && <div className="flex justify-center border-t border-line p-4"><Button variant="outline" loading={loadingMoreJobs} onClick={() => void loadMoreJobs()}>Charger plus de générations</Button></div>}

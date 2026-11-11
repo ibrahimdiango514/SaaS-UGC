@@ -1,7 +1,7 @@
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
-  AdminOverview, AdminUser, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
+  AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
   ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
@@ -457,9 +457,12 @@ export async function listServices(): Promise<ServiceCatalogItem[]> {
 export async function startGeneration(
   projectId: string, serviceKey: string, payload: Json, idempotencyKey?: string,
 ): Promise<string> {
+  const quoteId = typeof payload.quote_id === 'string' ? payload.quote_id : '';
+  if (!quoteId) throw new AppError('Un devis vidéo valide est requis avant de lancer la génération.', 'VIDEO_QUOTE_REQUIRED');
   const id = await rpc<unknown>('reelora_start_generation', {
     p_project_id: projectId, p_service_key: serviceKey, p_payload: payload,
     p_idempotency_key: idempotencyKey ?? null,
+    p_quote_id: quoteId,
   });
   return requireId(id, 'job de génération');
 }
@@ -467,6 +470,10 @@ export async function startGeneration(
 /** Full live MuAPI video catalogue with explicit public/account diagnostics. */
 export function getVideoCatalog(): Promise<VideoCatalogResponse> {
   return invokeEdge<VideoCatalogResponse>('reelora-video', { action: 'catalog' });
+}
+
+export function adminVideoCatalog(): Promise<AdminVideoCatalogResponse> {
+  return invokeEdge<AdminVideoCatalogResponse>('reelora-video', { action: 'admin-catalog' });
 }
 
 /** Verified MuAPI video models (kept for the classical Studio and existing tests). */
@@ -684,6 +691,33 @@ export async function adminUpdateService(serviceKey: string, creditsCost: number
 
 export async function adminSetSetting(key: string, value: Json) {
   return rpc<boolean>('reelora_admin_set_setting', { p_key: key, p_value: value });
+}
+
+export async function adminSetVideoPricing(config: {
+  usd_to_xof: number;
+  credit_value_xof: number;
+  markup_percent: number;
+  additional_cost_usd: number;
+  enabled: boolean;
+}) {
+  return rpc<boolean>('reelora_admin_set_video_pricing', {
+    p_usd_to_xof: config.usd_to_xof,
+    p_credit_value_xof: config.credit_value_xof,
+    p_markup_percent: config.markup_percent,
+    p_additional_cost_usd: config.additional_cost_usd,
+    p_enabled: config.enabled,
+  });
+}
+
+export function adminProviderSpendSummary(): Promise<AdminProviderSpendSummary> {
+  return rpc<AdminProviderSpendSummary>('reelora_admin_provider_spend_summary');
+}
+
+export async function adminSetProviderSpendCap(maxUsd: number, enabled: boolean): Promise<boolean> {
+  return rpc<boolean>('reelora_admin_set_provider_spend_cap', {
+    p_max_usd: maxUsd,
+    p_enabled: enabled,
+  });
 }
 
 export async function adminCreatePromo(code: string, bonusCredits: number, maxRedemptions = 100) {

@@ -173,7 +173,7 @@ export function AssistPanel({
       const proposed = await onProposeAiPlan();
       if (proposed) setAiProposal(proposed);
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Erreur lors de la proposition Groq.');
+      setAiError('Impossible de générer une proposition IA. Réessayez.');
     } finally {
       setAiBusy(false);
     }
@@ -362,33 +362,33 @@ export function AssistPanel({
         })}
       </div>
 
-      {/* Explicit separation: optional Server AI (Groq) proposal block */}
+      {/* Optional server-assisted production plan */}
       {onProposeAiPlan && (
         <div className="mt-3 rounded-xl border border-white/[0.08] bg-black/25 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white">
-              <Bot size={13} className="text-cyan-300" /> Suggestion IA serveur (Groq)
+              <Bot size={13} className="text-cyan-300" /> Suggestion IA
             </span>
             <span className={cn(
               'rounded px-1.5 py-0.5 text-[9px] font-semibold',
               groqConfigured === true ? 'bg-cyan-400/15 text-cyan-200' : 'bg-amber-400/10 text-amber-200',
             )}>
-              {groqConfigured === true ? 'Groq configuré' : 'API IA non configurée'}
+              {groqConfigured === true ? 'Disponible' : 'Indisponible'}
             </span>
           </div>
           {groqConfigured !== true ? (
             <p className="mt-1.5 text-[10px] leading-relaxed text-amber-200/90">
-              GROQ_API_KEY absent côté serveur : les suggestions IA distantes sont désactivées et jamais simulées.
+              Les suggestions IA sont indisponibles pour le moment.
             </p>
           ) : (
             <div className="mt-2">
               <Button size="sm" variant="outline" loading={aiBusy} disabled={disabled} icon={<Wand2 size={12} />} onClick={() => void requestGroqSuggestion()}>
-                Demander un découpage IA (Groq)
+                Demander un découpage IA
               </Button>
               {aiError && <p className="mt-1.5 text-[10px] text-rose-300">{aiError}</p>}
               {aiProposal && (
                 <div className="mt-2 rounded-lg border border-cyan-400/25 bg-cyan-400/[0.05] p-2.5 text-[10px]">
-                  <p className="font-semibold text-cyan-200">Proposition Groq validée ({aiProposal.scenes.length} scènes)</p>
+                  <p className="font-semibold text-cyan-200">Proposition IA validée ({aiProposal.scenes.length} scènes)</p>
                   <p className="mt-1 text-slate-300">
                     {aiProposal.scenes.map((sc, i) => `${i + 1}. ${sc.label} (${sc.durationSeconds}s)`).join(' · ')}
                   </p>

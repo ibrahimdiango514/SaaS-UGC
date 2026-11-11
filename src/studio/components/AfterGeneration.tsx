@@ -23,7 +23,7 @@ export function AfterGeneration({ result, job, onRegenerate, onEditScript, onVar
           <h2 className="mt-1 text-lg font-semibold text-white">Votre vidéo UGC</h2>
         </div>
         <span className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-[11px] text-slate-400">
-          {job?.provider ?? 'muapi'} · {credits} crédits {job?.status === 'succeeded' ? 'capturés' : 'réservés'}
+          Studio UGC · {credits} crédits {job?.status === 'succeeded' ? 'utilisés' : 'réservés'}
         </span>
       </div>
 
@@ -37,7 +37,7 @@ export function AfterGeneration({ result, job, onRegenerate, onEditScript, onVar
                 <Film size={28} className="mx-auto text-slate-600" />
                 <p className="mt-2 text-sm text-slate-300">Aucun fichier vidéo disponible</p>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                  Aucun résultat fictif n’est affiché. Le lecteur apparaît uniquement quand MuAPI a produit une vidéo réelle, stockée dans votre espace privé.
+                  Le lecteur apparaît dès que votre vidéo est prête et enregistrée dans votre espace privé.
                 </p>
               </div>
             </div>
@@ -45,7 +45,7 @@ export function AfterGeneration({ result, job, onRegenerate, onEditScript, onVar
         </div>
         <div className="space-y-2">
           <p className="text-[11px] font-medium text-slate-400">Actions</p>
-          <a href={url ?? undefined} download={url ? 'reelora-video.mp4' : undefined}
+          <a href={url ?? undefined} download={url ? 'vyora-video.mp4' : undefined}
             className={`studio-action ${url ? '' : 'pointer-events-none opacity-40'}`} aria-disabled={!url}>
             <Download size={14} /> Télécharger
           </a>
@@ -55,7 +55,6 @@ export function AfterGeneration({ result, job, onRegenerate, onEditScript, onVar
           <button type="button" onClick={onVariant} className="studio-action"><Sparkles size={14} /> Créer une variante</button>
           <Link to="/app/historique" className="studio-action"><History size={14} /> Voir l’historique</Link>
           <Link to="/app/studio/montage" className="studio-action"><Clapperboard size={14} /> Reprendre dans l’éditeur</Link>
-          {job?.provider_job_id && <p className="break-all pt-1 text-[10px] text-slate-600">Tâche MuAPI : {job.provider_job_id}</p>}
         </div>
       </div>
     </div>

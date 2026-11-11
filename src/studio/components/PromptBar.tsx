@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { Button, Select, Toggle, cn } from '../../components/ui';
 import type { Avatar, MuApiModel, ServiceCatalogItem, VideoCostEstimate } from '../../lib/types';
-import { modelFamily, normalizeParamValue, paramLabel, providerQuoteCostLabel, providerQuoteOriginLabel } from '../model';
-import { USD_CREDIT_NOTE, creditSummary } from '../catalog';
+import { MODE_LABELS, modelModes, normalizeParamValue, paramLabel } from '../model';
+import { creditSummary } from '../catalog';
 import {
   QUALITY_TIERS, compatibleParams, selectOptions, numericRange, clampToModelDuration,
   type QualityTier,
@@ -61,7 +61,6 @@ interface Props {
   onRetryHealth: () => void;
   catalogOpen: boolean;
   onOpenCatalog: () => void;
-  catalogSummary: string;
 }
 
 const RESERVED_KEYS = ['aspect_ratio', 'resolution', 'duration'];
@@ -73,7 +72,7 @@ export function PromptBar({
   state, onPatch, model, services, estimate, balance, blockedReason, busy,
   generateLabel, onGenerate, health, avatars, onAiPlan, aiBusy, aiMessage,
   healthBusy, healthError, onRetryHealth,
-  catalogOpen, onOpenCatalog, catalogSummary,
+  catalogOpen, onOpenCatalog,
 }: Props) {
   const [advanced, setAdvanced] = useState(false);
   const { pathname } = useLocation();
@@ -161,7 +160,7 @@ export function PromptBar({
             </button>
             <button type="button" onClick={onOpenCatalog}
               className={cn('studio-chip shrink-0', catalogOpen && 'border-cyan-400/45 bg-cyan-400/10 text-cyan-100')}>
-              <Database size={11} /> Catalogue MuAPI
+              <Database size={11} /> Catalogue vidéo VYORA
             </button>
             <button type="button" onClick={() => setAdvanced((v) => !v)}
               className={cn('studio-chip shrink-0', advanced && 'border-cyan-400/40 text-cyan-200')}>
@@ -176,8 +175,8 @@ export function PromptBar({
               <p className="text-[10px] uppercase tracking-wide text-slate-500">Qualité & modèle</p>
               <p className="mt-1 text-sm font-semibold text-white">{tier?.label}</p>
               <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{tier?.description}</p>
-              <p className="mt-2 text-[11px] text-cyan-200">Modèle : {model ? modelFamily(model) : 'catalogue en cours…'}</p>
-              <p className="mt-1 text-[10px] text-slate-500">{service ? `Service : ${service.display_name}` : 'Service indisponible'}</p>
+              <p className="mt-2 text-[11px] text-cyan-200">Mode : {model ? MODE_LABELS[modelModes(model)[0]] ?? 'Vidéo' : 'Chargement du catalogue…'}</p>
+              <p className="mt-1 text-[10px] text-slate-500">{service ? 'Service actif' : 'Service indisponible'}</p>
             </div>
 
             {extras.length > 0 && (
@@ -275,17 +274,17 @@ export function PromptBar({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="flex items-center gap-1.5 text-xs font-semibold text-cyan-100"><Sparkles size={12} /> Plan de production & assistance IA</p>
                 <Button size="sm" variant="outline" loading={aiBusy} disabled={health?.groq !== true}
-                  onClick={() => void onAiPlan()} icon={<Sparkles size={11} />}>Proposer un plan avec Groq</Button>
+                  onClick={() => void onAiPlan()} icon={<Sparkles size={11} />}>Proposer un plan avec l’IA</Button>
               </div>
               {health?.groq === false && (
                 <p className="mt-2 text-[11px] leading-relaxed text-amber-200">
-                  <Info size={10} className="mr-1 inline" /> Assistance IA indisponible : <code>GROQ_API_KEY</code> absent côté serveur.
+                  <Info size={10} className="mr-1 inline" /> Assistance IA indisponible pour le moment.
                   Aucune réponse IA n’est simulée. Le plan local déterministe reste disponible et construit vos scènes à partir de votre seule instruction.
                 </p>
               )}
               {health?.groq !== true && health?.groq !== false && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-amber-200" role={healthError ? 'alert' : 'status'}>
-                  <span>{healthBusy ? 'Vérification de la disponibilité de Groq…' : `Vérification Groq indisponible : ${healthError || 'aucune réponse du serveur.'}`}</span>
+                  <span>{healthBusy ? 'Vérification de la disponibilité de l’aide IA…' : 'Aide IA indisponible. Réessayez plus tard.'}</span>
                   {!healthBusy && (
                     <Button size="sm" variant="ghost" icon={<RefreshCw size={11} />} onClick={onRetryHealth}>
                       Réessayer
@@ -301,15 +300,10 @@ export function PromptBar({
         <div className="mt-1.5 flex flex-col gap-1 sm:mt-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
           <div className="flex max-h-[38px] flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden text-[10px] sm:max-h-none sm:flex-nowrap sm:overflow-visible sm:text-[11px]" data-testid="studio-credit-summary">
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1.5 font-semibold text-cyan-200">
-              <Coins size={12} /> {cost !== null ? `${cost} crédits UGC` : 'Devis en cours…'}
+              <Coins size={12} /> {cost !== null ? `${cost} crédits VYORA` : 'Coût en crédits en cours…'}
             </span>
-            {estimate && (
-              <span data-testid="studio-provider-quote" className={summary.quoteToConfirm ? 'font-semibold text-amber-200' : 'text-slate-500'} title={`${providerQuoteOriginLabel(estimate)} · ${USD_CREDIT_NOTE}`}>
-                Fournisseur {providerQuoteCostLabel(estimate)}<span className="hidden sm:inline"> · Solde {balance} crédits</span>
-              </span>
-            )}
-            {summary.quoteToConfirm && <span className="hidden text-amber-200 lg:inline">Génération bloquée : devis à confirmer</span>}
-            {catalogSummary && <span className="hidden max-w-full truncate text-slate-600 sm:inline" title={catalogSummary}>{catalogSummary}</span>}
+            {estimate && <span className="text-slate-500">Solde {balance} crédits</span>}
+            {summary.quoteToConfirm && <span className="hidden text-amber-200 lg:inline">Génération bloquée : coût en crédits à confirmer</span>}
             {blockedReason && <span className="hidden max-w-full items-center gap-1 text-amber-300 sm:inline-flex" title={blockedReason}><AlertCircle size={11} /> {blockedReason}</span>}
           </div>
           <button type="button" onClick={onGenerate} disabled={!canGenerate} title={blockedReason ?? undefined}
@@ -324,10 +318,9 @@ export function PromptBar({
         </div>
         {summary.quoteToConfirm && (
           <p data-testid="studio-quote-warning" className="mt-1.5 text-[10px] leading-relaxed text-amber-200 lg:hidden">
-            Devis fournisseur à confirmer · aucun montant de remplacement · génération bloquée.
+            Coût en crédits à confirmer · génération bloquée.
           </p>
         )}
-        <p className="mt-1 hidden text-[9px] leading-relaxed text-slate-600 sm:block">{USD_CREDIT_NOTE}</p>
         <button type="button" onClick={focusPrompt} className="sr-only">Aller au prompt</button>
       </div>
     </div>

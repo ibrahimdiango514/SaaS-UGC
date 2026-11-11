@@ -1,18 +1,12 @@
 /**
  * Pure, testable helpers for the finalised Studio catalogue.
  *
- * Everything here is derived from the REAL MuAPI rows returned by
- * `reelora-video { action: "catalog" }` or from the backend estimate:
- * - no model identifier, price, format, duration or resolution is invented;
- * - no USD ↔ credit conversion is performed (Reelora credits are fixed per
- *   service, the provider cost is a separate, clearly labelled USD amount);
- * - a failed/absent `estimate-cost` quote is never replaced by 0.000 USD.
+ * Everything here is derived from the video catalog or opaque backend quote.
  */
 
 import type { MuApiModel, VideoCostEstimate } from '../lib/types';
 import {
-  MODE_LABELS, hasUsableProviderCost, isExactProviderQuote, modelDurations,
-  modelModes, modelRatios, modelResolutions, providerQuoteCostLabel,
+  MODE_LABELS, modelDurations, modelModes, modelRatios, modelResolutions,
   reeloraModelStatus,
 } from './model';
 
@@ -55,11 +49,8 @@ export const CATALOG_CATEGORIES: CategoryOption[] = [
 
 export const CATALOG_STATUSES: { id: CatalogStatusFilter; label: string }[] = [
   { id: 'all', label: 'Tous les statuts' },
-  { id: 'active', label: 'Actifs Reelora' },
+  { id: 'active', label: 'Disponibles dans VYORA' },
   { id: 'unavailable', label: 'Indisponibles' },
-  { id: 'account', label: 'Retourné avec la clé' },
-  { id: 'public_only', label: 'Absent du catalogue clé' },
-  { id: 'unverified', label: 'Compte non vérifié' },
 ];
 
 export const CATALOG_CAPABILITIES: { id: CapabilityFilter; label: string }[] = [
@@ -79,8 +70,6 @@ export const CATALOG_PRICING: { id: PricingFilter; label: string }[] = [
 
 export const CATALOG_SORTS: { id: CatalogSort; label: string }[] = [
   { id: 'relevance', label: 'Ordre du catalogue' },
-  { id: 'cost-asc', label: 'Coût croissant' },
-  { id: 'cost-desc', label: 'Coût décroissant' },
   { id: 'name', label: 'Nom A → Z' },
 ];
 
@@ -138,14 +127,13 @@ export function modelCapabilities(model: MuApiModel): ModelCapabilities {
   if (hasDuration) tags.push(compact(durations, 'Durée', 'Durée déclarée'));
   if (hasAudio) tags.push('Audio natif');
   if (hasImage) tags.push(requiresImage ? 'Image requise' : 'Image → vidéo');
-  if (dynamicPricing) tags.push('Devis dynamique');
   return {
     ratios, resolutions, durations, hasRatio, hasResolution, hasDuration,
     hasAudio, hasImage, requiresImage, dynamicPricing, tags,
   };
 }
 
-export function knownCostUsd(model: MuApiModel): number | null {
+function knownCostUsd(model: MuApiModel): number | null {
   const n = Number(model.cost_usd);
   return model.cost_usd !== null && model.cost_usd !== undefined && model.cost_usd !== ''
     && Number.isFinite(n) && n >= 0 ? n : null;
@@ -199,7 +187,6 @@ function sortModels(items: MuApiModel[], sort: CatalogSort): MuApiModel[] {
     return out.sort((a, b) => {
       const ca = knownCostUsd(a);
       const cb = knownCostUsd(b);
-      // Unknown prices are NEVER treated as 0: they go last in both directions.
       if (ca === null && cb === null) return 0;
       if (ca === null) return 1;
       if (cb === null) return -1;
@@ -227,46 +214,41 @@ export function filterModels(models: MuApiModel[], f: CatalogFilters): CatalogSe
   return { items, total: items.length, counts, activeFilters };
 }
 
-/** Clear wording: Reelora credits are NOT converted from the provider USD cost. */
-export const USD_CREDIT_NOTE = 'Crédits Reelora fixes par service, coût USD du fournisseur affiché séparément : aucune conversion, aucun arrondi de facturation.';
-
 export interface CreditSummary {
   creditsCost: number | null;
   balance: number;
   remaining: number | null;
   enough: boolean;
-  usdLabel: string;
   exactQuote: boolean;
   quoteToConfirm: boolean;
   canReserve: boolean;
 }
 
 /**
- * Single source of truth for the USD / credits display and the reservation
- * guard. An absent, failed or null quote can never produce `0.000 USD`.
+ * Single source of truth for the customer-facing credit summary and reservation
+ * guard. Internal provider quote details are not part of this display model.
  */
 export function creditSummary(
   estimate: VideoCostEstimate | null | undefined,
   balance: number,
-  requiresExactQuote = false,
+  _requiresExactQuote = false,
 ): CreditSummary {
   const raw = estimate?.credits_cost;
   const creditsCost = typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : null;
   const remaining = creditsCost === null ? null : Math.max(0, balance - creditsCost);
   const enough = creditsCost !== null && creditsCost > 0 && balance >= creditsCost;
-  const exactQuote = isExactProviderQuote(estimate);
-  const usableCost = hasUsableProviderCost(estimate);
-  // A dynamic model must have a successful `estimate_cost` quote. A fixed
-  // catalogue tariff is factual but never masquerades as an exact quote.
-  const quoteToConfirm = !estimate || !usableCost || (requiresExactQuote && !exactQuote);
+  const expiresAt = estimate?.quote_expires_at ? Date.parse(estimate.quote_expires_at) : Number.NaN;
+  const quoteFresh = Number.isFinite(expiresAt) && expiresAt > Date.now();
+  const exactQuote = Boolean(estimate?.quote_id && estimate.pricing_available && quoteFresh);
+  const quoteToConfirm = !estimate || !estimate.pricing_available || !estimate.quote_id || !quoteFresh;
   const canReserve = Boolean(estimate)
     && estimate?.service_active === true
     && estimate?.model_available === true
+    && Boolean(estimate?.quote_id)
     && !quoteToConfirm
     && enough;
   return {
     creditsCost, balance, remaining, enough,
-    usdLabel: providerQuoteCostLabel(estimate),
     exactQuote,
     quoteToConfirm,
     canReserve: Boolean(canReserve),

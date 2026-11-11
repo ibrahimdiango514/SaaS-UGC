@@ -25,9 +25,9 @@ function Intro({ icon, title, children, to, linkLabel }: {
 
 export function StudioGenerations() {
   return (
-    <StudioShell title="My Generations" actions={<Link to="/app/studio" className="btn btn-primary btn-sm"><Sparkles size={13} /> Nouvelle création</Link>}>
-      <Intro icon={<Clock3 size={18} />} title="Suivi serveur, pas de résultat simulé" to="/app/studio" linkLabel="Ouvrir le Video Studio">
-        Chaque tâche expose son statut réel, son modèle, ses paramètres, son coût, ses événements et ses mouvements de crédits. Webhook MuAPI, worker et cron poursuivent le suivi même après fermeture de la page.
+    <StudioShell title="Mes générations" actions={<Link to="/app/studio" className="btn btn-primary btn-sm"><Sparkles size={13} /> Nouvelle création</Link>}>
+      <Intro icon={<Clock3 size={18} />} title="Suivi serveur, sans résultat simulé" to="/app/studio" linkLabel="Ouvrir le Studio UGC">
+        Chaque tâche expose son statut, ses paramètres, son coût en crédits et son historique. Le suivi continue même après fermeture de la page.
       </Intro>
       <History embedded />
     </StudioShell>
@@ -36,9 +36,9 @@ export function StudioGenerations() {
 
 export function StudioProjects() {
   return (
-    <StudioShell title="My Projects" actions={<Link to="/app/studio" className="btn btn-outline btn-sm"><Layers3 size={13} /> Créer une vidéo</Link>}>
+    <StudioShell title="Mes projets" actions={<Link to="/app/studio" className="btn btn-outline btn-sm"><Layers3 size={13} /> Créer une vidéo</Link>}>
       <Intro icon={<Database size={18} />} title="Projets existants conservés" to="/app/bibliotheque" linkLabel="Voir les créations">
-        Scripts, scènes, statuts et vidéos restent dans les tables Reelora existantes, avec RLS et quotas inchangés. Une génération Video Studio peut être rattachée à l’un de ces projets.
+        Scripts, scènes, statuts et vidéos restent dans les tables existantes, avec RLS et quotas inchangés. Une génération Studio UGC peut être rattachée à l’un de ces projets.
       </Intro>
       <Projects embedded />
     </StudioShell>
@@ -58,9 +58,9 @@ export function StudioSaved() {
 
 export function StudioLegacy() {
   return (
-    <StudioShell title="Parcours classique" eyebrow="Fonctionnalités validées conservées : brief, script Groq, scènes, modèle, coût et suivi.">
-      <Intro icon={<Lock size={18} />} title="Ancien parcours en 5 étapes conservé" to="/app/studio" linkLabel="Revenir au Video Studio">
-        Ce parcours reste accessible sans suppression de fonctionnalités. Le nouveau Video Studio est l’entrée principale et utilise exactement les mêmes RPC, ledger, RLS, Storage et suivi serveur.
+    <StudioShell title="Parcours classique" eyebrow="Fonctionnalités conservées : brief, script IA, scènes, modèle, coût et suivi.">
+      <Intro icon={<Lock size={18} />} title="Ancien parcours en 5 étapes conservé" to="/app/studio" linkLabel="Revenir au Studio UGC">
+        Ce parcours reste accessible sans suppression de fonctionnalités. Le nouveau Studio UGC est l’entrée principale et utilise exactement les mêmes RPC, ledger, RLS, Storage et suivi serveur.
       </Intro>
       <LegacyStudio embedded />
     </StudioShell>

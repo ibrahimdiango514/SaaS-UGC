@@ -27,13 +27,13 @@ import { StudioTopBar } from './components/StudioTopBar';
 import { TrackingPanel } from './components/PreviewStage';
 import { trackingState } from './tracking';
 import {
-  modelFamily, modeFromModel, providerQuoteOriginLabel, type ParamValue,
+  MODE_LABELS, modeFromModel, paramLabel, type ParamValue,
 } from './model';
 import {
   QUALITY_TIERS, buildCompatibleParams, defaultSettingsFor, modelForQuality,
   qualityTierSummary, serviceForQuality,
 } from './quality';
-import { USD_CREDIT_NOTE, creditSummary } from './catalog';
+import { creditSummary } from './catalog';
 import {
   PLAN_VERSION, CREATION_MODES, buildLocalPlan, mapAiScriptToPlan, planToEditorProject,
   validateProductionPlan, type ProductionPlan, type SectorId,
@@ -198,11 +198,11 @@ export default function GenerationStudio() {
       ]);
       setProjects(p); setServices(svc.filter((s) => s.active));
       setModels(c.models ?? []); setCatalog(c.catalog ?? null);
-      setCatalogError(c.catalog?.error ?? '');
+      setCatalogError(c.catalog?.error ? 'Le catalogue vidéo est temporairement indisponible.' : '');
       setAvatars(av);
       setProjectId((current) => current || p[0]?.id || '');
     } catch (err) {
-      setLoadError(asAppError(err).message);
+      setLoadError('Impossible de charger le Studio pour le moment. Vérifiez votre connexion puis réessayez.');
     } finally { setLoading(false); }
   }, [checkHealth, workspaceId]);
   useEffect(() => { void load(); }, [load]);
@@ -263,9 +263,9 @@ export default function GenerationStudio() {
         if (!r?.model) return;
         setModels((prev) => prev.map((m) => m.model_id === id ? { ...m, ...r.model } : m));
       })
-      .catch((err) => {
+      .catch(() => {
         detailCache.current.delete(id);
-        toast.warning(`Schéma détaillé indisponible pour ${id} : ${asAppError(err).message}`);
+        toast.warning('Impossible de charger les paramètres du modèle. Réessayez.');
       })
       .finally(() => setDetailLoading(false));
   }, [model?.model_id, toast]);
@@ -343,12 +343,12 @@ export default function GenerationStudio() {
         .then((e) => {
           if (!active) return;
           setEstimate(e);
-          setEstimateError(e.provider_quote_error ?? '');
+          setEstimateError(e.pricing_error ?? (!e.pricing_available ? 'Le coût en crédits est temporairement indisponible.' : ''));
         })
-        .catch((err) => {
+        .catch(() => {
           if (!active) return;
           setEstimate(null);
-          setEstimateError(asAppError(err).message);
+          setEstimateError('Impossible de calculer le coût en crédits. Réessayez.');
         })
         .finally(() => { if (active) setQuoteBusy(false); });
     }, 350);
@@ -365,28 +365,27 @@ export default function GenerationStudio() {
   );
   const issues = useMemo(() => {
     const out: string[] = [];
-    if (!model) out.push('Aucun modèle MuAPI compatible disponible pour ce mode.');
+    if (!model) out.push('Aucun modèle vidéo compatible disponible pour ce mode.');
     if (!service) out.push('Service de crédits indisponible pour cette qualité.');
     if (catalogError) out.push(catalogError);
-    if (catalog?.account.key_valid === false) out.push('Clé / compte MuAPI non validée : aucune génération réelle ne peut être lancée.');
-    if (health?.muapi === false) out.push('Secret serveur MUAPI_API_KEY absent : une génération réelle ne peut pas aboutir.');
-    if (detailLoading) out.push('Schéma réel du modèle en cours de récupération…');
-    if (quoteBusy) out.push('Devis backend exact en cours…');
-    if (estimateError) out.push(`Devis serveur : ${estimateError}`);
+    if (catalog?.verified === false) out.push('Le service vidéo est indisponible pour le moment.');
+    if (health?.muapi === false) out.push('Le service vidéo est momentanément indisponible.');
+    if (detailLoading) out.push('Chargement des paramètres du modèle…');
+    if (quoteBusy) out.push('Calcul du coût en crédits…');
+    if (estimateError) out.push(estimateError);
     if (form.prompt.trim().length < 20) out.push('Décrivez votre vidéo en au moins 20 caractères.');
     if (!projectId) out.push('Sélectionnez ou créez un projet.');
-    if (!estimate) out.push('Devis serveur en cours…');
+    if (!estimate) out.push('Calcul du coût en crédits en cours…');
     else {
       if (!estimate.service_active) out.push('Le service de crédits est inactif.');
-      if (!estimate.model_available) out.push(estimate.model_reason || 'Le modèle MuAPI sélectionné n’est plus disponible.');
-      if (estimate.provider_quote_error) out.push(estimate.provider_quote_error);
-      if (requiresExactQuote && !summary.exactQuote) out.push('Devis exact estimate-cost indisponible pour ce modèle dynamique : aucune génération payante sans prix confirmé.');
-      if (summary.quoteToConfirm) out.push('Devis fournisseur à confirmer : aucun prix fictif, y compris un zéro factice, n’est accepté.');
-      if (cost !== null && cost > balance) out.push('Crédits UGC insuffisants pour cette réservation.');
-      if (cost === null || cost <= 0) out.push('Coût en crédits Reelora non confirmé par le serveur.');
+      if (!estimate.model_available) out.push('Le modèle sélectionné n’est plus disponible.');
+      if (requiresExactQuote && !summary.exactQuote) out.push('Le coût exact en crédits n’a pas pu être confirmé. La génération reste bloquée.');
+      if (summary.quoteToConfirm) out.push('Le coût en crédits doit être confirmé avant la génération.');
+      if (cost !== null && cost > balance) out.push('Crédits Studio UGC insuffisants pour cette réservation.');
+      if (cost === null || cost <= 0) out.push('Coût en crédits Studio UGC non confirmé par le serveur.');
     }
     const needsImage = (model?.required_fields ?? []).some((f) => f.toLowerCase() === 'image_url');
-    if (needsImage && !reference?.url) out.push('Ce modèle exige une image de référence réelle pour le devis et la génération.');
+    if (needsImage && !reference?.url) out.push('Importez une image de référence pour ce modèle.');
     if (form.mode === 'product' && !form.referenceFile) out.push('Importez une image de produit.');
     if (form.mode === 'avatar' && !form.avatarId) out.push('Choisissez un avatar existant.');
     if (form.referenceFile && form.referenceFile.size > MAX_REFERENCE_BYTES) out.push('Image trop volumineuse (8 Mo maximum).');
@@ -403,7 +402,7 @@ export default function GenerationStudio() {
     setResult(r);
     if (r.status) setStatus(r.status);
     if (r.provider_state) setProviderState(r.provider_state);
-    if (r.status === 'failed') setRunError(r.error || r.message || 'La génération a échoué. Les crédits réservés ont été restitués.');
+    if (r.status === 'failed') setRunError('La génération a échoué. Les crédits réservés ont été restitués.');
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -441,8 +440,6 @@ export default function GenerationStudio() {
       }
       const r: VideoActionResult = {
         job_id: j.id, status: j.status,
-        provider: j.provider ?? undefined,
-        provider_job_id: j.provider_job_id,
         preview_url: previewUrl,
         storage_path: storagePath || undefined,
         error: j.error_message,
@@ -495,9 +492,10 @@ export default function GenerationStudio() {
       }
       const prompt = form.prompt.trim();
       const payload = {
-        provider: 'muapi', ui_version: 'reelora-video-studio-v2-catalog',
+        ui_version: 'reelora-video-studio-v2-catalog',
         mode: generationMode, creation_mode: form.mode, quality: form.quality,
         sector: plan.sector, model_id: model.model_id, params: compatible,
+        quote_id: estimate.quote_id,
         visual_prompt: prompt,
         script_text: (form.script.trim() || prompt).slice(0, 4000),
         subtitles: form.subtitles,
@@ -505,10 +503,7 @@ export default function GenerationStudio() {
         plan_scenes: plan.scenes.map((s) => ({ role: s.role, label: s.label, duration_seconds: s.durationSeconds, visual_prompt: s.visualPrompt, subtitle: s.subtitle })),
         quote: {
           credits_cost: estimate.credits_cost,
-          provider_cost_usd: estimate.provider_cost_usd,
-          provider_cost_currency: estimate.provider_cost_currency,
-          provider_quote_source: estimate.provider_quote_source,
-          params: estimate.quote_params ?? compatible,
+          quote_id: estimate.quote_id,
         },
         ...referencePayload,
       };
@@ -517,7 +512,7 @@ export default function GenerationStudio() {
       const r = await videoStart(id);
       applyResult(r);
       if (r.status === 'failed') await refreshQuota();
-      else { toast.info('Génération soumise à MuAPI. Le suivi continue côté serveur.'); startPolling(id); }
+      else { toast.info('Génération lancée. Le suivi continue automatiquement.'); startPolling(id); }
     } catch (err) {
       setStatus('failed'); setRunError(asAppError(err).message); await refreshQuota();
     } finally { setStarting(false); }
@@ -563,7 +558,7 @@ export default function GenerationStudio() {
   const onSelectModel = (id: string) => {
     setSelectedModelId(id);
     setAdvancedMode(true);
-    toast.info('Modèle sélectionné : schéma réel et devis serveur en cours de chargement.');
+    toast.info('Modèle sélectionné. Chargement des paramètres et du coût en crédits.');
   };
 
   const onClearSelection = () => {
@@ -593,9 +588,7 @@ export default function GenerationStudio() {
 
   const onAiPlan = async () => {
     if (health?.groq !== true) {
-      const message = health?.groq === false
-        ? 'Assistance IA indisponible : GROQ_API_KEY absent côté serveur. Aucune réponse n’est simulée.'
-        : healthError || 'Configuration Groq non vérifiée. Réessayez la vérification avant de continuer.';
+      const message = 'Assistance IA indisponible pour le moment. Réessayez plus tard.';
       setAiMessage(message);
       toast.warning(message);
       return;
@@ -604,9 +597,9 @@ export default function GenerationStudio() {
     try {
       const script = await generateScript({ product: plan.product || 'le produit', brief: form.prompt.slice(0, 800), duration: plan.totalDuration, language: 'fr' });
       const mapped = mapAiScriptToPlan(script, localPlan);
-      if (!mapped.ok) { setAiMessage(`Plan IA rejeté par la validation structurée : ${mapped.errors.join(' ')}`); toast.warning('Plan IA invalide, aucune donnée transmise au fournisseur.'); return; }
+      if (!mapped.ok) { setAiMessage('Le plan proposé n’a pas passé les vérifications. Aucune modification n’a été appliquée.'); toast.warning('Le plan proposé est invalide.'); return; }
       setAiPlan(mapped.plan);
-      setAiMessage(`Plan Groq validé : ${mapped.plan.scenes.length} scènes. Relisez chaque plan avant de générer.`);
+      setAiMessage(`Plan IA validé : ${mapped.plan.scenes.length} scènes. Relisez chaque plan avant de générer.`);
       toast.success('Plan IA validé et chargé.');
     } catch (err) { setAiMessage(asAppError(err).message); toast.error(asAppError(err).message); }
     finally { setAiBusy(false); }
@@ -621,14 +614,12 @@ export default function GenerationStudio() {
     } catch (err) { toast.error(asAppError(err).message); }
   };
 
-  if (loading) return <div className="studio-v2"><StudioTopBar /><LoadingState label="Préparation du Video Generation Studio…" /></div>;
+  if (loading) return <div className="studio-v2"><StudioTopBar /><LoadingState label="Préparation du Studio UGC…" /></div>;
   if (loadError) return <div className="studio-v2"><StudioTopBar /><ErrorState message={loadError} onRetry={() => void load()} /></div>;
 
   const tracking = trackingState(status, providerState);
   const showEmpty = !form.prompt.trim() && !jobId && !result;
-  const catalogSummary = catalog
-    ? `${catalog.detected_video} détectés · ${catalog.active} actifs · ${catalog.unavailable} indisponibles · ${catalog.account_accessible} retournés avec la clé`
-    : 'Catalogue en cours…';
+  const catalogSummary = catalog ? `${catalog.active} modèles disponibles` : 'Actualisation en cours…';
   const catalogModel = selectedModel;
 
   return (
@@ -638,11 +629,11 @@ export default function GenerationStudio() {
       <div className="hidden flex-wrap items-center justify-between gap-2 sm:flex">
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1.5 text-[11px] text-cyan-200">
-            <Database size={12} /> Catalogue MuAPI · {catalogSummary}
+            <Database size={12} /> Catalogue vidéo VYORA · {catalogSummary}
           </span>
           <Link to="/app/studio/classique" className="studio-icon-link">Parcours détaillé</Link>
           <Link to="/app/studio/avance" className="studio-icon-link hidden sm:inline-flex">Parcours 5 étapes</Link>
-          <Link to="/app/studio/montage" className="studio-icon-link"><Scissors size={12} /> AI Video Editor</Link>
+          <Link to="/app/studio/montage" className="studio-icon-link"><Scissors size={12} /> Montage vidéo</Link>
         </div>
         <div className="flex items-center gap-2">
           <Select id="studio-project" value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-auto min-w-[160px] text-xs" aria-label="Projet">
@@ -662,19 +653,19 @@ export default function GenerationStudio() {
         </div>
       )}
       {catalogError && (
-        <div className="mt-3"><Banner tone="danger" title="Catalogue MuAPI partiellement indisponible">{catalogError}</Banner></div>
+        <div className="mt-3"><Banner tone="danger" title="Catalogue vidéo partiellement indisponible">{catalogError}</Banner></div>
       )}
-      {catalog?.account.key_valid === false && (
-        <div className="mt-3"><Banner tone="warning" title="Compte MuAPI non validé">
-          La sonde lecture seule n’a pas pu valider la clé serveur. Les modèles publics restent visibles mais aucune option n’est présentée comme réellement accessible au compte.
+      {catalog?.verified === false && (
+        <div className="mt-3"><Banner tone="warning" title="Service vidéo indisponible">
+          Certains modèles ne peuvent pas être utilisés pour le moment. Aucune génération ne sera lancée tant que le service n’est pas rétabli.
         </Banner></div>
       )}
-      {catalog?.account.key_valid === true && (
-        <p className="mt-2 hidden items-center gap-1.5 text-[11px] text-emerald-300 sm:flex"><CheckCircle2 size={12} /> Clé compte MuAPI validée en lecture seule · aucune génération payante lancée.</p>
+      {catalog?.verified === true && (
+        <p className="mt-2 hidden items-center gap-1.5 text-[11px] text-emerald-300 sm:flex"><CheckCircle2 size={12} /> Le service vidéo est disponible.</p>
       )}
       {health?.muapi === false && (
-        <div className="mt-3"><Banner tone="warning" title="Secret MuAPI absent">
-          La génération réelle ne peut pas aboutir. Ajoutez le secret serveur MUAPI_API_KEY dans Supabase ; aucun résultat n’est simulé.
+        <div className="mt-3"><Banner tone="warning" title="Service vidéo indisponible">
+          La génération ne peut pas aboutir pour le moment. Réessayez plus tard.
         </Banner></div>
       )}
       {estimateError && (
@@ -685,9 +676,9 @@ export default function GenerationStudio() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">Rapide · Standard · Premium</p>
-            <h2 className="mt-0.5 text-sm font-semibold text-white">Services et modèles réellement associés</h2>
+            <h2 className="mt-0.5 text-sm font-semibold text-white">Options de création disponibles</h2>
           </div>
-          <span className="rounded-lg border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[10px] text-slate-500">{models.length} modèles · {services.length} services</span>
+          <span className="rounded-lg border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[10px] text-slate-500">{models.length} modèles disponibles</span>
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           {tierSummary.map((tier) => (
@@ -697,13 +688,11 @@ export default function GenerationStudio() {
                 <span className={cn('rounded-md px-1.5 py-0.5 text-[9px]', tier.available ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-200')}>{tier.available ? 'Disponible' : 'Indisponible'}</span>
               </div>
               <p className="mt-1 text-[10px] leading-snug text-slate-500">{tier.description}</p>
-              <p className="mt-2 text-[11px] font-semibold text-amber-300">{tier.creditsCost ?? '—'} crédits UGC · {tier.serviceKey}</p>
-              <p className="mt-0.5 truncate text-[10px] text-slate-400" title={tier.modelId ?? ''}>{tier.modelName ?? 'Aucun modèle compatible'}</p>
-              <p className="mt-0.5 text-[9px] text-slate-600">Tarif catalogue {tier.catalogCostUsd !== null ? `${tier.catalogCostUsd.toFixed(3)} USD` : '—'} · devis exact séparé</p>
+              <p className="mt-2 text-[11px] font-semibold text-amber-300">Devis avant création</p>
+              <p className="mt-0.5 truncate text-[10px] text-slate-400">{tier.available ? 'Modèle vidéo VYORA' : 'Aucun modèle compatible pour le moment'}</p>
             </div>
           ))}
         </div>
-        <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-600"><Info size={11} className="mt-0.5 shrink-0" /> {USD_CREDIT_NOTE}</p>
       </section>
 
       {showEmpty && (
@@ -718,7 +707,7 @@ export default function GenerationStudio() {
           <div className="rounded-2xl border border-white/[0.08] bg-[#080d14] p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">Plan de production · {plan.source === 'ai' ? 'Groq validé' : 'local déterministe'}</p>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">Plan de production · {plan.source === 'ai' ? 'IA validée' : 'préparé à partir de votre brief'}</p>
                 <h2 className="mt-1 text-lg font-semibold text-white">{plan.product || 'Votre publicité UGC'}</h2>
                 <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-400 line-clamp-2">{form.prompt}</p>
               </div>
@@ -753,24 +742,22 @@ export default function GenerationStudio() {
               <p className="text-[11px] font-semibold text-white">Devis serveur</p>
               <div className="mt-3 space-y-2 text-[11px]">
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Qualité</span><span className="text-white">{QUALITY_TIERS.find((q) => q.id === form.quality)?.label}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Modèle</span><span className="text-right text-white">{model ? modelFamily(model) : '—'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Service</span><span className="text-right text-white">{service?.display_name ?? '—'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Crédits UGC</span><span className="font-bold text-cyan-300">{cost ?? '…'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Coût fournisseur</span><span className={summary.quoteToConfirm ? 'text-right font-semibold text-amber-200' : 'text-right text-white'}>{summary.usdLabel}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Origine du devis</span><span className="text-right text-white">{providerQuoteOriginLabel(estimate)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Modèle</span><span className="text-right text-white">{model ? (MODE_LABELS[modeFromModel(model)] ?? 'Vidéo') : '—'}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Type de création</span><span className="text-right text-white">Vidéo VYORA</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Coût en crédits</span><span className="font-bold text-cyan-300">{cost ?? '…'}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Solde après réservation</span><span className="text-white">{summary.remaining ?? '—'}</span></div>
               </div>
-              {estimate?.provider_quote_error && <p className="mt-2 text-[10px] text-amber-200">{estimate.provider_quote_error}</p>}
-              {summary.quoteToConfirm && <p data-testid="studio-quote-warning" className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-2 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-200">Devis fournisseur à confirmer : aucun prix fictif, génération bloquée.</p>}
-              <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-500"><Info size={11} className="mt-0.5 shrink-0" /> Devis calculé exclusivement côté backend. {USD_CREDIT_NOTE} Réservation avant envoi, capture uniquement après succès, restitution sur échec.</p>
+              {estimate?.pricing_error && <p className="mt-2 text-[10px] text-amber-200">{estimate.pricing_error}</p>}
+              {summary.quoteToConfirm && <p data-testid="studio-quote-warning" className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-2 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-200">Coût en crédits à confirmer : génération bloquée.</p>}
+              <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-500"><Info size={11} className="mt-0.5 shrink-0" /> Le coût est vérifié avant réservation. Les crédits sont débités uniquement après réussite et restitués en cas d’échec.</p>
             </div>
             <div className="rounded-2xl border border-white/[0.08] bg-[#080d14] p-4">
               <p className="text-[11px] font-semibold text-white">Paramètres réellement envoyés</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {Object.entries(compatible).map(([k, v]) => <span key={k} className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-300">{k} : {String(v)}</span>)}
+                {Object.entries(compatible).map(([k, v]) => <span key={k} className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-300">{paramLabel(k)} : {String(v)}</span>)}
                 {Object.keys(compatible).length === 0 && <span className="text-[11px] text-slate-500">Prompt uniquement.</span>}
               </div>
-              <p className="mt-2 text-[10px] text-slate-600">Dérivés de <code>param_schema ∩ input_fields</code> du schéma MuAPI récupéré côté serveur.</p>
+              <p className="mt-2 text-[10px] text-slate-600">Les options affichées correspondent aux paramètres disponibles pour ce modèle.</p>
             </div>
           </div>
         </div>
@@ -786,12 +773,12 @@ export default function GenerationStudio() {
           onLastReferenceChange={(file) => patch({ lastReferenceFile: file })}
           estimate={selectedModelId === model?.model_id ? estimate : null} balance={balance}
           loading={loading} catalogError={catalogError} estimateError={estimateError}
-          quoteBusy={quoteBusy} providerUnavailable={catalog?.account.key_valid === false || health?.muapi === false} />
+          quoteBusy={quoteBusy} providerUnavailable={catalog?.verified === false || health?.muapi === false} />
       )}
 
       {jobId && (
         <div className="mt-4">
-          <TrackingPanel tracking={tracking} providerState={providerState} requestId={finishedJob?.provider_job_id ?? null} />
+          <TrackingPanel tracking={tracking} providerState={providerState} requestId={null} />
           {ACTIVE.includes(status) && (
             <button type="button" onClick={() => void onCancel()} className="studio-chip mt-2 text-rose-200">
               <Square size={11} /> Annuler et restituer les crédits
@@ -814,7 +801,7 @@ export default function GenerationStudio() {
         onGenerate={() => setConfirmOpen(true)} health={health} avatars={avatars}
         onAiPlan={() => void onAiPlan()} aiBusy={aiBusy} aiMessage={aiMessage}
         healthBusy={healthBusy} healthError={healthError} onRetryHealth={() => void checkHealth()}
-        catalogOpen={catalogOpen} onOpenCatalog={onOpenCatalog} catalogSummary={catalogSummary} />
+        catalogOpen={catalogOpen} onOpenCatalog={onOpenCatalog} />
 
       {model && estimate && (
         <CostConfirm open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={() => void onConfirm()}

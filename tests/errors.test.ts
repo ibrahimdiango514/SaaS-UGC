@@ -11,7 +11,7 @@ describe('humanizeError', () => {
   });
   it('signale les problèmes réseau et les échecs CORS/Edge', () => {
     expect(humanizeError('Failed to fetch')).toContain('Connexion impossible');
-    expect(humanizeError('Failed to send a request to the Edge Function')).toContain('service Edge Reelora');
+    expect(humanizeError('Failed to send a request to the Edge Function')).toContain('service VYORA');
   });
   it('utilise le message de secours si rien n’est fourni', () => {
     expect(humanizeError(null, 'Oups')).toBe('Oups');

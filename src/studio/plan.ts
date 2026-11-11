@@ -158,7 +158,7 @@ export function buildLocalPlan(input: {
   const warnings: string[] = [];
   if (prompt.length < 20) warnings.push('Instruction courte : ajoutez le produit, l’objectif et le ton pour un plan plus précis.');
   if (!product) warnings.push('Produit non identifié explicitement : précisez-le dans votre instruction.');
-  if (!script) warnings.push('Aucun script fourni : la piste voix off reste vide (Groq non configuré).');
+  if (!script) warnings.push('Aucun script fourni : la piste voix off reste vide.');
   return {
     version: PLAN_VERSION, source: 'deterministic', objective: prompt,
     sector, product, totalDuration: total, ratio: input.ratio ?? '9:16', scenes, warnings,
@@ -235,7 +235,7 @@ export function mapAiScriptToPlan(raw: unknown, fallback: ProductionPlan): Retur
     version: PLAN_VERSION, source: 'ai',
     objective: str(r.script_text ?? r.script ?? fallback.objective).slice(0, 4000) || fallback.objective,
     sector: fallback.sector, product: fallback.product, ratio: fallback.ratio,
-    scenes, warnings: ['Plan proposé par Groq : relisez et ajustez chaque plan avant génération.'],
+    scenes, warnings: ['Plan proposé par l’assistant VYORA : relisez et ajustez chaque scène avant génération.'],
   });
 }
 
@@ -247,7 +247,7 @@ export function planToEditorProject(plan: ProductionPlan, meta: {
   return {
     version: 1,
     projectId: meta.projectId ?? null,
-    title: (plan.product || plan.objective).slice(0, 90) || 'Montage Reelora',
+    title: (plan.product || plan.objective).slice(0, 90) || 'Montage VYORA',
     prompt: plan.objective,
     sector: plan.sector,
     quality: meta.quality,

@@ -30,24 +30,24 @@ const DB_MESSAGES: Array<[RegExp, string]> = [
   [/violates row-level security/i, 'Action refusée par les règles de sécurité.'],
   [/invalid input syntax/i, 'Une valeur saisie est invalide.'],
   [/invalid_idempotency_key/i, 'Identifiant d’opération invalide. Relancez la génération.'],
-  [/MUAPI_NOT_CONFIGURED/i, 'La génération vidéo MuAPI n’est pas configurée côté serveur (secret MUAPI_API_KEY).'],
-  [/MODEL_UNAVAILABLE/i, 'Ce modèle MuAPI n’est plus disponible. Choisissez-en un autre.'],
-  [/MODEL_NOT_FOUND/i, 'Modèle vidéo MuAPI introuvable.'],
+  [/MUAPI_NOT_CONFIGURED/i, 'La génération vidéo est indisponible pour le moment. Réessayez plus tard.'],
+  [/MODEL_UNAVAILABLE/i, 'Ce modèle vidéo n’est plus disponible. Choisissez-en un autre.'],
+  [/MODEL_NOT_FOUND/i, 'Modèle vidéo introuvable.'],
   [/IMAGE_MISSING/i, 'Ce modèle exige une image de référence (produit ou avatar).'],
   [/SCRIPT_MISSING/i, 'Générez ou saisissez un script avant de lancer la vidéo.'],
-  [/MUAPI_SUBMIT_ERROR/i, 'MuAPI a refusé la génération. Vérifiez le modèle et les paramètres.'],
-  [/MUAPI_NO_REQUEST_ID/i, 'MuAPI n’a pas confirmé la tâche. Vos crédits ont été restitués.'],
-  [/timeout/i, 'Le fournisseur vidéo n’a pas répondu à temps. Vos crédits ont été restitués.'],
-  [/GROQ_NOT_CONFIGURED/i, 'L’assistance IA n’est pas configurée côté serveur (secret GROQ_API_KEY). Aucun texte n’est simulé ; saisissez votre script ou votre prompt manuellement.'],
-  [/AI_PROVIDERS_NOT_CONFIGURED/i, 'Aucun fournisseur IA (Groq ou Google Gemini) n’est encore configuré côté serveur. Ajoutez au moins une clé API dans les secrets Supabase. Aucune réponse n’est simulée.'],
+  [/MUAPI_SUBMIT_ERROR/i, 'La génération n’a pas pu être lancée. Vérifiez les paramètres et réessayez.'],
+  [/MUAPI_NO_REQUEST_ID/i, 'La génération n’a pas pu être confirmée. Vos crédits ont été restitués.'],
+  [/timeout/i, 'Le service vidéo n’a pas répondu à temps. Vos crédits ont été restitués.'],
+  [/GROQ_NOT_CONFIGURED/i, 'L’assistance IA est indisponible pour le moment. Saisissez votre script ou votre prompt manuellement.'],
+  [/AI_PROVIDERS_NOT_CONFIGURED/i, 'Aucun service IA n’est disponible pour le moment. Aucune réponse n’est simulée.'],
   [/BG_INSUFFICIENT_CREDITS|bg_insufficient_credits/i, 'Crédits Business Grow épuisés. Vos crédits Studio UGC ne sont jamais utilisés dans Business Grow.'],
   [/BG_INSUFFICIENT_QUOTA|bg_insufficient_quota/i, 'Quota Business Grow atteint pour cette période. Vos crédits Studio UGC restent totalement séparés.'],
-  [/NO_VERIFIED_PROVIDER/i, 'Aucun fournisseur IA Business Grow n’est vérifié pour cette route. Vérifiez un fournisseur configuré dans l’onglet Fournisseurs IA.'],
-  [/PROVIDER_NOT_CONFIGURED/i, 'Ce fournisseur IA n’a pas encore de clé API configurée côté serveur.'],
-  [/PROVIDER_ADAPTER_NOT_IMPLEMENTED/i, 'Cet adaptateur fournisseur est préparé dans le registre mais son exécution distante n’est pas encore activée.'],
+  [/NO_VERIFIED_PROVIDER/i, 'Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.'],
+  [/PROVIDER_NOT_CONFIGURED/i, 'Ce service IA est indisponible pour le moment.'],
+  [/PROVIDER_ADAPTER_NOT_IMPLEMENTED/i, 'Cette fonctionnalité n’est pas encore disponible.'],
   [/business_memory_consent_required/i, 'La mémoire métier est désactivée pour cette entreprise. Activez le consentement avant d’enregistrer des souvenirs.'],
   [/AI_EMPTY_RESPONSE/i, 'Le service IA n’a renvoyé aucun contenu exploitable. Aucun texte n’est simulé ; réessayez ou saisissez votre texte manuellement.'],
-  [/AI_PROVIDER_ERROR/i, 'Le fournisseur IA a renvoyé une erreur. Aucun texte n’est simulé ; réessayez plus tard.'],
+  [/AI_PROVIDER_ERROR/i, 'Le service IA a rencontré une erreur. Aucun texte n’est simulé ; réessayez plus tard.'],
   [/AI_INTERNAL_ERROR/i, 'Une erreur inattendue est survenue côté IA. Aucun texte n’est simulé.'],
 ];
 
@@ -55,7 +55,7 @@ export function humanizeError(raw: string | undefined | null, fallback = 'Une er
   if (!raw) return fallback;
   for (const [pattern, message] of DB_MESSAGES) if (pattern.test(raw)) return message;
   if (/Failed to send a request to the Edge Function|FunctionsFetchError/i.test(raw)) {
-    return 'Impossible de joindre le service Edge Reelora (réseau ou CORS). Vérifiez votre connexion puis réessayez.';
+    return 'Impossible de joindre un service VYORA (réseau ou CORS). Vérifiez votre connexion puis réessayez.';
   }
   if (/fetch failed|network|Failed to fetch|NetworkError/i.test(raw)) return 'Connexion impossible. Vérifiez votre réseau puis réessayez.';
   return raw.length > 260 ? `${raw.slice(0, 260)}…` : raw;

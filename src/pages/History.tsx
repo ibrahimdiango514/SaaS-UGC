@@ -5,7 +5,7 @@ import { PageHeader, Card, CardHeader, Button, Badge, Select, LoadingState, Erro
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
-import { formatDate, statusLabel, truncate } from '../lib/format';
+import { formatDate, statusLabel } from '../lib/format';
 import { cancelGeneration, listJobEvents, listJobs, listLedger } from '../lib/api';
 import type { GenerationJob, LedgerEntry } from '../lib/types';
 import { paramsSummary, type ParamValue } from '../studio/model';
@@ -27,7 +27,7 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
   const payload = (job.request_payload ?? {}) as Record<string, unknown>;
   const result = (job.result_payload ?? {}) as Record<string, unknown>;
   const mode = CREATION_MODES.find((m) => m.id === payload.creation_mode)?.label ?? 'Parcours détaillé';
-  const quality = QUALITY_TIERS.find((q) => q.id === payload.quality)?.label ?? job.service_key;
+  const quality = QUALITY_TIERS.find((q) => q.id === payload.quality)?.label ?? 'Création vidéo';
   const resultPath = typeof result.storage_path === 'string' ? result.storage_path : '';
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<{ id: string; event_type: string; from_status: string | null; to_status: string | null; created_at: string }[]>([]);
@@ -55,8 +55,8 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
     <div className="border-b border-white/[0.06] last:border-0">
       <div className="flex flex-wrap items-center gap-3 px-5 py-3.5">
         <div className="min-w-[150px] flex-1">
-          <p className="text-sm font-medium text-white">{job.service_key}</p>
-          <p className="text-[11px] text-slate-500">{formatDate(job.created_at, true)} · {job.provider ?? 'non soumis'}</p>
+          <p className="text-sm font-medium text-white">{quality}</p>
+          <p className="text-[11px] text-slate-500">{formatDate(job.created_at, true)}</p>
         </div>
         <Badge status={job.status}>{statusLabel(job.status)}</Badge>
         <span className="hidden text-xs text-slate-500 sm:block">{job.credits_charged || job.credits_reserved} crédits</span>
@@ -66,15 +66,14 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
       {open && (
         <div className="grid gap-3 bg-white/[0.02] px-5 pb-4 pt-1 text-xs sm:grid-cols-2">
           <div><p className="text-slate-500">Identifiant</p><p className="break-all font-mono text-slate-300">{job.id}</p></div>
-          <div><p className="text-slate-500">Fournisseur</p><p className="text-slate-300">{job.provider ?? '—'} {job.provider_job_id && <span className="font-mono text-[10px]">({truncate(job.provider_job_id, 30)})</span>}</p></div>
-          <div><p className="text-slate-500">Modèle MuAPI vérifié</p><p className="font-mono text-[10px] text-slate-300">{String(payload.model_id ?? '—')}</p></div>
+          <div><p className="text-slate-500">Type de création</p><p className="text-slate-300">Vidéo VYORA</p></div>
           <div><p className="text-slate-500">Coût / date</p><p className="text-slate-300">{job.credits_charged || job.credits_reserved} crédits · {formatDate(job.created_at, true)}</p></div>
           <div><p className="text-slate-500">Mode / qualité</p><p className="text-slate-300">{mode} · {quality}</p></div>
           <div><p className="text-slate-500">Projet</p><p className="truncate text-slate-300">{job.project_id ? <Link className="text-cyan-300 hover:underline" to={`/app/projets/${job.project_id}`}>Ouvrir le projet</Link> : '—'}</p></div>
           <div className="sm:col-span-2"><p className="text-slate-500">Paramètres utilisés</p><p className="text-slate-300">{paramsSummary(usedParams(payload))}</p></div>
           <div className="sm:col-span-2"><p className="text-slate-500">Description</p><p className="line-clamp-3 text-slate-300">{String(payload.visual_prompt ?? '—')}</p></div>
-          <div className="sm:col-span-2"><p className="text-slate-500">Résultat réel</p><p className="break-all text-[11px] text-slate-300">{resultPath || (job.status === 'succeeded' ? 'Fichier stocké : voir la bibliothèque.' : 'Aucun fichier produit. Aucun média fictif affiché.')}</p></div>
-          <div className="sm:col-span-2"><p className="text-slate-500">Erreur</p><p className="text-slate-300">{job.error_message || '—'}</p></div>
+          <div className="sm:col-span-2"><p className="text-slate-500">Résultat</p><p className="text-slate-300">{resultPath || job.status === 'succeeded' ? 'Vidéo enregistrée dans la bibliothèque.' : 'Aucun fichier vidéo disponible.'}</p></div>
+          {job.status === 'failed' && <div className="sm:col-span-2"><p className="text-slate-500">État</p><p className="text-slate-300">La génération a échoué. Les crédits réservés ont été restitués.</p></div>}
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <Link to={`/app/studio?reuse=${job.id}`} className="btn btn-outline btn-sm"><RefreshCw size={13} /> Régénérer / variante</Link>
             <Link to={`/app/studio/montage?job=${job.id}`} className="btn btn-outline btn-sm"><Scissors size={13} /> Modifier le montage</Link>

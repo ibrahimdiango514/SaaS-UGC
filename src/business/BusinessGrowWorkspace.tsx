@@ -7,6 +7,7 @@ import {
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { listBrands, listProducts } from '../lib/api';
+import { humanizeError } from '../lib/errors';
 import {
   buildStudioLocationStateFromBrief,
   parseBusinessGrowEntryIntent,
@@ -32,7 +33,7 @@ const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare
   { id: 'chat', label: 'Assistant', icon: MessageSquare },
   { id: 'company', label: 'Entreprise', icon: Building2 },
   { id: 'memory', label: 'Mémoire métier', icon: Building2 },
-  { id: 'providers', label: 'Fournisseurs IA', icon: Zap },
+  { id: 'providers', label: 'Services IA', icon: Zap },
   { id: 'integrations', label: 'Intégrations', icon: Plug },
 ];
 
@@ -83,7 +84,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
     <section className="space-y-4" data-testid="business-company-context">
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-6">
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-brand-200">Compte Reelora partagé</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-brand-200">Compte VYORA partagé</p>
           <h2 className="mt-1 text-lg font-semibold text-white">{workspace?.name ?? 'Aucun espace de travail actif'}</h2>
           {workspace && (
             <p className="mt-1 text-sm text-slate-400">
@@ -100,7 +101,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
         <EmptyState
           icon={<Building2 size={22} />}
           title="Espace de travail indisponible"
-          description="Reconnectez-vous à Reelora ou réessayez le chargement de votre espace."
+          description="Reconnectez-vous à VYORA ou réessayez le chargement de votre espace."
         />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void load()} />
@@ -132,7 +133,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
                 ))}
               </div>
             ) : (
-              <EmptyState icon={<Building2 size={20} />} title="Aucune marque enregistrée" description="Ajoutez les marques de votre entreprise depuis les paramètres Reelora." />
+              <EmptyState icon={<Building2 size={20} />} title="Aucune marque enregistrée" description="Ajoutez les marques de votre entreprise depuis les paramètres VYORA." />
             )}
           </div>
 
@@ -157,7 +158,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
                 ))}
               </div>
             ) : (
-              <EmptyState icon={<Package size={20} />} title="Aucun produit enregistré" description="Ajoutez vos produits ou services depuis les paramètres Reelora." />
+              <EmptyState icon={<Package size={20} />} title="Aucun produit enregistré" description="Ajoutez vos produits ou services depuis les paramètres VYORA." />
             )}
           </div>
         </div>
@@ -165,7 +166,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3">
         <p className="text-xs text-slate-400">
-          Ces données proviennent de l’espace Reelora partagé. Elles ne sont pas copiées dans la mémoire IA.
+          Ces données proviennent de l’espace VYORA partagé. Elles ne sont pas copiées dans la mémoire IA.
         </p>
         <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => void load()} disabled={loading || !workspace}>
           Actualiser
@@ -232,23 +233,23 @@ function formatProbeTime(checkedAt: string | null | undefined): string {
 function describeProviderFailureHint(code: string | null | undefined): string {
   switch (code) {
     case 'PROVIDER_AUTH_FAILED':
-      return 'Clé API rejetée par le fournisseur. Vérifiez ou renouvelez le secret serveur dans Supabase Edge Functions Secrets.';
+      return 'La vérification du service IA a échoué. Contactez le support VYORA si le problème persiste.';
     case 'PROVIDER_RATE_LIMITED':
-      return 'Limite de débit ou quota fournisseur atteint pour ce modèle. Sélectionnez un autre modèle vérifié ou basculez vers l’autre fournisseur.';
+      return 'Le service IA est temporairement saturé. Réessayez plus tard.';
     case 'PROVIDER_REQUEST_REJECTED':
-      return 'Le modèle configuré ou la requête a été rejeté par le fournisseur. Vérifiez l’identifiant exact du modèle.';
+      return 'La demande n’a pas été acceptée. Vérifiez votre message puis réessayez.';
     case 'PROVIDER_NOT_CONFIGURED':
-      return 'Clé API ou modèle manquant côté serveur. Renseignez les variables BUSINESS_GROW_* sur Supabase.';
+      return 'Le service IA est indisponible pour le moment.';
     case 'PROVIDER_TIMEOUT':
     case 'PROVIDER_NETWORK_ERROR':
     case 'PROVIDER_UNAVAILABLE':
-      return 'Le fournisseur n’a pas répondu dans le délai imparti ou est momentanément indisponible. Relancez le test ou activez le secours auto.';
+      return 'Le service IA ne répond pas pour le moment. Réessayez plus tard.';
     case 'ORIGIN_NOT_ALLOWED':
-      return 'Origine du navigateur refusée par CORS sur business-grow. Vérifiez BUSINESS_GROW_ALLOWED_ORIGINS ou utilisez le relais preview Netlify.';
+      return 'Cette connexion n’est pas disponible depuis cet environnement. Réessayez plus tard.';
     case 'BUSINESS_GROW_UNAVAILABLE':
-      return 'Backend Business Grow injoignable depuis le navigateur. Vérifiez le déploiement de la fonction ou le relais Netlify.';
+      return 'Business Grow est momentanément indisponible. Réessayez plus tard.';
     default:
-      return 'Relancez une vérification serveur ou inspectez les journaux Supabase Edge Functions pour obtenir le détail.';
+      return 'Réessayez plus tard ou contactez le support VYORA.';
   }
 }
 
@@ -275,7 +276,7 @@ function providerStatus(provider: BusinessProviderStatus | undefined): {
     return {
       label: 'Configuré · Non vérifié',
       tone: 'warning',
-      description: 'Une configuration serveur existe, mais aucun test réel réussi n’a encore validé ce fournisseur.',
+      description: 'Une configuration existe, mais aucun test réussi ne confirme encore sa disponibilité.',
     };
   }
   if (isVerifiedProvider(provider)) {
@@ -293,7 +294,7 @@ function providerStatus(provider: BusinessProviderStatus | undefined): {
     return {
       label: 'Dégradé',
       tone: 'warning',
-      description: `Dernier test serveur dégradé${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
+      description: `Dernier test dégradé${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
     };
   }
   if (provider.status === 'unavailable' || provider.error_code) {
@@ -301,7 +302,7 @@ function providerStatus(provider: BusinessProviderStatus | undefined): {
     return {
       label: 'Échec vérification',
       tone: 'danger',
-      description: `Le dernier test serveur a échoué${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
+      description: `Le dernier test a échoué${codePart}. ${describeProviderFailureHint(provider.error_code)}`,
     };
   }
   return {
@@ -317,21 +318,17 @@ function ProviderStatusList({ statuses, compact = false }: {
 }) {
   const providers = compact ? BUSINESS_PROVIDERS.filter((provider) => provider.id !== 'muapi').slice(0, 3) : BUSINESS_PROVIDERS;
   const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
+  const activeCount = providers.filter((provider) => isVerifiedProvider(byKey.get(provider.id))).length;
 
   return (
-    <div className="space-y-2">
-      {providers.map((provider) => {
-        const status = providerStatus(byKey.get(provider.id));
-        return (
-          <div key={provider.id} className="flex items-start justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-slate-200">{provider.name}</p>
-              <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{status.description}</p>
-            </div>
-            <Badge tone={status.tone}>{status.label}</Badge>
-          </div>
-        );
-      })}
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-200">Assistant IA VYORA</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+          {activeCount > 0 ? 'Les services IA sont disponibles.' : 'Les services IA sont momentanément indisponibles.'}
+        </p>
+      </div>
+      <Badge tone={activeCount > 0 ? 'success' : 'warning'}>{activeCount > 0 ? 'Disponible' : 'Indisponible'}</Badge>
     </div>
   );
 }
@@ -427,13 +424,13 @@ function AssistantView({
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-      <section className="flex min-h-[620px] flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#090d16]">
+      <section className="flex min-h-[620px] flex-col overflow-hidden rounded-[1.4rem] border border-white/[0.09] bg-[radial-gradient(ellipse_at_55%_0%,rgba(139,92,246,.07),transparent_38%),#090d16] shadow-[0_24px_70px_-48px_rgba(0,0,0,.9)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500/15 text-brand-200"><Brain size={19} /></span>
+            <span className="grid h-10 w-10 place-items-center rounded-xl border border-violet-200/15 bg-violet-300/[0.08] text-violet-100"><Brain size={19} /></span>
             <div>
-              <h2 className="text-sm font-semibold text-white">Copilote Business Grow</h2>
-              <p className="text-xs text-slate-500">AI Director · {availableProviders.length ? 'fournisseurs vérifiés' : 'aucun fournisseur vérifié'}</p>
+              <h2 className="font-display text-sm font-semibold text-white">VYORA Business</h2>
+              <p className="text-xs text-slate-500">AI Director · {availableProviders.length ? `${availableProviders.length} service(s) IA vérifié(s)` : 'aucun service IA vérifié'}</p>
             </div>
           </div>
           <Button
@@ -442,6 +439,7 @@ function AssistantView({
             icon={<MessageSquare size={14} />}
             onClick={() => { setDraft(''); onNewConversation(); }}
             disabled={!backendReady || busy}
+            className="border-violet-200/15 hover:border-violet-200/30 hover:bg-violet-300/[0.06]"
           >
             Nouvelle conversation
           </Button>
@@ -454,7 +452,7 @@ function AssistantView({
               aria-label="Rôle de la tâche IA"
               value={roleKey}
               onChange={(event) => onChangeRole(event.target.value as BusinessRoleKey)}
-              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
             >
               {BUSINESS_ROLES.map((role) => (
                 <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
@@ -467,7 +465,7 @@ function AssistantView({
               aria-label="Mode de routage"
               value={routingMode}
               onChange={(event) => onChangeRoutingMode(event.target.value as RoutingSelectionMode)}
-              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
             >
               <option value="auto">Automatique (AI Director)</option>
               <option value="manual">Manuel</option>
@@ -476,14 +474,14 @@ function AssistantView({
           {routingMode === 'manual' && (
             <>
               <select
-                aria-label="Fournisseur manuel"
+                aria-label="Service IA manuel"
                 value={preferredProviderKey}
                 onChange={(event) => onChangePreferredProvider(event.target.value)}
-                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
               >
-                <option value="">Fournisseur…</option>
-                {availableProviders.map((provider) => (
-                  <option key={provider.provider_key} value={provider.provider_key}>{provider.display_name}</option>
+                <option value="">Service IA…</option>
+                {availableProviders.map((provider, index) => (
+                  <option key={provider.provider_key} value={provider.provider_key}>{`Service VYORA ${index + 1}`}</option>
                 ))}
               </select>
               {verifiedModels.length > 0 && (
@@ -491,13 +489,13 @@ function AssistantView({
                   aria-label="Modèle manuel"
                   value={preferredModelKey}
                   onChange={(event) => onChangePreferredModel(event.target.value)}
-                  className="max-w-[200px] truncate rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-400/40"
+                  className="max-w-[200px] truncate rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
                 >
                   <option value="">Modèle par défaut</option>
                   {verifiedModels
                     .filter((m) => !preferredProviderKey || m.provider_key === preferredProviderKey)
-                    .map((model) => (
-                      <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{model.display_name}</option>
+                    .map((model, index) => (
+                      <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{`Modèle VYORA ${index + 1}`}</option>
                     ))}
                 </select>
               )}
@@ -507,16 +505,16 @@ function AssistantView({
                   checked={manualAllowFallback}
                   onChange={(event) => onChangeManualAllowFallback(event.target.checked)}
                   aria-label="Autoriser le secours automatique en mode manuel"
-                  className="accent-brand-400"
+                  className="accent-violet-400"
                 />
                 <span>Secours auto</span>
               </label>
             </>
           )}
           {quota && quota.available_units !== null && (
-            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-300" data-testid="business-quota-pill">
-              <Gauge size={12} className="text-brand-300" />
-              Quota Business Grow : {quota.available_units} unités
+            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-violet-200/15 bg-violet-200/[0.05] px-2.5 py-1 text-[11px] text-violet-100" data-testid="business-quota-pill">
+              <Gauge size={12} className="text-violet-200" />
+              Quota Business : {quota.available_units} unités
             </span>
           )}
         </div>
@@ -556,13 +554,13 @@ function AssistantView({
           )}
           {backendReady && messages.length === 0 && (
             <div className="m-auto max-w-xl text-center">
-              <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-brand-400/20 bg-brand-500/10 text-brand-200">
+              <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-violet-200/20 bg-violet-300/[0.08] text-violet-100">
                 <Sparkles size={24} />
               </span>
-              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-brand-200">Votre espace de travail IA</p>
-              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Faites grandir votre activité, à votre façon.</h3>
+              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-violet-200">Intelligence · stratégie · croissance</p>
+              <h3 className="mt-2 font-display text-2xl font-medium tracking-tight text-white sm:text-3xl">Les bonnes décisions commencent par les bonnes questions.</h3>
               <p className="mt-3 text-sm leading-relaxed text-slate-400">
-                {activeConversation?.title || 'Créez une conversation et échangez avec votre copilote métier.'}
+                {activeConversation?.title || 'Parlez de vos priorités, explorez vos options et structurez la suite avec votre copilote métier.'}
               </p>
               <div className="mt-7 grid gap-2 sm:grid-cols-3">
                 {PROMPT_IDEAS.map(({ label, text, icon: Icon }) => (
@@ -570,29 +568,29 @@ function AssistantView({
                     key={label}
                     type="button"
                     onClick={() => setDraft(text)}
-                    className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 py-3 text-left text-xs text-slate-300 transition hover:border-brand-400/30 hover:bg-brand-500/[0.06]"
+                    className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 py-3 text-left text-xs text-slate-300 transition hover:border-violet-200/25 hover:bg-violet-300/[0.05]"
                   >
-                    <Icon size={15} className="shrink-0 text-brand-200" />{label}<ArrowUpRight size={12} className="ml-auto text-slate-600" />
+                    <Icon size={15} className="shrink-0 text-violet-200" />{label}<ArrowUpRight size={12} className="ml-auto text-slate-600" />
                   </button>
                 ))}
               </div>
             </div>
           )}
           {loading && <p className="m-auto text-sm text-slate-400">Chargement de la conversation…</p>}
-          {busy && <p className="text-center text-xs text-brand-200" role="status">Demande en attente · traitement par l’AI Director…</p>}
+          {busy && <p className="text-center text-xs text-violet-200" role="status">Demande en attente · traitement par l’AI Director…</p>}
           {messages.map((message) => (
             <article
               key={message.id}
               className={cn(
                 'max-w-[90%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed',
                 message.author_role === 'user'
-                  ? 'ml-auto bg-brand-500/15 text-white'
+                  ? 'ml-auto border border-violet-200/10 bg-violet-300/[0.10] text-white'
                   : 'mr-auto border border-white/[0.08] bg-white/[0.03] text-slate-200',
               )}
               data-testid={`business-message-${message.author_role}`}
             >
               <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                {message.author_role === 'user' ? 'Vous' : 'Business Grow'}
+                {message.author_role === 'user' ? 'Vous' : 'VYORA Business'}
               </p>
               {message.content}
               {message.request_status && (
@@ -603,10 +601,10 @@ function AssistantView({
                   {message.request_status === 'queued' && 'En attente'}
                   {message.request_status === 'running' && 'Traitement en cours'}
                   {message.request_status === 'succeeded' && 'Traitement réussi'}
-                  {message.request_status === 'failed' && `Erreur (${message.request_error_code || 'erreur inconnue'})`}
+                  {message.request_status === 'failed' && humanizeError(message.request_error_code, 'Une erreur est survenue. Réessayez.')}
                   {message.request_status === 'canceled' && 'Traitement annulé'}
                   {message.request_status === 'succeeded' && message.author_role === 'assistant' && message.request_provider_key
-                    ? ` · Réponse fournie par ${BUSINESS_PROVIDERS.find((provider) => provider.id === message.request_provider_key)?.name ?? message.request_provider_key}${message.request_model_key ? ` · ${message.request_model_key}` : ''}`
+                    ? ' · Réponse générée par l’assistant VYORA'
                     : null}
                 </p>
               )}
@@ -694,19 +692,19 @@ function AssistantView({
           )}
           {backendReady && !availableProviders.length && (
             <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs leading-relaxed text-amber-100/80" role="status">
-              Aucun fournisseur IA vérifié n’est actuellement disponible. Votre demande sera conservée dans l’historique, mais aucune réponse ne sera simulée.
+              Aucun service IA vérifié n’est actuellement disponible. Votre demande sera conservée dans l’historique, mais aucune réponse ne sera simulée.
             </div>
           )}
         </div>
 
         <form onSubmit={handleSubmit} className="border-t border-white/[0.07] bg-black/20 p-3 sm:p-5">
           <label htmlFor="business-chat-draft" className="sr-only">Votre demande</label>
-          <div className="flex items-end gap-2 rounded-2xl border border-white/[0.10] bg-[#0c111b] p-2 focus-within:border-brand-400/40">
+          <div className="flex items-end gap-2 rounded-2xl border border-white/[0.10] bg-[#0c111b] p-2 focus-within:border-violet-200/35">
             <textarea
               id="business-chat-draft"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Décrivez votre besoin métier…"
+              placeholder="Partagez une question, un objectif ou un défi métier…"
               rows={2}
               maxLength={12_000}
               disabled={!backendReady || busy}
@@ -717,7 +715,7 @@ function AssistantView({
             </Button>
           </div>
           <p className="mt-2 text-center text-[10px] text-slate-600">
-            {!backendReady ? 'Envoi indisponible tant que le backend n’est pas installé.' : 'Sans fournisseur vérifié, aucune réponse IA ne sera générée.'}
+            {!backendReady ? 'Envoi indisponible tant que le service n’est pas prêt.' : 'Sans service IA vérifié, aucune réponse ne sera générée.'}
           </p>
         </form>
       </section>
@@ -735,7 +733,7 @@ function AssistantView({
                   key={conversation.id}
                   className={cn(
                     'w-full rounded-xl px-3 py-2 text-left text-xs transition',
-                    conversation.id === selectedConversationId ? 'bg-brand-500/15 text-brand-100' : 'text-slate-400 hover:bg-white/[0.04]',
+                    conversation.id === selectedConversationId ? 'bg-violet-300/[0.10] text-violet-100 ring-1 ring-inset ring-violet-200/10' : 'text-slate-400 hover:bg-white/[0.04]',
                   )}
                 >
                   {editingId === conversation.id ? (
@@ -841,11 +839,11 @@ function AssistantView({
         <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
           <div className="mb-3 flex items-center gap-2">
             <Zap size={15} className="text-cyan-300" />
-            <h2 className="text-sm font-semibold text-white">Registre IA</h2>
+            <h2 className="text-sm font-semibold text-white">Services IA VYORA</h2>
           </div>
           <ProviderStatusList statuses={providers} compact />
           <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
-            {availableProviders.length === 0 ? 'Aucun fournisseur disponible ou validé pour le routage.' : `${availableProviders.length} fournisseur(s) disponible(s) et validé(s).`}
+            {availableProviders.length === 0 ? 'Aucun service IA disponible pour le moment.' : 'Disponibilité vérifiée côté serveur.'}
           </p>
         </section>
 
@@ -855,7 +853,7 @@ function AssistantView({
             <h2 className="text-sm font-semibold text-white">Données privées</h2>
           </div>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
-            Les conversations sont liées à votre compte Reelora. La mémoire n’est utilisée qu’après votre consentement.
+            Les conversations sont liées à votre compte VYORA. La mémoire n’est utilisée qu’après votre consentement.
           </p>
         </section>
       </aside>
@@ -915,7 +913,7 @@ function MemoryView({
       <div className="max-w-2xl">
         <h2 className="text-lg font-semibold text-white">Mémoire métier privée</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Cette mémoire est rattachée à votre compte Reelora. La révocation supprime les éléments mémorisés; elle n’efface pas vos conversations.
+          Cette mémoire est rattachée à votre compte VYORA. La révocation supprime les éléments mémorisés; elle n’efface pas vos conversations.
         </p>
       </div>
       {error && (
@@ -1038,14 +1036,14 @@ function ProvidersView({
       <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <h2 className="text-lg font-semibold text-white">Registre des fournisseurs</h2>
+            <h2 className="text-lg font-semibold text-white">Services IA VYORA</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
-              Les rôles affichés sont des propositions. L’AI Director ne peut router que vers un fournisseur configuré, vérifié et disponible côté serveur.
+              L’AI Director sélectionne automatiquement le service adapté selon sa disponibilité réelle. Les détails techniques restent internes à VYORA.
             </p>
           </div>
           {quota && quota.available_units !== null && (
             <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5 text-xs text-slate-300">
-              <p className="font-semibold text-white">Quota Business Grow isolé</p>
+              <p className="font-semibold text-white">Quota Business isolé</p>
               <p className="mt-0.5 text-slate-400">{quota.available_units} unité(s) · Studio UGC intact ({quota.studio_ugc_untouched ? 'oui' : 'non'})</p>
             </div>
           )}
@@ -1062,15 +1060,12 @@ function ProvidersView({
           >
             <p className="font-medium">
               {verifyBanner.message}
-              {verifyBanner.code ? <span className="ml-2 font-mono text-[10px] opacity-80">[{verifyBanner.code}]</span> : null}
             </p>
-            {verifyBanner.hint && (
-              <p className="mt-1 text-[11px] opacity-85">{verifyBanner.hint}</p>
-            )}
+            {verifyBanner.hint && <p className="mt-1 text-[11px] opacity-85">Réessayez plus tard ou contactez le support VYORA.</p>}
           </div>
         )}
         <div className="space-y-3">
-          {BUSINESS_PROVIDERS.map((provider) => {
+          {BUSINESS_PROVIDERS.map((provider, providerIndex) => {
             const rawStatus = byKey.get(provider.id);
             const status = providerStatus(rawStatus);
             const providerModels = models.filter((model) => model.provider_key === provider.id);
@@ -1079,8 +1074,8 @@ function ProvidersView({
               <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold text-white">{provider.name}</h3>
-                    <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.description}</p>
+                    <h3 className="font-semibold text-white">Moteur VYORA {providerIndex + 1}</h3>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.label === 'Vérifié' ? 'Disponibilité confirmée.' : 'Disponibilité non confirmée.'}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge tone={status.tone}>{status.label}</Badge>
@@ -1110,14 +1105,14 @@ function ProvidersView({
                       const modelStateLabel = model.verification_status === 'verified'
                         ? 'Vérifié'
                         : model.verification_status === 'unavailable'
-                          ? `Indisponible${model.error_code ? ` · ${model.error_code}` : ''}`
+                          ? 'Indisponible'
                           : 'Non vérifié';
                       return (
                         <button
                           key={model.model_key}
                           type="button"
                           disabled={!canProbe || Boolean(verifyingKey)}
-                          title={canProbe ? `Exécuter un test serveur réel sur ${model.provider_model_key}` : undefined}
+                          title={canProbe ? 'Vérifier ce modèle IA VYORA' : undefined}
                           onClick={() => {
                             if (canProbe) void onVerifyProvider(provider.id, model.provider_model_key);
                           }}
@@ -1131,13 +1126,12 @@ function ProvidersView({
                             (!canProbe || Boolean(verifyingKey)) && 'cursor-default opacity-80',
                           )}
                         >
-                          {model.display_name} ({modelStateLabel})
+                          Modèle VYORA {providerModels.indexOf(model) + 1} ({modelStateLabel})
                         </button>
                       );
                     })}
                   </div>
                 )}
-                {provider.note && <p className="mt-3 text-[11px] text-slate-500">{provider.note}</p>}
               </article>
             );
           })}
@@ -1156,11 +1150,10 @@ function ProvidersView({
           {EXTENSIBLE_PROVIDER_ADAPTERS.map((adapter) => (
             <article key={adapter.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-3.5" data-testid={`adapter-${adapter.id}`}>
               <div className="flex items-center justify-between gap-2">
-                <h4 className="text-sm font-medium text-white">{adapter.name}</h4>
-                <Badge tone="neutral">{adapter.statusLabel}</Badge>
+                <h4 className="text-sm font-medium text-white">Service VYORA à venir</h4>
+                <Badge tone="neutral">À venir</Badge>
               </div>
-              <p className="mt-1 text-[11px] text-slate-400">{adapter.statusDescription}</p>
-              <p className="mt-2 font-mono text-[10px] text-slate-500">{adapter.envKeyHint}</p>
+              <p className="mt-1 text-[11px] text-slate-400">Cette capacité pourra être activée après vérification côté serveur.</p>
             </article>
           ))}
         </div>
@@ -1196,7 +1189,7 @@ function ProvidersView({
             {routingMode === 'manual' && (
               <>
                 <select
-                  aria-label="Fournisseur préféré"
+                  aria-label="Service IA préféré"
                   value={routingProvider}
                   onChange={(event) => {
                     setRoutingProvider(event.target.value);
@@ -1204,7 +1197,7 @@ function ProvidersView({
                   }}
                   className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
                 >
-                  <option value="">Fournisseur…</option>
+                  <option value="">Service IA…</option>
                   {(configurableProviders.length > 0
                     ? configurableProviders
                     : BUSINESS_PROVIDERS.filter((p) => p.id !== 'muapi').map((p) => ({
@@ -1213,7 +1206,7 @@ function ProvidersView({
                       }))
                   ).map((provider) => (
                     <option key={provider.provider_key} value={provider.provider_key}>
-                      {provider.display_name}
+                        {`Moteur VYORA ${configurableProviders.findIndex((entry) => entry.provider_key === provider.provider_key) + 1}`}
                     </option>
                   ))}
                 </select>
@@ -1226,7 +1219,7 @@ function ProvidersView({
                   <option value="">Modèle par défaut</option>
                   {modelsForSelectedProvider.map((model) => (
                     <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>
-                      {model.display_name}
+                      {`Modèle VYORA ${modelsForSelectedProvider.indexOf(model) + 1}`}
                     </option>
                   ))}
                 </select>
@@ -1262,8 +1255,8 @@ function ProvidersView({
               {savedRouting.map((pref) => (
                 <span key={String(pref.role_key)} className="rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-1 text-[11px] text-slate-300">
                   {String(pref.role_key)} : {String(pref.selection_mode)}
-                  {pref.preferred_provider_key ? ` · ${String(pref.preferred_provider_key)}` : ''}
-                  {pref.preferred_model_key ? ` / ${String(pref.preferred_model_key)}` : ''}
+                  {pref.preferred_provider_key ? ' · moteur personnalisé' : ''}
+                  {pref.preferred_model_key ? ' / modèle personnalisé' : ''}
                   {pref.allow_fallback === false ? ' (sans secours)' : ''}
                 </span>
               ))}
@@ -1277,7 +1270,7 @@ function ProvidersView({
               <div className="space-y-1.5 text-[11px]">
                 {requests.slice(0, 6).map((req) => (
                   <div key={String(req.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-slate-300">
-                    <span>{String(req.role_key ?? req.task_role_key ?? 'business_advisor')} · {String(req.provider_key ?? req.selected_provider_key ?? 'aucun')} / {String(req.model_key ?? req.selected_model_key ?? '—')}</span>
+                    <span>{String(req.role_key ?? req.task_role_key ?? 'business_advisor')} · traitement IA VYORA</span>
                     <span className="text-slate-500">
                       {String(req.status ?? '')}
                       {req.latency_ms ? ` · ${String(req.latency_ms)} ms` : ''}
@@ -1454,7 +1447,7 @@ export default function BusinessGrowWorkspace() {
       setConversations([]);
       setSelectedConversationId(null);
       setMessages([]);
-      setError('Session Reelora indisponible. Reconnectez-vous pour charger Business Grow.');
+      setError('Session VYORA indisponible. Reconnectez-vous pour charger Business Grow.');
       return;
     }
     setBackendReady(false);
@@ -1668,7 +1661,8 @@ export default function BusinessGrowWorkspace() {
         'PROVIDER_EMPTY_RESPONSE',
         'BG_INSUFFICIENT_QUOTA',
       ].includes(code)) {
-        setError(sendError instanceof Error ? sendError.message : 'Aucun fournisseur IA vérifié n’est disponible.');
+        const errorMessage = humanizeError(code, 'Impossible de traiter votre demande. Réessayez.');
+        setError(errorMessage);
         await Promise.allSettled([
           loadConversations(),
           conversationId
@@ -1720,8 +1714,8 @@ export default function BusinessGrowWorkspace() {
       const discoveredCount = Array.isArray(result.availableModels) ? result.availableModels.length : 0;
       setVerifyBanner({
         tone: 'success',
-        message: `Test serveur réel : ${result.providerKey} (${result.modelKey}) vérifié avec succès (${result.latencyMs} ms).`,
-        hint: discoveredCount > 0 ? `${discoveredCount} modèle(s) détecté(s) sur l’API du fournisseur.` : null,
+        message: `Connexion vérifiée avec succès · ${result.latencyMs} ms.`,
+        hint: discoveredCount > 0 ? `${discoveredCount} modèle(s) actif(s).` : null,
       });
       await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
     } catch (verifyError) {
@@ -1730,8 +1724,8 @@ export default function BusinessGrowWorkspace() {
         setVerifyBanner({
           tone: 'error',
           code: errorCode,
-          message: verifyError instanceof Error ? verifyError.message : 'La vérification du fournisseur a échoué.',
-          hint: describeProviderFailureHint(errorCode),
+          message: 'Impossible de vérifier la connexion au service IA. Réessayez plus tard.',
+          hint: errorCode ? describeProviderFailureHint(errorCode) : null,
         });
         await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
       }
@@ -1749,7 +1743,7 @@ export default function BusinessGrowWorkspace() {
       if (accountScopeRef.current === requestScope) {
         setVerifyBanner({
           tone: 'success',
-          message: `Règle de routage enregistrée pour ${pref.roleKey}.`,
+          message: 'Préférence de routage enregistrée.',
         });
         void loadOperationalDetails();
       }
@@ -1759,8 +1753,8 @@ export default function BusinessGrowWorkspace() {
         setVerifyBanner({
           tone: 'error',
           code: errorCode,
-          message: saveError instanceof Error ? saveError.message : 'Impossible d’enregistrer le routage.',
-          hint: describeProviderFailureHint(errorCode),
+          message: 'Impossible d’enregistrer la préférence de routage. Réessayez.',
+          hint: errorCode ? describeProviderFailureHint(errorCode) : null,
         });
       }
     }
@@ -1837,6 +1831,16 @@ export default function BusinessGrowWorkspace() {
   const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
   const ActiveIcon = activeSection.icon;
   const availableProviderCount = (providers ?? []).filter((provider) => isVerifiedProvider(provider)).length;
+  const providerStatusTone = availableProviderCount
+    ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100'
+    : backendReady
+      ? 'border-amber-400/20 bg-amber-400/[0.06] text-amber-100'
+      : 'border-white/10 bg-white/[0.04] text-slate-300';
+  const providerStatusDot = availableProviderCount
+    ? 'bg-emerald-300'
+    : backendReady
+      ? 'bg-amber-300'
+      : 'bg-slate-500';
 
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
@@ -1846,27 +1850,41 @@ export default function BusinessGrowWorkspace() {
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-200">
-              <Brain size={14} /> Reelora · Business Grow
+              <Brain size={14} /> VYORA · Business Grow
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Votre copilote business</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
-              Votre espace métier intégré à Reelora, avec le même compte et les mêmes droits que le Studio UGC.
+              Intelligence, stratégie et croissance, reliées à votre espace Studio UGC VYORA.
             </p>
           </div>
-          <span
-            className={cn(
-              'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium',
-              availableProviderCount
-                ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100'
-                : 'border-amber-400/20 bg-amber-400/[0.06] text-amber-100',
-            )}
-            data-testid="business-overall-status"
-          >
-            <span className={cn('h-1.5 w-1.5 rounded-full', availableProviderCount ? 'bg-emerald-300' : 'bg-amber-300')} />
-            {availableProviderCount ? `${availableProviderCount} fournisseur(s) vérifié(s)` : backendReady ? 'IA non disponible' : 'Backend en attente'}
+          <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium', providerStatusTone)} data-testid="business-overall-status">
+            <span className={cn('h-1.5 w-1.5 rounded-full', providerStatusDot)} />
+            {availableProviderCount ? `${availableProviderCount} service(s) IA vérifié(s)` : backendReady ? 'IA non disponible' : 'Backend en attente'}
           </span>
         </div>
       </header>
+
+      <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
+          <div className="flex items-center gap-2 text-xs text-slate-400"><MessageSquare size={14} className="text-cyan-300" /> Conversations</div>
+          <p className="mt-2 text-xl font-semibold text-white">{backendReady ? conversations.length : '—'}</p>
+          <p className="mt-1 text-[11px] text-slate-500">Historique de votre espace métier</p>
+        </div>
+        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
+          <div className="flex items-center gap-2 text-xs text-slate-400"><Zap size={14} className="text-emerald-300" /> Services vérifiés</div>
+          <p className="mt-2 text-xl font-semibold text-white">{providers ? availableProviderCount : '—'}</p>
+          <p className="mt-1 text-[11px] text-slate-500">Disponibilité contrôlée côté serveur</p>
+        </div>
+        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
+          <div className="flex items-center gap-2 text-xs text-slate-400"><Brain size={14} className="text-violet-300" /> Quota métier</div>
+          <p className="mt-2 text-xl font-semibold text-white">{quota?.available_units ?? '—'}</p>
+          <p className="mt-1 text-[11px] text-slate-500">
+            {quota
+              ? `Unités disponibles · crédits Studio ${quota.studio_ugc_untouched ? 'intacts' : 'distincts'}`
+              : 'Quota distinct des crédits Studio UGC'}
+          </p>
+        </div>
+      </section>
 
       <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav aria-label="Navigation Business Grow" className="flex gap-2 overflow-x-auto rounded-2xl border border-white/[0.07] bg-panel/40 p-2 lg:flex-col lg:self-start">
@@ -1886,7 +1904,7 @@ export default function BusinessGrowWorkspace() {
           ))}
           <div className="hidden border-t border-white/[0.07] px-2 pt-3 lg:block">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Historique</p>
-            <p className="text-xs leading-relaxed text-slate-500">{conversations.length} conversation(s) dans Reelora.</p>
+            <p className="text-xs leading-relaxed text-slate-500">{conversations.length} conversation(s) dans VYORA.</p>
           </div>
         </nav>
 

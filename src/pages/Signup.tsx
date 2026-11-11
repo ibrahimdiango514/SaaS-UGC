@@ -35,7 +35,7 @@ export default function Signup() {
     setSubmitting(true);
     try {
       const data = await signUp(email.trim(), password, fullName.trim());
-      if (data.session) { toast.success('Votre espace Reelora est prêt !'); navigate('/app', { replace: true }); }
+      if (data.session) { toast.success('Votre espace VYORA est prêt !'); navigate('/app', { replace: true }); }
       else setNeedConfirmation(true);
     } catch (err) { setError(asAppError(err, 'Inscription impossible.').message); }
     finally { setSubmitting(false); }

@@ -342,27 +342,26 @@ export default function Settings() {
 
       {tab === 'integrations' && (
         <div className="max-w-3xl space-y-5">
-          <Card><CardHeader title="État des intégrations serveur" description="Les valeurs proviennent de reelora-health ; aucun secret n’est exposé." />
+          <Card><CardHeader title="État des services" description="Disponibilité actuelle des fonctionnalités VYORA." />
             <div className="space-y-3 p-5">
-              {health === null && <Banner tone="warning" title="État indisponible">La fonction reelora-health n’a pas répondu. Vérifiez le déploiement des Edge Functions.</Banner>}
+              {health === null && <Banner tone="warning" title="État indisponible">Impossible de vérifier les services pour le moment. Réessayez plus tard.</Banner>}
               {health && [
-                ['Groq (scripts & prompts)', health.groq, 'GROQ_API_KEY'],
-                ['MuAPI (génération vidéo)', health.muapi, 'MUAPI_API_KEY'],
-                ['Worker MuAPI (webhook + cron)', health.worker, 'jeton stocké dans Supabase Vault'],
-                ['Supabase', health.supabase, 'injecté par la plateforme'],
-              ].map(([label, ok, hint]) => (
+                ['Assistant IA', health.groq, 'Scripts, prompts et suggestions'],
+                ['Création vidéo', health.muapi, 'Génération dans Studio UGC'],
+                ['Suivi des créations', health.worker, 'Traitement et mise à jour des tâches'],
+                ['Espace de travail', health.supabase, 'Données et contenus sécurisés'],
+              ].map(([label, ok, description]) => (
                 <div key={String(label)} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] px-4 py-3">
-                  <div><p className="text-sm font-medium text-white">{label}</p><p className="text-[11px] text-slate-500">{hint}</p></div>
-                  <Badge tone={ok ? 'success' : 'warning'}>{ok ? 'Configuré' : 'À configurer'}</Badge>
+                  <div><p className="text-sm font-medium text-white">{label}</p><p className="text-[11px] text-slate-500">{description}</p></div>
+                  <Badge tone={ok ? 'success' : 'warning'}>{ok ? 'Disponible' : 'Indisponible'}</Badge>
                 </div>
               ))}
-              <Banner tone="info" title="Configuration requise">Les secrets se définissent dans Supabase → Project Settings → Edge Functions → Secrets. Ils ne doivent jamais être préfixés VITE_ ni être placés dans le frontend.</Banner>
             </div>
           </Card>
           <Card>
             <CardHeader
               title="Connecteurs sociaux et e-commerce"
-              description="Architecture préparée pour les futurs comptes de ce même workspace Reelora."
+              description="Architecture préparée pour les futurs comptes de ce même espace VYORA."
             />
             <div className="grid gap-3 p-5 sm:grid-cols-2">
               {INTEGRATION_DEFINITIONS.map((integration) => (

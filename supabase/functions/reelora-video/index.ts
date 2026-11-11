@@ -119,8 +119,93 @@ async function loadJob(id: string): Promise<Json | null> {
   return rows[0] ?? null;
 }
 async function loadModel(id: string): Promise<Json | null> {
-  const rows = await restService<Json>(`reelora_video_models?model_id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
+  const encoded = encodeURIComponent(id);
+  const rows = await restService<Json>(
+    `reelora_video_models?or=(model_id.eq.${encoded},public_id.eq.${encoded})&select=*&limit=1`,
+  );
   return rows[0] ?? null;
+}
+
+function customerModel(model: Json, index: number, status?: Status, reason?: string): Json {
+  const category = str(model.category, 60);
+  const schema = paramSchemaFromRow(model);
+  const safeSchema = Object.fromEntries(Object.entries(schema).filter(([key]) => !key.startsWith("__")));
+  const meta = metaFromRow(model);
+  const modelStatus = status ?? statusFor(model).status;
+  return {
+    model_id: str(model.public_id, 80),
+    display_name: `VYORA ${category === "Image to Video" ? "Image" : "Video"} ${String(index + 1).padStart(2, "0")}`,
+    description: category === "Image to Video"
+      ? "Animez un visuel de référence avec des paramètres de création vérifiés."
+      : "Créez une vidéo à partir d'une instruction et de paramètres vérifiés.",
+    category,
+    input_fields: asArray(model.input_fields),
+    required_fields: asArray(model.required_fields),
+    param_schema: safeSchema,
+    dynamic_pricing: bool(meta.dynamic_pricing, false),
+    is_enabled: bool(model.is_enabled, true),
+    is_coming_soon: bool(model.is_coming_soon, false),
+    sort_order: finite(model.sort_order) ?? index,
+    reelora_status: modelStatus,
+    reelora_reason: reason ?? (modelStatus === "active"
+      ? "Disponible dans VYORA."
+      : modelStatus === "coming_soon" ? "Bientôt disponible." : "Indisponible momentanément."),
+  };
+}
+
+function pricingParameters(values: Json): Json {
+  return Object.fromEntries(Object.entries(values)
+    .filter(([key]) => !["prompt", "image_url", "last_image", "first_frame", "last_image_url"].includes(key))
+    .sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Json).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+interface VideoPricingConfig {
+  enabled: boolean;
+  usd_to_xof: number | null;
+  credit_value_xof: number | null;
+  markup_percent: number | null;
+  additional_cost_usd: number | null;
+  updated_at: string;
+}
+
+async function loadVideoPricingConfig(): Promise<VideoPricingConfig | null> {
+  const url = `${SUPABASE_URL()}/rest/v1/ugc_app_settings?setting_key=eq.video_pricing_config&select=setting_value,updated_at&limit=1`;
+  const response = await fetch(url, { headers: svcHeaders(), signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`VIDEO_PRICING_READ_ERROR: HTTP ${response.status}`);
+  const rows = await response.json() as Json[];
+  const row = rows[0];
+  if (!row) return null;
+  const config = obj(row.setting_value);
+  return {
+    enabled: bool(config.enabled),
+    usd_to_xof: finite(config.usd_to_xof),
+    credit_value_xof: finite(config.credit_value_xof),
+    markup_percent: finite(config.markup_percent),
+    additional_cost_usd: finite(config.additional_cost_usd),
+    updated_at: str(row.updated_at, 80),
+  };
+}
+
+export function calculateVideoCredits(
+  providerCostUsd: number,
+  config: Pick<VideoPricingConfig, "usd_to_xof" | "credit_value_xof" | "markup_percent" | "additional_cost_usd">,
+): number | null {
+  const { usd_to_xof, credit_value_xof, markup_percent, additional_cost_usd } = config;
+  if (![providerCostUsd, usd_to_xof, credit_value_xof, markup_percent, additional_cost_usd].every(Number.isFinite)
+    || providerCostUsd <= 0 || (usd_to_xof ?? 0) <= 0 || (credit_value_xof ?? 0) <= 0
+    || (markup_percent ?? -1) < 0 || (additional_cost_usd ?? -1) < 0) return null;
+  const totalXof = (providerCostUsd + additional_cost_usd!) * usd_to_xof! * (1 + markup_percent! / 100);
+  const credits = Math.ceil(totalXof / credit_value_xof!);
+  return Number.isSafeInteger(credits) && credits > 0 ? credits : null;
 }
 async function loadAvatar(id: string): Promise<Json | null> {
   const rows = await restService<Json>(`reelora_avatars?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
@@ -374,6 +459,7 @@ function mapDbRow(row: Json, access: Access): Json {
     param_schema: paramSchemaFromRow(row),
     cost_usd: finite(row.cost_usd),
     cost_currency: str(row.cost_currency, 10) || "USD",
+    active: bool(row.active, true),
     is_enabled: bool(row.is_enabled, true),
     is_coming_soon: bool(row.is_coming_soon, false),
     synced_at: str(row.synced_at, 60) || null,
@@ -389,6 +475,7 @@ function mapDbRow(row: Json, access: Access): Json {
   };
 }
 function statusFor(model: Json): { status: Status; reason: string } {
+  if (!bool(model.active, true)) return { status: "disabled", reason: "Désactivé dans le catalogue VYORA." };
   if (!bool(model.is_enabled, true)) return { status: "disabled", reason: "Désactivé dans le catalogue MuAPI." };
   if (bool(model.is_coming_soon, false)) return { status: "coming_soon", reason: "Annoncé par MuAPI, pas encore lancé." };
   const unsupported = asArray(model.required_fields).filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
@@ -466,7 +553,6 @@ function totalOf(reply: MuapiReply, entries: Json[]): number | null {
 }
 
 const schemaCache = new Map<string, { schema: Record<string, ParamDef>; fields: string[]; required: string[]; at: number }>();
-const quoteCache = new Map<string, { cost: number | null; currency: string; at: number }>();
 async function effectiveSchema(row: Json, modelId: string): Promise<{ schema: Record<string, ParamDef>; fields: string[]; required: string[] }> {
   const local = paramSchemaFromRow(row);
   const fallback = { schema: local, fields: asArray(row.input_fields), required: asArray(row.required_fields) };
@@ -494,9 +580,9 @@ function buildQuoteBody(body: Json, schema: Record<string, ParamDef>, fields: st
   if ((fields.includes("image_url") || required.includes("image_url")) && imageUrl) out.image_url = imageUrl;
   if ((fields.includes("last_image") || required.includes("last_image")) && lastImageUrl) out.last_image = lastImageUrl;
   const params = obj(body.params);
-  for (const [key, raw] of Object.entries(params)) {
+  for (const [key, def] of Object.entries(schema)) {
     if (!fields.includes(key) || isSourceField(key) || key.startsWith("__")) continue;
-    const def = schema[key];
+    const raw = params[key] ?? body[key] ?? def.default;
     const value = scalar(raw);
     if (!def || value === undefined) continue;
     if (def.type === "select" && Array.isArray(def.options) && !def.options.some((o) => String(o) === String(value))) continue;
@@ -589,21 +675,53 @@ function muapiCost(raw: Json): Json | null {
   const d = obj(raw.data ?? raw);
   return d.cost && typeof d.cost === "object" ? obj(d.cost) : null;
 }
+function muapiActualCostUsd(raw: Json | null): number | null {
+  if (!raw) return null;
+  const currency = str(raw.currency ?? raw.cost_currency, 10).toUpperCase();
+  const amount = raw.amount_usd ?? raw.cost_usd ?? (currency === "USD" ? raw.amount : null);
+  const value = finite(amount);
+  return value !== null && value >= 0 ? value : null;
+}
 
-function friendly(code: string, detail: string): string {
+async function updateProviderSpend(
+  jobId: string,
+  status: "submitted" | "unknown" | "succeeded" | "failed" | "cancelled",
+  options: { providerRequestId?: string; actualCostUsd?: number | null; release?: boolean; reasonCode?: string } = {},
+): Promise<boolean> {
+  const result = await rpcService("reelora_update_provider_spend", {
+    p_job_id: jobId,
+    p_status: status,
+    p_provider_request_id: options.providerRequestId ?? null,
+    p_actual_cost_usd: options.actualCostUsd ?? null,
+    p_release: options.release ?? false,
+    p_reason_code: options.reasonCode ?? null,
+  });
+  if (!result.ok || result.data !== true) {
+    console.error("provider spend update failed", redact(result.error ?? "provider_spend_update_rejected"));
+    return false;
+  }
+  return true;
+}
+
+function friendly(code: string, _detail: string): string {
   const map: Record<string, string> = {
-    MUAPI_NOT_CONFIGURED: "Le service vidéo MuAPI n’est pas configuré : ajoutez le secret serveur MUAPI_API_KEY dans Supabase. Les crédits réservés ont été restitués.",
-    MUAPI_SUBMIT_ERROR: `MuAPI a refusé la requête : ${detail}`,
-    MUAPI_NO_REQUEST_ID: "MuAPI n’a pas renvoyé d’identifiant de tâche. Les crédits réservés ont été restitués.",
-    MODEL_UNAVAILABLE: "Ce modèle vidéo MuAPI n’est plus disponible. Choisissez un autre modèle.",
-    MODEL_NOT_FOUND: "Modèle vidéo MuAPI inconnu.",
-    UNSUPPORTED_INPUT: `Ce modèle exige une entrée non connectée dans Reelora : ${detail}. Aucune génération n’a été lancée ; les crédits réservés ont été restitués.`,
+    MUAPI_NOT_CONFIGURED: "Le service vidéo n’est pas disponible pour le moment. Les crédits réservés ont été restitués.",
+    MUAPI_SUBMIT_ERROR: "La demande de génération n’a pas abouti. Les crédits réservés ont été restitués.",
+    MUAPI_NO_REQUEST_ID: "Le suivi de la génération n’a pas pu démarrer. Les crédits réservés ont été restitués.",
+    MODEL_UNAVAILABLE: "Ce modèle n’est plus disponible. Choisissez une autre option.",
+    MODEL_NOT_FOUND: "Ce modèle est introuvable.",
+    UNSUPPORTED_INPUT: "Ce modèle nécessite un réglage qui n’est pas pris en charge. Les crédits réservés ont été restitués.",
     IMAGE_MISSING: "Ce modèle exige une image de référence. Importez une image ou choisissez un modèle texte → vidéo.",
     LAST_IMAGE_MISSING: "Ce modèle exige une image finale de référence.",
     SCRIPT_MISSING: "Générez ou saisissez un script avant de lancer la vidéo.",
+    VIDEO_QUOTE_INVALID: "Le devis est expiré ou ne correspond plus aux paramètres. Recalculez le coût avant de relancer.",
     SUBMISSION_ALREADY_CLAIMED: "La soumission est déjà en cours. Actualisez le suivi.",
+    PROVIDER_SPEND_DISABLED: "Les tests payants du fournisseur sont désactivés par l’administration.",
+    PROVIDER_SPEND_CAP_EXCEEDED: "Le budget fournisseur disponible ne couvre pas cette génération.",
+    PROVIDER_SPEND_UNAVAILABLE: "La vérification du budget fournisseur est indisponible. Aucun appel payant n’a été lancé.",
+    PROVIDER_SPEND_ALREADY_RESERVED: "La réservation du budget est déjà utilisée ou nécessite une vérification administrative.",
   };
-  return map[code] ?? detail;
+  return map[code] ?? "La génération a échoué. Les crédits réservés ont été restitués.";
 }
 
 async function releaseQuota(jobId: string, userId: string): Promise<void> {
@@ -613,7 +731,7 @@ async function failJob(jobId: string, userId: string, code: string, detail: stri
   await rpcService("reelora_finalize_generation", {
     p_job_id: jobId, p_status: "failed", p_storage_path: null,
     p_mime_type: "video/mp4", p_file_size_bytes: null,
-    p_result_payload: { provider: "muapi", error_code: code },
+    p_result_payload: { error_code: code },
     p_error_message: friendly(code, detail),
   });
   await releaseQuota(jobId, userId);
@@ -631,7 +749,7 @@ async function actionModels(): Promise<Response> {
       });
       if (res.ok) {
         const catalog = await res.json() as Json;
-        const rows = await restService<Json>("reelora_video_models?select=model_id");
+        const rows = await restService<Json>("reelora_video_models?select=model_id,public_id");
         const allowed = new Set(rows.map((r) => str(r.model_id, 120)));
         const entries = Array.isArray(catalog.models)
           ? (catalog.models as Json[]).filter((m) => allowed.has(str(m.name, 120)))
@@ -641,17 +759,11 @@ async function actionModels(): Promise<Response> {
     } catch { /* cached catalog remains available */ }
   }
   const models = await restService<Json>("reelora_video_models?active=eq.true&select=*&order=sort_order");
-  return json({ models: models.map((m) => ({
-    model_id: m.model_id, display_name: m.display_name, description: m.description,
-    category: m.category, endpoint: m.endpoint, input_fields: m.input_fields,
-    required_fields: m.required_fields, param_schema: m.param_schema,
-    cost_usd: m.cost_usd, cost_currency: m.cost_currency,
-    is_enabled: m.is_enabled, is_coming_soon: m.is_coming_soon, synced_at: m.synced_at,
-  })) });
+  return json({ models: models.map((m, index) => customerModel(m, index)) });
 }
 
-/** Full public + account-scoped video catalogue, with explicit diagnostics. */
-async function actionCatalog(): Promise<Response> {
+/** Full public + account-scoped video catalogue; raw diagnostics are admin-only. */
+async function actionCatalog(adminOnly = false): Promise<Response> {
   const [publicReply, probe, dbRows] = await Promise.all([
     muapiFetch("/api/v1/models", { useKey: false, timeout: 20000 }),
     probeAccount(),
@@ -745,19 +857,42 @@ async function actionCatalog(): Promise<Response> {
       error: probe.error ? redact(probe.error) : null,
     },
   };
-  return json({ models, catalog });
+  if (adminOnly) return json({ models, catalog });
+
+  const publicIdByModelId = new Map(dbRows.map((row) => [str(row.model_id, 120), str(row.public_id, 80)]));
+  const customerModels = models
+    .filter((model) => publicIdByModelId.has(str(model.model_id, 120)))
+    .map((model, index) => customerModel(
+      { ...model, public_id: publicIdByModelId.get(str(model.model_id, 120)) },
+      index,
+      str(model.reelora_status) as Status,
+    ));
+  const verified = probe.key_valid && authCatalogOk;
+  return json({
+    models: customerModels,
+    catalog: {
+      fetched_at: catalog.fetched_at,
+      detected_video: customerModels.length,
+      active: customerModels.filter((model) => model.reelora_status === "active").length,
+      unavailable: customerModels.filter((model) => model.reelora_status !== "active").length,
+      verified,
+      error: verified ? null : "Le catalogue est temporairement indisponible.",
+    },
+  });
 }
 
 /** Full input_schema of one real model, fetched server-side with its own key. */
 async function actionModelDetail(body: Json): Promise<Response> {
-  const modelId = str(body.model_id, 120);
-  if (!validModelId(modelId)) return fail("INVALID_INPUT", "Identifiant de modèle invalide.", 400);
-  const row = await loadModel(modelId);
-  if (!row) return fail("MODEL_NOT_FOUND", "Modèle vidéo MuAPI inconnu.", 404);
+  const requestedModelId = str(body.model_id, 120);
+  if (!requestedModelId) return fail("INVALID_INPUT", "Identifiant de modèle invalide.", 400);
+  const row = await loadModel(requestedModelId);
+  if (!row) return fail("MODEL_NOT_FOUND", "Modèle vidéo inconnu.", 404);
+  const publicModelId = str(row.public_id, 80);
+  const modelId = str(row.model_id, 120);
   const key = MUAPI_KEY();
   let reply = await muapiFetch(`/api/v1/models/${encodeURIComponent(modelId)}`, { useKey: Boolean(key), timeout: 15000 });
   if (!reply.ok && key) reply = await muapiFetch(`/api/v1/models/${encodeURIComponent(modelId)}`, { useKey: false, timeout: 15000 });
-  if (!reply.ok) return fail("MODEL_DETAIL_UNAVAILABLE", `Schéma MuAPI indisponible : ${reply.error || `HTTP ${reply.status}`}`, 502);
+  if (!reply.ok) return fail("MODEL_DETAIL_UNAVAILABLE", "Les paramètres de ce modèle ne sont pas disponibles.", 502);
   const d = obj(obj(reply.data).data ?? reply.data);
   const name = str(d.name, 120) || modelId;
   if (name !== modelId) return fail("MODEL_DETAIL_MISMATCH", "La fiche MuAPI ne correspond pas au modèle demandé.", 502);
@@ -765,107 +900,134 @@ async function actionModelDetail(body: Json): Promise<Response> {
   const detailSchema = schemaFromInputSchema(d.input_schema, fields);
   const rowSchema = paramSchemaFromRow(row);
   const model: Json = {
+    ...row,
     ...mapLiveEntry({ ...d, name: modelId }, "unverified"),
     model_id: modelId,
+    public_id: publicModelId,
     input_fields: fields.length ? fields : asArray(row.input_fields),
     required_fields: asArray(d.required_fields).length ? asArray(d.required_fields) : asArray(row.required_fields),
     param_schema: mergeSchema(rowSchema, detailSchema),
-    source: "muapi_model_detail",
-    // Access is deliberately NOT overwritten here: the catalog action alone
-    // decides public vs account after validating the key.
-    account_access: undefined,
-    reelora_status: undefined,
-    reelora_reason: undefined,
   };
-  return json({ model });
+  return json({ model: customerModel(model, 0) });
 }
 
-async function actionEstimate(body: Json): Promise<Response> {
+async function actionAdminCatalog(userJwt: string): Promise<Response> {
+  const response = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_overview`, {
+    method: "POST",
+    headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) return fail("FORBIDDEN", "Accès administrateur requis.", 403);
+  await actionModels();
+  return actionCatalog(true);
+}
+
+async function actionEstimate(body: Json, userId: string): Promise<Response> {
   const serviceKey = str(body.service_key, 80);
-  const modelId = str(body.model_id, 120);
+  const requestedModelId = str(body.model_id, 120);
   const rows = await restService<Json>(`ugc_service_catalog?service_key=eq.${encodeURIComponent(serviceKey)}&select=service_key,display_name,credits_cost,active&limit=1`);
   const service = rows[0];
-  const rawModel = modelId ? await loadModel(modelId) : null;
+  const rawModel = requestedModelId ? await loadModel(requestedModelId) : null;
   const model = rawModel ? { ...rawModel } : null;
+  const publicModelId = str(model?.public_id, 80);
+  const modelId = str(model?.model_id, 120);
   const meta = model ? metaFromRow(model) : {};
   const dynamic = bool(meta.dynamic_pricing, false);
   const estimateEndpoint = model ? normalizeEstimateEndpoint(meta.estimate_endpoint, modelId) : null;
-  const quoteRequested = body.params !== undefined || body.prompt !== undefined || body.image_url !== undefined || body.last_image_url !== undefined;
   const effective = model ? await effectiveSchema(model, modelId) : { schema: {}, fields: [] as string[], required: [] as string[] };
   const clientSchema = paramSchemaFromClient(body.param_schema, effective.fields);
   const schema = Object.keys(clientSchema).length ? clientSchema : effective.schema;
   const quoteParams = model ? buildQuoteBody(body, schema, effective.fields, effective.required) : {};
   const unsupported = effective.required.filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
   const catalogCost = finite(model?.cost_usd);
-  let providerCostUsd: number | string | null = catalogCost;
+  let providerCostUsd = catalogCost;
   let currency = str(model?.cost_currency, 10) || "USD";
-  let quoteSource: "catalog" | "estimate_cost" | "unavailable" = "catalog";
-  let quoteError: string | null = null;
+  let quoteAvailable = Boolean(catalogCost && catalogCost > 0);
 
-  if (quoteRequested && model && dynamic) {
+  if (model && dynamic) {
+    quoteAvailable = false;
     if (!MUAPI_KEY()) {
-      quoteSource = "unavailable";
-      quoteError = "Devis exact indisponible : secret serveur MUAPI_API_KEY absent.";
+      providerCostUsd = null;
     } else if (!estimateEndpoint) {
-      quoteSource = "unavailable";
-      quoteError = "Devis exact indisponible : endpoint estimate-cost non déclaré par MuAPI.";
+      providerCostUsd = null;
     } else if (effective.required.includes("prompt") && !str(quoteParams.prompt, 4000)) {
-      quoteSource = "unavailable";
-      quoteError = "Saisissez une instruction pour obtenir le devis exact de ce modèle à tarification dynamique.";
+      providerCostUsd = null;
     } else {
-      const cacheKey = `${modelId}|${estimateEndpoint}|${JSON.stringify(quoteParams)}`;
-      const cached = quoteCache.get(cacheKey);
-      let cost: number | null = cached && Date.now() - cached.at < 300000 ? cached.cost : null;
-      if (!cached || Date.now() - cached.at >= 300000) {
-        const reply = await muapiFetch(estimateEndpoint, { method: "POST", useKey: true, body: quoteParams, timeout: 20000 });
-        cost = reply.ok ? providerCost(reply) : null;
-        if (reply.ok && cost !== null) {
-          currency = providerCurrency(reply, currency);
-          quoteCache.set(cacheKey, { cost, currency, at: Date.now() });
-        } else {
-          quoteError = `MuAPI estimate-cost : ${reply.error || `HTTP ${reply.status}`}`;
-        }
-      } else if (cached) currency = cached.currency;
-      if (cost !== null) {
-        providerCostUsd = cost;
-        quoteSource = "estimate_cost";
-      } else {
-        quoteSource = "unavailable";
-        quoteError = quoteError ?? "MuAPI n’a pas renvoyé de coût exploitable pour ces paramètres exacts.";
+      const reply = await muapiFetch(estimateEndpoint, { method: "POST", useKey: true, body: quoteParams, timeout: 20000 });
+      providerCostUsd = reply.ok ? providerCost(reply) : null;
+      if (reply.ok && providerCostUsd !== null) {
+        currency = providerCurrency(reply, currency);
+        quoteAvailable = providerCostUsd > 0;
       }
     }
   }
 
   const modelAvailable = Boolean(model && bool(model.active, false) && bool(model.is_enabled, true)
-    && !bool(model.is_coming_soon, false) && !unsupported.length && quoteSource !== "unavailable");
+    && !bool(model.is_coming_soon, false) && !unsupported.length);
   const modelStatus: Status = !model ? "disabled"
     : !bool(model.is_enabled, true) ? "disabled"
       : bool(model.is_coming_soon, false) ? "coming_soon"
         : unsupported.length ? "unsupported"
-          : quoteSource === "unavailable" ? "unverified" : "active";
-  const modelReason = !model ? "Modèle inconnu du catalogue Reelora."
-    : unsupported.length ? `Entrée non connectée : ${unsupported.join(", ")}.`
-      : quoteSource === "unavailable" ? quoteError
-        : "Modèle actif et sélectionnable.";
-
-  // A catalogue tariff is NOT an exact provider quote. When estimate-cost fails
-  // (or cannot be requested), never fall back to the catalogue price: the UI
-  // must display "devis fournisseur à confirmer" instead of an invented number.
-  if (quoteSource === "unavailable") providerCostUsd = null;
+          : "active";
+  const modelReason = !model ? "Modèle vidéo inconnu."
+    : unsupported.length ? "Ce modèle nécessite un réglage qui n'est pas encore pris en charge."
+      : modelAvailable ? "Disponible dans VYORA." : "Indisponible momentanément.";
+  let creditsCost: number | null = null;
+  let quoteId: string | null = null;
+  let pricingError: string | null = null;
+  if (!service?.active || !modelAvailable) {
+    pricingError = "Ce modèle ou ce service n'est pas disponible pour le moment.";
+  } else if (!quoteAvailable || providerCostUsd === null || currency.toUpperCase() !== "USD") {
+    pricingError = "Le tarif exact de cette génération n'est pas disponible.";
+  } else {
+    const config = await loadVideoPricingConfig();
+    if (!config?.enabled || config.usd_to_xof === null || config.credit_value_xof === null
+      || config.markup_percent === null || config.additional_cost_usd === null || !config.updated_at) {
+      pricingError = "La tarification n'est pas encore configurée et validée.";
+    } else {
+      creditsCost = calculateVideoCredits(providerCostUsd, config);
+      if (creditsCost === null) {
+        pricingError = "Le tarif exact de cette génération n'est pas disponible.";
+      } else {
+        const pricingParams = pricingParameters(quoteParams);
+        const recorded = await rpcService("reelora_record_video_quote", {
+          p_user_id: userId,
+          p_service_key: serviceKey,
+          p_model_id: modelId,
+          p_public_model_id: publicModelId,
+          p_credits_cost: creditsCost,
+          p_provider_cost_usd: providerCostUsd,
+          p_usd_to_xof: config.usd_to_xof,
+          p_credit_value_xof: config.credit_value_xof,
+          p_markup_percent: config.markup_percent,
+          p_additional_cost_usd: config.additional_cost_usd,
+          p_config_updated_at: config.updated_at,
+          p_quote_params: pricingParams,
+          p_pricing_params: pricingParams,
+        });
+        if (recorded.ok && typeof recorded.data === "string") {
+          quoteId = recorded.data;
+        } else {
+          creditsCost = null;
+          pricingError = "Le devis n'a pas pu être validé. Réessayez.";
+        }
+      }
+    }
+  }
 
   return json({
     service_key: serviceKey,
-    credits_cost: Number(service?.credits_cost ?? 0),
+    credits_cost: creditsCost,
     service_active: Boolean(service?.active),
-    model_id: modelId || null,
+    model_id: publicModelId || null,
     model_available: modelAvailable,
     model_status: modelStatus,
     model_reason: modelReason,
-    provider_cost_usd: providerCostUsd,
-    provider_cost_currency: currency,
-    provider_quote_source: quoteSource,
-    provider_quote_error: quoteError ? redact(quoteError) : null,
-    quote_params: quoteParams,
+    pricing_available: Boolean(quoteId),
+    pricing_error: pricingError,
+    quote_id: quoteId,
+    quote_expires_at: quoteId ? new Date(Date.now() + 10 * 60 * 1000).toISOString() : null,
   });
 }
 
@@ -878,14 +1040,26 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
   const payload = obj(job.request_payload);
 
   if (["succeeded", "failed", "cancelled"].includes(status) || providerJobId) {
-    return json({ job_id: jobId, status, provider: "muapi", provider_job_id: providerJobId || null });
+    return json({ job_id: jobId, status });
   }
 
-  // Atomic claim: two concurrent "start" calls can never POST twice to MuAPI.
+  const quoteId = str(job.pricing_quote_id, 80) || str(payload.quote_id, 80);
+  const quoteResult = quoteId ? await rpcService("reelora_get_video_quote", { p_quote_id: quoteId })
+    : { ok: false, data: null, error: "missing_quote" };
+  const quote = obj(quoteResult.data);
+  const publicModelId = str(payload.model_id, 80);
+  if (!quoteResult.ok || str(quote.user_id, 80) !== userId
+    || str(quote.service_key, 80) !== str(job.service_key, 80)
+    || str(quote.public_model_id, 80) !== publicModelId
+    || Number(quote.credits_cost) !== Number(job.credits_reserved)) {
+    return await failJob(jobId, userId, "VIDEO_QUOTE_INVALID", "");
+  }
+
+  // Atomic claim: two concurrent start calls can never submit twice.
   const claimId = `claim-${crypto.randomUUID()}`;
   const claim = await rpcService("reelora_claim_generation_submission", { p_job_id: jobId, p_claim_id: claimId });
   if (!claim.ok || claim.data !== true) {
-    return json({ job_id: jobId, status, provider: "muapi", provider_job_id: null,
+    return json({ job_id: jobId, status,
       message: friendly("SUBMISSION_ALREADY_CLAIMED", "") });
   }
 
@@ -894,12 +1068,12 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
     return await failJob(jobId, userId, "MUAPI_NOT_CONFIGURED", "Clé MuAPI absente.");
   }
 
-  const modelId = str(payload.model_id, 120);
-  const rawModel = modelId ? await loadModel(modelId) : null;
-  if (!rawModel) return await failJob(jobId, userId, "MODEL_NOT_FOUND", `Modèle ${modelId || "(non renseigné)"} inconnu.`);
+  const rawModel = publicModelId ? await loadModel(publicModelId) : null;
+  if (!rawModel) return await failJob(jobId, userId, "MODEL_NOT_FOUND", "");
+  const modelId = str(rawModel.model_id, 120);
   const model: Json = { ...rawModel };
   if (!bool(model.active, false) || !bool(model.is_enabled, true) || bool(model.is_coming_soon, false)) {
-    return await failJob(jobId, userId, "MODEL_UNAVAILABLE", `Modèle ${modelId} indisponible.`);
+    return await failJob(jobId, userId, "MODEL_UNAVAILABLE", "");
   }
   const effective = await effectiveSchema(model, modelId);
   const unsupported = effective.required.filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
@@ -939,9 +1113,26 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
     const code = e instanceof Error ? e.message.split(":")[0] : "INVALID_INPUT";
     return await failJob(jobId, userId, code, e instanceof Error ? e.message : String(e));
   }
+  if (str(quote.model_id, 120) !== modelId
+    || canonicalJson(pricingParameters(submitBody)) !== canonicalJson(obj(quote.pricing_params))) {
+    return await failJob(jobId, userId, "VIDEO_QUOTE_INVALID", "");
+  }
 
   const endpoint = normalizeEndpoint(model.endpoint, metaFromRow(rawModel).endpoint_url, modelId);
-  if (!validEndpoint(endpoint)) return await failJob(jobId, userId, "MODEL_UNAVAILABLE", "Endpoint MuAPI invalide.");
+  if (!validEndpoint(endpoint)) return await failJob(jobId, userId, "MODEL_UNAVAILABLE", "");
+  const spendReservation = await rpcService("reelora_reserve_provider_spend", { p_job_id: jobId });
+  if (!spendReservation.ok) {
+    console.error("provider spend reservation failed", redact(spendReservation.error ?? "provider_spend_unavailable"));
+    return await failJob(jobId, userId, "PROVIDER_SPEND_UNAVAILABLE", "");
+  }
+  const spendDecision = obj(spendReservation.data);
+  if (spendDecision.allowed !== true) {
+    const reason = str(spendDecision.reason, 80);
+    const code = reason === "provider_spend_disabled" ? "PROVIDER_SPEND_DISABLED"
+      : reason === "provider_spend_cap_exceeded" ? "PROVIDER_SPEND_CAP_EXCEEDED"
+        : "PROVIDER_SPEND_ALREADY_RESERVED";
+    return await failJob(jobId, userId, code, "");
+  }
   let submitUrl = `${MUAPI_BASE}${endpoint}`;
   const token = await workerToken();
   if (token) {
@@ -953,6 +1144,7 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
 
   let requestId = "";
   let cost: Json | null = null;
+  let submitRejected = false;
   try {
     const res = await fetch(submitUrl, {
       method: "POST",
@@ -963,6 +1155,7 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
     let parsed: Json = {};
     try { parsed = raw ? JSON.parse(raw) as Json : {}; } catch { /* handled below */ }
     if (!res.ok) {
+      submitRejected = res.status >= 400 && res.status < 500;
       const detail = redact(str(parsed.message, 300) || str(parsed.error, 300) || raw.slice(0, 300));
       throw new Error(`MUAPI_SUBMIT_ERROR: ${detail || `HTTP ${res.status}`}`);
     }
@@ -970,14 +1163,25 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
     cost = muapiCost(parsed);
   } catch (e) {
     const detail = redact(e instanceof Error ? e.message : String(e));
+    if (submitRejected) {
+      await updateProviderSpend(jobId, "failed", { release: true, reasonCode: "provider_rejected" });
+    } else {
+      await updateProviderSpend(jobId, "unknown", { reasonCode: "provider_submission_outcome_unknown" });
+    }
     return await failJob(jobId, userId, "MUAPI_SUBMIT_ERROR", detail);
   }
-  if (!requestId) return await failJob(jobId, userId, "MUAPI_NO_REQUEST_ID", "Réponse MuAPI sans request_id.");
+  if (!requestId) {
+    await updateProviderSpend(jobId, "unknown", { reasonCode: "provider_request_id_missing" });
+    return await failJob(jobId, userId, "MUAPI_NO_REQUEST_ID", "");
+  }
+
+  await updateProviderSpend(jobId, "submitted", {
+    providerRequestId: requestId,
+    actualCostUsd: muapiActualCostUsd(cost),
+  });
 
   const merged: Json = {
-    ...payload, provider: "muapi", model_id: modelId, model_endpoint: endpoint,
-    muapi_request_id: requestId, muapi_submit_body: submitBody, muapi_submit_cost: cost,
-    webhook_enabled: Boolean(token), prompt_used: prompt,
+    ...payload, model_id: publicModelId, webhook_enabled: Boolean(token),
   };
   const updated = await rpcService("reelora_set_job_processing", {
     p_job_id: jobId, p_provider: "muapi", p_provider_job_id: requestId, p_request_payload: merged,
@@ -986,9 +1190,8 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
   if (cost) await rpcService("reelora_record_video_poll", {
     p_job_id: jobId, p_provider_status: "queued", p_next_poll_seconds: 30, p_cost: cost,
   });
-  return json({ job_id: jobId, status: "processing", provider: "muapi",
-    provider_job_id: requestId, provider_state: "queued", model_id: modelId,
-    provider_cost: cost, webhook_enabled: Boolean(token) });
+  return json({ job_id: jobId, status: "processing", provider_state: "queued",
+    model_id: publicModelId, webhook_enabled: Boolean(token) });
 }
 
 async function actionStatus(jobId: string, userId: string): Promise<Response> {
@@ -997,8 +1200,7 @@ async function actionStatus(jobId: string, userId: string): Promise<Response> {
   if (str(job.created_by, 80) !== userId) return fail("FORBIDDEN", "Cette tâche ne vous appartient pas.", 403);
   const status = str(job.status, 30);
   const result: Json = {
-    job_id: jobId, status, provider: "muapi",
-    provider_job_id: str(job.provider_job_id, 300) || null,
+    job_id: jobId, status,
     provider_state: str(obj(job.result_payload).provider_status, 40) || null,
     error: status === "failed" ? str(job.error_message, 500) || null : null,
     progress: status === "succeeded" ? 100 : status === "processing" ? 55 : status === "reserved" ? 20 : 0,
@@ -1027,9 +1229,10 @@ export async function handler(req: Request): Promise<Response> {
   const action = str(body.action, 20);
   try {
     if (action === "catalog") return await actionCatalog();
+    if (action === "admin-catalog") return await actionAdminCatalog(userJwt);
     if (action === "model-detail") return await actionModelDetail(body);
     if (action === "models") return await actionModels();
-    if (action === "estimate") return await actionEstimate(body);
+    if (action === "estimate") return await actionEstimate(body, userId);
     const jobId = str(body.job_id, 80);
     if (!jobId) return fail("INVALID_INPUT", "job_id requis.", 400);
     if (action === "start") return await actionStart(jobId, userId);

@@ -104,10 +104,10 @@ export default function Prompts() {
     try {
       const data = await improvePrompt(form.content);
       setForm({ ...form, content: data.content });
-      toast.success('Prompt enrichi par Groq.'); await refreshQuota();
+      toast.success('Prompt enrichi par l’IA.'); await refreshQuota();
     } catch (err) {
       const e = asAppError(err);
-      toast.error(e.code === 'GROQ_NOT_CONFIGURED' ? 'GROQ_API_KEY est requis côté serveur pour cette fonction.' : e.message);
+      toast.error(e.code === 'GROQ_NOT_CONFIGURED' ? 'L’assistance IA est indisponible pour le moment.' : e.message);
     } finally { setImproving(false); }
   };
 
@@ -214,7 +214,7 @@ export default function Prompts() {
       </Modal>
 
       <ConfirmDialog open={Boolean(toDelete)} title="Supprimer ce prompt ?" danger confirmLabel="Supprimer" onClose={() => setToDelete(null)} onConfirm={() => void onDelete()} message="Ce modèle de prompt sera définitivement supprimé." />
-      <div className="mt-6"><Banner tone="info" title="Modèles système"><Wand2 size={12} className="inline" /> Les modèles fournis par Reelora sont en lecture seule. Dupliquez-les en copiant leur contenu pour les personnaliser.</Banner></div>
+      <div className="mt-6"><Banner tone="info" title="Modèles système"><Wand2 size={12} className="inline" /> Les modèles fournis par VYORA sont en lecture seule. Dupliquez-les en copiant leur contenu pour les personnaliser.</Banner></div>
     </>
   );
 }

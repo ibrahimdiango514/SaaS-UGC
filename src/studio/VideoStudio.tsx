@@ -27,7 +27,7 @@ import { PreviewStage, TrackingPanel } from './components/PreviewStage';
 import { EMPTY_STRUCTURE, PromptComposer, type StructuredPrompt } from './components/PromptComposer';
 import { StudioShell } from './components/StudioShell';
 import {
-  MODE_DESCRIPTIONS, MODE_LABELS, defaultParams, isModelAvailable, modelFamily,
+  MODE_DESCRIPTIONS, MODE_LABELS, defaultParams, isModelAvailable,
   modelModes, modelsForMode, paramsSummary, type GenerationMode, type ParamValue,
 } from './model';
 import { trackingState } from './tracking';
@@ -282,7 +282,7 @@ export default function VideoStudio() {
         const first = modelsForMode(next, mode)[0];
         setModelId(first?.model_id ?? '');
       }
-      toast.success('Catalogue MuAPI vérifié rechargé.');
+      toast.success('Catalogue vidéo actualisé.');
     } catch (err) { toast.error(asAppError(err).message); }
     finally { setRefreshing(false); }
   };
@@ -305,8 +305,8 @@ export default function VideoStudio() {
 
   const launchIssues = useMemo(() => {
     const issues: string[] = [];
-    if (mode === 'video-to-video') issues.push('Video to Video est un espace préparé : aucun modèle correspondant n’est intégré.');
-    if (!selectedModel) issues.push('Choisissez un modèle MuAPI disponible.');
+    if (mode === 'video-to-video') issues.push('La transformation vidéo n’est pas encore disponible.');
+    if (!selectedModel) issues.push('Choisissez un modèle vidéo disponible.');
     else if (!modelModes(selectedModel).includes(mode)) issues.push('Le modèle sélectionné n’accepte pas ce mode.');
     if (!projectId) issues.push('Sélectionnez ou créez un projet pour enregistrer la vidéo.');
     if (prompt.trim().length < 20) issues.push('Décrivez la scène en au moins 20 caractères.');
@@ -314,13 +314,13 @@ export default function VideoStudio() {
     if (!estimate) issues.push('Estimation serveur des crédits en cours.');
     else {
       if (!estimate.service_active) issues.push('Le service de crédits sélectionné est inactif.');
-      if (!estimate.model_available) issues.push('Le modèle MuAPI sélectionné n’est plus disponible.');
-      if (requiresExactQuote && !summary.exactQuote) issues.push('Devis exact estimate-cost indisponible pour ce modèle dynamique.');
-      if (summary.quoteToConfirm) issues.push('Devis fournisseur à confirmer : aucun prix de remplacement accepté.');
+      if (!estimate.model_available) issues.push('Le modèle sélectionné n’est plus disponible.');
+      if (requiresExactQuote && !summary.exactQuote) issues.push('Le coût exact en crédits n’a pas pu être confirmé.');
+      if (summary.quoteToConfirm) issues.push('Le coût en crédits doit être confirmé avant la génération.');
       if (summary.creditsCost !== null && summary.creditsCost > balance) issues.push('Crédits insuffisants pour cette réservation.');
       if (summary.creditsCost === null || summary.creditsCost <= 0) issues.push('Coût en crédits non confirmé par le serveur.');
     }
-    if (health?.muapi === false) issues.push('Le secret serveur MUAPI_API_KEY n’est pas configuré : une génération réelle ne peut pas aboutir.');
+    if (health?.muapi === false) issues.push('Le service vidéo est momentanément indisponible.');
     if (selectedModel?.required_fields.includes('image_url') && !referenceFile && !referencePath) issues.push('Importez l’image de référence requise par ce modèle.');
     if (selectedModel?.required_fields.includes('last_image') && !lastFile && !lastPath) issues.push('Importez l’image finale requise par ce modèle.');
     if (starting || (jobId && !terminal)) issues.push('Une génération est déjà en cours pour cette session.');
@@ -362,11 +362,12 @@ export default function VideoStudio() {
       } : {};
 
       const payload = {
-        provider: 'muapi', ui_version: 'reelora-video-studio-v1', mode,
+        ui_version: 'reelora-video-studio-v1', mode,
         model_id: selectedModel.model_id, params: paramValues,
+        quote_id: estimate.quote_id,
         visual_prompt: prompt.trim(), script_text: (scriptText.trim() || prompt.trim()).slice(0, 4000),
         product_name: productName.trim(), structured_prompt: structure,
-        project_title: projects.find((p) => p.id === projectId)?.title ?? 'Reelora',
+        project_title: projects.find((p) => p.id === projectId)?.title ?? 'VYORA',
         ...reference, ...lastReference,
       };
       const id = await startGeneration(projectId, serviceKey, payload, idempotencyKey);
@@ -374,7 +375,7 @@ export default function VideoStudio() {
       const r = await videoStart(id);
       applyResult(r);
       if (r.status === 'failed') await refreshQuota();
-      else { toast.info('Génération soumise à MuAPI. Le suivi se poursuit côté serveur.'); startPolling(id); }
+      else { toast.info('Génération lancée. Le suivi se poursuit automatiquement.'); startPolling(id); }
     } catch (err) {
       setStatus('failed'); setRunError(asAppError(err).message); await refreshQuota();
     } finally { setStarting(false); setUploading(false); setConfirmOpen(false); }
@@ -412,8 +413,8 @@ export default function VideoStudio() {
       <Link to="/app/studio/avance" className="btn btn-ghost btn-sm"><Wand2 size={13} /> Parcours 5 étapes</Link>
     </>}>
       {health?.muapi === false && (
-        <div className="mb-4"><Banner tone="warning" title="Activation MuAPI en attente">
-          Le catalogue vérifié et toute la chaîne de crédits / suivi sont consultables. Le secret serveur <code>MUAPI_API_KEY</code> n’est pas configuré : le lancement est bloqué explicitement, sans résultat simulé. Configurez-le uniquement dans les secrets Supabase Edge Functions.
+        <div className="mb-4">        <Banner tone="warning" title="Service vidéo indisponible">
+        La génération réelle ne peut pas aboutir pour le moment. Réessayez plus tard.
         </Banner></div>
       )}
 
@@ -422,12 +423,12 @@ export default function VideoStudio() {
         <div className="order-1 space-y-4">
           <PreviewStage state={stage} referenceUrl={referencePreview} videoUrl={previewUrl}
             onClearReference={() => onReference('first', null)}>
-            {stage === 'generating' && <div className="mt-5 text-left"><TrackingPanel tracking={tracking} providerState={providerState} requestId={finishedJob?.provider_job_id ?? null} /></div>}
+            {stage === 'generating' && <div className="mt-5 text-left"><TrackingPanel tracking={tracking} providerState={providerState} requestId={null} /></div>}
           </PreviewStage>
 
           {jobId && (
             <div className="space-y-3">
-              <TrackingPanel tracking={tracking} providerState={providerState} requestId={finishedJob?.provider_job_id ?? null} />
+              <TrackingPanel tracking={tracking} providerState={providerState} requestId={null} />
               {runError && <Banner tone="danger" title="Génération interrompue"><AlertCircle size={12} className="inline" /> {runError}</Banner>}
               {status === 'succeeded' && (
                 <Card className="p-4 sm:p-5">
@@ -435,19 +436,19 @@ export default function VideoStudio() {
                     <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-emerald-400" />
                     <div className="min-w-0 flex-1">
                       <h3 className="text-sm font-semibold text-white">Vidéo réelle disponible</h3>
-                      <p className="mt-1 text-xs leading-relaxed text-slate-400">Fichier téléchargé depuis MuAPI et conservé dans Supabase Storage privé. L’URL de lecture ci-dessus est signée et temporaire ; le fichier, lui, reste dans votre bibliothèque.</p>
+                      <p className="mt-1 text-xs leading-relaxed text-slate-400">Votre vidéo est conservée dans votre bibliothèque privée. L’URL de lecture est temporaire, mais le fichier reste disponible dans votre espace.</p>
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Modèle : </span><span className="text-slate-200">{selectedModel?.display_name ?? String(finishedJob?.request_payload?.model_id ?? '—')}</span></div>
+                        <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Type : </span><span className="text-slate-200">{selectedModel ? MODE_LABELS[modelModes(selectedModel)[0]] ?? 'Vidéo VYORA' : 'Vidéo VYORA'}</span></div>
                         <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Coût : </span><span className="text-amber-300">{resultCredits} crédits</span></div>
                         <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Date : </span><span className="text-slate-200">{finishedJob ? formatDate(finishedJob.created_at, true) : '—'}</span></div>
                         <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Projet : </span><span className="text-slate-200">{currentProject?.title ?? 'Bibliothèque'}</span></div>
                       </div>
                       <p className="mt-2 text-[11px] text-slate-500">Paramètres : {paramsSummary(paramValues)}</p>
                       <div className="mt-4 flex flex-wrap gap-2">
-                        {previewUrl && <a href={previewUrl} download={`reelora-${jobId.slice(0, 8)}.mp4`} className="btn btn-primary btn-sm"><Download size={13} /> Télécharger</a>}
+                        {previewUrl && <a href={previewUrl} download={`vyora-${jobId.slice(0, 8)}.mp4`} className="btn btn-primary btn-sm"><Download size={13} /> Télécharger</a>}
                         <Link to="/app/bibliotheque" className="btn btn-outline btn-sm"><Film size={13} /> Mes créations enregistrées</Link>
                         <Button variant="ghost" size="sm" icon={<RefreshCw size={13} />} onClick={resetForNew}>Relancer avec ces paramètres</Button>
-                        <Link to="/app/historique" className="btn btn-ghost btn-sm">Détails & ledger</Link>
+                        <Link to="/app/historique" className="btn btn-ghost btn-sm">Détails des crédits</Link>
                       </div>
                     </div>
                   </div>
@@ -528,7 +529,7 @@ export default function VideoStudio() {
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-400/10 text-emerald-200"><FolderKanban size={15} /></span>
                   <div>
                     <h3 className="text-sm font-semibold text-white">Projet & service</h3>
-                    <p className="mt-0.5 text-[11px] text-slate-500">Le résultat est rattaché à ce projet ; le coût Reelora vient du catalogue de services existant.</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">Le résultat est rattaché à ce projet ; le coût en crédits Studio provient du catalogue de services.</p>
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -537,7 +538,7 @@ export default function VideoStudio() {
                     {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
                   </Select>
                   <Select id="studio-service" label="Service / coût" value={serviceKey} onChange={(e) => setServiceKey(e.target.value)}>
-                    {services.map((s) => <option key={s.service_key} value={s.service_key}>{s.display_name} — {s.credits_cost} crédits</option>)}
+                    {services.map((s, index) => <option key={s.service_key} value={s.service_key}>{`Service vidéo VYORA ${index + 1}`}</option>)}
                   </Select>
                 </div>
                 <Button variant="ghost" size="sm" className="mt-3" icon={<Plus size={13} />} onClick={() => setProjectModal(true)}>Créer un projet rapide</Button>
@@ -581,7 +582,7 @@ export default function VideoStudio() {
       {mode !== 'video-to-video' && selectedModel && !jobId && (
         <div className="sticky bottom-[76px] z-20 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-400/25 bg-[#10131f]/95 p-3 shadow-[0_18px_50px_-25px_rgba(0,0,0,0.9)] backdrop-blur-xl lg:bottom-4">
           <div className="min-w-0">
-            <p className="truncate text-xs font-semibold text-white">{selectedModel.display_name} <span className="font-normal text-slate-500">· {modelFamily(selectedModel)}</span></p>
+            <p className="truncate text-xs font-semibold text-white">Modèle vidéo VYORA <span className="font-normal text-slate-500">· {MODE_LABELS[modelModes(selectedModel)[0]] ?? 'Vidéo'}</span></p>
             <CostSummary compact model={selectedModel} estimate={estimate} balance={balance} params={paramValues} />
           </div>
           <Button size="lg" icon={<Play size={16} />} disabled={Boolean(blockedReason)} onClick={() => setConfirmOpen(true)}>
@@ -596,7 +597,7 @@ export default function VideoStudio() {
           loading={starting || uploading} blockedReason={blockedReason} />
       )}
 
-      <Modal open={projectModal} onClose={() => setProjectModal(false)} title="Nouveau projet Reelora" size="sm"
+      <Modal open={projectModal} onClose={() => setProjectModal(false)} title="Nouveau projet VYORA" size="sm"
         description="Utilise la RPC, les quotas et les RLS existants. Aucune donnée n’est supprimée."
         footer={<><Button variant="ghost" onClick={() => setProjectModal(false)}>Annuler</Button><Button loading={creatingProject} onClick={() => void onCreateProject()}>Créer le projet</Button></>}>
         <Input label="Nom du projet" value={newProjectTitle} onChange={(e) => setNewProjectTitle(e.target.value)} placeholder="Ex. Campagne Sérum Éclat — Novembre" />

@@ -509,7 +509,7 @@ export default function VideoEditor() {
       setRecoverableDraft(null);
       setDirty(false);
       setSavedAt(new Date().toISOString());
-      toast.success('Montage enregistré sans perte dans le projet Reelora.');
+      toast.success('Montage enregistré sans perte dans votre projet VYORA.');
       return next;
     } catch (err) {
       toast.error(asAppError(err).message);
@@ -683,7 +683,7 @@ export default function VideoEditor() {
     });
     const mapped = mapAiScriptToPlan(script, local);
     if (!mapped.ok) {
-      throw new Error(`Réponse Groq rejetée par la validation structurée : ${mapped.errors.join(' ')}`);
+      throw new Error(`Réponse IA rejetée par la validation structurée : ${mapped.errors.join(' ')}`);
     }
     return mapped.plan;
   };
@@ -709,18 +709,18 @@ export default function VideoEditor() {
         return;
       }
       if (health?.groq !== true) {
-        setPlanMessage('Assistance IA indisponible : GROQ_API_KEY absent côté serveur. Aucune réponse n’est simulée.');
+        setPlanMessage('Assistance IA indisponible pour le moment.');
         return;
       }
       const aiPlan = await proposeGroqPlan();
       if (aiPlan) {
         commitChange(replanEditorScenes(project, aiPlan));
-        setPlanMessage('Plan Groq validé puis appliqué au montage. Relisez chaque plan et ses médias.');
+        setPlanMessage('Plan IA validé puis appliqué au montage. Relisez chaque plan et ses médias.');
         toast.success('Plan IA validé et appliqué.');
       }
     } catch (err) {
-      setPlanMessage(asAppError(err).message);
-      toast.error(asAppError(err).message);
+      setPlanMessage('Impossible de générer une proposition IA. Réessayez.');
+      toast.error('Impossible de générer une proposition IA. Réessayez.');
     } finally {
       setPlanBusy(false);
     }
@@ -927,10 +927,10 @@ export default function VideoEditor() {
                 Recalculer le plan local
               </Button>
               <Button size="sm" variant="ghost" loading={planBusy} disabled={health?.groq !== true} onClick={() => void applyBrief(true)()}>
-                Proposer avec Groq
+                Proposer avec l’IA
               </Button>
             </div>
-            {health?.groq === false && <p className="mt-2 text-[10px] text-amber-300">GROQ_API_KEY absent : aucune réponse IA simulée.</p>}
+            {health?.groq === false && <p className="mt-2 text-[10px] text-amber-300">Assistance IA indisponible pour le moment.</p>}
             {planMessage && <p className="mt-2 text-[11px] leading-relaxed text-slate-300">{planMessage}</p>}
           </section>
         </div>
@@ -1116,14 +1116,14 @@ export default function VideoEditor() {
       <Modal
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
-        title="Médias du projet & bibliothèque Reelora"
+        title="Médias du projet & bibliothèque VYORA"
         size="lg"
         description="Seuls les médias réels stockés dans votre espace privé peuvent être attachés à un plan."
       >
         {libraryBusy ? <LoadingState label="Chargement des médias du projet…" /> : mediaItems.length === 0 ? (
           <div className="rounded-xl border border-white/[0.08] bg-black/20 p-5 text-center text-xs text-slate-400">
             <Upload size={20} className="mx-auto mb-2 text-slate-600" />
-            Aucune vidéo générée ou média disponible. Lancez une génération MuAPI réelle ou importez un clip local dans un plan.
+            Aucune vidéo ou média disponible. Lancez une création vidéo ou importez un clip local dans un plan.
           </div>
         ) : (
           <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">

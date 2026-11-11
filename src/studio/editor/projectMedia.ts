@@ -119,7 +119,7 @@ export async function signMediaItems(
       id: `asset-${asset.id}`,
       origin: currentProjectId && asset.project_id === currentProjectId ? 'project-asset' : 'workspace-asset',
       mediaType: isAudioAsset(asset) ? 'audio' : 'video',
-      name: asset.storage_path.split('/').pop() || 'Média Reelora',
+      name: asset.storage_path.split('/').pop() || 'Média VYORA',
       storagePath: asset.storage_path,
       assetId: asset.id,
       jobId: asset.generation_job_id,

@@ -900,7 +900,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
 export function exportFilename(project: EditorProject, mimeType: string): string {
   const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
   const slug = project.title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'reelora-montage';
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'vyora-montage';
   return `${slug}-${project.aspect.replace(':', 'x')}.${ext}`;
 }
 

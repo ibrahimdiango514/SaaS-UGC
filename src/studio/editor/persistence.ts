@@ -115,7 +115,7 @@ export async function saveEditorProject(projectId: string, editor: EditorProject
 export async function createEditorProject(editor: EditorProject): Promise<string> {
   const durable = durableCopy(editor);
   return createProject({
-    title: durable.title || 'Montage Reelora',
+    title: durable.title || 'Montage VYORA',
     brief: durable.prompt.slice(0, 1000),
     platform: 'TikTok',
     language: 'fr',

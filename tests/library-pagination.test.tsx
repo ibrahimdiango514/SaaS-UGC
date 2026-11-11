@@ -77,8 +77,9 @@ describe('Pagination de la bibliothèque privée', () => {
 
     await waitFor(() => expect(mocks.listAssets).toHaveBeenLastCalledWith(25, 24));
     expect(await screen.findAllByText('Vidéo réelle')).toHaveLength(26);
-    expect(screen.getByText('workspace-1/assets/25.mp4')).toBeTruthy();
-    expect(screen.getByText('workspace-1/assets/26.mp4')).toBeTruthy();
+    expect(screen.getAllByText('Espace privé')).toHaveLength(26);
+    expect(screen.queryByText('workspace-1/assets/25.mp4')).toBeNull();
+    expect(screen.queryByText('workspace-1/assets/26.mp4')).toBeNull();
   });
 
   it('préserve les créations déjà chargées et permet de réessayer après une erreur de page', async () => {

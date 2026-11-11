@@ -28,7 +28,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       await signIn(email.trim(), password);
-      toast.success('Bienvenue sur Reelora !');
+      toast.success('Bienvenue sur VYORA !');
       const from = (location.state as { from?: string } | null)?.from;
       navigate(from && from.startsWith('/app') ? from : '/app', { replace: true });
     } catch (err) {
@@ -39,7 +39,7 @@ export default function Login() {
   if (!loading && user) return <Navigate to="/app" replace />;
 
   return (
-    <AuthShell title="Connexion" subtitle="Accédez à votre espace de création Reelora."
+    <AuthShell title="Connexion" subtitle="Accédez à votre espace de création VYORA."
       footer={<>Pas encore de compte ? <Link to="/inscription" className="font-semibold text-brand-300 hover:text-brand-200">Créer un compte</Link></>}>
       <Card className="p-6">
         <form onSubmit={(e) => void onSubmit(e)} className="space-y-4" noValidate>

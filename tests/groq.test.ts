@@ -199,16 +199,16 @@ describe('Quand Groq répond réellement, seul son contenu est retourné', () =>
 });
 
 describe('États côté interface et messages français', () => {
-  it('les boutons IA du studio sont désactivés et explicités quand Groq est absent', () => {
+  it('les boutons IA du studio sont désactivés et explicités sans détails techniques', () => {
     const composer = read('src/studio/components/PromptComposer.tsx');
     expect(composer).toContain('disabled={!groqConfigured || busy !== null}');
     expect(composer).toContain('groqConfigured === false');
-    expect(composer).toContain('GROQ_API_KEY');
+    expect(composer).not.toContain('GROQ_API_KEY');
   });
 
   it('les erreurs Groq sont traduites sans laisser de code brut', () => {
-    expect(humanizeError('GROQ_NOT_CONFIGURED')).toMatch(/GROQ_API_KEY/);
+    expect(humanizeError('GROQ_NOT_CONFIGURED')).toMatch(/assistance IA est indisponible/i);
     expect(humanizeError('AI_EMPTY_RESPONSE')).toMatch(/n’est simulé|ni simulé|aucun contenu/i);
-    expect(humanizeError('AI_PROVIDER_ERROR')).toMatch(/fournisseur IA/);
+    expect(humanizeError('AI_PROVIDER_ERROR')).toMatch(/service IA/);
   });
 });

@@ -432,7 +432,7 @@ describe('Logique pure · Persistance sans perte & refus strict de faux export',
 });
 
 describe('Interface desktop & mobile (fixtures API simulées — aucune génération ni débit)', () => {
-  it('AssistPanel permet d’accepter, modifier et rejeter chaque suggestion locale et désactive Groq si absent', () => {
+  it('AssistPanel permet de gérer les suggestions locales et signale l’indisponibilité de l’aide IA', () => {
     const onChange = vi.fn();
     const base = makeProject();
     // Place hook after demo so 'hook' suggestion appears
@@ -447,7 +447,7 @@ describe('Interface desktop & mobile (fixtures API simulées — aucune généra
     );
 
     expect(screen.getByText(/Local · déterministe/i)).toBeTruthy();
-    expect(screen.getByText(/GROQ_API_KEY absent côté serveur/i)).toBeTruthy();
+    expect(screen.getByText(/Les suggestions IA sont indisponibles pour le moment/i)).toBeTruthy();
 
     // Reject 'audio' suggestion
     const audioCard = screen.getByTestId('suggestion-audio');

@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { ChevronDown, Eraser, Lightbulb, Sparkles, WandSparkles } from 'lucide-react';
 import { Button, Textarea, Input, cn } from '../../components/ui';
 import { generateScript, improvePrompt } from '../../lib/api';
-import { asAppError } from '../../lib/errors';
 import { useToast } from '../../context/ToastContext';
 import { PROMPT_FIELDS, composeStructuredPrompt, type StructuredPrompt } from '../prompt';
 
@@ -37,9 +36,9 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
     setBusy('prompt');
     try {
       const result = await improvePrompt(prompt);
-      if (result?.content) { onPrompt(result.content); toast.success('Prompt reformulé avec Groq.'); }
-      else toast.warning('Groq n’a pas renvoyé de reformulation.');
-    } catch (err) { toast.error(asAppError(err).message); }
+      if (result?.content) { onPrompt(result.content); toast.success('Prompt reformulé avec l’IA.'); }
+      else toast.warning('L’IA n’a pas renvoyé de reformulation.');
+    } catch { toast.error('Impossible de reformuler le prompt. Réessayez.'); }
     finally { setBusy(null); }
   };
 
@@ -51,9 +50,9 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
         product: productName.trim(), language: 'fr', duration: 15,
         tone: 'authentique UGC', brief: prompt.slice(0, 800),
       });
-      if (result?.script_text) { onScript(result.script_text); toast.success('Script voix off généré avec Groq.'); }
-      else toast.warning('Groq n’a pas renvoyé de script.');
-    } catch (err) { toast.error(asAppError(err).message); }
+      if (result?.script_text) { onScript(result.script_text); toast.success('Script voix off généré avec l’IA.'); }
+      else toast.warning('L’IA n’a pas renvoyé de script.');
+    } catch { toast.error('Impossible de générer le script. Réessayez.'); }
     finally { setBusy(null); }
   };
 
@@ -64,7 +63,7 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-500/15 text-brand-200"><Sparkles size={15} /></span>
           <div>
             <h3 className="text-sm font-semibold text-white">Description de la scène</h3>
-            <p className="mt-0.5 text-[11px] text-slate-500">Écrivez, collez et modifiez librement. Ce texte devient le prompt visuel envoyé à MuAPI.</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">Écrivez, collez et modifiez librement. Ce texte guide la création vidéo.</p>
           </div>
         </div>
         <span className="text-[11px] text-slate-500">{prompt.length} / 4000</span>
@@ -86,7 +85,7 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
       </div>
 
       {groqConfigured === false && (
-        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-200"><Lightbulb size={12} /> L’aide IA nécessite le secret serveur <code>GROQ_API_KEY</code>, distinct de la clé MuAPI. Elle reste désactivée tant qu’il n’est pas configuré.</p>
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-200"><Lightbulb size={12} /> L’aide IA est indisponible pour le moment.</p>
       )}
 
       {open && (
@@ -104,16 +103,16 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
 
       <details className="group mt-4 rounded-xl border border-white/[0.07] bg-white/[0.01]">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-3 text-xs font-medium text-slate-300 hover:text-white">
-          <span>Script voix off · Groq</span>
+          <span>Script voix off · IA</span>
           <span className="text-[10px] font-normal text-slate-500">{scriptText ? 'Script présent' : 'Optionnel'}</span>
         </summary>
         <div className="border-t border-white/[0.06] p-3.5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <Input label="Produit / marque" value={productName} onChange={(e) => onProductName(e.target.value)} placeholder="Ex. Sérum Éclat" className="flex-1" />
-            <Button variant="outline" size="sm" loading={busy === 'script'} disabled={!groqConfigured || busy !== null} onClick={() => void onGenerateScript()}>Générer un script Groq</Button>
+            <Button variant="outline" size="sm" loading={busy === 'script'} disabled={!groqConfigured || busy !== null} onClick={() => void onGenerateScript()}>Générer un script</Button>
           </div>
           <Textarea label="Script (contexte UGC, non écrit à l’écran)" value={scriptText} onChange={(e) => onScript(e.target.value.slice(0, 4000))}
-            placeholder="Collez un script ou générez-le avec Groq. Il enrichit le contexte du prompt sans ajouter de texte à l’image."
+            placeholder="Collez ou générez un script. Il enrichit le contexte du prompt sans ajouter de texte à l’image."
             className="mt-3 min-h-[100px] border-white/10 bg-[#0a0d17] text-xs" />
         </div>
       </details>

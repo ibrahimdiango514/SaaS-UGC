@@ -86,7 +86,7 @@ export default function Scripts() {
     } catch (err) {
       const appErr = asAppError(err);
       setError(appErr.code === 'GROQ_NOT_CONFIGURED'
-        ? 'Le secret serveur GROQ_API_KEY n’est pas configuré. Ajoutez-le dans Supabase → Edge Functions → Secrets pour activer la génération IA.'
+        ? 'La génération IA est indisponible pour le moment. Réessayez plus tard.'
         : appErr.message);
     } finally { setGenerating(false); }
   };
@@ -117,7 +117,7 @@ export default function Scripts() {
       setHooks(data.hooks || []); await refreshQuota();
     } catch (err) {
       const e = asAppError(err);
-      setError(e.code === 'GROQ_NOT_CONFIGURED' ? 'GROQ_API_KEY n’est pas configuré côté serveur.' : e.message);
+      setError(e.code === 'GROQ_NOT_CONFIGURED' ? 'La génération IA est indisponible pour le moment.' : e.message);
     } finally { setGenerating(false); }
   };
 
@@ -139,7 +139,7 @@ export default function Scripts() {
 
   return (
     <>
-      <PageHeader eyebrow="Intelligence artificielle" title="Générateur de scripts" description="Rédigez des scripts UGC structurés avec Groq. Chaque génération consomme un quota et un crédit." />
+      <PageHeader eyebrow="Intelligence artificielle" title="Générateur de scripts" description="Rédigez des scripts UGC structurés avec l’IA. Chaque génération consomme un quota et un crédit." />
 
       <Tabs active={tab} onChange={setTab} tabs={[
         { id: 'generer', label: 'Générer', icon: <Wand2 size={14} /> },
@@ -184,7 +184,7 @@ export default function Scripts() {
 
           <Card className="lg:col-span-3"><CardHeader title="Résultat" description="Le script, les scènes et les précautions de conformité."
             action={result && <Button size="sm" variant="ghost" icon={<Copy size={14} />} onClick={() => void onCopy(result.script_text)}>Copier</Button>} />
-            {generating ? <LoadingState label="Groq rédige votre script…" /> : !result ? (
+            {generating ? <LoadingState label="L’IA rédige votre script…" /> : !result ? (
               <EmptyState icon={<Wand2 size={24} />} title="Aucun script généré" description="Renseignez le brief puis lancez la génération. Aucun résultat fictif n’est affiché." />
             ) : (
               <div className="space-y-5 p-5">

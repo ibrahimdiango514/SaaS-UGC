@@ -12,12 +12,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { MuApiModel, VideoCostEstimate, VideoCatalogDiagnostics } from '../src/lib/types';
 import {
-  QUOTE_TO_CONFIRM, hasUsableProviderCost, isExactProviderQuote,
-  modelRatios, modelResolutions, providerCostLabel,
-  providerQuoteCostLabel, providerQuoteOriginLabel, reeloraModelStatus,
+  modelRatios, modelResolutions, reeloraModelStatus,
 } from '../src/studio/model';
 import {
-  DEFAULT_CATALOG_FILTERS, USD_CREDIT_NOTE, canConfirmGeneration,
+  DEFAULT_CATALOG_FILTERS, canConfirmGeneration,
   creditSummary, filterModels, modelCapabilities,
 } from '../src/studio/catalog';
 import {
@@ -54,9 +52,8 @@ function estimate(overrides: Partial<VideoCostEstimate> = {}): VideoCostEstimate
   return {
     service_key: 'ugc_clip_15s', credits_cost: 16, service_active: true,
     model_id: 'phase2-t2v', model_available: true, model_status: 'active',
-    model_reason: null, provider_cost_usd: 1.87, provider_cost_currency: 'USD',
-    provider_quote_source: 'estimate_cost', provider_quote_error: null,
-    quote_params: { aspect_ratio: '9:16', resolution: '720p', duration: 5 },
+    model_reason: null, pricing_available: true, quote_id: 'quote-123',
+    quote_expires_at: new Date(Date.now() + 600_000).toISOString(),
     ...overrides,
   };
 }
@@ -70,7 +67,7 @@ function promptBarHealthProps(
   return {
     state: { ...initialFormState(), prompt: 'Une publicité UGC de quinze secondes pour un sérum naturel.' },
     onPatch: noop, model: model(), services: [], estimate: estimate({
-      provider_cost_usd: null, provider_quote_source: 'unavailable', model_available: false,
+      pricing_available: false, quote_id: null, model_available: false,
     }),
     balance: 36, blockedReason: 'Devis fournisseur à confirmer', busy: false,
     onGenerate: noop, health, avatars: [], onAiPlan: noop,
@@ -173,50 +170,32 @@ class SimulatedCreditWallet {
   }
 }
 
-describe('Phase 2 · devis indisponibles et prix jamais fabriqués', () => {
-  it('n’affiche jamais 0.000 USD pour un devis absent, en erreur ou vide', () => {
+describe('Phase 2 · devis opaques et crédits VYORA', () => {
+  it('bloque un devis absent, indisponible ou expiré', () => {
     const cases: Array<Partial<VideoCostEstimate>> = [
-      { provider_cost_usd: null, provider_quote_source: 'unavailable' },
-      { provider_cost_usd: 0, provider_quote_source: 'unavailable' },
-      { provider_cost_usd: 0.016, provider_quote_source: 'unavailable' },
-      { provider_cost_usd: '', provider_quote_source: 'estimate_cost' },
-      { provider_cost_usd: Number.NaN, provider_quote_source: 'estimate_cost' },
-      { provider_cost_usd: 0.12, provider_quote_source: 'catalog', provider_quote_error: 'HTTP 502' },
+      { pricing_available: false, quote_id: null },
+      { pricing_available: true, quote_id: null },
+      { pricing_available: true, quote_expires_at: new Date(Date.now() - 1000).toISOString() },
     ];
     for (const e of cases) {
       const q = estimate(e);
-      expect(providerQuoteCostLabel(q)).toBe(QUOTE_TO_CONFIRM);
-      expect(providerQuoteOriginLabel(q)).toBe(QUOTE_TO_CONFIRM);
-      expect(hasUsableProviderCost(q)).toBe(false);
-      expect(creditSummary(q, 40, true).quoteToConfirm).toBe(true);
-      expect(creditSummary(q, 40, true).canReserve).toBe(false);
-      expect(canConfirmGeneration({ estimate: q, balance: 40, accepted: true, requiresExactQuote: true })).toBe(false);
+      expect(creditSummary(q, 40).quoteToConfirm).toBe(true);
+      expect(creditSummary(q, 40).canReserve).toBe(false);
+      expect(canConfirmGeneration({ estimate: q, balance: 40, accepted: true })).toBe(false);
     }
-    expect(providerQuoteCostLabel(null)).toBe(QUOTE_TO_CONFIRM);
-    expect(providerQuoteCostLabel({ provider_cost_usd: '', provider_quote_source: 'catalog' })).toBe(QUOTE_TO_CONFIRM);
-    expect(providerCostLabel('')).toBe('non communiqué');
-    expect(providerCostLabel(null)).toBe('non communiqué');
-    expect(providerCostLabel(0)).toBe('0.000 USD'); // un vrai zéro déclaré reste distinguishable
+    expect(creditSummary(null, 40).quoteToConfirm).toBe(true);
   });
 
-  it('distingue devis exact, tarif catalogue et confirmation obligatoire', () => {
-    const exact = estimate();
-    expect(isExactProviderQuote(exact)).toBe(true);
-    expect(providerQuoteCostLabel(exact)).toBe('1.870 USD');
-    expect(providerQuoteOriginLabel(exact)).toBe('estimate-cost MuAPI');
-    expect(creditSummary(exact, 36, true).canReserve).toBe(true);
-    expect(canConfirmGeneration({ estimate: exact, balance: 36, accepted: false, requiresExactQuote: true })).toBe(false);
-    expect(canConfirmGeneration({ estimate: exact, balance: 36, accepted: true, requiresExactQuote: true })).toBe(true);
-
-    const catalog = estimate({ provider_quote_source: 'catalog', provider_cost_usd: 0.6 });
-    expect(isExactProviderQuote(catalog)).toBe(false);
-    expect(providerQuoteCostLabel(catalog)).toBe('0.600 USD');
-    expect(providerQuoteOriginLabel(catalog)).toContain('devis exact non disponible');
-    expect(creditSummary(catalog, 36, false).canReserve).toBe(true);
-    expect(creditSummary(catalog, 36, true).canReserve).toBe(false); // modèle dynamique : devis exact exigé
+  it('autorise uniquement un devis serveur frais, avec confirmation explicite', () => {
+    const quote = estimate({ credits_cost: 18 });
+    expect(creditSummary(quote, 36).canReserve).toBe(true);
+    expect(canConfirmGeneration({ estimate: quote, balance: 36, accepted: false })).toBe(false);
+    expect(canConfirmGeneration({ estimate: quote, balance: 36, accepted: true })).toBe(true);
+    expect(creditSummary(quote, 10).canReserve).toBe(false);
+    expect(creditSummary(quote, 10).remaining).toBe(0);
   });
 
-  it('garde les sources UI sans repli à zéro ni conversion USD → crédits', () => {
+  it('ne transmet aucun coût fournisseur dans les surfaces client', () => {
     for (const file of [
       'src/studio/GenerationStudio.tsx', 'src/studio/components/PromptBar.tsx',
       'src/studio/components/CostConfirm.tsx', 'src/studio/components/CatalogBrowser.tsx',
@@ -224,10 +203,9 @@ describe('Phase 2 · devis indisponibles et prix jamais fabriqués', () => {
     ]) {
       const source = read(file);
       expect(source).not.toContain('?? 0).toFixed(3)');
-      expect(source).not.toMatch(/provider_cost_usd\s*\|\|\s*0/);
+      expect(source).not.toContain('provider_cost_usd');
       expect(source).not.toMatch(/cost_usd\s*\|\|\s*0/);
     }
-    expect(USD_CREDIT_NOTE).toContain('aucune conversion');
     expect(read('supabase/config.toml')).toContain('verify_jwt = true');
     // Les deux parcours historiques demandent aussi un devis exact et bloquent
     // toute génération si le serveur n'a pas confirmé le prix.
@@ -241,15 +219,14 @@ describe('Phase 2 · devis indisponibles et prix jamais fabriqués', () => {
 });
 
 describe('Phase 2 · erreurs fournisseur et états d’interface', () => {
-  it('expose les erreurs estimate-cost sans tarif de remplacement', () => {
+  it('expose un état générique sans publier le détail de tarification', () => {
     const failed = estimate({
-      provider_cost_usd: null, provider_quote_source: 'unavailable',
-      provider_quote_error: 'MuAPI estimate-cost : HTTP 503', model_available: false,
-      model_status: 'unverified', model_reason: 'Devis exact indisponible',
+      pricing_available: false, quote_id: null, pricing_error: 'Le tarif exact de cette génération n’est pas disponible.',
+      model_available: false, model_status: 'unverified', model_reason: 'Indisponible momentanément.',
     });
     const s = creditSummary(failed, 100, true);
     expect(s.quoteToConfirm).toBe(true);
-    expect(s.usdLabel).toBe(QUOTE_TO_CONFIRM);
+    expect(s).not.toHaveProperty('usdLabel');
     expect(s.exactQuote).toBe(false);
     expect(s.canReserve).toBe(false);
     expect(failed.model_available).toBe(false);
@@ -288,13 +265,8 @@ describe('Phase 2 · erreurs fournisseur et états d’interface', () => {
 
   it('affiche chargement, catalogue vide, erreur fournisseur et aucun résultat', () => {
     const diagnostics: VideoCatalogDiagnostics = {
-      source: 'muapi_authenticated', fetched_at: '2026-11-09T00:00:00Z',
-      public_total: 814, authenticated_total: 415, detected_video: 415,
-      active: 0, unavailable: 0, account_accessible: 0, public_only: 0,
-      reasons: {}, endpoints: [], account: {
-        key_configured: false, key_valid: false, catalog_status: 503,
-        balance_status: null, keys_status: null, key_is_test: null,
-      },
+      fetched_at: '2026-11-09T00:00:00Z',
+      detected_video: 415, active: 0, unavailable: 0, verified: false,
     };
     const base = {
       models: [], catalog: diagnostics, selectedId: null, onSelect: vi.fn(), onClose: vi.fn(),
@@ -304,7 +276,8 @@ describe('Phase 2 · erreurs fournisseur et états d’interface', () => {
     };
     const { unmount } = render(<CatalogBrowser {...base} loading catalogError="MuAPI HTTP 503" providerUnavailable />);
     expect(screen.getByTestId('catalog-loading')).toBeTruthy();
-    expect(screen.getByTestId('catalog-provider-error').textContent).toContain('HTTP 503');
+    expect(screen.getByTestId('catalog-provider-error').textContent).toContain('service sera disponible');
+    expect(screen.getByTestId('catalog-provider-error').textContent).not.toContain('503');
     unmount(); cleanup();
 
     render(<CatalogBrowser {...base} catalogError="MuAPI HTTP 503" providerUnavailable />);
@@ -314,7 +287,7 @@ describe('Phase 2 · erreurs fournisseur et états d’interface', () => {
     const models = catalogFixture();
     render(<CatalogBrowser {...base} models={models} />);
     fireEvent.change(screen.getByTestId('catalog-search'), { target: { value: 'inexistant-xyz' } });
-    expect(screen.getByTestId('catalog-no-results').textContent).toContain('Aucun modèle réel');
+    expect(screen.getByTestId('catalog-no-results').textContent).toContain('Aucun modèle ne correspond aux filtres');
     expect(screen.getByTestId('catalog-results-count').textContent).toContain('0 résultat');
   });
 });
@@ -394,7 +367,7 @@ describe('Phase 2 · paramètres incompatibles et capacités déclarées', () =>
     expect(reeloraModelStatus(unsupported).status).toBe('unsupported');
     expect(filterModels([unsupported], { ...DEFAULT_CATALOG_FILTERS, status: 'active' }).total).toBe(0);
     expect(catalogByCost([unsupported], 'text-to-video')).toHaveLength(0);
-    expect(catalogByCost([model({ cost_usd: null })], 'text-to-video')).toHaveLength(0);
+    expect(catalogByCost([model({ cost_usd: null })], 'text-to-video')).toHaveLength(1);
   });
 });
 
@@ -413,14 +386,14 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     const tiers = qualityTierSummary(models, services, 'text-to-video');
     expect(tiers.map((t) => t.tier)).toEqual(['rapide', 'standard', 'premium']);
     expect(tiers.map((t) => t.serviceKey)).toEqual(QUALITY_TIERS.map((q) => q.serviceKey));
-    expect(tiers.map((t) => t.creditsCost)).toEqual([9, 16, 36]);
+    expect(tiers.map((t) => t.creditsCost)).toEqual([null, null, null]);
     expect(tiers.map((t) => t.modelId)).toEqual(models.map((m) => m.model_id));
     expect(tiers.every((t) => t.available)).toBe(true);
-    for (const [i, usd] of [0.02, 1.87, 9.35].entries()) {
-      const q = estimate({ service_key: tiers[i].serviceKey, credits_cost: tiers[i].creditsCost!, provider_cost_usd: usd });
+    for (const [i] of [0.02, 1.87, 9.35].entries()) {
+      const q = estimate({ service_key: tiers[i].serviceKey, credits_cost: [9, 16, 36][i], quote_id: `quote-${i}` });
       const s = creditSummary(q, 36, true);
       expect(s.creditsCost).toBe([9, 16, 36][i]);
-      expect(s.usdLabel).toBe(`${usd.toFixed(3)} USD`);
+      expect(s).not.toHaveProperty('usdLabel');
       expect(s.remaining).toBe(36 - [9, 16, 36][i]);
       expect(s.exactQuote).toBe(true);
       expect(s.enough).toBe(true);
@@ -476,7 +449,7 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     const noop = vi.fn();
     const props = {
       state: { ...initialFormState(), prompt: 'Une publicité UGC de quinze secondes pour un sérum naturel.' },
-      onPatch: noop, model: dynamic, services: [], estimate: estimate({ provider_cost_usd: null, provider_quote_source: 'unavailable', model_available: false }),
+      onPatch: noop, model: dynamic, services: [], estimate: estimate({ pricing_available: false, quote_id: null, model_available: false }),
       balance: 36, blockedReason: 'Devis fournisseur à confirmer', busy: false,
       onGenerate: noop, health: null, avatars: [], onAiPlan: noop,
       aiBusy: false, aiMessage: '', healthBusy: false, healthError: 'Connexion impossible.',
@@ -484,25 +457,26 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     };
     render(<MemoryRouter><PromptBar {...props} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
-    expect(screen.getByRole('alert').textContent).toContain('Connexion impossible.');
+    expect(screen.getByRole('alert').textContent).toContain('Aide IA indisponible.');
     const retryHealth = props.onRetryHealth;
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
     expect(retryHealth).toHaveBeenCalledTimes(1);
     expect((screen.getByTestId('generate-button') as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByTestId('studio-provider-quote').textContent).toContain(QUOTE_TO_CONFIRM);
+    expect(screen.getByTestId('studio-credit-summary').textContent).toContain('coût en crédits à confirmer');
     expect(screen.getByTestId('studio-quote-warning').textContent).toContain('génération bloquée');
-    expect(screen.getByText(USD_CREDIT_NOTE)).toBeTruthy();
+    expect(screen.getByTestId('studio-credit-summary').textContent).not.toMatch(/USD|MuAPI|Groq/i);
     cleanup();
 
     render(<MemoryRouter><PromptBar {...props} estimate={estimate()} blockedReason="" /></MemoryRouter>);
     expect((screen.getByTestId('generate-button') as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByTestId('studio-provider-quote').textContent).toContain('1.870 USD');
+    expect(screen.getByTestId('studio-credit-summary').textContent).toContain('16 crédits VYORA');
+    expect(screen.getByTestId('studio-credit-summary').textContent).not.toMatch(/USD|MuAPI|Groq/i);
   });
 
   it('annonce la vérification Groq en cours sans afficher une relance prématurée', () => {
     render(<MemoryRouter><PromptBar {...promptBarHealthProps(null, true)} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
-    expect(screen.getByRole('status').textContent).toContain('Vérification de la disponibilité de Groq');
+    expect(screen.getByRole('status').textContent).toContain('Vérification de la disponibilité de l’aide IA');
     expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
   });
 
@@ -510,8 +484,8 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     const absent = promptBarHealthProps({ groq: false });
     render(<MemoryRouter><PromptBar {...absent} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
-    expect(screen.getByText('GROQ_API_KEY').parentElement?.textContent).toContain('absent côté serveur');
-    expect(screen.getByRole('button', { name: 'Proposer un plan avec Groq' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/Assistance IA indisponible pour le moment/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Proposer un plan avec l’IA' }).hasAttribute('disabled')).toBe(true);
 
     cleanup();
     const available = promptBarHealthProps({ groq: true });
@@ -519,7 +493,7 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
     expect(screen.queryByRole('status')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Proposer un plan avec Groq' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Proposer un plan avec l’IA' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('n’autorise la modale qu’après checkbox et devis confirmé', () => {
@@ -528,12 +502,12 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
       open: true, onClose: vi.fn(), onConfirm, model: model(), estimate: estimate(),
       balance: 36, params: { aspect_ratio: '9:16' }, loading: false, blockedReason: '',
     };
-    render(<CostConfirm {...props} estimate={estimate({ provider_cost_usd: null, provider_quote_source: 'unavailable' })} />);
+    render(<CostConfirm {...props} estimate={estimate({ pricing_available: false, quote_id: null })} />);
     const blocked = screen.getByRole('button', { name: /Je confirme/ }) as HTMLButtonElement;
     expect(blocked.disabled).toBe(true);
     fireEvent.click(screen.getByRole('checkbox'));
     expect(blocked.disabled).toBe(true);
-    expect(screen.getByTestId('quote-to-confirm').textContent).toContain('zéro factice');
+    expect(screen.getByTestId('quote-to-confirm').textContent).toContain('coût en crédits');
     expect(screen.getByTestId('quote-to-confirm').textContent).not.toContain('0.000 USD');
     expect(onConfirm).not.toHaveBeenCalled();
     cleanup();

@@ -1,10 +1,9 @@
 /**
  * Quality tiers are a Reelora UX abstraction over the REAL backend.
  *
- * - The credit cost is NEVER computed here: it comes from the server action
- *   `reelora-video { action: "estimate" }` (ugc_service_catalog.credits_cost).
- * - The chosen MuAPI model is derived from the live verified catalog, ordered
- *   by its real `cost_usd`. No model identifier is invented.
+ * - Credits are quoted by the server for the selected model and parameters.
+ * - The model order comes from the curated catalogue, not a client-visible
+ *   provider price or a guessed quality score.
  * - Compatible settings are derived from `param_schema ∩ input_fields`.
  */
 
@@ -38,25 +37,13 @@ export function serviceForQuality(services: ServiceCatalogItem[], tier: QualityT
   return services.find((s) => s.service_key === def.serviceKey && s.active) ?? null;
 }
 
-/**
- * A model without a KNOWN, finite catalogue price must never be ranked as
- * "le plus économique": the old `NaN → 0` fallback silently promoted unknown
- * prices. Only real declared costs can be compared.
- */
-export function hasKnownCost(model: MuApiModel): boolean {
-  const n = Number(model.cost_usd);
-  return model.cost_usd !== null && model.cost_usd !== undefined && model.cost_usd !== ''
-    && Number.isFinite(n) && n >= 0;
-}
-
-/** Sorted by the real provider cost declared in the verified catalog. */
+/** Keep the curated server ordering without exposing provider costs. */
 export function catalogByCost(models: MuApiModel[], mode: GenerationMode): MuApiModel[] {
   return modelsForMode(models, mode)
     .filter(isModelAvailable)
     .filter((m) => (m.required_fields ?? []).every((field) => ['prompt', 'image_url'].includes(field.toLowerCase())))
-    .filter(hasKnownCost)
     .slice()
-    .sort((a, b) => Number(a.cost_usd) - Number(b.cost_usd));
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 }
 
 export function modelForQuality(models: MuApiModel[], mode: GenerationMode, tier: QualityTier): MuApiModel | null {
@@ -79,10 +66,9 @@ export function qualityTierSummary(models: MuApiModel[], services: ServiceCatalo
       description: def.description,
       serviceKey: def.serviceKey,
       serviceActive: Boolean(service?.active),
-      creditsCost: service?.credits_cost ?? null,
+      creditsCost: null,
       modelId: picked?.model_id ?? null,
       modelName: picked?.display_name ?? null,
-      catalogCostUsd: picked && hasKnownCost(picked) ? Number(picked.cost_usd) : null,
       available: Boolean(service?.active && picked),
     };
   });

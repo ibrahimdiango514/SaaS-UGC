@@ -4,6 +4,7 @@ import {
   Lock, Mic2, Scissors, UserRound,
 } from 'lucide-react';
 import { cn } from '../../components/ui';
+import { BrandLockup } from '../../components/Brand';
 import { useAuth } from '../../context/AuthContext';
 
 interface Category {
@@ -21,7 +22,7 @@ export const STUDIO_CATEGORIES: Category[] = [
   { id: 'image', label: 'Image', icon: ImageIcon, available: false, mobile: true, note: 'Génération d’images : aucun modèle intégré.' },
   { id: 'video', label: 'Vidéo', icon: Clapperboard, to: '/app/studio', available: true, mobile: true },
   { id: 'audio', label: 'Audio', icon: AudioLines, available: false, mobile: true, note: 'Aucun moteur audio / TTS connecté.' },
-  { id: 'lip-sync', label: 'Lip Sync', icon: Mic2, available: false, mobile: true, note: 'Nécessite une source audio non produite par Reelora.' },
+  { id: 'lip-sync', label: 'Lip Sync', icon: Mic2, available: false, mobile: true, note: 'Nécessite une source audio non produite par VYORA.' },
   { id: 'editor', label: 'Montage', icon: Scissors, to: '/app/studio/montage', available: true },
   { id: 'creations', label: 'Mes créations', icon: Film, to: '/app/bibliotheque', available: true },
 ];
@@ -36,12 +37,10 @@ export function StudioTopBar() {
     <header className="studio-v2 mb-4 rounded-2xl border border-white/[0.07] bg-[#05080d]/95 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 sm:px-4 sm:py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white text-[#04121a] shadow-[0_0_20px_rgba(34,211,238,0.18)]">
-            <Clapperboard size={17} />
-          </span>
+          <BrandLockup symbolSize={32} />
           <div className="hidden min-w-0 leading-tight sm:block">
-            <p className="truncate text-[12px] font-semibold text-white">Reelora <span className="font-normal text-cyan-300">Studio</span></p>
-            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-600">Création UGC</p>
+            <p className="truncate text-[12px] font-semibold text-white">Studio <span className="font-normal text-cyan-300">UGC</span></p>
+            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-600">Creative workspace</p>
           </div>
         </div>
 

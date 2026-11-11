@@ -27,12 +27,12 @@ export const STUDIO_SECTIONS: StudioSection[] = [
   {
     id: 'video', label: 'Video Studio', shortLabel: 'Vidéo', icon: Clapperboard, status: 'live',
     route: '/app/studio', group: 'creation',
-    description: 'Génération vidéo MuAPI, catalogue synchronisé, crédits et suivi temps réel.',
+    description: 'Création vidéo, modèles compatibles, crédits et suivi en temps réel.',
   },
   {
     id: 'generations', label: 'My Generations', shortLabel: 'Générations', icon: Sparkles, status: 'live',
     route: '/app/historique', group: 'library',
-    description: 'Toutes les tâches de génération, leur statut et leur coût.',
+    description: 'Toutes les tâches de génération, leur statut et les crédits utilisés.',
   },
   {
     id: 'projects', label: 'My Projects', shortLabel: 'Projets', icon: Layers3, status: 'live',
@@ -52,20 +52,20 @@ export const STUDIO_SECTIONS: StudioSection[] = [
   {
     id: 'avatar', label: 'Avatar Studio', shortLabel: 'Avatar', icon: PersonStanding, status: 'prepared',
     route: '/app/studio/espace/avatar', group: 'creation',
-    description: 'Espace réservé aux avatars parlants. Les modèles MuAPI concernés exigent une source audio qui n’est pas encore produite par Reelora.',
+    description: 'Espace réservé aux avatars parlants. La création avec audio n’est pas encore disponible.',
   },
   {
     id: 'video-to-video', label: 'Video to Video', shortLabel: 'V→V', icon: Film, status: 'prepared',
     route: '/app/studio/espace/video-to-video', group: 'roadmap',
-    description: 'Transformation vidéo → vidéo : aucun modèle MuAPI correspondant n’est intégré. Espace préparé, non opérationnel, sans bouton de génération ni résultat simulé.',
+    description: 'Transformation vidéo → vidéo : cette capacité n’est pas encore disponible. Espace préparé, non opérationnel, sans bouton de génération ni résultat simulé.',
   },
   {
     id: 'image-generation', label: 'Image Generation', shortLabel: 'Images IA', icon: WandSparkles, status: 'prepared',
-    route: '/app/studio/espace/image-generation', group: 'roadmap', description: 'Architecture modulaire préparée, fournisseur non intégré.',
+    route: '/app/studio/espace/image-generation', group: 'roadmap', description: 'Architecture modulaire préparée, service IA non encore disponible.',
   },
   {
     id: 'audio', label: 'Audio Studio', shortLabel: 'Audio', icon: AudioLines, status: 'prepared',
-    route: '/app/studio/espace/audio', group: 'roadmap', description: 'Architecture modulaire préparée, fournisseur non intégré.',
+    route: '/app/studio/espace/audio', group: 'roadmap', description: 'Architecture modulaire préparée, service IA non encore disponible.',
   },
   {
     id: 'clipping', label: 'AI Clipping', shortLabel: 'Clipping', icon: Scissors, status: 'prepared',

@@ -23,6 +23,7 @@ import { humanizeError } from '../src/lib/errors';
 
 const PROJECT_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const JOB_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const QUOTE_ID = '99999999-9999-4999-8999-999999999999';
 
 beforeEach(() => {
   mocks.rpc.mockReset();
@@ -35,7 +36,7 @@ describe('Réservation de crédits et idempotence (RPC mockés)', () => {
   it.each([
     ['projet', () => createProject({ title: 'Campagne' })],
     ['script', () => saveScript({ project_id: PROJECT_ID, script_text: 'Texte de script' })],
-    ['génération', () => startGeneration(PROJECT_ID, 'ugc_clip_8s', {})],
+    ['génération', () => startGeneration(PROJECT_ID, 'ugc_clip_8s', { quote_id: QUOTE_ID })],
   ])('refuse une confirmation de création sans identifiant Supabase (%s)', async (_entity, operation) => {
     mocks.rpc.mockResolvedValue({ data: null, error: null });
 
@@ -45,10 +46,13 @@ describe('Réservation de crédits et idempotence (RPC mockés)', () => {
   it('transmet un identifiant d’idempotence stable pour une opération donnée', async () => {
     mocks.rpc.mockResolvedValue({ data: JOB_ID, error: null });
     const key = newGenerationIdempotencyKey();
-    const id = await startGeneration(PROJECT_ID, 'ugc_clip_8s', { provider: 'muapi', model_id: 'seedance-lite-t2v' }, key);
+    const id = await startGeneration(PROJECT_ID, 'ugc_clip_8s', {
+      quote_id: QUOTE_ID, model_id: '11111111-1111-4111-8111-111111111112',
+    }, key);
     expect(id).toBe(JOB_ID);
     expect(mocks.rpc).toHaveBeenCalledWith('reelora_start_generation', expect.objectContaining({
       p_project_id: PROJECT_ID, p_service_key: 'ugc_clip_8s', p_idempotency_key: key,
+      p_quote_id: QUOTE_ID,
     }));
   });
 
@@ -57,8 +61,8 @@ describe('Réservation de crédits et idempotence (RPC mockés)', () => {
     const k1 = newGenerationIdempotencyKey();
     const k2 = newGenerationIdempotencyKey();
     expect(k1).not.toBe(k2);
-    await startGeneration(PROJECT_ID, 'ugc_clip_8s', {}, k1);
-    await startGeneration(PROJECT_ID, 'ugc_clip_8s', {}, k2);
+    await startGeneration(PROJECT_ID, 'ugc_clip_8s', { quote_id: QUOTE_ID }, k1);
+    await startGeneration(PROJECT_ID, 'ugc_clip_8s', { quote_id: QUOTE_ID }, k2);
     expect(mocks.rpc.mock.calls[0][1].p_idempotency_key).toBe(k1);
     expect(mocks.rpc.mock.calls[1][1].p_idempotency_key).toBe(k2);
   });
@@ -66,8 +70,8 @@ describe('Réservation de crédits et idempotence (RPC mockés)', () => {
   it('un replay du même identifiant renvoie le même job (aucune réservation supplémentaire)', async () => {
     mocks.rpc.mockResolvedValue({ data: JOB_ID, error: null });
     const key = 'ugc-replay-0001';
-    const first = await startGeneration(PROJECT_ID, 'ugc_clip_8s', {}, key);
-    const second = await startGeneration(PROJECT_ID, 'ugc_clip_8s', {}, key);
+    const first = await startGeneration(PROJECT_ID, 'ugc_clip_8s', { quote_id: QUOTE_ID }, key);
+    const second = await startGeneration(PROJECT_ID, 'ugc_clip_8s', { quote_id: QUOTE_ID }, key);
     expect(first).toBe(second);
     expect(mocks.rpc).toHaveBeenCalledTimes(2);
     expect(mocks.rpc.mock.calls[0][1]).toEqual(mocks.rpc.mock.calls[1][1]);
@@ -75,7 +79,7 @@ describe('Réservation de crédits et idempotence (RPC mockés)', () => {
 
   it('un solde insuffisant est refusé avec un message compréhensible', async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: 'insufficient_credits', code: 'P0001' } });
-    await expect(startGeneration(PROJECT_ID, 'ugc_clip_15s', {})).rejects.toMatchObject({
+    await expect(startGeneration(PROJECT_ID, 'ugc_clip_15s', { quote_id: QUOTE_ID })).rejects.toMatchObject({
       name: 'AppError', code: 'P0001',
       message: 'Crédits insuffisants. Rechargez votre solde depuis l’abonnement.',
     });
@@ -83,7 +87,7 @@ describe('Réservation de crédits et idempotence (RPC mockés)', () => {
   });
 
   it('les erreurs MuAPI sont traduites en français pour l’utilisateur', () => {
-    expect(humanizeError('MUAPI_NOT_CONFIGURED')).toContain('MUAPI_API_KEY');
+    expect(humanizeError('MUAPI_NOT_CONFIGURED')).toContain('génération vidéo est indisponible');
     expect(humanizeError('IMAGE_MISSING')).toContain('image de référence');
     expect(humanizeError('SCRIPT_MISSING')).toContain('script');
     expect(humanizeError('timeout')).toContain('restitués');

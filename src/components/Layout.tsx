@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell, BookOpen, Brain, ChevronDown, Clapperboard, Coins, CreditCard, FolderKanban,
@@ -11,35 +11,42 @@ import { asAppError } from '../lib/errors';
 import { initials, relativeDate, truncate } from '../lib/format';
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '../lib/api';
 import type { AppNotification } from '../lib/types';
+import { BrandLockup, BrandSymbol } from './Brand';
 import { Badge, Button, cn, LoadingState } from './ui';
 
 interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean }
-const NAV: NavItem[] = [
-  { to: '/app', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
-  { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  { to: '/app/studio', label: 'Video Studio', icon: Clapperboard },
-  { to: '/app/business', label: 'Business Grow', icon: Brain },
-  { to: '/app/avatars', label: 'Avatars', icon: Users },
-  { to: '/app/scripts', label: 'Scripts IA', icon: Wand2 },
-  { to: '/app/prompts', label: 'Prompts', icon: BookOpen },
-  { to: '/app/presets', label: 'Réglages vidéo', icon: SlidersHorizontal },
-  { to: '/app/bibliotheque', label: 'Bibliothèque', icon: Sparkles },
-  { to: '/app/historique', label: 'Historique', icon: History },
-  { to: '/app/abonnement', label: 'Abonnement', icon: CreditCard },
-  { to: '/app/parametres', label: 'Paramètres', icon: Settings },
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  { label: 'Espace', items: [
+    { to: '/app', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
+    { to: '/app/projets', label: 'Projets', icon: FolderKanban },
+  ] },
+  { label: 'Modules', items: [
+    { to: '/app/studio', label: 'Studio UGC', icon: Clapperboard },
+    { to: '/app/business', label: 'Business Grow', icon: Brain },
+  ] },
+  { label: 'Ressources', items: [
+    { to: '/app/avatars', label: 'Avatars', icon: Users },
+    { to: '/app/scripts', label: 'Scripts IA', icon: Wand2 },
+    { to: '/app/prompts', label: 'Prompts', icon: BookOpen },
+    { to: '/app/presets', label: 'Réglages vidéo', icon: SlidersHorizontal },
+    { to: '/app/bibliotheque', label: 'Bibliothèque', icon: Sparkles },
+    { to: '/app/historique', label: 'Historique', icon: History },
+  ] },
+  { label: 'Compte', items: [
+    { to: '/app/abonnement', label: 'Abonnement', icon: CreditCard },
+    { to: '/app/parametres', label: 'Paramètres', icon: Settings },
+  ] },
 ];
 
+const NAV: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
 const MOBILE_NAV = NAV.filter((item) =>
   ['/app', '/app/projets', '/app/studio', '/app/business', '/app/historique'].includes(item.to),
 );
 
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
-    <NavLink to="/app" className="flex items-center gap-2.5">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow">
-        <Clapperboard size={19} />
-      </span>
-      {!compact && <span className="text-lg font-extrabold tracking-tight text-white">Reelora<span className="text-brand-400">.</span></span>}
+    <NavLink to="/app" aria-label="VYORA, tableau de bord" className="flex items-center gap-2.5">
+      {compact ? <BrandSymbol size={36} /> : <BrandLockup tagline />}
     </NavLink>
   );
 }
@@ -62,10 +69,6 @@ export default function Layout() {
   const [search, setSearch] = useState('');
   const notifRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
-
-  const nav = useMemo(() => isAdmin
-    ? [...NAV, { to: '/app/admin', label: 'Administration', icon: Shield }]
-    : NAV, [isAdmin]);
 
   const notificationItems = Array.isArray(notifications) ? notifications : [];
   const unread = notificationItems.filter((n) => !n.read_at).length;
@@ -146,31 +149,49 @@ export default function Layout() {
   return (
     <div className="min-h-screen lg:flex">
       {/* Desktop sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col border-r border-line bg-panel/50 px-3 py-5 lg:flex">
-        <div className="px-2 pb-7"><Logo /></div>
-        <nav className="flex-1 space-y-1 overflow-y-auto no-scrollbar">
-          {nav.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end}
-              className={({ isActive }) => cn('nav-link', isActive && 'nav-link-active')}>
-              <item.icon size={18} /> {item.label}
-            </NavLink>
+      <aside className="sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col border-r border-line bg-[#090e15]/90 px-3 py-5 backdrop-blur-xl lg:flex">
+        <div className="px-2 pb-6">
+          <Logo />
+          <p className="mt-1.5 pl-[46px] text-[10px] font-medium uppercase tracking-[0.2em] text-slate-600">Espace de création</p>
+        </div>
+        <nav className="flex-1 space-y-5 overflow-y-auto no-scrollbar">
+          {NAV_GROUPS.map((group) => (
+            <section key={group.label}>
+              <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">{group.label}</p>
+              <div className="space-y-0.5">
+                {group.items.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end}
+                    className={({ isActive }) => cn('nav-link py-2', isActive && 'nav-link-active')}>
+                    <item.icon size={17} /> {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            </section>
           ))}
+          {isAdmin && (
+            <section>
+              <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">Administration</p>
+              <NavLink to="/admin" className={({ isActive }) => cn('nav-link py-2', isActive && 'nav-link-active')}>
+                <Shield size={17} /> Administration
+              </NavLink>
+            </section>
+          )}
         </nav>
-        <div className="mt-4 rounded-xl border border-line bg-gradient-to-br from-brand-500/[0.12] to-transparent p-3.5">
-          <div className="flex items-center gap-2 text-xs font-semibold text-brand-200"><Coins size={14} /> Solde de crédits</div>
-          <p className="mt-1 text-2xl font-bold text-white">{quota?.credits ?? 0}</p>
+        <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-cyan-400/[0.09] via-panel/70 to-violet-500/[0.04] p-3.5">
+          <div className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Coins size={14} /> Crédits Studio UGC</div>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-white">{quota?.credits ?? 0}</p>
           <p className="mt-1 text-[11px] text-slate-400">{quota?.plan?.display_name ?? 'Formule'} · {quota?.usage?.video ?? 0}/{quota?.plan?.max_videos_per_month ?? 0} vidéos ce mois</p>
-          <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/app/abonnement')}>Recharger</Button>
+          <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/app/abonnement')}>Gérer le Studio</Button>
         </div>
       </aside>
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-ink/80 px-4 backdrop-blur-xl sm:px-6', studioMobileShell && 'hidden lg:flex')}>
+        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-ink/85 px-4 backdrop-blur-xl sm:px-6', studioMobileShell && 'hidden lg:flex')}>
           <button className="btn btn-ghost btn-icon lg:hidden" onClick={() => setDrawerOpen(true)} aria-label="Ouvrir le menu"><Menu size={20} /></button>
           <div className="lg:hidden"><Logo compact /></div>
 
-          <form className="hidden max-w-md flex-1 items-center gap-2 rounded-xl border border-line bg-white/[0.04] px-3 py-2 md:flex"
+          <form className="hidden max-w-md flex-1 items-center gap-2 rounded-xl border border-line bg-white/[0.025] px-3 py-2 md:flex"
             onSubmit={(e) => { e.preventDefault(); navigate(`/app/projets?q=${encodeURIComponent(search)}`); }}>
             <Search size={16} className="text-slate-500" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un projet…"
@@ -251,18 +272,26 @@ export default function Layout() {
       {/* Mobile drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm lg:hidden" onMouseDown={() => setDrawerOpen(false)}>
-          <div className="h-full w-[280px] border-r border-line bg-panel px-3 py-5" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="flex h-full w-[min(88vw,300px)] flex-col border-r border-line bg-panel px-3 py-5" onMouseDown={(e) => e.stopPropagation()}>
             <div className="mb-6 flex items-center justify-between px-2"><Logo /><button onClick={() => setDrawerOpen(false)} className="btn btn-ghost btn-icon"><X size={18} /></button></div>
-            <nav className="space-y-1 overflow-y-auto">
-              {nav.map((item) => (
-                <NavLink key={item.to} to={item.to} end={item.end}
-                  className={({ isActive }) => cn('nav-link', isActive && 'nav-link-active')}>
-                  <item.icon size={18} /> {item.label}
-                </NavLink>
+            <nav className="flex-1 space-y-5 overflow-y-auto">
+              {NAV_GROUPS.map((group) => (
+                <section key={group.label}>
+                  <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">{group.label}</p>
+                  <div className="space-y-0.5">
+                    {group.items.map((item) => (
+                      <NavLink key={item.to} to={item.to} end={item.end}
+                        className={({ isActive }) => cn('nav-link py-2', isActive && 'nav-link-active')}>
+                        <item.icon size={17} /> {item.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                </section>
               ))}
+              {isAdmin && <NavLink to="/app/admin" className={({ isActive }) => cn('nav-link py-2', isActive && 'nav-link-active')}><Shield size={17} /> Administration</NavLink>}
             </nav>
-            <div className="mt-6 rounded-xl border border-line bg-brand-500/10 p-3 text-sm">
-              <p className="text-xs text-slate-400">Crédits disponibles</p>
+            <div className="mt-6 rounded-2xl border border-cyan-300/15 bg-cyan-400/[0.06] p-3 text-sm">
+              <p className="text-xs text-slate-400">Crédits Studio UGC</p>
               <p className="text-xl font-bold text-white">{quota?.credits ?? 0}</p>
             </div>
           </div>

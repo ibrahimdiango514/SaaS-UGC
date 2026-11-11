@@ -45,9 +45,10 @@ describe('Une seule intégration MuAPI, de bout en bout', () => {
   });
 
   it('le worker enrichit result_payload avec les métadonnées affichées par la bibliothèque', () => {
-    for (const key of ['model_id', 'params', 'visual_prompt', 'mode', 'credits_reserved']) {
+    for (const key of ['params', 'visual_prompt', 'mode', 'credits_reserved']) {
       expect(worker).toContain(`${key}:`);
     }
+    expect(worker).not.toContain('model_id:');
     expect(worker).toContain('p_result_payload');
     // The library reads the metadata persisted by finalize_generation (which
     // originates from result_payload) and falls back on request_payload.
@@ -62,10 +63,10 @@ describe('Une seule intégration MuAPI, de bout en bout', () => {
     expect(video).toContain('/api/v1/models');
     expect(video).toContain('allowed.has(str(m.name, 120))');
     const quote = read('docs/devis-test-muapi.md');
-    for (const value of ['seedance-lite-t2v', '9 crédits', '0,1000 USD', 'aspect_ratio', 'Confirmation requise']) {
+    for (const value of ['désactivée', '110 %', 'opaque', '10 minutes', 'coût en crédits']) {
       expect(quote).toContain(value);
     }
-    expect(quote).toContain('PRÉPARÉ, NON LANCÉ');
+    expect(quote).toContain("Aucun devis réel ni génération payante");
   });
 });
 

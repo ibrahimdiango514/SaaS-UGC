@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Activity, Coins, CreditCard, FileClock, Settings2, Shield, Users, Zap } from 'lucide-react';
+import { Activity, Coins, CreditCard, FileClock, Power, PowerOff, RefreshCw, Settings2, Shield, Users, Video, Zap } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Modal, Banner, LoadingState, ErrorState, EmptyState, Tabs, StatCard } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
 import { formatDate, formatMoney, statusLabel, truncate } from '../lib/format';
 import {
-  adminAdjustCredits, adminConfirmRecharge, adminCreatePromo, adminListAuditLogs,
+  adminAdjustCredits, adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminProviderSpendSummary,
+  adminSetProviderSpendCap, adminSetVideoPricing,
+  adminVideoCatalog,
   adminListRecharges, adminListSettings, adminListUsers, adminOverview, adminSetAccountStatus,
   adminSetPlan, adminSetRole, adminSetSetting, adminUpdateService, listPlans, listServices,
 } from '../lib/api';
-import type { AdminOverview, AdminUser, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
+import type { AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
 
 type AuditLog = { id: string; action: string; target_type: string | null; target_id: string | null; details: Record<string, unknown>; created_at: string; actor_user_id: string };
 type Setting = { setting_key: string; setting_value: Record<string, unknown>; description: string | null };
+const formatUsd = (amount: number) => new Intl.NumberFormat('en-US', {
+  style: 'currency', currency: 'USD', maximumFractionDigits: 6,
+}).format(amount);
 
 export default function Admin() {
   const toast = useToast();
@@ -39,14 +44,38 @@ export default function Admin() {
   const [serviceActive, setServiceActive] = useState(true);
   const [editingSetting, setEditingSetting] = useState<Setting | null>(null);
   const [settingValue, setSettingValue] = useState('{}');
+  const [videoPricing, setVideoPricing] = useState({
+    usdToXof: '', creditValueXof: '', markupPercent: '110', additionalCostUsd: '', enabled: false,
+  });
+  const [videoCatalog, setVideoCatalog] = useState<AdminVideoCatalogResponse | null>(null);
+  const [videoCatalogLoading, setVideoCatalogLoading] = useState(false);
+  const [videoCatalogError, setVideoCatalogError] = useState('');
+  const [providerSpend, setProviderSpend] = useState<AdminProviderSpendSummary | null>(null);
+  const [providerSpendError, setProviderSpendError] = useState('');
+  const [providerSpendCapDraft, setProviderSpendCapDraft] = useState('0');
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
+    setProviderSpendError('');
     try {
-      const [o, u, r, s, p, st, l] = await Promise.all([
+      const [o, u, r, s, p, st, l, spend] = await Promise.all([
         adminOverview(), adminListUsers(), adminListRecharges(), listServices(), listPlans(), adminListSettings(), adminListAuditLogs(),
+        adminProviderSpendSummary().catch((err) => {
+          setProviderSpendError(asAppError(err).message);
+          return null;
+        }),
       ]);
       setOverview(o); setUsers(Array.isArray(u) ? u : []); setRecharges(r); setServices(s); setPlans(p); setSettings(st); setLogs(l as AuditLog[]);
+      setProviderSpend(spend);
+      if (spend) setProviderSpendCapDraft(String(spend.max_usd));
+      const savedPricing = st.find((setting) => setting.setting_key === 'video_pricing_config')?.setting_value;
+      if (savedPricing) setVideoPricing({
+        usdToXof: typeof savedPricing.usd_to_xof === 'number' ? String(savedPricing.usd_to_xof) : '',
+        creditValueXof: typeof savedPricing.credit_value_xof === 'number' ? String(savedPricing.credit_value_xof) : '',
+        markupPercent: typeof savedPricing.markup_percent === 'number' ? String(savedPricing.markup_percent) : '110',
+        additionalCostUsd: typeof savedPricing.additional_cost_usd === 'number' ? String(savedPricing.additional_cost_usd) : '',
+        enabled: savedPricing.enabled === true,
+      });
     } catch (err) { setError(asAppError(err).message); }
     finally { setLoading(false); }
   }, []);
@@ -87,7 +116,66 @@ export default function Admin() {
     setEditingSetting(null);
   };
 
+  const onVideoPricing = async (e: FormEvent) => {
+    e.preventDefault();
+    const usdToXof = Number(videoPricing.usdToXof);
+    const creditValueXof = Number(videoPricing.creditValueXof);
+    const markupPercent = Number(videoPricing.markupPercent);
+    const additionalCostUsd = Number(videoPricing.additionalCostUsd);
+    if (![usdToXof, creditValueXof, markupPercent, additionalCostUsd].every(Number.isFinite)
+      || usdToXof <= 0 || creditValueXof <= 0 || markupPercent < 0 || additionalCostUsd < 0) {
+      toast.warning('Renseignez un taux USD/FCFA, une valeur de crédit, une majoration et des coûts additionnels valides.');
+      return;
+    }
+    if (videoPricing.enabled && videoCatalog?.catalog.account.key_valid !== true) {
+      toast.warning('Vérifiez d’abord le catalogue réel. Les tarifs resteront non publiés.');
+      return;
+    }
+    await run('video-pricing', () => adminSetVideoPricing({
+      usd_to_xof: usdToXof,
+      credit_value_xof: creditValueXof,
+      markup_percent: markupPercent,
+      additional_cost_usd: additionalCostUsd,
+      enabled: videoPricing.enabled,
+    }), videoPricing.enabled ? 'Tarification vidéo publiée.' : 'Tarification enregistrée sans publication.');
+  };
+
+  const onSaveProviderSpendCap = async (e: FormEvent) => {
+    e.preventDefault();
+    const maxUsd = Number(providerSpendCapDraft);
+    if (!Number.isFinite(maxUsd) || maxUsd < 0 || maxUsd > 1000000) {
+      toast.warning('Le plafond doit être compris entre 0 et 1 000 000 USD.');
+      return;
+    }
+    if (maxUsd > (providerSpend?.max_usd ?? 0)
+      && !window.confirm(`Confirmer l’augmentation du plafond fournisseur à ${formatUsd(maxUsd)} ?`)) return;
+    await run('provider-spend', () => adminSetProviderSpendCap(maxUsd, providerSpend?.enabled ?? false), 'Plafond fournisseur enregistré.');
+  };
+
+  const onEnableProviderSpend = async () => {
+    const maxUsd = providerSpend?.max_usd ?? Number(providerSpendCapDraft);
+    if (!Number.isFinite(maxUsd) || maxUsd <= 0) {
+      toast.warning('Définissez un plafond strictement supérieur à 0 USD avant d’autoriser les tests.');
+      return;
+    }
+    if (!window.confirm(`Autoriser des générations payantes dans la limite globale de ${formatUsd(maxUsd)} ?`)) return;
+    await run('provider-spend', () => adminSetProviderSpendCap(maxUsd, true), 'Tests payants autorisés dans la limite configurée.');
+  };
+
+  const onDisableProviderSpend = async () => {
+    await run('provider-spend', () => adminSetProviderSpendCap(providerSpend?.max_usd ?? 0, false), 'Tests payants désactivés immédiatement.');
+  };
+
+  const refreshVideoCatalog = async () => {
+    setVideoCatalogLoading(true);
+    setVideoCatalogError('');
+    try { setVideoCatalog(await adminVideoCatalog()); }
+    catch (err) { setVideoCatalogError(asAppError(err).message); }
+    finally { setVideoCatalogLoading(false); }
+  };
+
   const filteredUsers = users.filter((u) => `${u.email} ${u.display_name ?? ''}`.toLowerCase().includes(search.toLowerCase()));
+  const genericSettings = settings.filter((setting) => setting.setting_key !== 'video_pricing_config');
 
   if (loading && !overview) return <LoadingState label="Chargement de l’administration…" />;
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
@@ -101,6 +189,7 @@ export default function Admin() {
         { id: 'users', label: `Utilisateurs (${users.length})`, icon: <Users size={14} /> },
         { id: 'recharges', label: 'Recharges', icon: <CreditCard size={14} /> },
         { id: 'services', label: 'Services', icon: <Zap size={14} /> },
+        { id: 'video-pricing', label: 'Tarifs vidéo', icon: <Video size={14} /> },
         { id: 'settings', label: 'Paramètres', icon: <Settings2 size={14} /> },
         { id: 'audit', label: 'Journal', icon: <FileClock size={14} /> },
       ]} />
@@ -184,10 +273,127 @@ export default function Admin() {
         </Card>
       )}
 
+      {tab === 'video-pricing' && (
+        <div className="space-y-5">
+          <Card>
+            <CardHeader title="Plafond de dépenses fournisseur" description="Budget global en USD réservé aux appels vidéo réellement payants. Indépendant des crédits clients et du chiffre d’affaires." />
+            {providerSpendError && <div className="px-5 pb-3"><Banner tone="warning" title="Suivi du budget indisponible">{providerSpendError} Appliquez la migration de suivi avant d’activer des tests payants.</Banner></div>}
+            <form onSubmit={(e) => void onSaveProviderSpendCap(e)} className="space-y-4 p-5">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Plafond maximal</p><p className="mt-1 text-lg font-semibold text-white">{providerSpend ? formatUsd(providerSpend.max_usd) : '—'}</p></div>
+                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Dépenses réelles connues</p><p className="mt-1 text-lg font-semibold text-white">{providerSpend ? formatUsd(providerSpend.actual_spent_usd) : '—'}</p></div>
+                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Budget engagé (estimations incluses)</p><p className="mt-1 text-lg font-semibold text-white">{providerSpend ? formatUsd(providerSpend.committed_usd) : '—'}</p></div>
+                <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Budget restant</p><p className={`mt-1 text-lg font-semibold ${providerSpend?.remaining_usd === 0 ? 'text-amber-200' : 'text-emerald-200'}`}>{providerSpend ? formatUsd(providerSpend.remaining_usd) : '—'}</p></div>
+              </div>
+              {providerSpend && (providerSpend.max_usd === 0 || providerSpend.remaining_usd === 0) && (
+                <Banner tone="warning" title={providerSpend.max_usd === 0 ? 'Aucun test payant autorisé' : 'Plafond atteint'}>
+                  Les nouvelles générations payantes sont bloquées côté serveur. Les dépenses réelles restent séparées des réservations et estimations.
+                </Banner>
+              )}
+              {providerSpend && providerSpend.estimated_unpriced_usd > 0 && (
+                <Banner tone="warning" title="Coût réel indisponible pour certaines opérations">
+                  Le montant estimé est conservé séparément et engagé par prudence jusqu’à réception d’un coût réel vérifiable.
+                </Banner>
+              )}
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <Input label="Plafond maximal autorisé (USD)" type="number" min="0" max="1000000" step="0.01" required
+                  value={providerSpendCapDraft} onChange={(e) => setProviderSpendCapDraft(e.target.value)}
+                  hint="0 USD bloque tous les nouveaux appels payants." />
+                <Button type="submit" loading={busy === 'provider-spend'} icon={<Coins size={14} />}>Enregistrer le plafond</Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {providerSpend?.enabled
+                  ? <Button type="button" variant="outline" loading={busy === 'provider-spend'} icon={<PowerOff size={14} />} onClick={() => void onDisableProviderSpend()}>Désactiver immédiatement les tests payants</Button>
+                  : <Button type="button" loading={busy === 'provider-spend'} disabled={!providerSpend || providerSpend.max_usd <= 0} icon={<Power size={14} />} onClick={() => void onEnableProviderSpend()}>Autoriser les tests payants</Button>}
+                <span className="self-center text-xs text-slate-500">{providerSpend?.enabled ? 'Autorisation active côté serveur.' : 'Désactivé : aucun appel de génération payant ne peut partir.'}</span>
+              </div>
+              {providerSpend && <p className="text-xs text-slate-500">{providerSpend.tests_count} test(s) lancé(s) · {providerSpend.blocked_count} tentative(s) bloquée(s) · {formatUsd(providerSpend.reserved_usd)} réservé(s) en cours.</p>}
+            </form>
+          </Card>
+
+          <Card>
+            <CardHeader title="Historique des dépenses fournisseur" description="Les coûts estimés et les montants réellement communiqués sont distincts. Aucune valeur n’est inventée." />
+            {!providerSpend?.history.length ? <div className="p-5"><EmptyState icon={<FileClock size={22} />} title="Aucune opération enregistrée" /></div> : (
+              <div className="table-wrap"><table className="table"><thead><tr><th>Date</th><th>Modèle / génération</th><th>Statut</th><th>Coût estimé</th><th>Coût réel</th><th>Référence fournisseur</th></tr></thead>
+                <tbody>{providerSpend.history.map((entry) => <tr key={entry.id}>
+                  <td className="whitespace-nowrap text-xs text-slate-400">{formatDate(entry.created_at, true)}</td>
+                  <td><p className="font-medium text-white">{entry.model_id}</p><p className="font-mono text-[10px] text-slate-500">{entry.generation_job_id}</p></td>
+                  <td><Badge status={entry.status}>{entry.status === 'blocked' ? 'Bloqué' : statusLabel(entry.status)}</Badge>{entry.reason_code && <p className="mt-1 text-[10px] text-slate-500">{entry.reason_code}</p>}</td>
+                  <td>{formatUsd(entry.estimated_cost_usd)}</td>
+                  <td>{entry.actual_cost_usd === null ? <span className="text-xs text-slate-500">Coût réel indisponible</span> : formatUsd(entry.actual_cost_usd)}</td>
+                  <td className="font-mono text-[10px] text-slate-500">{entry.provider_request_id ?? '—'}</td>
+                </tr>)}</tbody></table></div>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Tarification interne — VYORA Studio" description="Les coûts fournisseur et les conversions restent visibles uniquement dans cette console." />
+            <form onSubmit={(e) => void onVideoPricing(e)} className="space-y-4 p-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input label="Taux USD → FCFA (XOF)" type="number" min="0.0001" step="0.0001" required
+                  value={videoPricing.usdToXof} onChange={(e) => setVideoPricing((v) => ({ ...v, usdToXof: e.target.value }))} />
+                <Input label="Valeur d’un crédit (FCFA)" type="number" min="0.0001" step="0.0001" required
+                  value={videoPricing.creditValueXof} onChange={(e) => setVideoPricing((v) => ({ ...v, creditValueXof: e.target.value }))} />
+                <Input label="Majoration (%)" type="number" min="0" max="10000" step="0.01" required
+                  value={videoPricing.markupPercent} onChange={(e) => setVideoPricing((v) => ({ ...v, markupPercent: e.target.value }))} />
+                <Input label="Coût additionnel par génération (USD)" type="number" min="0" step="0.000001" required
+                  value={videoPricing.additionalCostUsd} onChange={(e) => setVideoPricing((v) => ({ ...v, additionalCostUsd: e.target.value }))} />
+              </div>
+              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+                <input type="checkbox" className="mt-1 accent-cyan-400" checked={videoPricing.enabled}
+                  onChange={(e) => setVideoPricing((v) => ({ ...v, enabled: e.target.checked }))} />
+                <span><span className="font-semibold text-white">Publier les tarifs et autoriser les nouvelles générations</span>
+                  <span className="mt-1 block text-xs text-slate-400">Désactivé par défaut. L’activation exige une vérification récente du catalogue réel.</span></span>
+              </label>
+              {!videoPricing.enabled && <Banner tone="warning" title="Tarification non publiée">Les devis et réservations vidéo restent bloqués tant que la configuration n’est pas validée et activée ici.</Banner>}
+              <Button type="submit" loading={busy === 'video-pricing'} icon={<Coins size={15} />}>Enregistrer la tarification</Button>
+            </form>
+          </Card>
+
+          <Card>
+            <CardHeader title="Catalogue réel et vérification" description="Les coûts, identifiants techniques et états du compte sont réservés aux administrateurs."
+              action={<Button size="sm" variant="outline" loading={videoCatalogLoading} icon={<RefreshCw size={13} />} onClick={() => void refreshVideoCatalog()}>Vérifier maintenant</Button>} />
+            {videoCatalogError && <div className="px-5 pb-3"><Banner tone="danger" title="Vérification impossible">{videoCatalogError}</Banner></div>}
+            {!videoCatalog && !videoCatalogError && <div className="px-5 pb-5"><EmptyState icon={<Video size={22} />} title="Catalogue non vérifié" description="Lancez une vérification réelle avant d’activer de nouveaux tarifs." /></div>}
+            {videoCatalog && (
+              <>
+                <div className="grid gap-3 px-5 pb-4 sm:grid-cols-3">
+                  <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Accès validé</p><p className="mt-1 font-semibold text-white">{videoCatalog.catalog.account.key_valid ? 'Oui' : 'Non'}</p></div>
+                  <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Modèles observés</p><p className="mt-1 font-semibold text-white">{videoCatalog.catalog.detected_video}</p></div>
+                  <div className="rounded-xl border border-line bg-white/[0.03] p-3"><p className="text-xs text-slate-500">Dernière vérification</p><p className="mt-1 font-semibold text-white">{formatDate(videoCatalog.catalog.fetched_at, true)}</p></div>
+                </div>
+                {videoCatalog.catalog.error && <div className="px-5 pb-4"><Banner tone="warning" title="Catalogue partiellement vérifié">{videoCatalog.catalog.error}</Banner></div>}
+                <div className="table-wrap"><table className="table"><thead><tr><th>Modèle interne</th><th>Identifiant</th><th>Coût réel communiqué</th><th>Statut</th><th>Synchronisé</th></tr></thead>
+                  <tbody>{videoCatalog.models.map((model) => <tr key={model.model_id}>
+                    <td><p className="font-medium text-white">{model.display_name}</p><p className="text-[11px] text-slate-500">{model.category}</p></td>
+                    <td className="font-mono text-[11px]">{model.model_id}</td>
+                    <td>{model.cost_usd === null || model.cost_usd === undefined ? 'Non communiqué' : `${model.cost_usd} ${model.cost_currency ?? 'USD'}`}</td>
+                    <td><Badge tone={model.reelora_status === 'active' ? 'success' : 'warning'}>{model.reelora_status ?? 'non vérifié'}</Badge></td>
+                    <td className="text-xs text-slate-500">{model.synced_at ? formatDate(model.synced_at, true) : 'Jamais'}</td>
+                  </tr>)}</tbody></table></div>
+              </>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Historique de tarification" description="Chaque changement conserve les valeurs précédentes et nouvelles." />
+            {logs.filter((log) => log.action === 'set_video_pricing').length === 0
+              ? <div className="p-5"><EmptyState icon={<FileClock size={22} />} title="Aucun changement enregistré" /></div>
+              : <div className="divide-y divide-white/[0.06]">{logs.filter((log) => log.action === 'set_video_pricing').map((log) => (
+                <div key={log.id} className="flex flex-wrap items-start justify-between gap-3 px-5 py-3">
+                  <div><p className="text-sm font-medium text-white">{log.details.enabled === true ? 'Tarification activée' : 'Configuration modifiée'}</p>
+                    <p className="mt-1 font-mono text-[11px] text-slate-500">{JSON.stringify(log.details)}</p></div>
+                  <p className="text-xs text-slate-500">{formatDate(log.created_at, true)}</p>
+                </div>
+              ))}</div>}
+          </Card>
+        </div>
+      )}
+
       {tab === 'settings' && (
         <Card><CardHeader title="Paramètres de la plateforme" description="Valeurs JSON réellement utilisées par le backend." />
-          {settings.length === 0 ? <EmptyState icon={<Settings2 size={22} />} title="Aucun paramètre" /> : (
-            <div className="divide-y divide-white/[0.06]">{settings.map((s) => (
+          {genericSettings.length === 0 ? <EmptyState icon={<Settings2 size={22} />} title="Aucun paramètre" /> : (
+            <div className="divide-y divide-white/[0.06]">{genericSettings.map((s) => (
               <div key={s.setting_key} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
                 <div className="min-w-0 flex-1"><p className="text-sm font-medium text-white">{s.setting_key}</p><p className="truncate font-mono text-[11px] text-slate-500">{JSON.stringify(s.setting_value)}</p></div>
                 <Button size="sm" variant="outline" onClick={() => { setEditingSetting(s); setSettingValue(JSON.stringify(s.setting_value, null, 2)); }}>Modifier</Button>

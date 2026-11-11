@@ -29,16 +29,16 @@ export const MODE_LABELS: Record<GenerationMode, string> = {
 };
 
 export const MODE_DESCRIPTIONS: Record<GenerationMode, string> = {
-  'text-to-video': 'Décrivez la scène : MuAPI génère la vidéo à partir de votre prompt.',
+  'text-to-video': 'Décrivez votre scène et donnez vie à votre idée en vidéo.',
   'image-to-video': 'Importez une image de référence et décrivez le mouvement souhaité.',
-  'video-to-video': 'Transformation d’une vidéo existante : source vidéo non connectée dans Reelora.',
-  'audio-to-video': 'Avatar / lip sync : source audio non produite par Reelora.',
+  'video-to-video': 'Transformation d’une vidéo existante : source vidéo non connectée dans VYORA.',
+  'audio-to-video': 'Avatar / lip sync : source audio non produite par VYORA.',
   'video-edit': 'Édition ou habillage d’une vidéo : source vidéo non connectée.',
   'video-tools': 'Outil vidéo : entrées spécifiques non connectées.',
   effects: 'Effet animé depuis une image : source image requise.',
   lora: 'Modèle LoRA vidéo : entrées spécifiques non connectées.',
-  training: 'Entraînement vidéo : aucun parcours Reelora connecté.',
-  other: 'Famille vidéo déclarée par MuAPI, sans moteur Reelora dédié.',
+  training: 'Entraînement vidéo : aucun parcours VYORA connecté.',
+  other: 'Autre capacité vidéo.',
 };
 
 /**
@@ -207,19 +207,19 @@ export function paramsSummary(params: Record<string, ParamValue>): string {
   return entries.map(([k, v]) => `${paramLabel(k)} : ${typeof v === 'boolean' ? (v ? 'oui' : 'non') : String(v)}`).join(' · ');
 }
 
-/** A model is selectable only when MuAPI AND Reelora can really serve it. */
+/** A model is selectable only when VYORA can really serve it. */
 export function reeloraModelStatus(model: MuApiModel): { status: ReeloraModelStatus; reason: string } {
-  if (!model.is_enabled) return { status: 'disabled', reason: 'Désactivé dans le catalogue MuAPI.' };
-  if (model.is_coming_soon) return { status: 'coming_soon', reason: 'Annoncé par MuAPI, pas encore lancé.' };
+  if (!model.is_enabled) return { status: 'disabled', reason: 'Ce modèle est désactivé.' };
+  if (model.is_coming_soon) return { status: 'coming_soon', reason: 'Ce modèle n’est pas encore lancé.' };
   const unsupported = (model.required_fields ?? []).filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
   if (unsupported.length) {
-    return { status: 'unsupported', reason: `Entrée non connectée dans Reelora : ${unsupported.join(', ')}.` };
+    return { status: 'unsupported', reason: `Entrée non connectée dans VYORA : ${unsupported.join(', ')}.` };
   }
   if (model.account_access === 'unverified') {
-    return { status: 'unverified', reason: 'Clé / compte MuAPI non validée côté serveur.' };
+    return { status: 'unverified', reason: 'Disponibilité non vérifiée.' };
   }
   if (model.account_access === 'public_only') {
-    return { status: 'unverified', reason: 'Modèle public MuAPI non accessible au compte configuré.' };
+    return { status: 'unverified', reason: 'Ce modèle n’est pas accessible pour le moment.' };
   }
   return { status: 'active', reason: 'Modèle actif et sélectionnable.' };
 }
@@ -237,54 +237,4 @@ export function statusLabel(status: ReeloraModelStatus): string {
     unsupported: 'Entrée non connectée',
     unverified: 'Compte non vérifié',
   }[status];
-}
-
-/** Cost shown to the user comes from the server estimate; never a local guess. */
-export function usableCostUsd(costUsd: number | string | null | undefined): number | null {
-  if (costUsd === null || costUsd === undefined || (typeof costUsd === 'string' && !costUsd.trim())) return null;
-  const n = Number(costUsd);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-export function providerCostLabel(costUsd: number | string | null | undefined, currency = 'USD'): string {
-  const n = usableCostUsd(costUsd);
-  return n !== null ? `${n.toFixed(3)} ${currency}` : 'non communiqué';
-}
-
-/** Wording required when MuAPI's exact estimate-cost quote cannot be obtained. */
-export const QUOTE_TO_CONFIRM = 'devis fournisseur à confirmer';
-
-export interface ProviderQuoteView {
-  provider_cost_usd?: number | string | null;
-  provider_cost_currency?: string;
-  provider_quote_source?: 'catalog' | 'estimate_cost' | 'unavailable' | string;
-  provider_quote_error?: string | null;
-}
-
-/** True only when the displayed USD amount comes from a successful exact quote. */
-export function isExactProviderQuote(estimate: ProviderQuoteView | null | undefined): boolean {
-  return estimate?.provider_quote_source === 'estimate_cost'
-    && usableCostUsd(estimate.provider_cost_usd) !== null;
-}
-
-export function hasUsableProviderCost(estimate: ProviderQuoteView | null | undefined): boolean {
-  return Boolean(estimate) && estimate?.provider_quote_source !== 'unavailable'
-    && !estimate?.provider_quote_error
-    && usableCostUsd(estimate?.provider_cost_usd) !== null;
-}
-
-/**
- * Never display `0.000 USD` for a failed or absent quote. A catalogue tariff is
- * factual but is explicitly labelled as a non-exact quote; `unavailable` has no
- * price at all and is only described as "devis fournisseur à confirmer".
- */
-export function providerQuoteCostLabel(estimate: ProviderQuoteView | null | undefined): string {
-  if (!hasUsableProviderCost(estimate)) return QUOTE_TO_CONFIRM;
-  return providerCostLabel(estimate?.provider_cost_usd, estimate?.provider_cost_currency ?? 'USD');
-}
-
-export function providerQuoteOriginLabel(estimate: ProviderQuoteView | null | undefined): string {
-  if (isExactProviderQuote(estimate)) return 'estimate-cost MuAPI';
-  if (!hasUsableProviderCost(estimate)) return QUOTE_TO_CONFIRM;
-  return 'tarif catalogue MuAPI · devis exact non disponible';
 }

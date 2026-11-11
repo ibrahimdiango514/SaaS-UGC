@@ -101,27 +101,26 @@ export default function Avatars() {
 
   return (
     <>
-      <PageHeader eyebrow="Présentateurs" title="Mes avatars" description="Associez une image de référence (présentateur ou produit) aux modèles MuAPI image → vidéo."
+      <PageHeader eyebrow="Présentateurs" title="Mes avatars" description="Associez une image de référence (présentateur ou produit) à vos créations vidéo."
         actions={<Button icon={<Plus size={15} />} onClick={openCreate}>Nouvel avatar</Button>} />
 
-      <div className="mb-5"><Banner tone="info" title="Image de référence MuAPI">Pour les modèles image → vidéo, ajoutez une image JPG/PNG : elle est signée côté serveur puis transmise à MuAPI comme <code>image_url</code>. Les modèles texte → vidéo n’en ont pas besoin. Les clés API restent côté serveur.</Banner></div>
+      <div className="mb-5"><Banner tone="info" title="Images de référence">Ajoutez une image JPG ou PNG pour animer un présentateur ou un produit. Les clés et traitements techniques restent sécurisés.</Banner></div>
 
       {error && <ErrorState message={error} onRetry={() => void load()} />}
       {loading ? <LoadingState label="Chargement des avatars…" /> : avatars.length === 0 ? (
-        <EmptyState icon={<Users size={24} />} title="Aucun avatar" description="Ajoutez une image de référence pour les modèles MuAPI image → vidéo." action={<Button icon={<Plus size={15} />} onClick={openCreate}>Créer un avatar</Button>} />
+        <EmptyState icon={<Users size={24} />} title="Aucun avatar" description="Ajoutez une image de référence pour animer un présentateur ou un produit." action={<Button icon={<Plus size={15} />} onClick={openCreate}>Créer un avatar</Button>} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {avatars.map((a) => (
             <Card key={a.id} className="flex flex-col p-3">
               <AvatarThumb avatar={a} />
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                <Badge tone="info">{a.provider}</Badge>
+                <Badge tone="info">{a.provider === 'custom' ? 'Personnalisé' : a.provider === 'legacy' ? 'Historique' : 'VYORA'}</Badge>
                 {a.is_default && <Badge tone="success"><Star size={11} fill="currentColor" /> Par défaut</Badge>}
                 {a.status !== 'active' && <Badge tone="danger">{a.status}</Badge>}
               </div>
               <h3 className="mt-2 truncate text-sm font-semibold text-white">{a.name}</h3>
               <p className="mt-1 line-clamp-2 min-h-[32px] text-xs text-slate-500">{truncate(a.description, 90) || 'Aucune description'}</p>
-              <p className="mt-2 truncate text-[11px] text-slate-600">ID : {a.provider_avatar_id || '—'}</p>
               <p className="text-[11px] text-slate-600">{formatDate(a.created_at)}</p>
               <div className="mt-3 flex gap-1.5">
                 {!a.is_default && <Button size="sm" variant="outline" className="flex-1" icon={<Star size={13} />} onClick={() => void onSetDefault(a)}>Défaut</Button>}
@@ -133,19 +132,17 @@ export default function Avatars() {
         </div>
       )}
 
-      <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Modifier l’avatar' : 'Nouvel avatar'} description="L’image est utilisée comme référence par les modèles MuAPI image → vidéo."
+      <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Modifier l’avatar' : 'Nouvel avatar'} description="L’image est utilisée comme référence pour vos créations vidéo."
         footer={<><Button variant="ghost" onClick={() => setModal(false)}>Annuler</Button><Button type="submit" form="avatar-form" loading={saving}>{editing ? 'Enregistrer' : 'Créer'}</Button></>}>
         <form id="avatar-form" onSubmit={(e) => void onSubmit(e)} className="space-y-4">
           <Input label="Nom" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex. Awa – présentatrice" />
           <Textarea label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Style, tenue, personnalité…" />
           <div className="grid gap-4 sm:grid-cols-2">
             <Select label="Type de fiche" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Avatar['provider'] })}>
-              <option value="muapi">Image de référence MuAPI</option><option value="custom">Référence personnalisée</option><option value="legacy">Fiche historique (lecture seule)</option>
+              <option value="muapi">VYORA</option><option value="custom">Référence personnalisée</option><option value="legacy">Historique (lecture seule)</option>
             </Select>
             <Select label="Langue" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })}><option value="fr">Français</option><option value="en">Anglais</option><option value="es">Espagnol</option></Select>
           </div>
-          <Input label="Référence interne" value={form.provider_avatar_id} onChange={(e) => setForm({ ...form, provider_avatar_id: e.target.value })} placeholder="Référence interne (optionnel)" />
-          <Input label="Identifiant de voix" value={form.voice_id} onChange={(e) => setForm({ ...form, voice_id: e.target.value })} placeholder="Laisser vide pour la voix par défaut" />
           <label className="field">
             <span className="field-label">Image de référence</span>
             <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-line bg-white/[0.03] px-4 py-3 hover:border-brand-400/40">

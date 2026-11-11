@@ -503,7 +503,7 @@ export function parseEditorProject(raw: unknown): EditorProject | null {
   return {
     version: EDITOR_VERSION,
     projectId: typeof r.projectId === 'string' ? r.projectId : null,
-    title: typeof r.title === 'string' ? r.title.slice(0, 200) : 'Montage Reelora',
+    title: typeof r.title === 'string' ? r.title.slice(0, 200) : 'Montage VYORA',
     prompt: typeof r.prompt === 'string' ? r.prompt.slice(0, 4000) : '',
     sector: typeof r.sector === 'string' ? r.sector.slice(0, 60) : 'general',
     quality: typeof r.quality === 'string' ? r.quality.slice(0, 40) : 'standard',

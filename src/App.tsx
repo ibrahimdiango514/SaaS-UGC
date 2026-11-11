@@ -49,29 +49,32 @@ export default function App() {
                 <Route path="/conditions" element={<Legal kind="conditions" />} />
 
                 <Route element={<ProtectedRoute />}>
-                  <Route path="/app" element={<Layout />}>
-                    <Route index element={<Dashboard />} />
-                    <Route path="projets" element={<StudioProjects />} />
-                    <Route path="projets/:id" element={<ProjectDetail />} />
-                    <Route path="studio" element={<GenerationStudio />} />
-                    <Route path="business" element={<BusinessGrow />} />
-                    <Route path="studio/classique" element={<VideoStudio />} />
-                    <Route path="studio/montage" element={<VideoEditor />} />
-                    <Route path="studio/avance" element={<StudioLegacy />} />
-                    <Route path="studio/generations" element={<StudioGenerations />} />
-                    <Route path="studio/projects" element={<StudioProjects />} />
-                    <Route path="studio/saved" element={<StudioSaved />} />
-                    <Route path="studio/espace/:section" element={<PreparedSpace />} />
-                    <Route path="avatars" element={<Avatars />} />
-                    <Route path="scripts" element={<Scripts />} />
-                    <Route path="prompts" element={<Prompts />} />
-                    <Route path="presets" element={<Presets />} />
-                    <Route path="bibliotheque" element={<StudioSaved />} />
-                    <Route path="historique" element={<StudioGenerations />} />
-                    <Route path="abonnement" element={<Subscription />} />
-                    <Route path="parametres" element={<Settings />} />
+                  <Route element={<Layout />}>
+                    <Route path="/app">
+                      <Route index element={<Dashboard />} />
+                      <Route path="projets" element={<StudioProjects />} />
+                      <Route path="projets/:id" element={<ProjectDetail />} />
+                      <Route path="studio" element={<GenerationStudio />} />
+                      <Route path="business" element={<BusinessGrow />} />
+                      <Route path="studio/classique" element={<VideoStudio />} />
+                      <Route path="studio/montage" element={<VideoEditor />} />
+                      <Route path="studio/avance" element={<StudioLegacy />} />
+                      <Route path="studio/generations" element={<StudioGenerations />} />
+                      <Route path="studio/projects" element={<StudioProjects />} />
+                      <Route path="studio/saved" element={<StudioSaved />} />
+                      <Route path="studio/espace/:section" element={<PreparedSpace />} />
+                      <Route path="avatars" element={<Avatars />} />
+                      <Route path="scripts" element={<Scripts />} />
+                      <Route path="prompts" element={<Prompts />} />
+                      <Route path="presets" element={<Presets />} />
+                      <Route path="bibliotheque" element={<StudioSaved />} />
+                      <Route path="historique" element={<StudioGenerations />} />
+                      <Route path="abonnement" element={<Subscription />} />
+                      <Route path="parametres" element={<Settings />} />
+                    </Route>
                     <Route element={<AdminRoute />}>
-                      <Route path="admin" element={<Admin />} />
+                      <Route path="/admin" element={<Admin />} />
+                      <Route path="/app/admin" element={<Navigate to="/admin" replace />} />
                     </Route>
                   </Route>
                 </Route>

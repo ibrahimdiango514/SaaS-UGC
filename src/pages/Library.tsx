@@ -53,7 +53,6 @@ function VideoCard({ asset, job, projects, onDelete, onAttach }: {
 
   const metadata = asRecord(asset.metadata);
   const payload = asRecord(job?.request_payload);
-  const modelId = String(metadata.model_id ?? payload.model_id ?? '—');
   const params = paramValues(metadata.params ?? payload.params);
   const credits = job?.credits_charged || job?.credits_reserved || Number(metadata.credits_reserved ?? 0);
   const project = projects.find((p) => p.id === asset.project_id);
@@ -77,17 +76,16 @@ function VideoCard({ asset, job, projects, onDelete, onAttach }: {
           <Badge tone="success">Vidéo réelle</Badge>
           <span className="text-[11px] text-slate-500">{formatDate(asset.created_at, true)}</span>
         </div>
-        <p className="mt-2 truncate text-xs text-slate-400" title={asset.storage_path}>{asset.storage_path}</p>
         <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
           <span className="flex items-center gap-1"><HardDrive size={12} /> {formatBytes(asset.file_size_bytes)}</span>
           <span>{asset.mime_type ?? 'video/mp4'}</span>
           <span className="text-amber-300">{credits} crédits</span>
         </div>
         <div className="mt-3 space-y-1.5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-2.5 text-[10px] leading-relaxed">
-          <p><span className="text-slate-500">Modèle : </span><span className="font-mono text-slate-300">{modelId}</span></p>
+          <p><span className="text-slate-500">Type : </span><span className="text-slate-300">Vidéo VYORA</span></p>
           <p><span className="text-slate-500">Paramètres : </span><span className="text-slate-300">{paramsSummary(params)}</span></p>
           <p><span className="text-slate-500">Projet : </span><span className="text-slate-300">{project?.title ?? 'Bibliothèque uniquement'}</span></p>
-          <p><span className="text-slate-500">Stockage : </span><span className="text-emerald-300">Supabase Storage privé</span></p>
+          <p><span className="text-slate-500">Stockage : </span><span className="text-emerald-300">Espace privé</span></p>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {url && <a href={url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm flex-1"><ExternalLink size={13} /> Lire</a>}

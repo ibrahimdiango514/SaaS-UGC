@@ -341,14 +341,15 @@ export interface MuApiModel {
   display_name: string;
   description: string | null;
   category: string;
-  endpoint: string;
+  endpoint?: string;
   input_fields: string[];
   required_fields: string[];
   param_schema: Record<string, MuApiParamDef>;
-  cost_usd: number | string | null;
-  cost_currency: string;
+  cost_usd?: number | string | null;
+  cost_currency?: string;
   is_enabled: boolean;
   is_coming_soon: boolean;
+  sort_order?: number;
   synced_at?: string | null;
   family?: string | null;
   group_of?: string | null;
@@ -365,27 +366,12 @@ export interface MuApiModel {
 
 /** Read-only diagnostics explaining the difference between public and account catalogue. */
 export interface VideoCatalogDiagnostics {
-  source: 'muapi_authenticated' | 'muapi_public' | 'database';
   fetched_at: string;
-  public_total: number | null;
-  authenticated_total: number | null;
   detected_video: number;
   active: number;
   unavailable: number;
-  account_accessible: number;
-  public_only: number;
-  reasons: Record<string, number>;
-  endpoints: string[];
+  verified: boolean;
   error?: string | null;
-  account: {
-    key_configured: boolean;
-    key_valid: boolean;
-    catalog_status: number | null;
-    balance_status: number | null;
-    keys_status: number | null;
-    key_is_test: boolean | null;
-    error?: string | null;
-  };
 }
 
 export interface VideoCatalogResponse {
@@ -393,7 +379,57 @@ export interface VideoCatalogResponse {
   catalog: VideoCatalogDiagnostics;
 }
 
-/** Explicit credit / provider cost shown BEFORE the user confirms. */
+export interface AdminVideoCatalogResponse {
+  models: MuApiModel[];
+  catalog: {
+    source: string;
+    fetched_at: string;
+    public_total: number | null;
+    authenticated_total: number | null;
+    detected_video: number;
+    active: number;
+    unavailable: number;
+    error?: string | null;
+    account: {
+      key_configured: boolean;
+      key_valid: boolean;
+      catalog_status: number | null;
+      balance_status: number | null;
+      keys_status: number | null;
+      key_is_test: boolean | null;
+      error?: string | null;
+    };
+  };
+}
+
+export interface AdminProviderSpendEntry {
+  id: string;
+  generation_job_id: string;
+  provider: string;
+  model_id: string;
+  provider_request_id: string | null;
+  estimated_cost_usd: number;
+  actual_cost_usd: number | null;
+  status: 'reserved' | 'submitted' | 'unknown' | 'succeeded' | 'failed' | 'cancelled' | 'blocked';
+  reason_code: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface AdminProviderSpendSummary {
+  enabled: boolean;
+  max_usd: number;
+  actual_spent_usd: number;
+  reserved_usd: number;
+  estimated_unpriced_usd: number;
+  committed_usd: number;
+  remaining_usd: number;
+  tests_count: number;
+  blocked_count: number;
+  history: AdminProviderSpendEntry[];
+}
+
+/** Opaque customer quote; provider costs and supplier diagnostics stay server-side. */
 export interface VideoCostEstimate {
   service_key: string;
   credits_cost: number;
@@ -402,25 +438,20 @@ export interface VideoCostEstimate {
   model_available: boolean;
   model_status?: ReeloraModelStatus;
   model_reason?: string | null;
-  provider_cost_usd: number | string | null;
-  provider_cost_currency: string;
-  provider_quote_source?: 'catalog' | 'estimate_cost' | 'unavailable';
-  provider_quote_error?: string | null;
-  quote_params?: Record<string, string | number | boolean>;
+  pricing_available: boolean;
+  pricing_error?: string | null;
+  quote_id?: string | null;
+  quote_expires_at?: string | null;
 }
 
 export interface VideoActionResult {
   job_id: string;
   status: string;
-  provider?: string;
-  provider_job_id?: string | null;
   provider_state?: string;
   model_id?: string;
   progress?: number;
   preview_url?: string | null;
   storage_path?: string;
-  provider_cost?: Json | null;
-  webhook_enabled?: boolean;
   message?: string;
   error?: string | null;
 }

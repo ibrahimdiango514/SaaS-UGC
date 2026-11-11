@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     } catch (error) {
       if (requestId !== dataRequestId.current || currentUid.current !== activeUser.id) return;
-      setBootstrapError(asAppError(error, 'Impossible de charger votre espace Reelora.').message);
+      setBootstrapError(asAppError(error, 'Impossible de charger votre espace VYORA.').message);
       setLoading(false);
     }
   }, []);

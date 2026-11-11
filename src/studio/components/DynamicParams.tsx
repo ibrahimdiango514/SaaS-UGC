@@ -72,7 +72,7 @@ function Field({ name, model, value, onChange }: {
             onChange={(e) => onChange(name, e.target.value)}
             className="studio-input mt-1.5" />
         </label>
-        <p className="mt-1.5 text-[9px] leading-relaxed text-slate-600">Champ déclaré sans liste d’options dans le schéma synchronisé : la fiche détaillée du fournisseur fait foi, aucune valeur n’est supposée.</p>
+        <p className="mt-1.5 text-[9px] leading-relaxed text-slate-600">Saisissez une valeur compatible avec les indications affichées ; aucune valeur n’est supposée.</p>
       </div>
     );
   }

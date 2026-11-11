@@ -122,7 +122,7 @@ export function SubtitlesVoiceoverPanel({
   const exportSrt = () => {
     if (!srtContent.trim()) return;
     const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
-    const slug = project.title.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'reelora';
+    const slug = project.title.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'vyora';
     downloadBlob(blob, `${slug}-sous-titres.srt`);
   };
 

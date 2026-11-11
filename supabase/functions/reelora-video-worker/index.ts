@@ -97,6 +97,36 @@ function parseResult(raw: Json): MuapiResult {
     id: str(d.id, 300) || str(raw.id, 300),
   };
 }
+function providerActualCostUsd(cost: Json | null): number | null {
+  if (!cost) return null;
+  const currency = str(cost.currency ?? cost.cost_currency, 10).toUpperCase();
+  const raw = cost.amount_usd ?? cost.cost_usd ?? (currency === "USD" ? cost.amount : null);
+  const amount = typeof raw === "number" ? raw
+    : typeof raw === "string" && raw.trim() ? Number(raw) : Number.NaN;
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+async function updateProviderSpend(
+  jobId: string,
+  status: "succeeded" | "failed" | "cancelled",
+  requestId: string,
+  cost: Json | null,
+): Promise<void> {
+  try {
+    const result = await rpcService("reelora_update_provider_spend", {
+      p_job_id: jobId,
+      p_status: status,
+      p_provider_request_id: requestId || null,
+      p_actual_cost_usd: providerActualCostUsd(cost),
+      p_release: false,
+      p_reason_code: null,
+    });
+    if (!result.ok || result.data !== true) {
+      console.error("provider spend settlement failed", redact(result.error ?? "provider_spend_settlement_rejected"));
+    }
+  } catch (error) {
+    console.error("provider spend settlement failed", redact(error instanceof Error ? error.message : String(error)));
+  }
+}
 async function pollMuapi(requestId: string): Promise<MuapiResult> {
   const key = MUAPI_KEY();
   if (!key) throw new Error("MUAPI_NOT_CONFIGURED");
@@ -161,13 +191,13 @@ async function reconcile(job: Json): Promise<string> {
   if (result.state === "completed" && result.outputs.length) {
     try {
       const stored = await uploadVideo(jobId, str(job.workspace_id, 80), result.outputs[0]);
+      await updateProviderSpend(jobId, "succeeded", requestId, result.cost);
       const requestPayload = job.request_payload && typeof job.request_payload === "object"
         ? job.request_payload as Json : {};
       await finalize(jobId, "succeeded", {
         storage_path: stored.path, file_size_bytes: stored.size,
         result_payload: {
-          provider: "muapi", provider_job_id: requestId, model_id: str(requestPayload.model_id, 120),
-          source_url: result.outputs[0], muapi_cost: result.cost, provider_status: result.state,
+          provider_status: result.state,
           params: requestPayload.params && typeof requestPayload.params === "object" ? requestPayload.params : {},
           visual_prompt: str(requestPayload.visual_prompt, 1000),
           mode: str(requestPayload.mode, 40),
@@ -177,14 +207,21 @@ async function reconcile(job: Json): Promise<string> {
       return "succeeded";
     } catch (e) {
       const message = redact(e instanceof Error ? e.message : String(e));
-      await finalize(jobId, "failed", { error_message: `Vidéo produite par MuAPI mais stockage impossible : ${message}` });
+      await updateProviderSpend(jobId, "failed", requestId, result.cost);
+      await finalize(jobId, "failed", { error_message: `La vidéo a été générée mais son enregistrement a échoué : ${message}` });
       await releaseQuota(jobId, userId);
       return "storage_failed";
     }
   }
   if (result.state === "failed" || result.state === "cancelled") {
+    await updateProviderSpend(
+      jobId,
+      result.state === "cancelled" ? "cancelled" : "failed",
+      requestId,
+      result.cost,
+    );
     await finalize(jobId, "failed", {
-      error_message: `MuAPI a signalé un échec : ${result.error || result.state}. Crédits restitués.`,
+      error_message: "La génération a échoué. Les crédits réservés ont été restitués.",
     });
     await releaseQuota(jobId, userId);
     return "failed";

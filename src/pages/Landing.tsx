@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, BadgeCheck, Check, Clapperboard, Coins, FileText, Layers,
+  ArrowRight, BadgeCheck, Brain, Check, Clapperboard, Coins,
   LockKeyhole, Play, ShieldCheck, Sparkles, Users, Wand2, Zap,
 } from 'lucide-react';
 import { listPlans } from '../lib/api';
 import { formatMoney } from '../lib/format';
 import type { Plan } from '../lib/types';
+import { BrandLockup } from '../components/Brand';
 import { Card, LoadingState, cn } from '../components/ui';
 
 const FEATURES = [
-  { icon: Wand2, title: 'Scripts IA en français', text: 'Générez des scripts UGC structurés (accroche, scènes, CTA) avec Groq, puis gardez chaque version dans l’historique.' },
-  { icon: Users, title: 'Avatars & voix', text: 'Gérez vos avatars, identifiants fournisseur, voix et images de référence pour chaque campagne.' },
+  { icon: Wand2, title: 'Scripts IA en français', text: 'Générez des scripts UGC structurés (accroche, scènes, CTA), puis gardez chaque version dans l’historique.' },
+  { icon: Users, title: 'Avatars & voix', text: 'Gérez vos avatars, voix et images de référence pour chaque campagne.' },
   { icon: Clapperboard, title: 'UGC Studio', text: 'Réglez durée, format, style, sous-titres et scènes avant de lancer une vraie génération vidéo.' },
   { icon: Sparkles, title: 'Bibliothèque & historique', text: 'Retrouvez chaque vidéo terminée, ses métadonnées, les événements de production et les mouvements de crédits.' },
   { icon: Coins, title: 'Crédits & quotas maîtrisés', text: 'Réservation, consommation et restitution automatiques des crédits, avec limites par formule.' },
@@ -26,9 +27,9 @@ const STEPS = [
 ];
 
 const FAQ = [
-  { q: 'Reelora génère-t-il réellement des vidéos ?', a: 'Oui. Reelora soumet la génération au fournisseur vidéo MuAPI avec le modèle et les paramètres que vous choisissez, puis télécharge et stocke le fichier produit dans votre bibliothèque privée. Le secret serveur MUAPI_API_KEY doit être configuré.' },
-  { q: 'Que se passe-t-il si une clé API manque ?', a: 'Aucune fausse vidéo n’est créée. L’application affiche précisément le secret manquant, marque la tâche comme échouée et restitue intégralement les crédits réservés.' },
-  { q: 'Mes données sont-elles isolées ?', a: 'Chaque espace de travail est isolé par des politiques RLS PostgreSQL. Les clés Groq et MuAPI, le jeton du worker et la clé service_role Supabase ne sont jamais envoyés au navigateur.' },
+  { q: 'VYORA génère-t-il réellement des vidéos ?', a: 'Oui. Les créations finalisées sont enregistrées dans votre bibliothèque privée. Le lecteur ne s’affiche qu’une fois le fichier vidéo réellement disponible.' },
+  { q: 'Que se passe-t-il si un service est indisponible ?', a: 'La génération est bloquée tant que le service n’est pas rétabli. Les crédits réservés sont restitués en cas d’échec ou d’annulation autorisée.' },
+  { q: 'Mes données sont-elles isolées ?', a: 'Chaque espace de travail est isolé et les clés techniques restent sécurisées côté serveur. Vos contenus ne sont pas exposés aux autres espaces.' },
   { q: 'Comment fonctionnent les crédits ?', a: 'Le coût estimé est affiché avant confirmation. Chaque service a un coût en crédits, réservé au lancement, consommé uniquement en cas de succès et restitué en cas d’échec, d’expiration ou d’annulation. Une clé d’idempotence empêche tout double débit.' },
 ];
 
@@ -51,8 +52,7 @@ export default function Landing() {
       <header className="sticky top-0 z-40 border-b border-line bg-ink/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-glow"><Clapperboard size={19} /></span>
-            <span className="text-lg font-extrabold tracking-tight text-white">Reelora<span className="text-brand-400">.</span></span>
+            <BrandLockup tagline />
           </Link>
           <nav className="ml-8 hidden items-center gap-6 text-sm text-slate-400 md:flex">
             <a href="#fonctionnalites" className="hover:text-white">Fonctionnalités</a>
@@ -68,67 +68,88 @@ export default function Landing() {
       </header>
 
       {/* Hero */}
-      <section className="relative mx-auto max-w-7xl px-4 pb-20 pt-14 sm:px-6 sm:pt-24">
-        <div className="grid items-center gap-12 lg:grid-cols-2">
-          <div className="animate-fadeUp">
-            <div className="inline-flex items-center gap-2 rounded-full border border-brand-400/25 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-200">
-              <Sparkles size={13} /> Studio UGC propulsé par l’intelligence artificielle
+      <section className="relative mx-auto max-w-7xl px-4 pb-24 pt-16 sm:px-6 sm:pt-24 lg:pb-28">
+        <div aria-hidden="true" className="pointer-events-none absolute -left-48 top-0 h-[34rem] w-[34rem] rounded-full bg-cyan-400/[0.06] blur-[120px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute right-0 top-24 h-96 w-96 rounded-full bg-violet-500/[0.06] blur-[110px]" />
+        <div className="relative grid items-center gap-14 lg:grid-cols-[1.02fr_.98fr]">
+          <div className="animate-fadeUp lg:py-8">
+            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+              <Sparkles size={13} /> Create. Evolve. Grow.
             </div>
-            <h1 className="mt-6 text-4xl font-extrabold leading-[1.08] tracking-tight text-white sm:text-6xl">
-              Créez des vidéos <span className="gradient-text">UGC</span> qui convertissent, en quelques minutes.
+            <h1 className="mt-7 max-w-2xl text-[2.6rem] font-semibold leading-[1.02] tracking-[-0.055em] text-white sm:text-6xl lg:text-[4.35rem]">
+              Vos idées prennent forme. <span className="gradient-text">Votre activité prend de l’ampleur.</span>
             </h1>
-            <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-300 sm:text-lg">
-              Reelora réunit la rédaction de scripts par IA, la gestion d’avatars, un studio de génération vidéo connecté à de vrais fournisseurs et une bibliothèque sécurisée. Tout est piloté depuis un seul espace, en français.
+            <p className="mt-7 max-w-xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">
+              VYORA réunit la création de contenus et le développement de votre activité grâce à l’intelligence artificielle. Deux dimensions complémentaires, un seul espace de travail.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link to="/inscription" className="btn btn-primary btn-lg">Créer mon compte <ArrowRight size={17} /></Link>
-              <a href="#fonctionnalites" className="btn btn-outline btn-lg"><Play size={16} /> Découvrir la plateforme</a>
+            <div className="mt-9 flex flex-wrap gap-3">
+              <Link to="/inscription" className="btn btn-primary btn-lg">Découvrir VYORA <ArrowRight size={17} /></Link>
+              <a href="#dimensions" className="btn btn-outline btn-lg"><Play size={16} /> Explorer les deux espaces</a>
             </div>
-            <div className="mt-9 flex flex-wrap gap-x-7 gap-y-3 text-sm text-slate-400">
-              {['Scripts IA illimités selon formule', 'Crédits restitués en cas d’échec', 'Données isolées par RLS'].map((x) => (
-                <span key={x} className="flex items-center gap-2"><BadgeCheck size={16} className="text-emerald-400" /> {x}</span>
+            <div className="mt-10 flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-slate-400">
+              {['Un compte partagé', 'Des espaces spécialisés', 'Des quotas indépendants'].map((x) => (
+                <span key={x} className="flex items-center gap-2"><BadgeCheck size={15} className="text-cyan-300" /> {x}</span>
               ))}
             </div>
           </div>
 
           <div className="relative animate-fadeUp">
-            <div className="absolute -inset-6 rounded-full bg-brand-600/20 blur-3xl" />
-            <div className="relative rounded-2xl border border-line bg-panel/90 p-4 shadow-2xl">
-              <div className="flex items-center gap-2 border-b border-line pb-3">
-                <span className="h-2.5 w-2.5 rounded-full bg-rose-400/70" /><span className="h-2.5 w-2.5 rounded-full bg-amber-400/70" /><span className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
-                <span className="ml-2 text-xs text-slate-500">Reelora / UGC Studio</span>
-              </div>
-              <div className="mt-4 grid grid-cols-5 gap-3">
-                <div className="col-span-2 space-y-3">
-                  {[{ icon: FileText, t: 'Script', d: 'Accroche + 4 scènes' }, { icon: Users, t: 'Avatar', d: 'Voix française' }, { icon: Layers, t: 'Réglages', d: '9:16 · 15 s · HD' }].map((x) => (
-                    <div key={x.t} className="rounded-xl border border-line bg-white/[0.03] p-3">
-                      <x.icon size={15} className="text-brand-300" />
-                      <p className="mt-2 text-xs font-semibold text-white">{x.t}</p>
-                      <p className="text-[11px] text-slate-500">{x.d}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="col-span-3">
-                  <div className="relative aspect-[9/16] overflow-hidden rounded-xl border border-line bg-gradient-to-br from-brand-900/60 via-panel2 to-cyan-900/30">
-                    <div className="absolute inset-0 grid place-items-center">
-                      <div className="grid h-14 w-14 place-items-center rounded-full border border-white/20 bg-white/10 backdrop-blur"><Play size={22} className="ml-1 text-white" /></div>
-                    </div>
-                    <div className="absolute bottom-3 left-3 right-3 space-y-1.5">
-                      <div className="h-2 w-4/5 rounded-full bg-white/25" /><div className="h-2 w-3/5 rounded-full bg-white/15" />
-                    </div>
+            <div className="grid grid-cols-[1fr_.72fr] items-center gap-3 sm:gap-4">
+              <figure className="group relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#141b24] shadow-2xl">
+                <img src="/studio-examples/cosmetique.jpg" alt="Visuel d’inspiration pour la création de contenu beauté" className="aspect-[.8] w-full object-cover transition duration-700 group-hover:scale-[1.025]" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-transparent to-black/10" />
+                <figcaption className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
+                  <span className="text-[9px] font-semibold uppercase tracking-[0.2em] text-cyan-200">Dimension créative</span>
+                  <p className="mt-1.5 font-display text-lg font-medium text-white sm:text-xl">Imaginez. Produisez. Publiez.</p>
+                  <p className="mt-1 text-[11px] text-slate-300">Studio UGC · Scripts · Montage</p>
+                </figcaption>
+              </figure>
+              <div className="space-y-3 sm:space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-[#101721] p-3 sm:p-4">
+                  <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-violet-200"><Brain size={14} /> Business</div>
+                  <div aria-hidden="true" className="relative mt-4 h-[92px] overflow-hidden rounded-xl bg-[radial-gradient(ellipse_at_55%_80%,rgba(139,92,246,.2),transparent_65%),linear-gradient(145deg,#161525,#10151e)] sm:h-28">
+                    <svg viewBox="0 0 220 112" className="absolute inset-0 h-full w-full" fill="none">
+                      <path d="M12 91h196M20 78c26-3 32-32 58-28s29 23 53 5 35 1 73-36" stroke="url(#growth-line)" strokeWidth="2" />
+                      <path d="M20 78c26-3 32-32 58-28s29 23 53 5 35 1 73-36v73H20V78Z" fill="url(#growth-fill)" />
+                      <circle cx="204" cy="19" r="4" fill="#C4B5FD" />
+                      <defs>
+                        <linearGradient id="growth-line" x1="20" y1="66" x2="204" y2="19" gradientUnits="userSpaceOnUse"><stop stopColor="#A78BFA" stopOpacity=".4"/><stop offset="1" stopColor="#67E8F9"/></linearGradient>
+                        <linearGradient id="growth-fill" x1="112" y1="20" x2="112" y2="98" gradientUnits="userSpaceOnUse"><stop stopColor="#8B5CF6" stopOpacity=".2"/><stop offset="1" stopColor="#8B5CF6" stopOpacity="0"/></linearGradient>
+                      </defs>
+                    </svg>
+                    <span className="absolute bottom-2 left-2 text-[9px] text-slate-500">Visualisation illustrative</span>
                   </div>
-                  <div className="mt-3 flex items-center justify-between rounded-xl border border-line bg-white/[0.03] px-3 py-2">
-                    <span className="flex items-center gap-2 text-xs text-slate-300"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" /> Génération</span>
-                    <span className="text-xs font-semibold text-brand-200">Suivi en direct</span>
-                  </div>
+                  <p className="mt-3 font-display text-sm font-medium text-white">Analysez. Décidez. Développez.</p>
+                  <p className="mt-1 text-[10px] text-slate-400">Assistant IA · Mémoire métier · Actions</p>
+                </div>
+                <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.05] p-3 sm:p-4">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-100">Une même plateforme</p>
+                  <p className="mt-1.5 font-display text-xs font-medium text-white sm:text-sm">One platform. Two dimensions.</p>
+                  <p className="mt-1 text-[10px] text-slate-400">Infinite possibilities.</p>
                 </div>
               </div>
-            </div>
-            <div className="absolute -bottom-6 -left-6 hidden animate-float rounded-xl border border-line bg-panel/95 p-3 shadow-xl sm:block">
-              <p className="flex items-center gap-2 text-xs font-semibold text-white"><Coins size={14} className="text-amber-300" /> Crédits protégés</p>
-              <p className="mt-1 text-[11px] text-slate-400">Réservés puis restitués si échec</p>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section id="dimensions" className="mx-auto max-w-7xl scroll-mt-24 px-4 pb-16 sm:px-6">
+        <div className="mb-7 flex flex-wrap items-end justify-between gap-4 border-b border-white/[0.08] pb-5">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200">Une identité. Deux dimensions.</p>
+            <h2 className="mt-2 font-display text-2xl font-medium tracking-tight text-white sm:text-3xl">Tout avance mieux, ensemble.</h2>
+          </div>
+          <p className="max-w-md text-sm leading-relaxed text-slate-400">Passez naturellement de la création de vos contenus au pilotage de votre croissance. Votre compte, vos données, votre espace.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <article className="flex min-h-[170px] items-center gap-5 rounded-2xl border border-cyan-200/15 bg-gradient-to-r from-cyan-300/[0.07] to-transparent p-5 sm:p-7">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-cyan-200/20 bg-cyan-200/[0.08] text-cyan-100"><Clapperboard size={21}/></div>
+            <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">01 · Créer</p><h3 className="mt-1.5 font-display text-xl font-medium text-white">VYORA Studio</h3><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-slate-400">Du brief au montage final, dans un studio de production relié à de vrais outils de génération.</p></div>
+          </article>
+          <article className="flex min-h-[170px] items-center gap-5 rounded-2xl border border-violet-200/15 bg-gradient-to-r from-violet-300/[0.07] to-transparent p-5 sm:p-7">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-violet-200/20 bg-violet-200/[0.08] text-violet-100"><Brain size={21}/></div>
+            <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-200">02 · Développer</p><h3 className="mt-1.5 font-display text-xl font-medium text-white">VYORA Business</h3><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-slate-400">Un espace intelligent pour éclairer vos décisions, organiser vos actions et faire croître votre activité.</p></div>
+          </article>
         </div>
       </section>
 
@@ -177,7 +198,7 @@ export default function Landing() {
         <div className="mx-auto max-w-2xl text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-300">Tarifs</p>
           <h2 className="mt-3 text-3xl font-bold text-white sm:text-4xl">Des formules adaptées à votre cadence</h2>
-          <p className="mt-3 text-sm text-slate-400">Les formules et quotas ci-dessous proviennent directement de la base Reelora.</p>
+          <p className="mt-3 text-sm text-slate-400">Les formules et quotas ci-dessous proviennent directement de la base de données.</p>
         </div>
         {plansLoading && <LoadingState label="Chargement des formules…" />}
         {!plansLoading && plans.length === 0 && <p className="mt-10 text-center text-sm text-slate-400">Les formules seront affichées dès que la connexion à la base est disponible.</p>}
@@ -186,10 +207,10 @@ export default function Landing() {
             <Card key={plan.plan_key} className={cn('flex flex-col p-6', plan.plan_key === 'studio' && 'border-brand-400/50 ring-1 ring-brand-400/20')}>
               {plan.plan_key === 'studio' && <span className="mb-3 w-fit rounded-full bg-brand-500/20 px-2.5 py-1 text-[11px] font-semibold text-brand-200">Le plus choisi</span>}
               <h3 className="text-lg font-bold text-white">{plan.display_name}</h3>
-              <p className="mt-1 text-xs text-slate-400">{plan.tagline}</p>
+              <p className="mt-1 text-xs text-slate-400">{(plan.tagline ?? '').replace(/\bReelora\b/gi, 'VYORA')}</p>
               <p className="mt-5 text-2xl font-extrabold text-white">{formatMoney(plan.monthly_price_minor, plan.currency)}<span className="text-sm font-normal text-slate-500"> / mois</span></p>
               <ul className="mt-5 flex-1 space-y-2.5">
-                {plan.features.map((f) => <li key={f} className="flex items-start gap-2 text-xs text-slate-300"><Check size={14} className="mt-0.5 shrink-0 text-emerald-400" /> {f}</li>)}
+                {plan.features.map((f) => <li key={f} className="flex items-start gap-2 text-xs text-slate-300"><Check size={14} className="mt-0.5 shrink-0 text-emerald-400" /> {f.replace(/\bReelora\b/gi, 'VYORA')}</li>)}
               </ul>
               <div className="mt-5 rounded-lg border border-line bg-white/[0.03] px-3 py-2 text-xs text-slate-400">
                 {plan.max_projects} projets · {plan.max_videos_per_month} vidéos/mois · {plan.max_scripts_per_month} scripts/mois
@@ -224,7 +245,7 @@ export default function Landing() {
           <div className="relative">
             <Zap className="mx-auto text-brand-200" size={28} />
             <h2 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Prêt à produire votre première vidéo UGC ?</h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm text-slate-300">Créez votre espace, décrivez votre produit et laissez Reelora orchestrer le reste.</p>
+            <p className="mx-auto mt-3 max-w-xl text-sm text-slate-300">Un seul espace pour créer, évoluer et développer votre activité avec VYORA.</p>
             <Link to="/inscription" className="btn btn-primary btn-lg mt-7">Créer mon compte gratuitement <ArrowRight size={17} /></Link>
           </div>
         </div>
@@ -232,7 +253,7 @@ export default function Landing() {
 
       <footer className="border-t border-line py-8">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 text-xs text-slate-500 sm:flex-row sm:px-6">
-          <div className="flex items-center gap-2"><Clapperboard size={15} className="text-brand-400" /> <span className="font-semibold text-slate-300">Reelora</span> · Studio UGC avec IA</div>
+          <div className="flex items-center gap-3"><BrandLockup tagline /> <span className="hidden text-slate-600 sm:inline">One platform. Two dimensions.</span></div>
           <div className="flex flex-wrap items-center gap-5">
             <Link to="/confidentialite" className="hover:text-white">Confidentialité</Link>
             <Link to="/conditions" className="hover:text-white">Conditions d’utilisation</Link>

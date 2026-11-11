@@ -8,7 +8,6 @@ import {
   PageHeader, Card, CardHeader, Button, Input, Textarea, Select, Badge, Banner,
   ProgressBar, ConfirmDialog, Modal, LoadingState, ErrorState, EmptyState,
 } from '../components/ui';
-import { providerQuoteCostLabel } from '../studio/model';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
@@ -29,7 +28,7 @@ const STEPS = [
   { n: 1, label: 'Projet & produit' },
   { n: 2, label: 'Script IA' },
   { n: 3, label: 'Scènes & prompts' },
-  { n: 4, label: 'Modèle MuAPI' },
+  { n: 4, label: 'Modèle vidéo' },
   { n: 5, label: 'Coût & lancement' },
 ] as const;
 
@@ -97,7 +96,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [jobId, setJobId] = useState<string | null>(params.get('job') ?? null);
   const [status, setStatus] = useState('');
-  const [providerState, setProviderState] = useState('');
+  const [, setProviderState] = useState('');
   const [progress, setProgress] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [runError, setRunError] = useState('');
@@ -179,7 +178,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
       if (['succeeded', 'failed', 'cancelled'].includes(r.status)) {
         stopPolling();
         await refreshQuota();
-        if (r.status === 'succeeded') toast.success('Vidéo MuAPI générée et ajoutée à la bibliothèque.');
+        if (r.status === 'succeeded') toast.success('Votre vidéo a été ajoutée à la bibliothèque.');
       }
     } catch (err) { setRunError(asAppError(err).message); }
   }, [applyResult, refreshQuota, stopPolling, toast]);
@@ -226,7 +225,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
       });
       setScriptText(r.script_text); setScriptId(r.script_id ?? null);
       if (r.scenes?.length) { setScenes(r.scenes); setVisualPrompt(r.scenes[0]?.visual_prompt ?? ''); }
-      toast.success('Script généré avec Groq. Relisez-le avant de continuer.');
+      toast.success('Script généré avec l’IA. Relisez-le avant de continuer.');
     } catch (err) { toast.error(asAppError(err).message); }
     finally { setGeneratingScript(false); }
   };
@@ -261,13 +260,13 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
       ['Projet publicitaire', Boolean(projectId)],
       ['Nom & infos produit', productName.trim().length > 1],
       ['Objectif publicitaire', Boolean(objective)],
-      ['Script Groq ou manuel', scriptText.trim().length > 20],
+      ['Script IA ou manuel', scriptText.trim().length > 20],
       ['Scènes / prompt visuel', scenes.length > 0 || visualPrompt.trim().length > 20],
-      ['Modèle MuAPI disponible', Boolean(modelId && selectedModel?.is_enabled && !selectedModel?.is_coming_soon)],
+      ['Modèle vidéo disponible', Boolean(modelId && selectedModel?.is_enabled && !selectedModel?.is_coming_soon)],
       ['Image de référence (si requise)', !needsImage || hasImage],
       ['Service & crédits suffisants', Boolean(serviceKey && selectedService?.active) && credits !== null && credits > 0 && (quota?.credits ?? 0) >= credits],
-      ['Devis fournisseur confirmé', summary.canReserve && !summary.quoteToConfirm],
-      ['Clé serveur MUAPI_API_KEY', Boolean(health?.muapi)],
+      ['Coût en crédits confirmé', summary.canReserve && !summary.quoteToConfirm],
+      ['Service vidéo disponible', Boolean(health?.muapi)],
     ] as Array<[string, boolean]>;
   }, [projectId, productName, objective, scriptText, scenes, visualPrompt, modelId, selectedModel, selectedService, needsImage, avatars, avatarId, imageUrl, serviceKey, quota, credits, health, summary.canReserve, summary.quoteToConfirm]);
   const canLaunch = checklist.every(([, ok]) => ok) && summary.canReserve && !summary.quoteToConfirm && !starting && !(jobId && !terminal);
@@ -284,14 +283,14 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
         script_text: scriptText, scenes, visual_prompt: visualPrompt,
         avatar_id: avatarId || null, image_url: imageUrl.trim() || null,
         product_name: productName, product_info: productInfo, campaign_objective: objective,
-        target_audience: audience, platform, title: projects.find((p) => p.id === projectId)?.title ?? 'Reelora',
+        target_audience: audience, platform, title: projects.find((p) => p.id === projectId)?.title ?? 'VYORA',
       };
       const id = await startGeneration(projectId, serviceKey, payload, idempotencyKey);
       setJobId(id); setStatus('reserved'); setProgress(20);
       const r = await videoStart(id);
       applyResult(r);
       if (r.status === 'failed') { await refreshQuota(); }
-      else { toast.info('Génération soumise à MuAPI. Le suivi continue côté serveur.'); startPolling(id); }
+      else { toast.info('Génération lancée. Le suivi continue automatiquement.'); startPolling(id); }
     } catch (err) {
       setStatus('failed'); setRunError(asAppError(err).message); await refreshQuota();
     } finally { setStarting(false); setConfirmOpen(false); }
@@ -324,8 +323,8 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
           <Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>
         </div>
       ) : (
-        <PageHeader eyebrow="Production · MuAPI" title="UGC Studio"
-          description="Du brief produit à la vidéo réelle : script Groq, scènes, modèle MuAPI, crédits maîtrisés et suivi serveur."
+        <PageHeader eyebrow="Production vidéo" title="UGC Studio"
+          description="Du brief produit à la vidéo : scripts IA, scènes, modèles compatibles, crédits maîtrisés et suivi."
           actions={<Button variant="ghost" size="sm" icon={<RefreshCw size={14} />} onClick={() => void load()}>Actualiser</Button>} />
       )}
 
@@ -341,15 +340,15 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
       </div>
 
       {health && !health.muapi && (
-        <div className="mb-5"><Banner tone="warning" title="MuAPI n’est pas encore configuré">
-          Ajoutez le secret serveur <code className="text-amber-100">MUAPI_API_KEY</code> dans les secrets Supabase Edge Functions. Il n’est jamais exposé au navigateur ni préfixé <code>VITE_</code>. Sans clé, la génération échoue explicitement et les crédits réservés sont restitués.
+        <div className="mb-5"><Banner tone="warning" title="Service vidéo indisponible">
+          La génération ne peut pas aboutir pour le moment. Réessayez plus tard.
         </Banner></div>
       )}
 
       <div className="grid gap-5 lg:grid-cols-5">
         <div className="space-y-5 lg:col-span-3">
           {step === 1 && <Card>
-            <CardHeader title="1 · Projet publicitaire, produit & objectif" description="Ces informations alimentent le script Groq et le prompt MuAPI."
+            <CardHeader title="1 · Projet publicitaire, produit & objectif" description="Ces informations alimentent le script IA et guident votre création vidéo."
               action={<Button size="sm" variant="outline" icon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>Nouveau projet</Button>} />
             <div className="space-y-4 p-5">
               <Select label="Projet" value={projectId} onChange={(e) => {
@@ -373,31 +372,31 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                 </Select>
               </div>
               <Textarea label="Informations produit & arguments" value={productInfo} onChange={(e) => setProductInfo(e.target.value)}
-                placeholder="Bénéfices, ingrédients, prix, preuves…" hint="Ces données sont transmises à Groq, jamais inventées." />
+                placeholder="Bénéfices, ingrédients, prix, preuves…" hint="Le contenu s’appuie sur les informations que vous fournissez." />
               <Textarea label="Brief de campagne" value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="Ton, interdits, accroche souhaitée…" />
             </div>
           </Card>}
 
           {step === 2 && <Card>
-            <CardHeader title="2 · Script avec Groq" description="Groq reste le fournisseur de texte : scripts, accroches, dialogues et contenus publicitaires." />
+            <CardHeader title="2 · Script avec l’IA" description="Préparez vos scripts, accroches, dialogues et contenus publicitaires." />
             <div className="space-y-4 p-5">
               <div className="flex flex-wrap gap-2">
-                <Button icon={<Wand2 size={15} />} loading={generatingScript} onClick={() => void onGenerateScript()}>Générer le script avec Groq</Button>
+                <Button icon={<Wand2 size={15} />} loading={generatingScript} onClick={() => void onGenerateScript()}>Générer le script avec l’IA</Button>
                 <Link to={projectId ? `/app/scripts?projet=${projectId}` : '/app/scripts'} className="btn btn-outline btn-sm"><Sparkles size={14} /> Ouvrir Scripts IA</Link>
               </div>
               <Textarea label="Script (modifiable)" value={scriptText} onChange={(e) => setScriptText(e.target.value)}
                 className="min-h-[190px]" placeholder="Générez un script ou collez le vôtre…"
                 hint={`${scriptText.length} caractères · minimum 20 pour lancer une vidéo`} />
               <Button variant="outline" size="sm" onClick={() => void onPersist()} disabled={!projectId}>Enregistrer dans le projet</Button>
-              {!health?.groq && <Banner tone="info" title="GROQ_API_KEY absent">La génération automatique de script nécessite le secret serveur GROQ_API_KEY. Vous pouvez toujours saisir un script manuellement.</Banner>}
+              {!health?.groq && <Banner tone="info" title="Assistance IA indisponible">Vous pouvez toujours saisir ou modifier votre script manuellement.</Banner>}
             </div>
           </Card>}
 
           {step === 3 && <Card>
-            <CardHeader title="3 · Scènes & prompts visuels" description="Chaque plan devient une instruction visuelle envoyée à MuAPI." />
+            <CardHeader title="3 · Scènes & prompts visuels" description="Chaque plan devient une instruction visuelle pour votre vidéo." />
             <div className="space-y-4 p-5">
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" icon={<Wand2 size={15} />} loading={generatingScenes} onClick={() => void onGenerateScenes()}>Découper en scènes avec Groq</Button>
+                <Button variant="outline" icon={<Wand2 size={15} />} loading={generatingScenes} onClick={() => void onGenerateScenes()}>Découper en scènes avec l’IA</Button>
                 <Button variant="ghost" size="sm" icon={<Plus size={14} />} onClick={() => setScenes((s) => [...s, { scene_type: 'ugc', duration_seconds: 3, visual_prompt: '', spoken_text: '', subtitle_text: '' }])}>Ajouter un plan</Button>
               </div>
               {scenes.length === 0 && <EmptyState icon={<Film size={22} />} title="Aucune scène" description="Générez un découpage depuis le script ou ajoutez un plan manuellement." />}
@@ -418,24 +417,23 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                 ))}
               </div>
               <Textarea label="Prompt visuel global" value={visualPrompt} onChange={(e) => setVisualPrompt(e.target.value)}
-                placeholder="Style général : UGC authentique, lumière naturelle, cadrage vertical…" hint="Combiné aux scènes pour construire le prompt MuAPI." />
+                placeholder="Style général : UGC authentique, lumière naturelle, cadrage vertical…" hint="Combiné aux scènes pour construire les instructions vidéo." />
             </div>
           </Card>}
 
           {step === 4 && <Card>
-            <CardHeader title="4 · Modèle MuAPI & paramètres" description="Catalogue issu de GET /api/v1/models ; seuls les modèles vérifiés et actifs sont proposés." />
+            <CardHeader title="4 · Modèle vidéo & paramètres" description="Choisissez parmi les modèles vidéo disponibles et leurs paramètres compatibles." />
             <div className="space-y-4 p-5">
-              {models.length === 0 && <Banner tone="warning" title="Catalogue indisponible">Le catalogue MuAPI n’a pas pu être chargé. Vérifiez le déploiement de reelora-video.</Banner>}
+              {models.length === 0 && <Banner tone="warning" title="Catalogue indisponible">Les modèles vidéo n’ont pas pu être chargés. Réessayez plus tard.</Banner>}
               <div className="grid gap-3 sm:grid-cols-2">
-                {models.map((m) => (
+                {models.map((m, index) => (
                   <button key={m.model_id} type="button" onClick={() => setModelId(m.model_id)}
                     className={`rounded-xl border p-3 text-left transition ${modelId === m.model_id ? 'border-brand-400/60 bg-brand-500/[0.12]' : 'border-line bg-white/[0.02] hover:border-white/20'}`}>
-                    <div className="flex items-center justify-between gap-2"><span className="text-sm font-semibold text-white">{m.display_name}</span>
+                    <div className="flex items-center justify-between gap-2"><span className="text-sm font-semibold text-white">Modèle vidéo {index + 1}</span>
                       {modelId === m.model_id && <CheckCircle2 size={15} className="text-brand-300" />}</div>
-                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-400">{m.description}</p>
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-400">Paramètres et formats de création disponibles.</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge tone="info">{m.category}</Badge>
-                      <Badge tone="neutral">≈ {Number(m.cost_usd ?? 0).toFixed(3)} {m.cost_currency}</Badge>
+                      <Badge tone="info">Vidéo VYORA</Badge>
                       {m.required_fields.includes('image_url') && <Badge tone="warning">image requise</Badge>}
                     </div>
                   </button>
@@ -444,8 +442,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
 
               {selectedModel && <>
                 <div className="rounded-xl border border-line bg-white/[0.03] p-3 text-[11px] text-slate-400">
-                  <p><span className="text-slate-300">Endpoint vérifié :</span> <code>POST {selectedModel.endpoint}</code></p>
-                  <p className="mt-1"><span className="text-slate-300">Champs requis :</span> {selectedModel.required_fields.join(', ')}</p>
+                  <p>Les paramètres ci-dessous reflètent les options disponibles pour ce modèle.</p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {Object.entries(selectedModel.param_schema).map(([key, def]) => (
@@ -484,17 +481,16 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
           </Card>}
 
           {step === 5 && <Card>
-            <CardHeader title="5 · Coût estimé, confirmation & lancement" description="Le coût est vérifié côté serveur et réservé atomiquement avant tout appel MuAPI." />
+            <CardHeader title="5 · Coût estimé, confirmation & lancement" description="Le coût en crédits est vérifié avant la réservation et le lancement." />
             <div className="space-y-4 p-5">
-              <Select label="Service de génération (crédits Reelora)" value={serviceKey} onChange={(e) => setServiceKey(e.target.value)}>
+              <Select label="Service de génération (crédits Studio UGC)" value={serviceKey} onChange={(e) => setServiceKey(e.target.value)}>
                 <option value="">Sélectionner un service</option>
-                {services.map((s) => <option key={s.service_key} value={s.service_key}>{s.display_name} — {s.credits_cost} crédits</option>)}
+                {services.map((s, index) => <option key={s.service_key} value={s.service_key}>{`Service vidéo VYORA ${index + 1}`}</option>)}
               </Select>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {[
                   ['Solde disponible', `${quota?.credits ?? 0} crédits`, 'text-white'],
                   ['Coût de cette vidéo', creditsLabel, 'text-amber-300'],
-                  ['Coût fournisseur estimé', providerQuoteCostLabel(estimate), estimate?.provider_quote_source === 'unavailable' ? 'text-amber-200' : 'text-cyan-300'],
                 ].map(([label, value, tone]) => (
                   <div key={label} className="rounded-xl border border-line bg-white/[0.03] px-4 py-3">
                     <p className="text-[11px] text-slate-500">{label}</p>
@@ -503,12 +499,12 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                 ))}
               </div>
               <div className="rounded-xl border border-brand-400/20 bg-brand-500/[0.06] px-4 py-3 text-xs leading-relaxed text-slate-300">
-                Modèle : <span className="text-white">{selectedModel?.display_name ?? '—'}</span> · Réservation de <span className="text-white">{creditsLabel}</span> avant soumission.
-                Débit définitif uniquement si MuAPI produit une vidéo ; restitution automatique si le fournisseur échoue, si la tâche expire ou si vous annulez à temps.
+                Modèle vidéo VYORA · Réservation de <span className="text-white">{creditsLabel}</span> avant soumission.
+                Débit définitif uniquement si la génération réussit ; restitution automatique en cas d’échec, d’expiration ou d’annulation autorisée.
                 Aucune génération ne sera facturée deux fois grâce à un identifiant d’idempotence propre à cette opération.
               </div>
               {quota && credits !== null && credits > quota.credits && <Banner tone="danger" title="Crédits insuffisants">Rechargez votre solde depuis l’abonnement avant de confirmer.</Banner>}
-              {estimate && !estimate.model_available && <Banner tone="warning" title="Modèle indisponible">Ce modèle MuAPI n’est plus actif. Retournez à l’étape 4.</Banner>}
+              {estimate && !estimate.model_available && <Banner tone="warning" title="Modèle indisponible">Ce modèle n’est plus disponible. Retournez à l’étape 4.</Banner>}
               <div className="flex flex-wrap gap-2">
                 <Button size="lg" icon={<Play size={16} />} loading={starting} disabled={!canLaunch} onClick={() => setConfirmOpen(true)}>Confirmer et lancer la génération</Button>
                 {jobId && !terminal && <Button variant="outline" icon={<Square size={15} />} onClick={() => void onCancel()}>Annuler</Button>}
@@ -537,31 +533,30 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
 
         <div className="space-y-5 lg:col-span-2">
           <Card><CardHeader title="Suivi & prévisualisation" description="États : brouillon, en attente, en cours, terminé, échoué, annulé." />
-            {!jobId ? <EmptyState icon={<Clapperboard size={24} />} title="Aucune génération lancée" description="Confirmez à l’étape 5 pour suivre ici la tâche MuAPI." /> : (
+            {!jobId ? <EmptyState icon={<Clapperboard size={24} />} title="Aucune génération lancée" description="Confirmez à l’étape 5 pour suivre votre création vidéo." /> : (
               <div className="space-y-4 p-5">
                 <div className="flex items-center gap-3">
                   {status === 'succeeded' ? <CheckCircle2 className="text-emerald-400" size={22} /> : status === 'failed' || status === 'cancelled' ? <XCircle className="text-rose-400" size={22} /> : <Loader2 className="animate-spin text-brand-300" size={22} />}
                   <div>
                     <p className="text-sm font-semibold text-white">{status === 'succeeded' ? 'Vidéo disponible' : status === 'failed' ? 'Génération échouée' : status === 'cancelled' ? 'Génération annulée' : 'Génération en cours'}</p>
-                    <p className="text-xs text-slate-500">Tâche {jobId.slice(0, 8)}… · MuAPI {selectedModel?.model_id ?? ''}</p>
+                    <p className="text-xs text-slate-500">Création {jobId.slice(0, 8)}…</p>
                   </div>
                 </div>
                 <ProgressBar value={progress} max={100} tone={status === 'succeeded' ? 'emerald' : status === 'failed' ? 'amber' : 'brand'} />
                 <div className="flex flex-wrap gap-2">
                   <Badge status={status}>{status || 'en attente'}</Badge>
-                  {providerState && <Badge tone="info">État MuAPI : {providerState}</Badge>}
                 </div>
                 {!terminal && <p className="rounded-xl border border-line bg-white/[0.03] px-3 py-2 text-[11px] leading-relaxed text-slate-400">
-                  Progression {progress} %. Webhook MuAPI + worker serveur toutes les minutes : vous pouvez fermer cette page, la vidéo sera enregistrée dans votre bibliothèque.
+                  Progression {progress} %. Le suivi continue automatiquement : vous pouvez fermer cette page, la vidéo sera enregistrée dans votre bibliothèque.
                 </p>}
                 {runError && <Banner tone="danger" title="Erreur de génération"><AlertTriangle size={12} className="inline" /> {runError}</Banner>}
                 {status === 'succeeded' && previewUrl && <div className="space-y-2">
                   <video src={previewUrl} controls playsInline preload="metadata" className="w-full rounded-xl border border-line bg-black" aria-label="Prévisualisation de la vidéo générée" />
-                  <a className="btn btn-primary btn-sm w-full" href={previewUrl} download={`reelora-${jobId.slice(0, 8)}.mp4`}><Download size={14} /> Télécharger la vidéo</a>
+                  <a className="btn btn-primary btn-sm w-full" href={previewUrl} download={`vyora-${jobId.slice(0, 8)}.mp4`}><Download size={14} /> Télécharger la vidéo</a>
                 </div>}
                 {status === 'succeeded' && <Link to="/app/bibliotheque" className="btn btn-outline btn-sm w-full"><Film size={14} /> Voir dans la bibliothèque</Link>}
                 <Link to="/app/historique" className="btn btn-ghost btn-sm w-full">Consulter l’historique & le ledger</Link>
-                <p className="text-[11px] leading-relaxed text-slate-600">Aucun résultat fictif : seul un fichier réellement produit par MuAPI et stocké côté serveur est ajouté à la bibliothèque.</p>
+                <p className="text-[11px] leading-relaxed text-slate-600">Votre bibliothèque affiche uniquement les vidéos réellement disponibles.</p>
               </div>
             )}
           </Card>
@@ -578,11 +573,11 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
           </Card>
 
           <Card><CardHeader title="Vos vidéos précédentes" />
-            {assets.length === 0 ? <EmptyState icon={<Film size={20} />} title="Bibliothèque vide" description="Vos vidéos MuAPI apparaîtront ici." /> : (
+            {assets.length === 0 ? <EmptyState icon={<Film size={20} />} title="Bibliothèque vide" description="Vos créations vidéo apparaîtront ici." /> : (
               <div className="space-y-2 p-5">
                 {assets.slice(0, 4).map((a) => (
                   <div key={a.id} className="flex items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] px-3 py-2 text-xs">
-                    <span className="truncate text-slate-300"><Film size={12} className="mr-1 inline" /> {a.storage_path.split('/').pop()}</span>
+                    <span className="truncate text-slate-300"><Film size={12} className="mr-1 inline" /> Vidéo enregistrée</span>
                     <span className="shrink-0 text-slate-500">{new Date(a.created_at).toLocaleDateString('fr-FR')}</span>
                   </div>
                 ))}
@@ -602,8 +597,8 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
 
       <ConfirmDialog open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={() => void onLaunch()}
         confirmLabel={`Confirmer · ${creditsLabel}`} loading={starting}
-        title="Confirmer la génération vidéo MuAPI"
-        message={`Modèle ${selectedModel?.display_name ?? modelId}. ${creditsLabel} seront réservés maintenant puis débités uniquement si MuAPI produit la vidéo. En cas d’échec, d’expiration ou d’annulation autorisée, ils seront restitués automatiquement. Un seul lancement sera facturé pour cette opération.`} />
+        title="Confirmer la génération vidéo"
+        message={`Modèle vidéo VYORA. ${creditsLabel} seront réservés maintenant puis débités uniquement si la génération réussit. En cas d’échec, d’expiration ou d’annulation autorisée, ils seront restitués automatiquement.`} />
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nouveau projet publicitaire"
         description="Le projet est créé dans votre workspace avec les règles RLS et quotas existantes."
