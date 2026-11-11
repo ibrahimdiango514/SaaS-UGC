@@ -1,7 +1,7 @@
 /**
  * Montage assistance — deterministic LOCAL rules, explicitly not AI.
  *
- * Reelora's AI-assisted suggestions require a configured Groq key (`reelora-ai`).
+ * VYORA's AI-assisted suggestions require a configured Groq key (`reelora-ai`).
  * While it is absent, these deterministic local rules analyze the timeline,
  * real project media dimensions/durations, UGC pacing presets, voiceover WPM,
  * transitions and subtitles to propose concrete, reviewable edits (accept /

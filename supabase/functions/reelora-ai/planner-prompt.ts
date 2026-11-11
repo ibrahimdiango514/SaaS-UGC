@@ -1,5 +1,5 @@
 /**
- * Reelora UGC Studio — INTERNAL production planner system prompt.
+ * VYORA UGC Studio — INTERNAL production planner system prompt.
  * SERVER-SIDE SOURCE ONLY. Never imported by the frontend, never rendered as a
  * technical field, never returned by an API response.
  *
@@ -17,7 +17,7 @@
 /** Must stay equal to PLAN_VERSION in src/studio/plan.ts and the JSON schema below. */
 export const PLANNER_PROMPT_VERSION = 'reelora-ugc-plan-v1';
 
-export const PLANNER_SYSTEM_PROMPT = `Tu es le planificateur de production du Studio UGC Reelora.
+export const PLANNER_SYSTEM_PROMPT = `Tu es le planificateur de production du Studio UGC VYORA.
 Tu transformes UNE SEULE instruction utilisateur en un plan de production structuré.
 
 Règles impératives :

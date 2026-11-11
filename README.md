@@ -26,9 +26,9 @@ SaaS francophone de création de contenus UGC et de croissance d'activité. Le S
 | Administration | Vue d'ensemble, utilisateurs/rôles, suspension, formule, ajustement de crédits, recharges, catalogue, paramètres, audit. Le rôle est vérifié côté serveur ; les changements de redirection et d'isolation sont publiés. |
 | Transverse | Interface 100 % française, mobile-first, responsive, états de chargement/erreur/vide, notifications, error boundary |
 
-## 1bis. Nouvelle expérience « Reelora Video Studio »
+## 1bis. Nouvelle expérience « VYORA Video Studio »
 
-L'entrée principale `/app/studio` est une refonte originale, premium et mobile-first : identité Reelora (aurora violet/cyan, grain discret, animations `fadeUp`), grande prévisualisation centrale, navigation modulaire horizontale, barre d'action collante et hiérarchie claire. Elle s'inspire fonctionnellement de la section vidéo MuAPI sans en copier l'interface.
+L'entrée principale `/app/studio` est une refonte originale, premium et mobile-first : identité VYORA (aurora violet/cyan, grain discret, animations `fadeUp`), grande prévisualisation centrale, navigation modulaire horizontale, barre d'action collante et hiérarchie claire. Elle s'inspire fonctionnellement de la section vidéo MuAPI sans en copier l'interface.
 
 | Espace | Route | État |
 | --- | --- | --- |
@@ -49,7 +49,7 @@ Avant le lancement, une confirmation explicite avec case à cocher reprend le mo
 
 - **Frontend** : React 18 + TypeScript strict + Vite 6 + Tailwind CSS 3 + React Router 6 + lucide-react
 - **Backend** : Supabase (PostgreSQL 17, Auth, Storage, PostgREST, Edge Functions Deno, **pg_cron + pg_net + Vault**)
-- **Schéma** : `saas_ugc` existant **conservé et réutilisé** (32 tables, 31 vues `security_invoker`) + 8 tables Reelora + 1 table `ugc_video_models` + 9 vues `public.reelora_*`
+- **Schéma** : `saas_ugc` existant **conservé et réutilisé** (32 tables, 31 vues `security_invoker`) + 8 tables VYORA + 1 table `ugc_video_models` + 9 vues `public.reelora_*`
 - **IA textuelle** : Groq (`llama-3.3-70b-versatile`) — scripts, accroches, dialogues, contenus publicitaires
 - **IA vidéo** : **MuAPI uniquement** (`https://api.muapi.ai/api/v1`, en-tête `x-api-key`). HeyGen et fal.ai ne sont **pas** utilisés.
 - **Tests** : Vitest — 362 tests, 33 fichiers (dont isolation des comptes VYORA, routage admin, contexte d'authentification, MuAPI, sécurité et parité d'intégration)
@@ -102,7 +102,7 @@ pg_cron '* * * * *' ── pg_net.http_post ─────────┴──
 | `seedance-lite-i2v` | `POST /api/v1/seedance-lite-i2v` | `prompt`, `image_url` | `resolution`, `duration`, `camera_fixed` | 0,100 USD |
 | `kling-o1-standard-image-to-video` | `POST /api/v1/kling-o1-standard-image-to-video` | `prompt`, `image_url` | `duration` (5/10) | 0,500 USD |
 
-Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models`, `/api/v1/models`, `https://muapi.ai/playground/<model>/llms.txt`. Les modèles `group_of:"avatar"` du catalogue exigent `audio_url` ; Reelora n'a pas de pipeline TTS et ne les expose donc pas. Aucune capacité « script → lipsync » n'est annoncée.
+Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models`, `/api/v1/models`, `https://muapi.ai/playground/<model>/llms.txt`. Les modèles `group_of:"avatar"` du catalogue exigent `audio_url` ; VYORA n'a pas de pipeline TTS et ne les expose donc pas. Aucune capacité « script → lipsync » n'est annoncée.
 
 ### Migrations
 
@@ -179,7 +179,7 @@ supabase secrets set MUAPI_API_KEY=... GROQ_API_KEY=... --project-ref xbuuhfwobr
 
 Business Grow utilise des secrets Edge séparés du Studio : `BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, `BUSINESS_GROW_GROQ_MODEL`, `BUSINESS_GROW_GEMINI_MODEL`, `BUSINESS_GROW_PROVIDER_ORDER` et `BUSINESS_GROW_DATABASE_URL`. Ils ne sont pas à ajouter à `.env.local`, à un fichier suivi par Git ou à une variable `VITE_*`. Le schéma et la fonction sont déployés sur le projet existant ; la disponibilité effective de chaque fournisseur doit être vérifiée par une sonde côté serveur avant de l'annoncer comme utilisable.
 
-Pour un développement local futur, `VITE_BUSINESS_GROW_FUNCTION_URL=http://127.0.0.1:54321/functions/v1/business-grow` (dans `.env.local`, jamais dans un fichier suivi) dirige uniquement le navigateur de développement vers l'Edge Function locale; le code refuse les autres hôtes ou URL afin de ne pas transmettre le jeton Reelora ailleurs. La fonction locale doit elle-même valider le jeton avec Supabase Auth. Cette URL seule ne rend pas le backend opérationnel : il faut encore un runtime Edge local, la base avec le schéma validé et les secrets serveur.
+Pour un développement local futur, `VITE_BUSINESS_GROW_FUNCTION_URL=http://127.0.0.1:54321/functions/v1/business-grow` (dans `.env.local`, jamais dans un fichier suivi) dirige uniquement le navigateur de développement vers l'Edge Function locale; le code refuse les autres hôtes ou URL afin de ne pas transmettre le jeton VYORA ailleurs. La fonction locale doit elle-même valider le jeton avec Supabase Auth. Cette URL seule ne rend pas le backend opérationnel : il faut encore un runtime Edge local, la base avec le schéma validé et les secrets serveur.
 
 ---
 
@@ -246,14 +246,14 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 4. **Premier administrateur** : le mécanisme de création est `/proprietaire`, avec confirmation e-mail et attribution via l'Edge Function propriétaire. Le bootstrap refuse toute seconde attribution. Le compte propriétaire existant a déjà le rôle admin ; il n'est pas nécessaire de créer un autre administrateur.
 5. **Worker** : `reelora_worker_token` existe dans Vault sans être exposé. Le cron `reelora-video-tick` est actif et ses exécutions récentes ont réussi.
 6. **Auth et paiements** : l'API Auth publique indique que l'inscription e-mail est activée et l'auto-confirmation active. Les parcours avec un vrai compte et la liste d'URL de redirection n'ont pas été testés. Les fonctions de paiement SasPay sont présentes, mais aucun paiement ou parcours de bout en bout n'a été réalisé.
-7. **Historique SQL** : les 25 migrations Reelora/Business Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.
+7. **Historique SQL** : les 25 migrations VYORA/Business Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.
 
 ---
 
 ## 8. Structures de données notables
 
 - `saas_ugc.ugc_*` : schéma métier d'origine (profils, portefeuilles, espaces, projets, scripts, scènes, tâches, assets, services, tarifs, ledger, notifications…).
-- Ajouts Reelora : `ugc_avatars`, `ugc_prompt_templates`, `ugc_generation_presets`, `ugc_plans`, `ugc_subscriptions`, `ugc_usage_events`, `ugc_notifications`, `ugc_audit_logs`, **`ugc_video_models`**.
+- Ajouts VYORA : `ugc_avatars`, `ugc_prompt_templates`, `ugc_generation_presets`, `ugc_plans`, `ugc_subscriptions`, `ugc_usage_events`, `ugc_notifications`, `ugc_audit_logs`, **`ugc_video_models`**.
 - Colonnes de suivi ajoutées à `ugc_generation_jobs` : `provider_status`, `next_poll_at`, `last_polled_at`, `poll_attempts`, `expires_at`, `webhook_received_at`, `submission_claim_id`, `muapi_cost`.
 - Formules : `Découverte` (gratuit, 9 crédits, 1 vidéo/mois), `Studio`, `Pro`, `Enterprise`. **Aucun crédit gratuit mensuel ajouté.**
 - Services actifs : `script=2`, `image_retouch=3`, `product_image=3`, `cutaway=10`, `ugc_clip_8s=9`, `ugc_clip_15s=16`, `ugc_ad_4clips=36` crédits.
@@ -270,4 +270,4 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 
 ---
 
-© 2026 Reelora. Hébergement Supabase `eu-central-1`. Aucune donnée de démonstration ni aucun résultat de génération n'est présenté comme réel.
+© 2026 VYORA. Hébergement Supabase `eu-central-1`. Aucune donnée de démonstration ni aucun résultat de génération n'est présenté comme réel.

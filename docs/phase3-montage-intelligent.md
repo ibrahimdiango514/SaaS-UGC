@@ -1,4 +1,4 @@
-# Phase 3 — Montage vidéo intelligent (`Reelora` / `AI Video Editor`)
+# Phase 3 — Montage vidéo intelligent (`VYORA` / `AI Video Editor`)
 
 > **Date :** 2026-11-09  
 > **Branche de session :** `arena/147ca0c8-saas-ugc` (contenant les commits Phase 1 & Phase 2 jusqu’à `a30ee86` ; `main` intact ; PR #3 laissée ouverte et non fusionnée)  

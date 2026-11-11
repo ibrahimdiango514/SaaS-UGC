@@ -1,5 +1,5 @@
 /**
- * Reelora Phase 4 — Export configuration, real capability probing & output verification.
+ * VYORA Phase 4 — Export configuration, real capability probing & output verification.
  *
  * Strict honesty rules:
  *  - Every resolution (720p, 1080p, 4k) and container (mp4, webm) is probed against

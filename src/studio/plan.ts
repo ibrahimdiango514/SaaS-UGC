@@ -1,5 +1,5 @@
 /**
- * Single-prompt production planner (Reelora UGC Studio).
+ * Single-prompt production planner (VYORA UGC Studio).
  *
  * `buildLocalPlan` is a DETERMINISTIC local planner: it assembles the user's own
  * instruction into a structured plan (objective, sector, narrative scenes,

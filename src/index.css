@@ -90,7 +90,7 @@
   .gradient-text { @apply bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent; }
   .glass { @apply border border-line bg-white/[0.03] backdrop-blur-sm; }
 
-  /* Reelora Video Studio — dark, cyan accent, compact mobile-first controls. */
+  /* VYORA Video Studio — dark, cyan accent, compact mobile-first controls. */
   .studio-v2 { @apply text-slate-200; color-scheme: dark; }
   .studio-v2 select option { @apply bg-[#0b111a] text-white; }
   .studio-icon-link {
@@ -115,6 +115,72 @@
   }
   .studio-action {
     @apply flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-cyan-400/35 hover:bg-cyan-400/[0.06] hover:text-white;
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* VYORA — langage visuel premium (vitrine + espaces connectés)           */
+  /* --------------------------------------------------------------------- */
+  .vyora-display {
+    @apply font-display font-semibold tracking-[-0.04em];
+    text-wrap: balance;
+  }
+  .vyora-eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-100;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+  .vyora-card {
+    @apply relative overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-[#080d15]/80 backdrop-blur-xl;
+    box-shadow: 0 30px 80px -50px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .vyora-card-hover {
+    @apply transition duration-300 hover:-translate-y-1 hover:border-cyan-300/25;
+  }
+  .vyora-card-hover:hover {
+    box-shadow: 0 40px 90px -50px rgba(34,211,238,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+  .vyora-grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(148,163,184,0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148,163,184,0.07) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 40%, transparent 100%);
+  }
+  .vyora-glow-ring {
+    @apply pointer-events-none absolute rounded-full blur-[110px];
+  }
+  .vyora-btn-sheen {
+    position: relative;
+    overflow: hidden;
+  }
+  .vyora-btn-sheen::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-120%) skewX(-18deg);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+    transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .vyora-btn-sheen:hover::after { transform: translateX(120%) skewX(-18deg); }
+  .vyora-divider {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-white/12 to-transparent;
+  }
+  .vyora-panel-hero {
+    @apply relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#070b12];
+    box-shadow: 0 50px 120px -60px rgba(34,211,238,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .vyora-dash-card {
+    @apply relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-b from-white/[0.05] to-white/[0.015] p-4;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .vyora-stat {
+    @apply text-3xl font-semibold tracking-[-0.04em] text-white;
+  }
+  .vyora-badge-soft {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-medium text-slate-300;
+  }
+  .vyora-leader {
+    background-image: radial-gradient(circle, rgba(148,163,184,0.5) 1px, transparent 1px);
+    background-size: 8px 8px;
   }
 }
 

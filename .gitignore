@@ -157,3 +157,6 @@ supabase/.branches/
 *.local
 playwright-report/
 test-results/
+
+# Builds locaux des Edge Functions
+.edge-build/

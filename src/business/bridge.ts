@@ -8,7 +8,7 @@ import type {
 import { businessGrowApi } from './api';
 
 /**
- * Pont officiel pour les modules Reelora externes à Business Grow
+ * Pont officiel pour les modules VYORA externes à Business Grow
  * (Dashboard, Studio UGC, Projets, Paramètres, futurs outils VS Code).
  *
  * Ce pont expose uniquement les ports de contrats publics et isole

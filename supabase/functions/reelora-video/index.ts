@@ -1,4 +1,4 @@
-// Reelora video gateway — MuAPI is the PRIMARY (and only) video provider.
+// VYORA video gateway — MuAPI is the PRIMARY (and only) video provider.
 // Groq remains the text provider (reelora-ai). HeyGen / fal.ai are NOT used here.
 //
 // Official MuAPI contract (verified):
@@ -26,6 +26,15 @@
 //
 // MUAPI_API_KEY is read from Edge secrets only. It is never returned, logged,
 // placed in a VITE_* variable or sent to the browser.
+
+import {
+  buildProviderQuote,
+  buildPricingBasis,
+  unavailableQuote,
+  type ProviderQuote,
+  type ProviderReplyLike,
+  type QuoteModelMeta,
+} from "../_shared/video-quote.ts";
 
 type Json = Record<string, unknown>;
 const MUAPI_BASE = "https://api.muapi.ai";
@@ -218,7 +227,7 @@ async function loadScript(projectId: string): Promise<string> {
   return str(rows[0]?.script_text, 4000);
 }
 /**
- * A reference image may be uploaded to the private Reelora bucket. Only paths
+ * A reference image may be uploaded to the private VYORA bucket. Only paths
  * inside the job's own workspace prefix are signed and forwarded to MuAPI.
  */
 function workspaceImagePath(raw: unknown, workspaceId: string): string {
@@ -252,7 +261,7 @@ interface ParamDef {
   default?: string | number | boolean;
   required?: boolean;
 }
-interface MuapiReply { status: number; data: unknown; error: string; ok: boolean }
+interface MuapiReply { status: number; data: unknown; error: string; ok: boolean; timedOut?: boolean }
 interface AccountProbe {
   key_configured: boolean;
   key_valid: boolean;
@@ -266,7 +275,7 @@ interface AccountProbe {
 type Access = "account" | "public_only" | "unverified";
 type Status = "active" | "disabled" | "coming_soon" | "unsupported" | "unverified";
 
-/** Required inputs Reelora can actually provide today. No audio/TTS/lipsync engine is connected. */
+/** Required inputs VYORA can actually provide today. No audio/TTS/lipsync engine is connected. */
 const SUPPORTED_REQUIRED_FIELDS = new Set(["prompt", "image_url"]);
 /** Media/structured fields are never exposed as tunable scalar parameters. */
 const SOURCE_FIELDS = new Set([
@@ -339,7 +348,7 @@ function paramSchemaFromClient(raw: unknown, fields: string[]): Record<string, P
   }
   return out;
 }
-/** Convert MuAPI's JSON-Schema-like input_schema into Reelora's param_schema. */
+/** Convert MuAPI's JSON-Schema-like input_schema into VYORA's param_schema. */
 function schemaFromInputSchema(raw: unknown, fallbackFields: string[]): Record<string, ParamDef> {
   void fallbackFields; // Kept for call-site clarity; JSON Schema properties are authoritative.
   const root = obj(raw);
@@ -403,6 +412,35 @@ function paramSchemaFromRow(row: Json): Record<string, ParamDef> {
   return curated || !Object.keys(obj(raw.__catalog)).length ? out : {};
 }
 function metaFromRow(row: Json): Json { return obj(obj(row.param_schema).__catalog); }
+
+/**
+ * Métadonnées de devis exposées au module de tarification pur. Aucun secret,
+ * aucun coût fournisseur brut n'est écrit en base ici : le tarif est toujours
+ * relu et vérifié côté serveur au moment du devis.
+ */
+function quoteMetaFromRow(row: Json, modelId: string): QuoteModelMeta {
+  const meta = metaFromRow(row);
+  const publicId = str(row.public_id, 80) || null;
+  const inputFields = asArray(row.input_fields);
+  const requiredFields = asArray(row.required_fields);
+  const category = str(row.category, 60);
+  return {
+    modelId,
+    publicId,
+    displayName: `VYORA ${category === "Image to Video" ? "Image" : "Video"}`,
+    catalogCostUsd: finite(row.cost_usd),
+    catalogCurrency: str(row.cost_currency, 10) || "USD",
+    dynamicPricing: bool(meta.dynamic_pricing, false),
+    estimateEndpoint: normalizeEstimateEndpoint(meta.estimate_endpoint, modelId),
+    active: bool(row.active, false),
+    enabled: bool(row.is_enabled, true),
+    comingSoon: bool(row.is_coming_soon, false),
+    syncedAt: str(row.synced_at, 60) || null,
+    requiredFields,
+    supportedFields: inputFields.length ? inputFields : Object.keys(paramSchemaFromRow(row)),
+  };
+}
+
 function mergeSchema(a: Record<string, ParamDef>, b: Record<string, ParamDef>): Record<string, ParamDef> {
   return Object.keys(b).length ? { ...a, ...b } : a;
 }
@@ -479,7 +517,7 @@ function statusFor(model: Json): { status: Status; reason: string } {
   if (!bool(model.is_enabled, true)) return { status: "disabled", reason: "Désactivé dans le catalogue MuAPI." };
   if (bool(model.is_coming_soon, false)) return { status: "coming_soon", reason: "Annoncé par MuAPI, pas encore lancé." };
   const unsupported = asArray(model.required_fields).filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
-  if (unsupported.length) return { status: "unsupported", reason: `Entrée non connectée dans Reelora : ${unsupported.join(", ")}.` };
+  if (unsupported.length) return { status: "unsupported", reason: `Entrée non connectée dans VYORA : ${unsupported.join(", ")}.` };
   if (model.account_access === "unverified") return { status: "unverified", reason: "Clé / compte MuAPI non validée côté serveur." };
   if (model.account_access === "public_only") return { status: "unverified", reason: "Modèle public MuAPI absent du catalogue retourné avec la clé." };
   return { status: "active", reason: "Modèle actif et sélectionnable." };
@@ -502,7 +540,12 @@ async function muapiFetch(path: string, init: { method?: string; useKey?: boolea
     const error = res.ok ? "" : redact(str(d.message ?? d.error ?? d.detail, 300) || raw.slice(0, 300) || `HTTP ${res.status}`);
     return { status: res.status, data, error, ok: res.ok };
   } catch (e) {
-    return { status: 0, data: null, error: redact(e instanceof Error ? e.message : String(e)), ok: false };
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+    return {
+      status: 0, data: null,
+      error: redact(e instanceof Error ? e.message : String(e)),
+      ok: false, timedOut,
+    };
   }
 }
 function hasBooleanFlag(value: unknown, names: string[], depth = 0): boolean | null {
@@ -596,27 +639,6 @@ function buildQuoteBody(body: Json, schema: Record<string, ParamDef>, fields: st
   }
   return out;
 }
-function providerCost(reply: MuapiReply): number | null {
-  const root = obj(obj(reply.data).data ?? reply.data);
-  const candidates: unknown[] = [root.cost, root.cost_usd, root.estimated_cost, root.price,
-    root.total_cost, root.amount, root.amount_usd, root.usd, root.total,
-    obj(root.cost).amount, obj(root.cost).usd, obj(root.data).cost];
-  for (const c of candidates) {
-    if (typeof c === "number" && Number.isFinite(c)) return c;
-    if (typeof c === "string" && Number.isFinite(Number(c))) return Number(c);
-    const o = obj(c);
-    for (const v of [o.amount, o.usd, o.cost, o.total, o.value]) {
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-      if (typeof v === "string" && Number.isFinite(Number(v))) return Number(v);
-    }
-  }
-  return null;
-}
-function providerCurrency(reply: MuapiReply, fallback: string): string {
-  const root = obj(obj(reply.data).data ?? reply.data);
-  return str(root.currency ?? root.cost_currency ?? obj(root.cost).currency, 10) || fallback;
-}
-
 /* -------------------------------- MuAPI --------------------------------- */
 
 function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: string, lastImageUrl = ""): Json {
@@ -653,7 +675,7 @@ function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: st
     } else if (def.type === "string") {
       body[key] = value;
     }
-    // array / object: no connected Reelora control, never invented or forwarded.
+    // array / object: no connected VYORA control, never invented or forwarded.
   }
   return body;
 }
@@ -923,79 +945,142 @@ async function actionAdminCatalog(userJwt: string): Promise<Response> {
   return actionCatalog(true);
 }
 
+interface ResolvedProviderQuote {
+  quote: ProviderQuote;
+  quoteParams: Json;
+  pricingBasis: Record<string, string | number | boolean>;
+  modelStatus: Status;
+  modelAvailable: boolean;
+  modelReason: string;
+  publicModelId: string | null;
+  modelId: string;
+  meta: QuoteModelMeta | null;
+}
+
+/**
+ * Cœur du devis : lit le modèle réel, applique SES paramètres vérifiés et,
+ * pour les modèles à tarification dynamique, interroge UNIQUEMENT
+ * `POST /api/v1/models/{name}/estimate-cost` (jamais une génération).
+ */
+async function resolveProviderQuote(body: Json): Promise<ResolvedProviderQuote> {
+  const requested = str(body.model_id, 120);
+  const now = new Date();
+  const row = requested ? await loadModel(requested) : null;
+  if (!row) {
+    return {
+      quote: unavailableQuote({ code: "MODEL_NOT_FOUND", now }),
+      quoteParams: {}, pricingBasis: {},
+      modelStatus: "disabled", modelAvailable: false,
+      modelReason: "Modèle vidéo inconnu.", publicModelId: null,
+      modelId: requested, meta: null,
+    };
+  }
+  const modelId = str(row.model_id, 120);
+  const publicModelId = str(row.public_id, 80) || null;
+  const meta = quoteMetaFromRow(row, modelId);
+  const effective = await effectiveSchema(row, modelId);
+  const clientSchema = paramSchemaFromClient(body.param_schema, effective.fields);
+  const schema = Object.keys(clientSchema).length ? clientSchema : effective.schema;
+  const quoteParams = buildQuoteBody(body, schema, effective.fields, effective.required);
+  const pricingBasis = buildPricingBasis(quoteParams, effective.fields);
+  const unsupported = effective.required.filter((field) => !SUPPORTED_REQUIRED_FIELDS.has(field.toLowerCase()));
+  const status = statusFor(row);
+  const modelAvailable = Boolean(bool(row.active, false) && bool(row.is_enabled, true)
+    && !bool(row.is_coming_soon, false) && !unsupported.length);
+  const base = {
+    estimateEndpoint: meta.estimateEndpoint,
+    catalogSyncedAt: meta.syncedAt,
+    pricingBasis,
+  };
+  const modelReason = unsupported.length
+    ? "Ce modèle nécessite un réglage qui n’est pas encore pris en charge."
+    : modelAvailable ? "Disponible dans VYORA." : (status.reason || "Indisponible momentanément.");
+
+  const finish = (quote: ProviderQuote): ResolvedProviderQuote => ({
+    quote, quoteParams, pricingBasis,
+    modelStatus: status.status, modelAvailable, modelReason, publicModelId, modelId, meta,
+  });
+
+  if (!modelAvailable) {
+    return finish(unavailableQuote({ code: "MODEL_UNAVAILABLE", now, ...base }));
+  }
+  if (meta.dynamicPricing) {
+    if (!MUAPI_KEY()) {
+      return finish(unavailableQuote({ code: "PROVIDER_KEY_MISSING", now, ...base }));
+    }
+    if (!meta.estimateEndpoint) {
+      return finish(unavailableQuote({ code: "ESTIMATE_ENDPOINT_MISSING", now, ...base }));
+    }
+    if (effective.required.includes("prompt") && !str(quoteParams.prompt, 4000)) {
+      return finish(unavailableQuote({ code: "PROMPT_REQUIRED", now, ...base }));
+    }
+    const reply = await muapiFetch(meta.estimateEndpoint, {
+      method: "POST", useKey: true, body: quoteParams, timeout: 20000,
+    });
+    const providerReply: ProviderReplyLike = {
+      ok: reply.ok, status: reply.status, data: reply.data, timedOut: reply.timedOut === true,
+    };
+    const quote = buildProviderQuote({
+      model: meta, providerReply, pricingParams: quoteParams,
+      prompt: str(quoteParams.prompt, 4000), now,
+    });
+    return finish(quote);
+  }
+  return finish(buildProviderQuote({
+    model: meta, providerReply: null, pricingParams: quoteParams,
+    prompt: str(quoteParams.prompt, 4000), now,
+  }));
+}
+
+/** Devis fournisseur public (aucun crédit, aucune génération, aucun débit). */
+async function actionProviderQuote(body: Json): Promise<Response> {
+  const resolved = await resolveProviderQuote(body);
+  return json({
+    model_id: resolved.publicModelId,
+    model_available: resolved.modelAvailable,
+    model_status: resolved.modelStatus,
+    model_reason: resolved.modelReason,
+    quote: resolved.quote,
+  });
+}
+
 async function actionEstimate(body: Json, userId: string): Promise<Response> {
   const serviceKey = str(body.service_key, 80);
   const requestedModelId = str(body.model_id, 120);
   const rows = await restService<Json>(`ugc_service_catalog?service_key=eq.${encodeURIComponent(serviceKey)}&select=service_key,display_name,credits_cost,active&limit=1`);
   const service = rows[0];
-  const rawModel = requestedModelId ? await loadModel(requestedModelId) : null;
-  const model = rawModel ? { ...rawModel } : null;
-  const publicModelId = str(model?.public_id, 80);
-  const modelId = str(model?.model_id, 120);
-  const meta = model ? metaFromRow(model) : {};
-  const dynamic = bool(meta.dynamic_pricing, false);
-  const estimateEndpoint = model ? normalizeEstimateEndpoint(meta.estimate_endpoint, modelId) : null;
-  const effective = model ? await effectiveSchema(model, modelId) : { schema: {}, fields: [] as string[], required: [] as string[] };
-  const clientSchema = paramSchemaFromClient(body.param_schema, effective.fields);
-  const schema = Object.keys(clientSchema).length ? clientSchema : effective.schema;
-  const quoteParams = model ? buildQuoteBody(body, schema, effective.fields, effective.required) : {};
-  const unsupported = effective.required.filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
-  const catalogCost = finite(model?.cost_usd);
-  let providerCostUsd = catalogCost;
-  let currency = str(model?.cost_currency, 10) || "USD";
-  let quoteAvailable = Boolean(catalogCost && catalogCost > 0);
+  const resolved = requestedModelId
+    ? await resolveProviderQuote(body)
+    : null;
+  const quote = resolved?.quote ?? null;
+  const providerCostUsd = quote?.available ? quote.cost_usd : null;
+  const quoteAvailable = Boolean(quote?.available && providerCostUsd && providerCostUsd > 0);
+  const modelAvailable = Boolean(resolved?.modelAvailable);
+  const modelStatus: Status = resolved?.modelStatus ?? "disabled";
 
-  if (model && dynamic) {
-    quoteAvailable = false;
-    if (!MUAPI_KEY()) {
-      providerCostUsd = null;
-    } else if (!estimateEndpoint) {
-      providerCostUsd = null;
-    } else if (effective.required.includes("prompt") && !str(quoteParams.prompt, 4000)) {
-      providerCostUsd = null;
-    } else {
-      const reply = await muapiFetch(estimateEndpoint, { method: "POST", useKey: true, body: quoteParams, timeout: 20000 });
-      providerCostUsd = reply.ok ? providerCost(reply) : null;
-      if (reply.ok && providerCostUsd !== null) {
-        currency = providerCurrency(reply, currency);
-        quoteAvailable = providerCostUsd > 0;
-      }
-    }
-  }
-
-  const modelAvailable = Boolean(model && bool(model.active, false) && bool(model.is_enabled, true)
-    && !bool(model.is_coming_soon, false) && !unsupported.length);
-  const modelStatus: Status = !model ? "disabled"
-    : !bool(model.is_enabled, true) ? "disabled"
-      : bool(model.is_coming_soon, false) ? "coming_soon"
-        : unsupported.length ? "unsupported"
-          : "active";
-  const modelReason = !model ? "Modèle vidéo inconnu."
-    : unsupported.length ? "Ce modèle nécessite un réglage qui n'est pas encore pris en charge."
-      : modelAvailable ? "Disponible dans VYORA." : "Indisponible momentanément.";
   let creditsCost: number | null = null;
   let quoteId: string | null = null;
   let pricingError: string | null = null;
   if (!service?.active || !modelAvailable) {
     pricingError = "Ce modèle ou ce service n'est pas disponible pour le moment.";
-  } else if (!quoteAvailable || providerCostUsd === null || currency.toUpperCase() !== "USD") {
-    pricingError = "Le tarif exact de cette génération n'est pas disponible.";
+  } else if (!quoteAvailable || providerCostUsd === null) {
+    pricingError = quote?.error_message ?? "Le tarif exact de cette génération n'est pas disponible.";
   } else {
     const config = await loadVideoPricingConfig();
     if (!config?.enabled || config.usd_to_xof === null || config.credit_value_xof === null
       || config.markup_percent === null || config.additional_cost_usd === null || !config.updated_at) {
-      pricingError = "La tarification n'est pas encore configurée et validée.";
+      pricingError = "La tarification en crédits n'est pas encore configurée. Le devis fournisseur en USD reste disponible, mais la réservation de crédits est bloquée.";
     } else {
       creditsCost = calculateVideoCredits(providerCostUsd, config);
       if (creditsCost === null) {
         pricingError = "Le tarif exact de cette génération n'est pas disponible.";
       } else {
-        const pricingParams = pricingParameters(quoteParams);
+        const pricingParams = pricingParameters(resolved?.quoteParams ?? {});
         const recorded = await rpcService("reelora_record_video_quote", {
           p_user_id: userId,
           p_service_key: serviceKey,
-          p_model_id: modelId,
-          p_public_model_id: publicModelId,
+          p_model_id: resolved?.modelId ?? "",
+          p_public_model_id: resolved?.publicModelId ?? "",
           p_credits_cost: creditsCost,
           p_provider_cost_usd: providerCostUsd,
           p_usd_to_xof: config.usd_to_xof,
@@ -1020,14 +1105,15 @@ async function actionEstimate(body: Json, userId: string): Promise<Response> {
     service_key: serviceKey,
     credits_cost: creditsCost,
     service_active: Boolean(service?.active),
-    model_id: publicModelId || null,
+    model_id: resolved?.publicModelId ?? null,
     model_available: modelAvailable,
     model_status: modelStatus,
-    model_reason: modelReason,
+    model_reason: resolved?.modelReason ?? "Modèle vidéo inconnu.",
     pricing_available: Boolean(quoteId),
     pricing_error: pricingError,
     quote_id: quoteId,
     quote_expires_at: quoteId ? new Date(Date.now() + 10 * 60 * 1000).toISOString() : null,
+    provider_quote: quote,
   });
 }
 
@@ -1233,6 +1319,7 @@ export async function handler(req: Request): Promise<Response> {
     if (action === "model-detail") return await actionModelDetail(body);
     if (action === "models") return await actionModels();
     if (action === "estimate") return await actionEstimate(body, userId);
+    if (action === "quote" || action === "provider-quote") return await actionProviderQuote(body);
     const jobId = str(body.job_id, 80);
     if (!jobId) return fail("INVALID_INPUT", "job_id requis.", 400);
     if (action === "start") return await actionStart(jobId, userId);

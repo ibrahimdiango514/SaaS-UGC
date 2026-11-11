@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Activity, Coins, CreditCard, FileClock, RefreshCw, Settings2, Shield, Users, Video, Zap } from 'lucide-react';
+import { Activity, Bot, Coins, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Modal, Banner, LoadingState, ErrorState, EmptyState, Tabs, StatCard } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
 import { formatDate, formatMoney, statusLabel, truncate } from '../lib/format';
 import ProviderBudgetSettings from './admin/ProviderBudgetSettings';
+import CreditManager from './admin/CreditManager';
 import {
-  adminAdjustCredits, adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminProviderSpendSummary,
+  GrowthActivitySection, KpiSection, ModelsSection, ProvidersSection, RevenueSection, StudioActivitySection, money,
+} from './admin/AdminSections';
+import {
+  adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminMetrics, adminProviderSpendSummary,
   adminSetProviderSpendCap, adminSetVideoPricing,
   adminVideoCatalog,
   adminListRecharges, adminListSettings, adminListUsers, adminOverview, adminSetAccountStatus,
   adminSetPlan, adminSetRole, adminSetSetting, adminUpdateService, listPlans, listServices,
 } from '../lib/api';
-import type { AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
+import type { AdminMetrics, AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
 
 type AuditLog = { id: string; action: string; target_type: string | null; target_id: string | null; details: Record<string, unknown>; created_at: string; actor_user_id: string };
 type Setting = { setting_key: string; setting_value: Record<string, unknown>; description: string | null };
@@ -36,8 +40,6 @@ export default function Admin() {
   const [busy, setBusy] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [creditsModal, setCreditsModal] = useState<AdminUser | null>(null);
-  const [delta, setDelta] = useState(25);
-  const [reason, setReason] = useState('Ajustement manuel');
   const [promoCode, setPromoCode] = useState('');
   const [promoCredits, setPromoCredits] = useState(25);
   const [promoMax, setPromoMax] = useState(100);
@@ -55,6 +57,19 @@ export default function Admin() {
   const [providerSpend, setProviderSpend] = useState<AdminProviderSpendSummary | null>(null);
   const [providerSpendError, setProviderSpendError] = useState('');
   const [providerSpendCapDraft, setProviderSpendCapDraft] = useState('0');
+  const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsError, setMetricsError] = useState('');
+  const [metricsMonths, setMetricsMonths] = useState(12);
+
+  const loadMetrics = useCallback(async (months: number) => {
+    setMetricsLoading(true); setMetricsError('');
+    try { setMetrics(await adminMetrics(months)); }
+    catch (err) { setMetricsError(asAppError(err).message); }
+    finally { setMetricsLoading(false); }
+  }, []);
+
+  useEffect(() => { void loadMetrics(metricsMonths); }, [loadMetrics, metricsMonths]);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -91,11 +106,6 @@ export default function Admin() {
     finally { setBusy(null); }
   };
 
-  const onCredits = async (e: FormEvent) => {
-    e.preventDefault(); if (!creditsModal) return;
-    await run('credits', () => adminAdjustCredits(creditsModal.id, delta, reason), 'Crédits ajustés.');
-    setCreditsModal(null);
-  };
 
   const onPromo = async (e: FormEvent) => {
     e.preventDefault();
@@ -188,9 +198,15 @@ export default function Admin() {
         actions={<Button variant="ghost" size="sm" onClick={() => void load()}>Actualiser</Button>} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { id: 'overview', label: 'Vue d’ensemble', icon: <Activity size={14} /> },
+        { id: 'revenues', label: 'Revenus', icon: <CreditCard size={14} /> },
+        { id: 'kpis', label: 'KPI & MRR', icon: <TrendingUp size={14} /> },
         { id: 'users', label: `Utilisateurs (${users.length})`, icon: <Users size={14} /> },
         { id: 'recharges', label: 'Recharges', icon: <CreditCard size={14} /> },
         { id: 'services', label: 'Services', icon: <Zap size={14} /> },
+        { id: 'models', label: 'Modèles vidéo', icon: <Video size={14} /> },
+        { id: 'providers', label: 'Fournisseurs IA', icon: <Bot size={14} /> },
+        { id: 'studio-activity', label: 'Activité Studio', icon: <Video size={14} /> },
+        { id: 'growth-activity', label: 'Activité Business Growth', icon: <Sparkles size={14} /> },
         { id: 'video-pricing', label: 'Tarifs vidéo', icon: <Video size={14} /> },
         { id: 'settings', label: 'Paramètres', icon: <Settings2 size={14} /> },
         { id: 'audit', label: 'Journal', icon: <FileClock size={14} /> },
@@ -198,6 +214,12 @@ export default function Admin() {
 
       {tab === 'overview' && overview && (
         <>
+          <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Revenus encaissés" value={metrics ? money(metrics.revenue.collected_total_minor, metrics.revenue.currency) : '—'} icon={<CreditCard size={19} />} hint={metrics ? `${metrics.revenue.collected_orders} commande(s) payée(s)` : undefined} tone="emerald" />
+            <StatCard label="MRR" value={metrics ? money(metrics.mrr.current_minor, metrics.mrr.currency) : '—'} icon={<TrendingUp size={19} />} hint={metrics ? `${metrics.mrr.active_recurring_subscriptions} abonnement(s) récurrent(s)` : undefined} tone="amber" />
+            <StatCard label="Période exploitable" value={metrics ? metrics.history.months_of_history : '—'} icon={<Activity size={19} />} hint={metrics ? `depuis ${metrics.history.exploitable_from}` : undefined} tone="cyan" />
+            <StatCard label="Modèles vidéo" value={metrics ? metrics.models.total : '—'} icon={<Video size={19} />} hint={metrics ? `${metrics.models.selectable} sélectionnable(s)` : undefined} />
+          </div>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Utilisateurs" value={overview.users} icon={<Users size={19} />} />
             <StatCard label="Projets" value={overview.projects} icon={<Shield size={19} />} tone="cyan" />
@@ -220,6 +242,26 @@ export default function Admin() {
         </>
       )}
 
+      {tab === 'revenues' && (
+        metricsError
+          ? <Banner tone="danger" title="Métriques indisponibles">{metricsError}</Banner>
+          : <RevenueSection metrics={metrics} loading={metricsLoading} months={metricsMonths} onMonths={setMetricsMonths} />
+      )}
+
+      {tab === 'kpis' && (
+        metricsError
+          ? <Banner tone="danger" title="Métriques indisponibles">{metricsError}</Banner>
+          : <KpiSection metrics={metrics} loading={metricsLoading} />
+      )}
+
+      {tab === 'models' && <ModelsSection />}
+
+      {tab === 'providers' && <ProvidersSection metrics={metrics} />}
+
+      {tab === 'studio-activity' && <StudioActivitySection metrics={metrics} loading={metricsLoading} />}
+
+      {tab === 'growth-activity' && <GrowthActivitySection metrics={metrics} loading={metricsLoading} />}
+
       {tab === 'users' && (
         <Card><CardHeader title="Utilisateurs & rôles" description="Actions réelles sur les tables Supabase, journalisées." action={<Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher…" className="max-w-xs" />} />
           {filteredUsers.length === 0 ? <EmptyState icon={<Users size={22} />} title="Aucun utilisateur" /> : (
@@ -232,7 +274,7 @@ export default function Admin() {
                   <td className="font-semibold text-amber-300">{u.credits}</td>
                   <td><Badge tone={u.roles.includes('admin') ? 'success' : 'neutral'}>{u.roles.includes('admin') ? 'admin' : 'user'}</Badge></td>
                   <td><div className="flex flex-wrap gap-1">
-                    <Button size="sm" variant="outline" icon={<Coins size={12} />} onClick={() => { setCreditsModal(u); setDelta(25); }}>Crédits</Button>
+                    <Button size="sm" variant="outline" icon={<Coins size={12} />} onClick={() => setCreditsModal(u)}>Crédits</Button>
                     <Button size="sm" variant="ghost" loading={busy === `role-${u.id}`} onClick={() => void run(`role-${u.id}`, () => adminSetRole(u.id, u.roles.includes('admin') ? 'user' : 'admin'), 'Rôle modifié.')}>{u.roles.includes('admin') ? 'Retirer admin' : 'Promouvoir'}</Button>
                     <Button size="sm" variant="ghost" loading={busy === `status-${u.id}`} onClick={() => void run(`status-${u.id}`, () => adminSetAccountStatus(u.id, u.subscription_status === 'suspended' ? 'active' : 'suspended'), 'Statut modifié.')}>{u.subscription_status === 'suspended' ? 'Réactiver' : 'Suspendre'}</Button>
                   </div></td>
@@ -380,13 +422,11 @@ export default function Admin() {
         </Card>
       )}
 
-      <Modal open={Boolean(creditsModal)} onClose={() => setCreditsModal(null)} title="Ajuster les crédits" description={creditsModal?.email}
-        footer={<><Button variant="ghost" onClick={() => setCreditsModal(null)}>Annuler</Button><Button type="submit" form="credits-form" loading={busy === 'credits'}>Appliquer</Button></>}>
-        <form id="credits-form" onSubmit={(e) => void onCredits(e)} className="space-y-4">
-          <Input label="Variation (négative pour retirer)" type="number" min={-100000} max={100000} value={delta} onChange={(e) => setDelta(Number(e.target.value))} />
-          <Input label="Motif" value={reason} onChange={(e) => setReason(e.target.value)} />
-        </form>
-      </Modal>
+      <CreditManager
+        user={creditsModal ? { id: creditsModal.id, email: creditsModal.email } : null}
+        onClose={() => setCreditsModal(null)}
+        onApplied={() => { void load(); }}
+      />
 
       <Modal open={Boolean(editingService)} onClose={() => setEditingService(null)} title="Modifier le service" description={editingService?.display_name}
         footer={<><Button variant="ghost" onClick={() => setEditingService(null)}>Annuler</Button><Button type="submit" form="service-form" loading={busy === 'service'}>Enregistrer</Button></>}>

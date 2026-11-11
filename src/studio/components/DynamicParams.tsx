@@ -77,7 +77,7 @@ function Field({ name, model, value, onChange }: {
     );
   }
 
-  // Arrays/objects are declared by some MuAPI schemas but Reelora has no
+  // Arrays/objects are declared by some MuAPI schemas but VYORA has no
   // connected editor for them yet. Never invent a control or a value.
   return null;
 }

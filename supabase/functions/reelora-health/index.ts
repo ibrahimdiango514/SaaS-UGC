@@ -1,4 +1,4 @@
-// Reelora health probe — reports ONLY the presence of server-side secrets,
+// VYORA health probe — reports ONLY the presence of server-side secrets,
 // never their values. The browser uses it to explain why a feature is disabled.
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",

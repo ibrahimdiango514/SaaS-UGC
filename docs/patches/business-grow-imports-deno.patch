@@ -1,0 +1,22 @@
+diff --git a/supabase/functions/business-grow/handler.ts b/supabase/functions/business-grow/handler.ts
+index 287de09..614f918 100644
+--- a/supabase/functions/business-grow/handler.ts
++++ b/supabase/functions/business-grow/handler.ts
+@@ -8,7 +8,7 @@ import {
+   type ExtractedToolProposal,
+   type MemorySnapshot,
+   type WorkspaceCompanyContext,
+-} from './intelligence';
++} from './intelligence.ts';
+ import {
+   listRemoteModels,
+   probeProvider,
+@@ -18,7 +18,7 @@ import {
+   type ProviderConfig,
+   type ProviderProbeResult,
+   type ProviderReply,
+-} from './providers';
++} from './providers.ts';
+ 
+ export type BusinessAction =
+   | 'status'

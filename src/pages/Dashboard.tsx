@@ -50,7 +50,9 @@ export default function Dashboard() {
 
   return (
     <>
-      <section className="relative isolate mb-6 overflow-hidden rounded-[1.75rem] border border-white/[0.09] bg-[#0b1119] px-5 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-9" aria-label="Bienvenue dans VYORA">
+      <section className="relative isolate mb-6 overflow-hidden rounded-[1.75rem] border border-white/[0.09] bg-[#080d15] px-5 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-9" aria-label="Bienvenue dans VYORA">
+        <img src="/brand/vyora-hero.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 -z-20 hidden h-full w-[62%] object-cover object-[62%_45%] opacity-40 lg:block [mask-image:linear-gradient(to_right,transparent,black_38%)]" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-r from-[#080d15] via-[#080d15]/85 to-transparent" />
         <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 -z-10 hidden w-[54%] bg-[radial-gradient(ellipse_at_68%_45%,rgba(34,211,238,.12),transparent_58%),radial-gradient(ellipse_at_96%_0%,rgba(167,139,250,.12),transparent_55%)] lg:block" />
         <div className="grid items-center gap-8 lg:grid-cols-[1.1fr_.9fr]">
           <div>
@@ -67,9 +69,14 @@ export default function Dashboard() {
               Du contenu qui raconte votre histoire à la stratégie qui fait avancer votre activité : votre prochain pas commence ici.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-2.5">
-              <Link to="/app/studio" className="btn btn-primary btn-md"><Play size={15} /> Créer avec Studio</Link>
+              <Link to="/app/studio" className="btn btn-primary btn-md vyora-btn-sheen"><Play size={15} /> Créer avec Studio</Link>
               <Link to="/app/business" className="btn btn-outline btn-md"><Brain size={15} /> Explorer Business</Link>
               <Button variant="ghost" size="sm" onClick={() => void load()} icon={<RefreshCw size={14} />}>Actualiser</Button>
+            </div>
+            <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-slate-500">
+              <span className="flex items-center gap-1.5"><CheckCircle2 size={11} className="text-emerald-400" /> Devis vérifié avant génération</span>
+              <span className="flex items-center gap-1.5"><CheckCircle2 size={11} className="text-emerald-400" /> Espace isolé par compte</span>
+              <span className="flex items-center gap-1.5"><CheckCircle2 size={11} className="text-emerald-400" /> Aucun résultat simulé</span>
             </div>
           </div>
           <div className="relative hidden min-h-[220px] items-center justify-center lg:flex">

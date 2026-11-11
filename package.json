@@ -1,16 +1,17 @@
 {
-  "name": "reelora",
+  "name": "vyora",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Reelora — SaaS de création de contenus UGC avec IA",
+  "description": "VYORA — SaaS de création de contenus UGC et de croissance assistée par IA",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:edge-imports": "node scripts/check-edge-imports.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",

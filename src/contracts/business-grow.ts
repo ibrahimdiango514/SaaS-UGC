@@ -1,6 +1,6 @@
 /**
  * Contrats publics et stables entre le moteur IA Business Grow (géré par Arena)
- * et le reste de la plateforme Reelora (développé dans VS Code : Studio UGC,
+ * et le reste de la plateforme VYORA (développé dans VS Code : Studio UGC,
  * Dashboard, Projets, Éditeur, Paramètres, Abonnement et futurs Connecteurs).
  *
  * Règle anti-conflit :
@@ -43,6 +43,7 @@ export interface BusinessGrowUgcHandoffBrief {
 
 export type BusinessGrowWorkspaceSection =
   | 'chat'
+  | 'growth'
   | 'company'
   | 'memory'
   | 'providers'
@@ -242,7 +243,7 @@ export function formatUgcPromptFromBrief(brief: BusinessGrowUgcHandoffBrief): st
 }
 
 const VALID_SECTIONS = new Set<BusinessGrowWorkspaceSection>([
-  'chat', 'company', 'memory', 'providers', 'integrations',
+  'chat', 'growth', 'company', 'memory', 'providers', 'integrations',
 ]);
 
 const VALID_ROLES = new Set<BusinessRoleKey>([

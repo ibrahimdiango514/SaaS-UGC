@@ -8,17 +8,18 @@ import { Banner, Button, ErrorState, LoadingState, Modal, Select, cn } from '../
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
-  cancelGeneration, createProject, estimateVideo, generateScript, getJob, healthCheck,
-  getVideoCatalog, getVideoModelDetail, listAvatars, listProjects, listServices,
+  cancelGeneration, createProject, estimateVideo, generateScript, getJob, getVideoProviderQuote,
+  healthCheck, getVideoCatalog, getVideoModelDetail, listAvatars, listProjects, listServices,
   newGenerationIdempotencyKey, signedStorageUrl, startGeneration, uploadReferenceImage,
   videoStart, videoStatus,
 } from '../lib/api';
 import { asAppError } from '../lib/errors';
 import type {
-  Avatar, GenerationJob, MuApiModel, Project, ServiceCatalogItem, VideoActionResult,
+  Avatar, GenerationJob, MuApiModel, Project, ProviderQuote, ServiceCatalogItem, VideoActionResult,
   VideoCatalogDiagnostics, VideoCostEstimate,
 } from '../lib/types';
 import { CostConfirm } from './components/CostConfirm';
+import { ProviderQuotePanel } from './components/ProviderQuotePanel';
 import { GenerationEmptyState } from './components/GenerationEmptyState';
 import { AfterGeneration } from './components/AfterGeneration';
 import { CatalogBrowser } from './components/CatalogBrowser';
@@ -117,6 +118,9 @@ export default function GenerationStudio() {
   const [projectModal, setProjectModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [estimate, setEstimate] = useState<VideoCostEstimate | null>(null);
+  const [providerQuote, setProviderQuote] = useState<ProviderQuote | null>(null);
+  const [providerQuoteBusy, setProviderQuoteBusy] = useState(false);
+  const [providerQuoteError, setProviderQuoteError] = useState('');
   const [aiPlan, setAiPlan] = useState<ProductionPlan | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMessage, setAiMessage] = useState('');
@@ -329,10 +333,13 @@ export default function GenerationStudio() {
   // Quote is computed EXCLUSIVELY by the backend, with exact model + params.
   useEffect(() => {
     if (!service || !model) {
-      setEstimate(null); setEstimateError(''); setQuoteBusy(false); return;
+      setEstimate(null); setEstimateError(''); setQuoteBusy(false);
+      setProviderQuote(null); setProviderQuoteError(''); setProviderQuoteBusy(false);
+      return;
     }
     let active = true;
     setEstimate(null); setEstimateError('');
+    setProviderQuote(null); setProviderQuoteError('');
     const timer = window.setTimeout(() => {
       setQuoteBusy(true);
       void estimateVideo(service.service_key, model.model_id, {
@@ -343,11 +350,15 @@ export default function GenerationStudio() {
         .then((e) => {
           if (!active) return;
           setEstimate(e);
+          setProviderQuote(e.provider_quote ?? null);
+          setProviderQuoteError(e.provider_quote ? '' : 'Le serveur n’a pas renvoyé de devis fournisseur pour ces paramètres.');
           setEstimateError(e.pricing_error ?? (!e.pricing_available ? 'Le coût en crédits est temporairement indisponible.' : ''));
         })
         .catch(() => {
           if (!active) return;
           setEstimate(null);
+          setProviderQuote(null);
+          setProviderQuoteError('Impossible de joindre le service de devis. Réessayez.');
           setEstimateError('Impossible de calculer le coût en crédits. Réessayez.');
         })
         .finally(() => { if (active) setQuoteBusy(false); });
@@ -355,6 +366,26 @@ export default function GenerationStudio() {
     return () => { active = false; window.clearTimeout(timer); };
   }, [service?.service_key, model?.model_id, schemaKey, inputFieldsKey, paramsKey, form.prompt,
     reference?.url, reference?.lastUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const refreshProviderQuote = useCallback(async () => {
+    if (!model) return;
+    setProviderQuoteBusy(true);
+    setProviderQuoteError('');
+    try {
+      const result = await getVideoProviderQuote(model.model_id, {
+        params: compatible, prompt: form.prompt.trim(),
+        image_url: reference?.url, last_image_url: reference?.lastUrl,
+        param_schema: model.param_schema,
+      });
+      setProviderQuote(result.quote);
+      if (!result.quote.available) setProviderQuoteError('');
+      if (!result.model_available) setProviderQuoteError(result.model_reason ?? 'Ce modèle n’est plus disponible.');
+    } catch (err) {
+      setProviderQuoteError(asAppError(err).message);
+    } finally {
+      setProviderQuoteBusy(false);
+    }
+  }, [model, compatible, form.prompt, reference?.url, reference?.lastUrl]);
 
   const requiresExactQuote = Boolean(model?.dynamic_pricing);
   const summary = creditSummary(estimate, balance, requiresExactQuote);
@@ -626,6 +657,43 @@ export default function GenerationStudio() {
     <div className="studio-v2 animate-fadeUp pb-2">
       <StudioTopBar />
 
+      <section className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="État du studio">
+        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
+          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Catalogue vidéo</p>
+          <p className="mt-1 text-sm font-semibold text-white">{models.length} modèle(s)</p>
+          <p className={cn('mt-0.5 flex items-center gap-1 text-[10px]', catalog?.verified ? 'text-emerald-300' : 'text-amber-200')}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', catalog?.verified ? 'bg-emerald-300' : 'bg-amber-300')} />
+            {catalog?.verified ? 'Vérifié côté serveur' : 'Vérification en cours'}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
+          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Devis fournisseur</p>
+          <p className="mt-1 text-sm font-semibold text-white">
+            {providerQuoteBusy ? 'Calcul…' : providerQuote?.available ? 'Disponible en USD' : 'Non vérifié'}
+          </p>
+          <p className="mt-0.5 text-[10px] text-slate-500">
+            {providerQuote?.available ? `${providerQuote.cost_usd?.toFixed(2)} $ · avant génération` : 'Aucun prix inventé'}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
+          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Crédits Studio</p>
+          <p className="mt-1 text-sm font-semibold text-white">{balance}</p>
+          <p className="mt-0.5 text-[10px] text-slate-500">Réservation uniquement après confirmation</p>
+        </div>
+        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
+          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Projet actif</p>
+          <p className="mt-1 truncate text-sm font-semibold text-white">
+            {projects.find((p) => p.id === projectId)?.title ?? 'Aucun projet sélectionné'}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-2 text-[10px]">
+            <Link to="/app/projets" className="text-cyan-200 transition hover:text-white">Projets</Link>
+            <Link to="/app/historique" className="text-cyan-200 transition hover:text-white">Historique</Link>
+            <Link to="/app/bibliotheque" className="text-cyan-200 transition hover:text-white">Bibliothèque</Link>
+            <Link to="/app/scripts" className="text-cyan-200 transition hover:text-white">Scripts</Link>
+          </div>
+        </div>
+      </section>
+
       <div className="hidden flex-wrap items-center justify-between gap-2 sm:flex">
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1.5 text-[11px] text-cyan-200">
@@ -751,6 +819,12 @@ export default function GenerationStudio() {
               {summary.quoteToConfirm && <p data-testid="studio-quote-warning" className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-2 py-1.5 text-[10px] font-semibold leading-relaxed text-amber-200">Coût en crédits à confirmer : génération bloquée.</p>}
               <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-500"><Info size={11} className="mt-0.5 shrink-0" /> Le coût est vérifié avant réservation. Les crédits sont débités uniquement après réussite et restitués en cas d’échec.</p>
             </div>
+            <ProviderQuotePanel
+              quote={providerQuote}
+              busy={providerQuoteBusy}
+              error={providerQuoteError}
+              onRefresh={() => { void refreshProviderQuote(); }}
+            />
             <div className="rounded-2xl border border-white/[0.08] bg-[#080d14] p-4">
               <p className="text-[11px] font-semibold text-white">Paramètres réellement envoyés</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -805,6 +879,8 @@ export default function GenerationStudio() {
 
       {model && estimate && (
         <CostConfirm open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={() => void onConfirm()}
+          providerQuote={providerQuote} providerQuoteBusy={providerQuoteBusy}
+          onRefreshProviderQuote={() => { void refreshProviderQuote(); }}
           model={model} estimate={estimate} balance={balance} params={compatible}
           loading={starting} blockedReason={blockedReason} />
       )}

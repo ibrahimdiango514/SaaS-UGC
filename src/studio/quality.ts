@@ -1,5 +1,5 @@
 /**
- * Quality tiers are a Reelora UX abstraction over the REAL backend.
+ * Quality tiers are a VYORA UX abstraction over the REAL backend.
  *
  * - Credits are quoted by the server for the selected model and parameters.
  * - The model order comes from the curated catalogue, not a client-visible

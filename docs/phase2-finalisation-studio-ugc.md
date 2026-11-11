@@ -1,4 +1,4 @@
-# REELORA — Phase 2 : finalisation du Studio UGC
+# VYORA — Phase 2 : finalisation du Studio UGC
 
 **Branche** : `arena/e22e624f-saas-ugc` (active). **Main** : inchangée. **PR** : ouverte uniquement après la fin des tests, non fusionnée. **Aucune génération vidéo n’a été exécutée ni validée pendant cette phase.**
 
@@ -14,7 +14,7 @@ Ce rapport distingue strictement :
 
 Ces résultats appartiennent à la phase précédente (`3b99f98`, `27b2ab9`) et n’ont **pas** été refaits en Phase 2 :
 
-- catalogue authentifié : **415** modèles retournés, **236** actifs Reelora, **179** indisponibles (`176` entrées requises non connectées + `3` `coming_soon`) ;
+- catalogue authentifié : **415** modèles retournés, **236** actifs VYORA, **179** indisponibles (`176` entrées requises non connectées + `3` `coming_soon`) ;
 - **4** fiches `model-detail` consultées ; **3** devis `estimate_cost` exacts, sans génération ;
 - Rapide `wan2.2-5b-fast-t2v` : **9 crédits UGC / 0,020 USD** ;
 - Standard `seedance-2.5-spicy-text-to-video` : **16 crédits UGC / 1,870 USD** ;
@@ -34,8 +34,8 @@ Requêtes `SELECT` sur `saas_ugc.ugc_video_models` via le connecteur Supabase, s
 | `total` | 415 | références du catalogue synchronisé |
 | `active_compatible` | 412 | lignes `active && is_enabled && !is_coming_soon` |
 | `coming_soon` | 3 | non sélectionnables |
-| `unsupported_required` | 176 | `required_fields` non connectés par Reelora |
-| **actifs Reelora** | **236 = 412 − 176** | sélectionnables dans le parcours actuel |
+| `unsupported_required` | 176 | `required_fields` non connectés par VYORA |
+| **actifs VYORA** | **236 = 412 − 176** | sélectionnables dans le parcours actuel |
 | `dynamic_pricing` | 412 | devis `estimate-cost` déclaré |
 | `estimate_endpoint` | 412 | endpoint de devis déclaré |
 | `input_fields.aspect_ratio` | 251 | capacité déclarée |
@@ -44,9 +44,9 @@ Requêtes `SELECT` sur `saas_ugc.ugc_video_models` via le connecteur Supabase, s
 | `param_schema` typés `select` | 3 / 3 / 4 | ratio / résolution / durée |
 | `min_cost` / `max_cost` | 0,0000 / 9,3500 USD | le `0,0000` réel concerne `add-video-watermark`, non sélectionnable (`video_url`, `watermark_image_url`) |
 | `missing_cost` | 0 | aucun coût catalogue manquant |
-| catégories des 412 lignes | 8 | dont 5 catégories parmi les 236 actifs Reelora |
+| catégories des 412 lignes | 8 | dont 5 catégories parmi les 236 actifs VYORA |
 
-Répartition des **236 actifs Reelora** : `Image to Video` 118, `Text to Video` 109, `Video to Video` 4, `Lora Support` 3, `Training` 2.
+Répartition des **236 actifs VYORA** : `Image to Video` 118, `Text to Video` 109, `Video to Video` 4, `Lora Support` 3, `Training` 2.
 
 Point corrigé : `selectOptions()` exigeait `type === 'select'` alors que la plupart des schémas synchronisés déclarent `aspect_ratio` / `resolution` / `duration` en `string` ou `number` avec ou sans `options`. La Phase 2 accepte désormais toute **option réellement déclarée**, quel que soit son type, et n’invente jamais `9:16`, `720p` ou une durée lorsque le schéma synchronisé ne publie ni option ni borne. Les valeurs exactes restent chargées via `model-detail` côté serveur.
 
@@ -70,7 +70,7 @@ Contrôle final lecture seule : `catalog_rows=415`, `jobs=0`, `assets=0`, `ledge
 - `quality.ts` : `catalogByCost` n’utilise plus `NaN → 0` comme coût ; un prix inconnu n’est jamais classé « plus économique ». `qualityTierSummary()` expose la correspondance exacte **Rapide / Standard / Premium → service + crédits + modèle réel**.
 - `model.ts` / `DynamicParams.tsx` : options déclarées sur `string`/`number` respectées ; bornes `min`/`max` réelles uniquement ; champs structurés affichés comme **non connectés** ; aucune valeur de substitution.
 
-### 3.2 Devis USD, crédits Reelora et confirmation
+### 3.2 Devis USD, crédits VYORA et confirmation
 
 - `usableCostUsd`, `hasUsableProviderCost`, `providerQuoteCostLabel` : `null`, chaîne vide, `NaN`, `source='unavailable'` et `provider_quote_error` donnent **« devis fournisseur à confirmer »** ; jamais `0.000 USD` factice.
 - `creditSummary()` : les crédits viennent du serveur, le coût USD du fournisseur est affiché séparément, **aucune conversion USD → crédits**. Un modèle dynamique exige `provider_quote_source='estimate_cost'` ; un tarif catalogue est factuel mais explicitement « devis exact non disponible » et ne déclenche pas de génération pour un modèle dynamique.

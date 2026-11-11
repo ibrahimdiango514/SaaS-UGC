@@ -1,11 +1,11 @@
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
-  AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
+  AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
   ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
-  Workspace, WorkspaceMember, MuApiParamDef,
+  Workspace, WorkspaceMember, MuApiParamDef, ProviderQuote, ReeloraModelStatus,
 } from './types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -521,6 +521,37 @@ export function getVideoModelDetail(modelId: string): Promise<{ model: MuApiMode
   return invokeEdge<{ model: MuApiModel }>('reelora-video', { action: 'model-detail', model_id: modelId });
 }
 
+export interface VideoProviderQuoteResponse {
+  model_id: string | null;
+  model_available: boolean;
+  model_status?: ReeloraModelStatus;
+  model_reason?: string | null;
+  quote: ProviderQuote;
+}
+
+/**
+ * Devis fournisseur réel pour un modèle et des paramètres exacts.
+ * Le backend interroge `estimate-cost` (aucune génération, aucun débit).
+ * Si le tarif ne peut pas être vérifié, `quote.available` vaut `false` :
+ * l'appelant doit afficher l'indisponibilité, jamais un montant local.
+ */
+export async function getVideoProviderQuote(modelId: string, quote?: VideoQuoteInput): Promise<VideoProviderQuoteResponse> {
+  const body: Record<string, unknown> = { model_id: modelId };
+  if (quote?.params) body.params = quote.params;
+  if (quote?.prompt) body.prompt = quote.prompt;
+  if (quote?.image_url) body.image_url = quote.image_url;
+  if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
+  if (quote?.param_schema) body.param_schema = quote.param_schema;
+  try {
+    // Service de devis dédié (déployé indépendamment de la passerelle de génération).
+    return await invokeEdge<VideoProviderQuoteResponse>('video-quote', body);
+  } catch (error) {
+    if (error instanceof AppError && error.code !== 'EDGE_ERROR' && error.code !== 'QUOTE_INTERNAL_ERROR') throw error;
+    // Repli : action `quote` de la passerelle pour les environnements où le service dédié n'est pas déployé.
+    return invokeEdge<VideoProviderQuoteResponse>('reelora-video', { ...body, action: 'quote' });
+  }
+}
+
 export interface VideoQuoteInput {
   params?: Record<string, string | number | boolean>;
   prompt?: string;
@@ -535,14 +566,23 @@ export interface VideoQuoteInput {
  * backend may call MuAPI's non-generating estimate-cost endpoint to obtain the
  * exact USD price for these exact parameters. No inference or media is created.
  */
-export function estimateVideo(serviceKey: string, modelId: string, quote?: VideoQuoteInput): Promise<VideoCostEstimate> {
+export async function estimateVideo(serviceKey: string, modelId: string, quote?: VideoQuoteInput): Promise<VideoCostEstimate> {
   const body: Record<string, unknown> = { action: 'estimate', service_key: serviceKey, model_id: modelId };
   if (quote?.params) body.params = quote.params;
   if (quote?.prompt) body.prompt = quote.prompt;
   if (quote?.image_url) body.image_url = quote.image_url;
   if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
   if (quote?.param_schema) body.param_schema = quote.param_schema;
-  return invokeEdge<VideoCostEstimate>('reelora-video', body);
+  const estimate = await invokeEdge<VideoCostEstimate>('reelora-video', body);
+  if (estimate.provider_quote) return estimate;
+  try {
+    // La passerelle de génération peut être antérieure au devis fournisseur :
+    // le service dédié fournit alors le tarif réel sans lancer de génération.
+    const detail = await getVideoProviderQuote(modelId, quote);
+    return { ...estimate, provider_quote: detail.quote };
+  } catch {
+    return estimate;
+  }
 }
 
 export async function cancelGeneration(jobId: string): Promise<boolean> {
@@ -695,6 +735,24 @@ export async function adminOverview(): Promise<AdminOverview> {
   return rpc<AdminOverview>('reelora_admin_overview');
 }
 
+export interface AiEngineHealth {
+  service?: string;
+  status?: string;
+  providers: {
+    groq?: { configured: boolean; model: string };
+    gemini?: { configured: boolean; model: string };
+  };
+}
+
+/** Real server-side probe of the central AI engine (model names, no keys). */
+export async function aiEngineHealth(): Promise<AiEngineHealth> {
+  return invokeEdge<AiEngineHealth>('vyora-ai', { action: 'health' });
+}
+
+export async function adminMetrics(months = 12): Promise<AdminMetrics> {
+  return rpc<AdminMetrics>('vyora_admin_metrics', { p_months: months });
+}
+
 export async function adminListUsers(): Promise<AdminUser[]> {
   return rpc<AdminUser[]>('reelora_admin_list_users');
 }
@@ -709,6 +767,20 @@ export async function adminSetPlan(userId: string, planKey: string) {
 
 export async function adminSetAccountStatus(userId: string, status: 'active' | 'suspended' | 'cancelled') {
   return rpc<boolean>('reelora_admin_set_account_status', { p_user_id: userId, p_status: status });
+}
+
+/**
+ * Ajustement de crédits réellement transactionnel (RPC serveur) :
+ * idempotent par clé, solde vérifié, journal d'audit, solde avant/après renvoyé.
+ */
+export async function adminCreditMovement(userId: string, delta: number, reason: string, idempotencyKey: string) {
+  return rpc<AdminCreditMovement>('vyora_admin_credit_movement', {
+    p_user_id: userId, p_delta: delta, p_reason: reason, p_idempotency_key: idempotencyKey,
+  });
+}
+
+export async function adminCreditHistory(userId: string, limit = 25) {
+  return rpc<AdminCreditHistory>('vyora_admin_credit_history', { p_user_id: userId, p_limit: limit });
 }
 
 export async function adminAdjustCredits(userId: string, delta: number, reason: string) {
@@ -782,27 +854,40 @@ export async function adminListAuditLogs() {
 /* AI (Groq via Edge Function)                                                 */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Moteur IA central VYORA (Groq + Gemini, routage et secours côté serveur).
+ * Repli sur l'ancienne passerelle uniquement si le service central n'est pas déployé.
+ */
+async function invokeAi<T>(body: Record<string, unknown>): Promise<T> {
+  try {
+    return await invokeEdge<T>('vyora-ai', body);
+  } catch (error) {
+    if (!(error instanceof AppError) || (error.code !== 'EDGE_ERROR' && error.code !== 'FUNCTION_NOT_FOUND')) throw error;
+    return invokeEdge<T>('reelora-ai', body);
+  }
+}
+
 export async function generateScript(payload: {
   project_id?: string | null; product: string; audience?: string; platform?: string; tone?: string;
   duration?: number; objective?: string; market?: string; brief?: string; template_id?: string | null; language?: string;
 }): Promise<AiScriptResult> {
-  return invokeEdge<AiScriptResult>('reelora-ai', { action: 'generate_script', ...payload });
+  return invokeAi<AiScriptResult>({ action: 'generate_script', ...payload });
 }
 
 export async function improvePrompt(content: string): Promise<{ content: string; variables: string[] }> {
-  return invokeEdge('reelora-ai', { action: 'improve_prompt', content });
+  return invokeAi<{ content: string; variables: string[] }>({ action: 'improve_prompt', content });
 }
 
 export async function generateHooks(product: string, audience: string): Promise<{ hooks: string[] }> {
-  return invokeEdge('reelora-ai', { action: 'generate_hooks', product, audience });
+  return invokeAi<{ hooks: string[] }>({ action: 'generate_hooks', product, audience });
 }
 
 export async function generateVisual(input: { product: string; scene_action: string; ambiance: string }): Promise<{ text: string }> {
-  return invokeEdge('reelora-ai', { action: 'generate_visual', ...input });
+  return invokeAi<{ text: string }>({ action: 'generate_visual', ...input });
 }
 
 export async function generateScenes(payload: { project_id?: string | null; script_text: string; duration?: number }): Promise<{ scenes: AiScene[] }> {
-  return invokeEdge('reelora-ai', { action: 'generate_scenes', ...payload });
+  return invokeAi<{ scenes: AiScene[] }>({ action: 'generate_scenes', ...payload });
 }
 
 export async function healthCheck(): Promise<{ configured: Record<string, boolean> }> {

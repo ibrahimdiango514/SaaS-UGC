@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useLocation } from 'react-router-dom';
 import {
   Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, LockKeyhole,
-  MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, X, Zap,
+  MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, X, Zap,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -14,6 +14,7 @@ import {
   type BusinessGrowEntryIntent,
 } from '../contracts/business-grow';
 import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
+import GrowthWorkspace from './growth/GrowthWorkspace';
 import type { Brand, Product, Workspace } from '../lib/types';
 import {
   BusinessGrowApiError, businessGrowApi,
@@ -27,10 +28,11 @@ import {
   type BusinessCapability, type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
 
-type BusinessSection = 'chat' | 'company' | 'memory' | 'providers' | 'integrations';
+type BusinessSection = 'chat' | 'growth' | 'company' | 'memory' | 'providers' | 'integrations';
 
 const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare }[] = [
   { id: 'chat', label: 'Assistant', icon: MessageSquare },
+  { id: 'growth', label: 'Croissance', icon: TrendingUp },
   { id: 'company', label: 'Entreprise', icon: Building2 },
   { id: 'memory', label: 'Mémoire métier', icon: Building2 },
   { id: 'providers', label: 'Services IA', icon: Zap },
@@ -1522,7 +1524,7 @@ export default function BusinessGrowWorkspace() {
   }, [accountScope]);
 
   useEffect(() => {
-    if (section === 'memory' && backendReady) void loadMemory();
+    if ((section === 'memory' || section === 'growth') && backendReady) void loadMemory();
   }, [backendReady, loadMemory, section]);
 
   const createConversation = useCallback(async () => {
@@ -1844,15 +1846,17 @@ export default function BusinessGrowWorkspace() {
 
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
-      <header className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b0d18] px-5 py-6 sm:px-7">
-        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-brand-500/20 blur-[90px]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 right-0 h-56 w-56 rounded-full bg-cyan-400/10 blur-[90px]" />
+      <header className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#080d15] px-5 py-6 sm:px-7">
+        <img src="/brand/vyora-growth.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 [mask-image:linear-gradient(to_right,transparent,black)]" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#080d15_20%,rgba(8,13,21,0.4))]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-brand-500/25 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 right-0 h-56 w-56 rounded-full bg-cyan-400/15 blur-[90px]" />
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-200">
               <Brain size={14} /> VYORA · Business Grow
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Votre copilote business</h1>
+            <h1 className="vyora-display text-2xl tracking-tight text-white sm:text-3xl">Votre copilote business</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
               Intelligence, stratégie et croissance, reliées à votre espace Studio UGC VYORA.
             </p>
@@ -1887,7 +1891,7 @@ export default function BusinessGrowWorkspace() {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="Navigation Business Grow" className="flex gap-2 overflow-x-auto rounded-2xl border border-white/[0.07] bg-panel/40 p-2 lg:flex-col lg:self-start">
+        <nav aria-label="Navigation Business Grow" className="flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -1895,8 +1899,10 @@ export default function BusinessGrowWorkspace() {
               onClick={() => setSection(id)}
               aria-current={section === id ? 'page' : undefined}
               className={cn(
-                'flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
-                section === id ? 'bg-brand-500/15 text-brand-100' : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
+                'relative flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
+                section === id
+                  ? 'bg-gradient-to-r from-brand-500/25 to-cyan-500/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]'
+                  : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
               )}
             >
               <Icon size={16} /> {label}
@@ -1944,6 +1950,19 @@ export default function BusinessGrowWorkspace() {
               onSelectConversation={setSelectedConversationId}
               onSend={sendMessage}
               onRetry={() => { void refreshWorkspace(); void loadMessages(); }}
+            />
+          )}
+          {section === 'growth' && (
+            <GrowthWorkspace
+              workspace={workspace}
+              workspaceId={workspaceId}
+              memory={memory}
+              loadingMemory={loadingMemory}
+              memoryError={memoryError}
+              onReloadMemory={loadMemory}
+              onOpenAssistant={() => setSection('chat')}
+              onOpenIntegrations={() => setSection('integrations')}
+              onOpenProviders={() => setSection('providers')}
             />
           )}
           {section === 'company' && <CompanyContextView workspace={workspace} />}

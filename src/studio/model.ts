@@ -42,7 +42,7 @@ export const MODE_DESCRIPTIONS: Record<GenerationMode, string> = {
 };
 
 /**
- * Required input fields Reelora can actually provide today. A verified model
+ * Required input fields VYORA can actually provide today. A verified model
  * that requires anything else (audio, video, multiple images, a previous
  * request id, …) is shown in the catalogue but never presented as a working
  * generation path until that capability is integrated.

@@ -1,4 +1,4 @@
-# REELORA — Validation authentifiée MuAPI et finalisation du Studio
+# VYORA — Validation authentifiée MuAPI et finalisation du Studio
 
 **Date d'exécution :** 2026-11-09 (horodatages UTC des outils Supabase).
 **Branche :** `arena/e22e624f-saas-ugc` (active, déjà basée sur `main` à jour).
@@ -76,7 +76,7 @@ endpoints           : GET /api/v1/models (public 200), GET /api/v1/models (authe
                       GET /api/v1/account/balance (200), GET /api/v1/keys (200)
 ```
 
-**Nombre de modèles réellement accessibles au compte : 415 références vidéo retournées par le catalogue authentifié**, dont **236 actives et sélectionnables dans Reelora** ; 176 entrées non connectées (champs média/structurés requis), 3 `coming_soon`. Réserve importante, déjà affichée dans l'UI : `GET /models` avec la clé ne prouve pas les **droits d'exécution** par modèle ; ces 415 ne sont pas une preuve que la génération aboutirait pour chacun.
+**Nombre de modèles réellement accessibles au compte : 415 références vidéo retournées par le catalogue authentifié**, dont **236 actives et sélectionnables dans VYORA** ; 176 entrées non connectées (champs média/structurés requis), 3 `coming_soon`. Réserve importante, déjà affichée dans l'UI : `GET /models` avec la clé ne prouve pas les **droits d'exécution** par modèle ; ces 415 ne sont pas une preuve que la génération aboutirait pour chacun.
 
 Le tri par coût réel appliqué au catalogue live (`catalogByCost` : mode `text-to-video`, `isModelAvailable`, `required_fields ⊆ {prompt,image_url}`, tri `cost_usd`) donne **104 modèles T2V éligibles** et les trois paliers ci-dessous. Aucun modèle fictif n'a été introduit.
 
@@ -95,7 +95,7 @@ Le tri par coût réel appliqué au catalogue live (`catalogByCost` : mode `text
 
 Trois `POST` Edge `action:estimate` avec le vrai JWT, `param_schema` issu des fiches live ci-dessus, et un prompt de 117 caractères. L'Edge a appelé **uniquement** `POST /api/v1/models/{name}/estimate-cost` côté MuAPI (jamais `POST /api/v1/{model}`).
 
-| Palier | Modèle (catalogue live) | Tarif catalogue | **Devis exact MuAPI** | Crédits Reelora | Service | `request_id` | `quote_source` |
+| Palier | Modèle (catalogue live) | Tarif catalogue | **Devis exact MuAPI** | Crédits VYORA | Service | `request_id` | `quote_source` |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Rapide | `wan2.2-5b-fast-t2v` | 0,016 USD | **0,02 USD** | 9 | `ugc_clip_8s` | 990 | `estimate_cost` |
 | Standard | `seedance-2.5-spicy-text-to-video` | 0,600 USD | **1,87 USD** | 16 | `ugc_clip_15s` | 991 | `estimate_cost` |
