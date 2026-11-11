@@ -2,7 +2,7 @@
 
 SaaS francophone de création de contenus UGC et de croissance d'activité. Le Studio vidéo utilise MuAPI côté serveur ; Business Grow dispose de son schéma Supabase et de son Edge Function. Les fournisseurs sont présentés comme opérationnels uniquement lorsque leurs secrets et modèles sont effectivement vérifiés. Ce dépôt contient le frontend, les migrations SQL, les Edge Functions et les tests.
 
-> **État de production vérifié le 12 novembre 2026** — le site public est [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour VYORA sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur ; Groq n'est pas configuré. Aucune génération payante n'a été lancée. Les changements frontend de cette branche doivent encore être publiés avant que la correction de redirection et d'interface soit disponible en production.
+> **État de production vérifié le 12 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour VYORA sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Les corrections de redirection et d'interface admin sont présentes dans le bundle de production ; une connexion navigateur avec les identifiants du propriétaire n'a pas été effectuée. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur ; Groq n'est pas configuré. Aucune génération payante n'a été lancée.
 
 ---
 
@@ -23,7 +23,7 @@ SaaS francophone de création de contenus UGC et de croissance d'activité. Le S
 | Bibliothèque | Vidéos réellement produites, URL signées (1 h), lecteur, téléchargement, suppression |
 | Historique | Toutes les tâches, modèle MuAPI, `request_id`, événements de production, filtres, annulation, **journal complet du ledger de crédits**, lien « Reprendre le suivi » |
 | Abonnement | 4 formules issues de la base, quotas mensuels, demande de changement, recharges, codes promotionnels |
-| Administration | Vue d'ensemble, utilisateurs/rôles, suspension, formule, ajustement de crédits, recharges, catalogue, paramètres, audit. Les changements frontend de redirection et d'isolation sont en attente de publication. |
+| Administration | Vue d'ensemble, utilisateurs/rôles, suspension, formule, ajustement de crédits, recharges, catalogue, paramètres, audit. Le rôle est vérifié côté serveur ; les changements de redirection et d'isolation sont publiés. |
 | Transverse | Interface 100 % française, mobile-first, responsive, états de chargement/erreur/vide, notifications, error boundary |
 
 ## 1bis. Nouvelle expérience « Reelora Video Studio »
