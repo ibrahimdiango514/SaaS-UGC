@@ -49,7 +49,10 @@ function clamp(n: unknown, min: number, max: number, fallback: number): number {
 const SUPABASE_URL = () => env("SUPABASE_URL");
 const ANON_KEY = () => env("SUPABASE_ANON_KEY") || env("SUPABASE_PUBLISHABLE_KEY");
 const SERVICE_KEY = () => env("SUPABASE_SERVICE_ROLE_KEY");
-const GROQ_KEY = () => env("GROQ_API_KEY");
+// The Studio talks to `vyora-ai` first and only lands here when that engine is
+// missing. It must therefore read the same secrets as `vyora-ai`, otherwise the
+// fallback path answers GROQ_NOT_CONFIGURED while the key is present.
+const GROQ_KEY = () => env("BUSINESS_GROW_GROQ_API_KEY") || env("GROQ_API_KEY");
 
 function rpcHeaders(userJwt: string): Record<string, string> {
   return { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" };
@@ -139,7 +142,7 @@ async function refundQuota(kind: string, referenceId: string | null, userId: str
   });
 }
 
-const MODEL = () => env("GROQ_MODEL") || "llama-3.3-70b-versatile";
+const MODEL = () => env("BUSINESS_GROW_GROQ_MODEL") || env("GROQ_MODEL") || "llama-3.3-70b-versatile";
 
 // Groq's answer is returned verbatim (trimmed). An empty / unparsable answer is
 // an explicit failure: VYORA NEVER manufactures an AI response locally.

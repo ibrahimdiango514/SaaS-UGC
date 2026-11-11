@@ -388,8 +388,12 @@ const defaultAllowedOrigins = [
   'https://deploy-preview-*--saas-ugc-growth.netlify.app',
   'https://sbc-ai-agency-dashbord.netlify.app',
   'https://reelora.netlify.app',
-  'https://5173-iu476i6ok9qrn5o47a39w.e2b.app',
-  'https://4173-iu476i6ok9qrn5o47a39w.e2b.app',
+  // Un aperçu de travail tourne sur un hôte `{port}-{sandbox}.e2b.app` dont
+  // l'identifiant de sandbox change à chaque session : lister des identifiants
+  // figés produisait un 403 ORIGIN_NOT_ALLOWED (« backend absent ou
+  // injoignable ») dès qu'un nouvel aperçu était ouvert. CORS n'est pas une
+  // frontière d'authentification ici : chaque requête exige un JWT VYORA.
+  'https://*.e2b.app',
 ].join(',');
 
 const allowedOrigins = (env('BUSINESS_GROW_ALLOWED_ORIGINS') || defaultAllowedOrigins)

@@ -886,3 +886,37 @@ describe('Business Grow Edge handler', () => {
     expect(store.selectRoute).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('Origines des aperçus de travail (régression CORS)', () => {
+  it('accepte un aperçu e2b de n’importe quelle session et refuse un hôte usurpé', async () => {
+    const { dependencies } = fixture();
+    const handler = createBusinessGrowHandler({
+      ...dependencies,
+      allowedOrigins: [...dependencies.allowedOrigins, 'https://*.e2b.app'],
+    });
+
+    for (const origin of [
+      'https://4180-ia19ukd7j0vjzx70dsuks.e2b.app',
+      'https://5173-iu476i6ok9qrn5o47a39w.e2b.app',
+    ]) {
+      const preflight = await handler(new Request('https://edge.test/business-grow', {
+        method: 'OPTIONS',
+        headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
+      }));
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+    }
+
+    for (const origin of [
+      'https://4180-ia19ukd7j0vjzx70dsuks.e2b.app.evil.com',
+      'http://4180-ia19ukd7j0vjzx70dsuks.e2b.app',
+    ]) {
+      const blocked = await handler(new Request('https://edge.test/business-grow', {
+        method: 'OPTIONS',
+        headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
+      }));
+      expect(blocked.status).toBe(403);
+      expect(blocked.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    }
+  });
+});
