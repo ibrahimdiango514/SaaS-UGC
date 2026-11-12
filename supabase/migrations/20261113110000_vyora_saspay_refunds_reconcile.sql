@@ -684,6 +684,13 @@ begin
          refund_billing_event_id = v_event, refund_recorded_by = v_admin
    where id = p_order_id returning * into v_order;
 
+  -- Journal d'audit commun de l'administration (qui, quoi, pourquoi).
+  insert into saas_ugc.ugc_audit_logs(actor_user_id, action, target_type, target_id, details)
+  values (v_admin, 'saspay_refund_recorded', 'business_payment_order', p_order_id::text,
+    jsonb_build_object('actor', 'admin', 'product', 'business', 'customer', v_order.user_id, 'reason', v_reason,
+      'refund_amount_minor', p_refund_amount_xof, 'days_recovered', (v_plan->>'days_recoverable')::integer,
+      'units_recovered', v_units, 'subscription_status', v_status, 'partial', (v_plan->>'needs_partial')::boolean));
+
   return saas_business.vyora_payment_order_json(v_order) || saas_business.vyora_payment_refund_json(v_order)
     || jsonb_build_object('outcome', 'refunded');
 end $$;
@@ -755,6 +762,10 @@ begin
          set refund_state = 'settled', refund_external_reference = v_ref,
              refund_settled_at = now(), refund_settled_by = v_admin
        where id = p_order_id returning * into v_bg;
+      insert into saas_ugc.ugc_audit_logs(actor_user_id, action, target_type, target_id, details)
+      values (v_admin, 'saspay_refund_settled', 'business_payment_order', p_order_id::text,
+        jsonb_build_object('actor', 'admin', 'product', 'business', 'customer', v_bg.user_id,
+          'external_reference', v_ref, 'refund_amount_minor', v_bg.refund_amount_minor));
     end if;
     return saas_business.vyora_payment_order_json(v_bg) || saas_business.vyora_payment_refund_json(v_bg);
   end if;

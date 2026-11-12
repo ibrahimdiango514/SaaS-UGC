@@ -20,8 +20,10 @@ import PaymentReturn, { RETURN_POLL_INTERVAL_MS } from '../src/pages/PaymentRetu
 import SasPayPanel from '../src/pages/admin/SasPayPanel';
 import {
   createIntentKeeper, describeFee, formatAmount, isOrderId, isPaymentProduct, isPlausiblePhone, isSafeCheckoutUrl,
-  paymentStateOf,
+  parseRefundAmount, paymentStateOf, refundBadge,
 } from '../src/lib/payments';
+import { ledgerOperationLabel } from '../src/lib/format';
+import { asAppError } from '../src/lib/errors';
 import { AppError } from '../src/lib/errors';
 
 const ORDER_ID = '9004f26f-f8c8-433e-85fa-f94d6fd2be5a';
@@ -340,6 +342,17 @@ describe('page de retour de paiement', () => {
     expect(calls('status')).toHaveLength(1);
   });
 
+  it('paiement remboursé : annoncé comme tel, jamais « crédits ajoutés »', async () => {
+    edge({ status: () => ({ order: order({ status: 'refunded', state: 'confirmed' }), verified: true, credited: false, message: null }) });
+    renderReturn(`?produit=studio&commande=${ORDER_ID}`);
+    await waitFor(() => expect(screen.getByText('Paiement remboursé')).toBeTruthy());
+    expect(screen.getByText(/crédits correspondants ont été retirés/)).toBeTruthy();
+    expect(screen.queryByText('Paiement confirmé')).toBeNull();
+    expect(screen.queryByText(/crédits ont été ajoutés/)).toBeNull();
+    expect(screen.getByText('Remboursé')).toBeTruthy();
+    expect(calls('status')).toHaveLength(1); // état final : aucune relance
+  });
+
   it('suit un paiement en attente jusqu’à sa confirmation', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const statuses = [order(), order({ status: 'paid', state: 'confirmed' })];
@@ -386,7 +399,21 @@ describe('page de retour de paiement', () => {
   });
 });
 
-describe('administration — panneau SasPay (lecture seule)', () => {
+const HEALTH = {
+  enabled: true, mode: 'test', cron: { available: true, scheduled: true, schedule: '*/5 * * * *', active: true },
+  open_orders: { studio: 2, business: 0 }, refunds_awaiting_settlement: 0, runs: [], anomalies: [],
+};
+/** Aiguille les RPC du panneau d'administration par nom. */
+function adminRpc(table: Record<string, unknown | ((args: Record<string, unknown>) => unknown)>) {
+  rpc.mockImplementation(async (name: string, args: Record<string, unknown> = {}) => {
+    const entry = name in table ? table[name] : name === 'vyora_admin_payment_health' ? HEALTH : undefined;
+    if (entry === undefined) throw new Error(`rpc inattendue : ${name}`);
+    return typeof entry === 'function' ? (entry as (a: Record<string, unknown>) => unknown)(args) : entry;
+  });
+}
+const rpcNamed = (name: string) => rpc.mock.calls.filter(([n]) => n === name);
+
+describe('administration — panneau SasPay', () => {
   const adminOrder = (extra: Record<string, unknown> = {}) => order({ user_email: 'client@vyora.test', provider_payment_id: 'tx-1', ...extra, state: undefined });
 
   it('affiche un solde par pays, sans total, et le gel éventuel', async () => {
@@ -436,10 +463,19 @@ describe('administration — panneau SasPay (lecture seule)', () => {
     expect(paid).toContain('Frais : 100\u00a0FCFA');
     expect(paid).toContain('Net reçu : 5\u202f000\u00a0FCFA');
     const labels = screen.getAllByRole('button').map((b) => b.textContent ?? '');
-    for (const label of labels) expect(label).not.toMatch(/Confirmer|Valider|Créditer|Modifier|Supprimer|Rembourser|Retirer|Transférer/i);
-    // Seule action : redemander l'état à SasPay, et seulement pour un paiement non terminé.
+    // Aucun moyen de créer, valider, créditer ou modifier un paiement, ni de sortir de l'argent.
+    for (const label of labels) expect(label).not.toMatch(/Confirmer|Valider|Créditer|Modifier|Supprimer|Retirer|Transférer|Décaisser|Payer/i);
+    // Redemander l'état à SasPay : seulement pour un paiement non terminé.
     expect(screen.getAllByRole('button', { name: 'Revérifier' })).toHaveLength(1);
+    // Rembourser : seulement pour un paiement confirmé — jamais en attente ni échoué.
+    expect(screen.getAllByRole('button', { name: 'Rembourser' })).toHaveLength(1);
+    const rows = screen.getAllByTestId('saspay-order');
+    expect(rows[0].textContent).toContain('Rembourser');
+    expect(rows[1].textContent).not.toContain('Rembourser');
+    expect(rows[2].textContent).not.toContain('Rembourser');
+    // Aucun champ de saisie tant qu'aucune action n'est ouverte ; rien n'a été écrit.
     expect(document.querySelectorAll('input, textarea, select')).toHaveLength(0);
+    expect(rpc.mock.calls.every(([name]) => name === 'vyora_admin_payments' || name === 'vyora_admin_payment_health')).toBe(true);
   });
 
   it('« Revérifier » interroge le serveur sans rien écrire', async () => {
@@ -454,7 +490,8 @@ describe('administration — panneau SasPay (lecture seule)', () => {
     await waitFor(() => expect(calls('status')).toHaveLength(1));
     expect(calls('status')[0][1]).toEqual({ action: 'status', product: 'studio', order_id: ORDER_ID });
     await waitFor(() => expect(screen.getByText(/état vérifié auprès de SasPay/)).toBeTruthy());
-    expect(rpc.mock.calls.every(([name]) => name === 'vyora_admin_payments')).toBe(true);
+    // Uniquement des lectures.
+    expect(rpc.mock.calls.every(([name]) => name === 'vyora_admin_payments' || name === 'vyora_admin_payment_health')).toBe(true);
   });
 
   it('Studio et Business Grow sont listés séparément', async () => {
@@ -464,5 +501,324 @@ describe('administration — panneau SasPay (lecture seule)', () => {
     await waitFor(() => expect(rpc).toHaveBeenCalledWith('vyora_admin_payments', { p_product: 'studio', p_limit: 100 }));
     fireEvent.click(screen.getByText('Business Grow (abonnements)'));
     await waitFor(() => expect(rpc).toHaveBeenCalledWith('vyora_admin_payments', { p_product: 'business', p_limit: 100 }));
+  });
+});
+
+describe('administration — remboursement', () => {
+  const noBalances = () => edge({ balances: () => ({ configured: false, mode: null, balances: [], message: null }) });
+  const paid = (extra: Record<string, unknown> = {}) => order({
+    id: ORDER_ID, status: 'paid', user_email: 'client@vyora.test', provider_payment_id: 'tx-1', state: undefined, ...extra,
+  });
+  const studioPreview = (extra: Record<string, unknown> = {}) => ({
+    product: 'studio', order_id: ORDER_ID, status: 'paid', internal_reference: 'VYS-ABC', price_xof: 5000,
+    credits_granted: 27, wallet_available: 27, wallet_reserved: 0, credits_recoverable: 27, credits_unrecoverable: 0,
+    max_refund_xof: 5000, needs_partial: false, refundable: true, blocked: null, ...extra,
+  });
+  // Le libellé accessible d'un champ inclut son texte d'aide : on cible son début.
+  const field = (label: RegExp) => screen.getByLabelText(label) as HTMLInputElement;
+  const AMOUNT = /^Montant à rendre au client \(FCFA\)/;
+  const REASON = /^Motif \(note interne, non montrée au client\)/;
+  const submitButton = () => screen.getByRole('button', { name: 'Reprendre et enregistrer' }) as HTMLButtonElement;
+
+  async function openRefund() {
+    render(<SasPayPanel />);
+    await waitFor(() => screen.getByRole('button', { name: 'Rembourser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rembourser' }));
+  }
+
+  it('aides : montant entier borné par le plafond serveur ; étiquettes de remboursement', () => {
+    expect(parseRefundAmount('5000', 5000)).toBe(5000);
+    expect(parseRefundAmount('3 148', 3148)).toBe(3148);
+    expect(parseRefundAmount('3\u202f148', 3148)).toBe(3148);
+    for (const bad of ['', '0', '5001', '-1', '12.5', '12,5', '1e3', 'abc', '5000 FCFA', '99999999999']) {
+      expect(parseRefundAmount(bad, 5000)).toBeNull();
+    }
+    expect(refundBadge({ status: 'paid' })).toBeNull();
+    expect(refundBadge({ status: 'refunded', refund_state: 'credits_recovered' })).toEqual({ label: 'Remboursement en cours', tone: 'warning' });
+    expect(refundBadge({ status: 'refunded', refund_state: 'settled' })).toEqual({ label: 'Remboursé', tone: 'neutral' });
+    // Sans état connu, on n'annonce jamais « Remboursé ».
+    expect(refundBadge({ status: 'refunded', refund_state: null })?.label).toBe('Remboursement en cours');
+    expect(paymentStateOf({ status: 'refunded' })).toBe('confirmed');
+    expect(ledgerOperationLabel('refund')).toBe('Remboursement');
+    expect(ledgerOperationLabel('purchase')).toBe('Achat de crédits');
+    expect(ledgerOperationLabel('inconnu_x')).toBe('inconnu_x');
+  });
+
+  it('messages d’erreur du serveur traduits en clair', () => {
+    const message = (code: string) => asAppError(new Error(code), 'défaut').message;
+    expect(message('refund_amount_out_of_bounds')).toMatch(/dépasse ce qui peut être rendu/);
+    expect(message('refund_credits_already_consumed')).toMatch(/remboursement partiel/);
+    expect(message('refund_wallet_has_reserved_credits')).toMatch(/générations sont en cours/i);
+    expect(message('refund_already_settled')).toMatch(/déjà attesté/);
+    expect(message('anomaly_note_required')).toMatch(/Décrivez ce qui a été fait/);
+    for (const code of ['refund_reason_required', 'refund_nothing_recoverable', 'refund_is_immutable', 'refund_settlement_requires_reference']) {
+      expect(message(code)).not.toMatch(/refund_/);
+    }
+  });
+
+  it('affiche ce qui sera repris, propose le plafond serveur et n’enregistre qu’avec un motif', async () => {
+    noBalances();
+    adminRpc({
+      vyora_admin_payments: [paid()],
+      vyora_admin_refund_preview: studioPreview(),
+      vyora_admin_refund_studio: paid({ status: 'refunded', refund_state: 'credits_recovered', refund_amount: '5000.00', outcome: 'refunded' }),
+    });
+    await openRefund();
+    await waitFor(() => screen.getByTestId('refund-preview'));
+    expect(rpcNamed('vyora_admin_refund_preview')[0][1]).toEqual({ p_product: 'studio', p_order_id: ORDER_ID });
+    expect(screen.getByText(/VYORA n’envoie pas d’argent/)).toBeTruthy();
+    expect(screen.getByTestId('refund-preview').textContent).toContain('Crédits qui seront repris : 27');
+    expect(screen.getByTestId('refund-max').textContent).toBe('5\u202f000\u00a0FCFA');
+    expect(field(AMOUNT).value).toBe('5000');
+    // Sans motif : rien ne part.
+    expect(submitButton().disabled).toBe(true);
+    fireEvent.change(field(REASON), { target: { value: 'abc' } });
+    expect(submitButton().disabled).toBe(true);
+    fireEvent.change(field(REASON), { target: { value: '  Erreur de pack, demande du client  ' } });
+    expect(submitButton().disabled).toBe(false);
+    expect(rpcNamed('vyora_admin_refund_studio')).toHaveLength(0);
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(rpcNamed('vyora_admin_refund_studio')).toHaveLength(1));
+    expect(rpcNamed('vyora_admin_refund_studio')[0][1]).toEqual({
+      p_order_id: ORDER_ID, p_reason: 'Erreur de pack, demande du client', p_refund_amount_xof: 5000, p_allow_partial: false,
+    });
+    await waitFor(() => expect(screen.getByRole('status').textContent)
+      .toBe('Remboursement enregistré pour VYS-ABC. Rendez 5\u202f000\u00a0FCFA au client, puis attestez le versement.'));
+    // La liste et la surveillance sont relues ; la fenêtre est fermée.
+    expect(screen.queryByRole('button', { name: 'Reprendre et enregistrer' })).toBeNull();
+    expect(rpcNamed('vyora_admin_payments').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('refuse à l’écran un montant au-dessus du plafond ou non entier', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [paid()], vyora_admin_refund_preview: studioPreview() });
+    await openRefund();
+    await waitFor(() => screen.getByTestId('refund-preview'));
+    fireEvent.change(field(REASON), { target: { value: 'Demande du client' } });
+    for (const bad of ['5001', '0', '12,5', '']) {
+      fireEvent.change(field(AMOUNT), { target: { value: bad } });
+      expect(submitButton().disabled).toBe(true);
+    }
+    expect(screen.queryByText(/montant entier entre 1 et 5000 FCFA/)).toBeNull(); // champ vide : pas de reproche
+    fireEvent.change(field(AMOUNT), { target: { value: '5001' } });
+    expect(screen.getByText(/montant entier entre 1 et 5000 FCFA/)).toBeTruthy();
+    fireEvent.change(field(AMOUNT), { target: { value: '2500' } });
+    expect(submitButton().disabled).toBe(false);
+  });
+
+  it('crédits déjà utilisés : plafond au prorata et confirmation explicite du remboursement partiel', async () => {
+    noBalances();
+    adminRpc({
+      vyora_admin_payments: [paid()],
+      vyora_admin_refund_preview: studioPreview({ wallet_available: 17, credits_recoverable: 17, credits_unrecoverable: 10, max_refund_xof: 3148, needs_partial: true }),
+      vyora_admin_refund_studio: paid({ status: 'refunded', refund_state: 'credits_recovered', refund_amount: '3148.00', outcome: 'refunded' }),
+    });
+    await openRefund();
+    await waitFor(() => screen.getByTestId('refund-preview'));
+    expect(screen.getByTestId('refund-preview').textContent).toContain('Crédits déjà utilisés, non récupérables : 10');
+    expect(screen.getByTestId('refund-max').textContent).toBe('3\u202f148\u00a0FCFA');
+    expect(field(AMOUNT).value).toBe('3148');
+    fireEvent.change(field(REASON), { target: { value: 'Demande du client' } });
+    expect(submitButton().disabled).toBe(true); // case non cochée
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(submitButton().disabled).toBe(false);
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(rpcNamed('vyora_admin_refund_studio')).toHaveLength(1));
+    expect(rpcNamed('vyora_admin_refund_studio')[0][1]).toMatchObject({ p_refund_amount_xof: 3148, p_allow_partial: true });
+  });
+
+  it('remboursement impossible : la raison est affichée, aucun champ ni envoi', async () => {
+    noBalances();
+    adminRpc({
+      vyora_admin_payments: [paid()],
+      vyora_admin_refund_preview: studioPreview({ refundable: false, blocked: 'refund_wallet_has_reserved_credits', max_refund_xof: 0 }),
+    });
+    await openRefund();
+    await waitFor(() => expect(screen.getByText('Remboursement impossible')).toBeTruthy());
+    expect(screen.getByText(/générations sont en cours/i)).toBeTruthy();
+    expect(screen.queryByLabelText(AMOUNT)).toBeNull();
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('refus du serveur : message en clair, fenêtre conservée, rien n’est annoncé comme fait', async () => {
+    noBalances();
+    adminRpc({
+      vyora_admin_payments: [paid()],
+      vyora_admin_refund_preview: studioPreview(),
+      vyora_admin_refund_studio: () => { throw new Error('refund_credits_already_consumed'); },
+    });
+    await openRefund();
+    await waitFor(() => screen.getByTestId('refund-preview'));
+    fireEvent.change(field(REASON), { target: { value: 'Demande du client' } });
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(screen.getByText('Enregistrement refusé')).toBeTruthy());
+    expect(screen.getByText(/seul un remboursement partiel, à confirmer, est possible/)).toBeTruthy();
+    expect(screen.queryByText(/Remboursement enregistré/)).toBeNull();
+    expect(submitButton()).toBeTruthy();
+  });
+
+  it('Business Grow : jours retirés et résiliation annoncés ; appelle la fonction Business Grow', async () => {
+    noBalances();
+    const bgOrder = paid({ product: 'business', amount: '25000.00', label: 'Business Grow — Croissance', credits: undefined, internal_reference: 'VYB-ABC' });
+    adminRpc({
+      vyora_admin_payments: (args: Record<string, unknown>) => (args.p_product === 'business' ? [bgOrder] : []),
+      vyora_admin_refund_preview: {
+        product: 'business', order_id: ORDER_ID, status: 'paid', internal_reference: 'VYB-ABC', price_xof: 25000, plan_key: 'croissance',
+        period_days: 30, subscription_status: 'active', days_recoverable: 10, new_period_end: null, will_cancel: true,
+        max_refund_xof: 8333, needs_partial: true, refundable: true, blocked: null,
+      },
+      vyora_admin_refund_business: { ...bgOrder, status: 'refunded', refund_state: 'credits_recovered', refund_amount: '8333.00', outcome: 'refunded' },
+    });
+    render(<SasPayPanel />);
+    fireEvent.click(await screen.findByText('Business Grow (abonnements)'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Rembourser' }));
+    await waitFor(() => screen.getByTestId('refund-preview'));
+    const summary = screen.getByTestId('refund-preview').textContent ?? '';
+    expect(summary).toContain('Jours restants qui seront retirés : 10');
+    expect(summary).toContain('résilié immédiatement');
+    expect(screen.getByTestId('refund-max').textContent).toBe('8\u202f333\u00a0FCFA');
+    fireEvent.change(field(REASON), { target: { value: 'Demande du client' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(rpcNamed('vyora_admin_refund_business')).toHaveLength(1));
+    expect(rpcNamed('vyora_admin_refund_business')[0][1]).toEqual({
+      p_order_id: ORDER_ID, p_reason: 'Demande du client', p_refund_amount_xof: 8333, p_allow_partial: true,
+    });
+    expect(rpcNamed('vyora_admin_refund_studio')).toHaveLength(0);
+  });
+
+  it('commande remboursée : détail affiché, versement à attester avec une référence', async () => {
+    noBalances();
+    const refunded = paid({
+      status: 'refunded', refund_state: 'credits_recovered', refund_amount: '3148.00', refunded_at: '2026-11-13T10:00:00Z',
+      refund_credits_recovered: 17, refund_credits_unrecovered: 10, refund_reason: 'Demande du client',
+    });
+    adminRpc({
+      vyora_admin_payments: [refunded],
+      vyora_admin_refund_settle: { ...refunded, refund_state: 'settled', refund_external_reference: 'OM-778', refund_settled_at: '2026-11-13T11:00:00Z' },
+    });
+    render(<SasPayPanel />);
+    await waitFor(() => screen.getByTestId('saspay-refund'));
+    const row = screen.getByTestId('saspay-order').textContent ?? '';
+    expect(row).toContain('Remboursement en cours');
+    expect(row).toContain('Remboursement de 3\u202f148\u00a0FCFA');
+    expect(row).toContain('17 crédits repris');
+    expect(row).toContain('(10 déjà utilisés)');
+    expect(row).toContain('Versement au client non attesté');
+    // Une commande remboursée ne peut être ni remboursée de nouveau, ni revérifiée.
+    expect(screen.queryByRole('button', { name: 'Rembourser' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Revérifier' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Attester le versement' }));
+    const confirm = () => screen.getAllByRole('button', { name: 'Attester le versement' }).at(-1) as HTMLButtonElement;
+    expect(screen.getByText(/VYORA ne vérifie pas ce versement/)).toBeTruthy();
+    expect(confirm().disabled).toBe(true);
+    fireEvent.change(field(/^Référence du versement/), { target: { value: 'OM' } });
+    expect(confirm().disabled).toBe(true);
+    fireEvent.change(field(/^Référence du versement/), { target: { value: ' OM-778 ' } });
+    fireEvent.click(confirm());
+    await waitFor(() => expect(rpcNamed('vyora_admin_refund_settle')).toHaveLength(1));
+    expect(rpcNamed('vyora_admin_refund_settle')[0][1]).toEqual({ p_product: 'studio', p_order_id: ORDER_ID, p_external_reference: 'OM-778' });
+    await waitFor(() => expect(screen.getByText('Versement attesté pour VYS-ABC.')).toBeTruthy());
+  });
+
+  it('remboursement versé : « Remboursé », plus aucune action', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [paid({
+      status: 'refunded', refund_state: 'settled', refund_amount: '5000.00', refunded_at: '2026-11-13T10:00:00Z',
+      refund_credits_recovered: 27, refund_credits_unrecovered: 0, refund_external_reference: 'OM-778', refund_settled_at: '2026-11-13T11:00:00Z',
+    })] });
+    render(<SasPayPanel />);
+    await waitFor(() => screen.getByTestId('saspay-refund'));
+    const row = screen.getByTestId('saspay-order');
+    expect(row.textContent).toContain('Remboursé');
+    expect(row.textContent).toContain('réf. OM-778');
+    expect(row.querySelectorAll('button')).toHaveLength(0);
+  });
+});
+
+describe('administration — surveillance des paiements', () => {
+  const noBalances = () => edge({ balances: () => ({ configured: false, mode: null, balances: [], message: null }) });
+  const run = (extra: Record<string, unknown> = {}) => ({
+    id: 'run-1', trigger_source: 'cron', status: 'ok', started_at: '2026-11-13T10:00:00Z', finished_at: '2026-11-13T10:00:02Z',
+    checked: 3, settled: 1, closed: 1, errors: 0, swept: 4, anomalies: 0, sweep_done: true, ...extra,
+  });
+  const anomaly = (extra: Record<string, unknown> = {}) => ({
+    id: 'an-1', kind: 'duplicate_payment', product: 'studio', order_id: ORDER_ID, internal_reference: 'VYS-ABC',
+    provider_payment_id: 'tx-dup', seen_count: 3, first_seen_at: '2026-11-13T09:00:00Z', last_seen_at: '2026-11-13T10:00:00Z', ...extra,
+  });
+
+  it('tâche active : planification, commandes en attente par produit, dernières exécutions', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, runs: [run(), run({ id: 'run-2', status: 'partial', errors: 2 })] } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getAllByTestId('saspay-run')).toHaveLength(2));
+    const card = screen.getByTestId('saspay-health').textContent ?? '';
+    expect(card).toContain('Vérification automatique active (*/5 * * * *)');
+    expect(card).toContain('Studio : 2');
+    expect(card).toContain('Business Grow : 0');
+    expect(card).toContain('3 vérifié(s) · 1 livré(s) · 1 clos · 0 erreur(s)');
+    expect(card).toContain('Réussie');
+    expect(card).toContain('Partielle');
+    expect(card).toContain('Aucune anomalie ouverte.');
+  });
+
+  it('tâche absente ou désactivée : alerte explicite, jamais « active »', async () => {
+    noBalances();
+    for (const cron of [{ available: true, scheduled: false }, { available: true, scheduled: true, schedule: '*/5 * * * *', active: false }, { available: false, scheduled: false }]) {
+      adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, cron } });
+      render(<SasPayPanel />);
+      await waitFor(() => expect(screen.getByText('Aucune vérification automatique')).toBeTruthy());
+      expect(screen.getByText('Vérification automatique inactive')).toBeTruthy();
+      expect(screen.queryByText(/Vérification automatique active/)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('surveillance illisible ou réponse inattendue : « non vérifiée », jamais un état sain', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: () => { throw new Error('forbidden'); } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getByText('Surveillance non vérifiée')).toBeTruthy());
+    expect(screen.queryByText(/Vérification automatique active/)).toBeNull();
+    cleanup();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: [] });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getByText('Surveillance non vérifiée')).toBeTruthy());
+    expect(screen.queryByText(/Aucune anomalie ouverte/)).toBeNull();
+  });
+
+  it('remboursements à verser : rappel visible', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, refunds_awaiting_settlement: 2 } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getByText('2 remboursement(s) à verser')).toBeTruthy());
+  });
+
+  it('anomalie : explication, conduite à tenir, classement avec une note obligatoire', async () => {
+    noBalances();
+    let open = [anomaly()];
+    adminRpc({
+      vyora_admin_payments: [],
+      vyora_admin_payment_health: () => ({ ...HEALTH, anomalies: open }),
+      vyora_admin_resolve_anomaly: () => { open = []; return anomaly(); },
+    });
+    render(<SasPayPanel />);
+    await waitFor(() => screen.getByTestId('saspay-anomaly'));
+    const text = screen.getByTestId('saspay-anomaly').textContent ?? '';
+    expect(text).toContain('Double encaissement pour une même commande');
+    expect(text).toContain('VYS-ABC');
+    expect(text).toContain('tx-dup');
+    expect(text).toContain('vue 3 fois');
+    expect(text).toContain('Rendez le second paiement au client');
+    fireEvent.click(screen.getByRole('button', { name: 'Classer' }));
+    const confirm = () => screen.getAllByRole('button', { name: 'Classer' }).at(-1) as HTMLButtonElement;
+    expect(screen.getByText(/ne modifie aucun paiement/)).toBeTruthy();
+    expect(confirm().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/^Ce qui a été fait/), { target: { value: 'Second paiement rendu par Orange Money, réf. OM-779' } });
+    fireEvent.click(confirm());
+    await waitFor(() => expect(rpcNamed('vyora_admin_resolve_anomaly')).toHaveLength(1));
+    expect(rpcNamed('vyora_admin_resolve_anomaly')[0][1]).toEqual({ p_anomaly_id: 'an-1', p_note: 'Second paiement rendu par Orange Money, réf. OM-779' });
+    await waitFor(() => expect(screen.getByText('Aucune anomalie ouverte.')).toBeTruthy());
   });
 });

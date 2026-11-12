@@ -99,7 +99,28 @@ export interface PaymentOrder {
   provider_payment_id?: string | null;
   provider_session_id?: string | null;
   provider_status?: string | null;
+  /** Remboursement (présent uniquement si la commande a été remboursée). */
+  refunded_at?: string | null;
+  refund_state?: RefundState | null;
+  /** Montant à rendre au client, décidé par l'administrateur (chaîne décimale). */
+  refund_amount?: string | null;
+  refund_credits_recovered?: number | null;
+  refund_credits_unrecovered?: number | null;
+  refund_days_recovered?: number | null;
+  refund_units_recovered?: number | null;
+  refund_settled_at?: string | null;
+  /** Vue administrateur uniquement : notes internes, jamais montrées au client. */
+  refund_reason?: string | null;
+  refund_external_reference?: string | null;
+  refund_subscription_status?: string | null;
 }
+
+/**
+ * Un remboursement se fait en deux temps, SANS mouvement d'argent par VYORA :
+ *  - `credits_recovered` : crédits (ou jours d'abonnement) repris, argent à rendre ;
+ *  - `settled` : l'administrateur atteste avoir rendu l'argent, référence à l'appui.
+ */
+export type RefundState = 'credits_recovered' | 'settled';
 
 export interface CreatePaymentResult {
   order: PaymentOrder;
@@ -176,6 +197,157 @@ export async function listMyPayments(product: PaymentProduct, limit = 20): Promi
 export async function adminListPayments(product: PaymentProduct, limit = 100): Promise<PaymentOrder[]> {
   const rows = await rpc<PaymentOrder[] | null>('vyora_admin_payments', { p_product: product, p_limit: limit });
   return Array.isArray(rows) ? rows.map(withState) : [];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Remboursements et exploitation (administrateur)                            */
+/* -------------------------------------------------------------------------- */
+
+/** Ce qu'un remboursement reprendrait maintenant. Calculé par le serveur. */
+export interface RefundPreview {
+  product: PaymentProduct;
+  order_id: string;
+  status: string;
+  internal_reference: string;
+  price_xof: number;
+  /** Plafond de ce qui peut être rendu, au prorata de ce qui est repris. */
+  max_refund_xof: number;
+  needs_partial: boolean;
+  refundable: boolean;
+  blocked: string | null;
+  // Studio
+  credits_granted?: number;
+  wallet_available?: number;
+  wallet_reserved?: number;
+  credits_recoverable?: number;
+  credits_unrecoverable?: number;
+  // Business Grow
+  plan_key?: string;
+  period_days?: number;
+  subscription_status?: string | null;
+  current_period_end?: string | null;
+  days_recoverable?: number;
+  new_period_end?: string | null;
+  will_cancel?: boolean;
+}
+
+export type RefundResult = PaymentOrder & { outcome?: 'refunded' | 'already_refunded' };
+
+export function adminRefundPreview(product: PaymentProduct, orderId: string): Promise<RefundPreview> {
+  return rpc<RefundPreview>('vyora_admin_refund_preview', { p_product: product, p_order_id: orderId });
+}
+
+/**
+ * Enregistre un remboursement : reprend les crédits (ou la période d'abonnement)
+ * et clôt la commande. N'envoie AUCUN argent : le versement se fait hors de
+ * VYORA, puis s'atteste avec `adminSettleRefund`.
+ */
+export async function adminRecordRefund(input: {
+  product: PaymentProduct; orderId: string; reason: string; amountXof: number; allowPartial: boolean;
+}): Promise<RefundResult> {
+  const row = await rpc<RefundResult>(
+    input.product === 'studio' ? 'vyora_admin_refund_studio' : 'vyora_admin_refund_business',
+    { p_order_id: input.orderId, p_reason: input.reason, p_refund_amount_xof: input.amountXof, p_allow_partial: input.allowPartial },
+  );
+  return { ...row, product: input.product, state: paymentStateOf(row) };
+}
+
+/** Atteste que l'argent a été rendu au client (référence du versement). */
+export async function adminSettleRefund(product: PaymentProduct, orderId: string, reference: string): Promise<RefundResult> {
+  const row = await rpc<RefundResult>('vyora_admin_refund_settle', {
+    p_product: product, p_order_id: orderId, p_external_reference: reference,
+  });
+  return { ...row, product, state: paymentStateOf(row) };
+}
+
+export type AnomalyKind = 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found';
+
+export interface PaymentAnomaly {
+  id: string;
+  kind: AnomalyKind | string;
+  product: PaymentProduct | null;
+  order_id: string | null;
+  internal_reference: string | null;
+  provider_payment_id: string | null;
+  seen_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+export interface ReconcileRun {
+  id: string;
+  trigger_source: string;
+  status: 'running' | 'ok' | 'partial' | 'error' | 'skipped' | string;
+  started_at: string;
+  finished_at: string | null;
+  checked: number;
+  settled: number;
+  closed: number;
+  errors: number;
+  swept: number;
+  anomalies: number;
+  sweep_done: boolean;
+}
+
+export interface PaymentHealth {
+  enabled: boolean;
+  mode: 'test' | 'live' | string;
+  cron: { available: boolean; scheduled: boolean; schedule?: string; active?: boolean };
+  open_orders: { studio: number; business: number };
+  refunds_awaiting_settlement: number;
+  runs: ReconcileRun[];
+  anomalies: PaymentAnomaly[];
+}
+
+export async function adminPaymentHealth(): Promise<PaymentHealth | null> {
+  const row = await rpc<PaymentHealth | null>('vyora_admin_payment_health');
+  // Réponse inattendue : « inconnu », jamais un état sain inventé.
+  if (!row || typeof row !== 'object' || Array.isArray(row) || !row.cron || !Array.isArray(row.runs)) return null;
+  return { ...row, anomalies: Array.isArray(row.anomalies) ? row.anomalies : [] };
+}
+
+export function adminResolveAnomaly(anomalyId: string, note: string): Promise<PaymentAnomaly> {
+  return rpc<PaymentAnomaly>('vyora_admin_resolve_anomaly', { p_anomaly_id: anomalyId, p_note: note });
+}
+
+export const ANOMALY_LABELS: Record<string, string> = {
+  order_stuck: 'Paiement bloqué depuis plus de 24 h',
+  duplicate_payment: 'Double encaissement pour une même commande',
+  payment_conflict: 'Encaissement non rattachable à la commande',
+  amount_mismatch: 'Montant encaissé différent de la commande',
+  payment_not_found: 'Paiement introuvable chez SasPay',
+};
+
+/** Ce qu'il faut faire, en clair, face à chaque anomalie. */
+export const ANOMALY_ADVICE: Record<string, string> = {
+  order_stuck: 'Vérifiez la transaction dans le tableau de bord SasPay. La commande reste revérifiée automatiquement.',
+  duplicate_payment: 'Le client a été débité deux fois : un seul achat a été livré. Rendez le second paiement au client, puis classez l’anomalie.',
+  payment_conflict: 'Un encaissement réussi porte la référence d’une commande liée à une autre transaction. Rien n’a été livré : comparez les deux transactions chez SasPay.',
+  amount_mismatch: 'Rien n’a été livré. Rendez le montant encaissé au client ou demandez-lui de repasser commande.',
+  payment_not_found: 'SasPay ne connaît pas cette transaction. La commande est close après 24 h ; un succès tardif la rouvrirait.',
+};
+
+export const RUN_STATUS_LABELS: Record<string, string> = {
+  running: 'En cours', ok: 'Réussie', partial: 'Partielle', error: 'En erreur', skipped: 'Ignorée',
+};
+
+/** Étiquette de remboursement d'une commande, ou `null` si elle n'est pas remboursée. */
+export function refundBadge(order: Pick<PaymentOrder, 'status' | 'refund_state'>): { label: string; tone: string } | null {
+  if (order.status !== 'refunded') return null;
+  return order.refund_state === 'settled'
+    ? { label: 'Remboursé', tone: 'neutral' }
+    : { label: 'Remboursement en cours', tone: 'warning' };
+}
+
+/**
+ * Montant de remboursement saisi : entier de francs CFA, entre 1 et le plafond
+ * calculé par le serveur. Confort de saisie — le serveur revalide.
+ */
+export function parseRefundAmount(input: string, maxXof: number): number | null {
+  const text = input.replace(/[\s\u00a0\u202f]/g, '');
+  if (!/^\d{1,9}$/.test(text)) return null;
+  const value = Number(text);
+  return value >= 1 && value <= maxXof ? value : null;
 }
 
 export interface BusinessSubscription {

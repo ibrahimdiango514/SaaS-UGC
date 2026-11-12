@@ -268,6 +268,14 @@ r = await settleRefund('business', l1.id, 'VIR-2026-0042');
 assert.equal(r.refund_state, 'settled');
 await fails(settleRefund('business', l1.id, 'AUTRE'), /refund_already_settled/, 'autre référence');
 ok('« remboursée » terminal et immuable ; attestation du versement unique');
+r = await settleRefund('business', l1.id, 'VIR-2026-0042');
+assert.equal(r.refund_state, 'settled');
+const bgAudit = (await admin.query(`select action, actor_user_id, target_type, details from saas_ugc.ugc_audit_logs where target_id = $1 order by created_at, action`, [l1.id])).rows;
+assert.deepEqual(bgAudit.map((a) => a.action), ['saspay_refund_recorded', 'saspay_refund_settled']);
+assert.ok(bgAudit.every((a) => a.actor_user_id === boss && a.target_type === 'business_payment_order'));
+assert.equal(bgAudit[0].details.reason, 'Demande du client, erreur de formule'); assert.equal(bgAudit[0].details.refund_amount_minor, 25000);
+assert.equal(bgAudit[1].details.external_reference, 'VIR-2026-0042');
+ok('remboursement Business Grow tracé au journal d’audit : qui, motif, montant, référence du versement (une ligne par étape, même rejouée)');
 
 const l2 = await bgOrder(lena);
 const subs = (await admin.query(`select id, status from saas_business.subscriptions where user_id = $1 order by created_at`, [lena])).rows;

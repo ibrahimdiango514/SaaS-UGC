@@ -52,6 +52,19 @@ export const STATUS_TONES: Record<string, string> = {
   todo: 'neutral', confirmed: 'success', refunded: 'neutral',
 };
 
+/** Opérations du grand livre de crédits, en clair. */
+export const LEDGER_OPERATION_LABELS: Record<string, string> = {
+  recharge: 'Achat de crédits', purchase: 'Achat de crédits', topup: 'Achat de crédits',
+  refund: 'Remboursement', reserve: 'Réservation', release: 'Restitution', capture: 'Consommation',
+  consume: 'Consommation', signup_bonus: 'Crédits de bienvenue', bonus: 'Crédits offerts',
+  promo: 'Code promotionnel', admin_adjustment: 'Ajustement', adjustment: 'Ajustement',
+  monthly_grant: 'Dotation mensuelle', expiration: 'Expiration',
+};
+
+export function ledgerOperationLabel(type: string | null | undefined): string {
+  return LEDGER_OPERATION_LABELS[type ?? ''] ?? type ?? '—';
+}
+
 export function statusLabel(status: string | null | undefined): string {
   return STATUS_LABELS[status ?? ''] ?? status ?? '—';
 }

@@ -1,7 +1,8 @@
 # Banc local — paiements SasPay
 
-Éprouve la migration `20261113100000_vyora_saspay_payments.sql` et les Edge
-Functions `vyora-payments` / `vyora-saspay-webhook` sur un **PostgreSQL 17 réel,
+Éprouve les migrations `20261113100000_vyora_saspay_payments.sql` et
+`20261113110000_vyora_saspay_refunds_reconcile.sql`, ainsi que les Edge Functions
+`vyora-payments`, `vyora-saspay-webhook` et `vyora-payments-reconcile`, sur un **PostgreSQL 17 réel,
 local et jetable**. Aucun appel à Supabase ni à SasPay : SasPay est simulé en
 mémoire, la base n'écoute que sur `127.0.0.1` et vit dans le répertoire
 temporaire du système.
@@ -15,10 +16,11 @@ npm test         # Node ≥ 22.6
 | Étape | Rôle |
 | --- | --- |
 | `base.mjs` | Monte la base : rôles Supabase, `prod_subset.sql`, migrations Business Grow du dépôt. |
-| `mig.mjs` | Applique la migration SasPay deux fois (idempotence). |
+| `mig.mjs` | Applique les deux migrations SasPay, dans l'ordre, deux fois (idempotence). |
 | `scenario.mjs` | Intégrité SQL : prix, idempotence, concurrence, gardes, droits, cloisonnement Studio / Business Grow. |
 | `legacy.mjs` | Anciennes RPC du navigateur (`ugc_create_recharge_order`, `reelora_admin_confirm_recharge`) face aux gardes. |
-| `e2e.mjs` | Bout en bout : vraies Edge Functions + base réelle + faux SasPay. |
+| `refunds.mjs` | Remboursements Studio et Business Grow, attestation, forges en table, concurrence, entretien, sélection de réconciliation, anomalies, tâche planifiée (`net.http_post` remplacé par un enregistreur). |
+| `e2e.mjs` | Bout en bout : vraies Edge Functions + base réelle + faux SasPay, dont la réconciliation planifiée (webhook perdu, réponse de création perdue, double encaissement, montant différent). |
 
 ## Limites à connaître
 
@@ -32,6 +34,11 @@ npm test         # Node ≥ 22.6
   de production `20261112054553`, absente du dépôt).
 - Les prix Business Grow utilisés (25 000 XOF, 400 unités) sont **fictifs** :
   aucune formule n'a de prix en production.
-- Ce banc ne remplace pas un essai avec une clé SasPay de test réelle.
+- `vault`, `cron` et `net` sont des **bouchons** (`pg.mjs`) : le banc prouve que
+  la tâche est planifiée une seule fois, que le jeton est créé une seule fois et
+  que l'appel sortant porte les bons en-têtes — pas que pg_cron l'exécute
+  réellement toutes les 5 minutes, ni que Vault chiffre le jeton.
+- Ce banc ne remplace pas un essai avec une clé SasPay de test réelle (recette :
+  `docs/paiements-saspay.md`).
 
 Variables : `VYORA_PGTEST_PORT` (54329), `VYORA_PGTEST_DIR`, `VYORA_PGTEST_BIN`.

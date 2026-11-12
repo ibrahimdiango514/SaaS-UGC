@@ -118,6 +118,25 @@ describe('page Crédits Studio', () => {
   });
 });
 
+describe('page Tarifs Studio — remboursements', () => {
+  it('affiche l’état du remboursement et son montant, sans notes internes', async () => {
+    const base = { product: 'studio', amount: '5000.00', currency: 'XOF', label: 'Pack Creator', has_payment: true, status: 'refunded' };
+    mockRpc({ vyora_my_payments: [
+      { ...base, id: 'r1', internal_reference: 'VYS-1', created_at: '2026-11-12T10:00:00Z', refund_state: 'credits_recovered', refund_amount: '3148.00', refunded_at: '2026-11-13T10:00:00Z' },
+      { ...base, id: 'r2', internal_reference: 'VYS-2', created_at: '2026-11-11T10:00:00Z', refund_state: 'settled', refund_amount: '5000.00', refunded_at: '2026-11-12T10:00:00Z' },
+    ] });
+    invokeEdge.mockResolvedValue(studioOptions(false));
+    render(<MemoryRouter><StudioPricing /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('Paiements en ligne')).toBeTruthy());
+    const list = screen.getByLabelText('Paiements en ligne').textContent ?? '';
+    expect(list).toContain('Remboursement en cours · 3\u202f148\u00a0FCFA');
+    expect(list).toContain('Remboursé · 5\u202f000\u00a0FCFA');
+    // Un paiement remboursé n'est plus présenté comme « Confirmé » et n'a rien à suivre.
+    expect(screen.queryByText('Confirmé')).toBeNull();
+    expect(screen.queryByText('Suivre')).toBeNull();
+  });
+});
+
 describe('page Abonnement Business Grow', () => {
   const plan = (extra: Record<string, unknown> = {}) => ({
     plan_key: 'croissance', display_name: 'Croissance', tagline: null, monthly_price_minor: null, currency: 'XOF',

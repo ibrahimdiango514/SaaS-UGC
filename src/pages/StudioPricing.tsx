@@ -29,7 +29,7 @@ import { formatDate } from '../lib/format';
 import { rpc } from '../lib/api';
 import PaymentDialog from '../components/PaymentDialog';
 import {
-  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, formatAmount, getPaymentOptions, listMyPayments,
+  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, formatAmount, getPaymentOptions, listMyPayments, refundBadge,
   type PaymentItem, type PaymentOrder,
 } from '../lib/payments';
 
@@ -353,7 +353,9 @@ export default function StudioPricing() {
                 <span className="min-w-0 flex-1 truncate text-slate-300">{row.label ?? 'Achat de crédits'}</span>
                 <span className="text-slate-500">{formatDate(row.created_at, true)}</span>
                 <span className="text-slate-300">{formatAmount(row.amount, row.currency)}</span>
-                <Badge tone={PAYMENT_STATE_TONES[row.state]}>{PAYMENT_STATE_LABELS[row.state]}</Badge>
+                {refundBadge(row)
+                  ? <Badge tone={refundBadge(row)?.tone}>{refundBadge(row)?.label}{row.refund_amount ? ` · ${formatAmount(row.refund_amount, row.currency)}` : ''}</Badge>
+                  : <Badge tone={PAYMENT_STATE_TONES[row.state]}>{PAYMENT_STATE_LABELS[row.state]}</Badge>}
                 {(row.state === 'pending' || row.state === 'todo') && (
                   <Link to={`/app/paiement/retour?produit=studio&commande=${row.id}`} className="text-cyan-300 hover:text-white">Suivre</Link>
                 )}

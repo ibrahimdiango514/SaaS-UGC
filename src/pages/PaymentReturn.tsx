@@ -107,7 +107,18 @@ export default function PaymentReturn() {
               </p>
             )}
 
-            {order && state === 'confirmed' && (
+            {order && state === 'confirmed' && order.status === 'refunded' && (
+              <>
+                <p className="flex items-center gap-2 text-base font-semibold text-slate-200"><CheckCircle2 size={18} /> Paiement remboursé</p>
+                <p className="text-sm leading-relaxed text-slate-300">
+                  {order.product === 'studio'
+                    ? 'Ce paiement a été remboursé : les crédits correspondants ont été retirés de votre solde Studio.'
+                    : 'Ce paiement a été remboursé : la période d’abonnement correspondante a été retirée.'}
+                </p>
+              </>
+            )}
+
+            {order && state === 'confirmed' && order.status !== 'refunded' && (
               <>
                 <p className="flex items-center gap-2 text-base font-semibold text-emerald-200"><CheckCircle2 size={18} /> Paiement confirmé</p>
                 <p className="text-sm leading-relaxed text-slate-300">
@@ -147,7 +158,7 @@ export default function PaymentReturn() {
                 <dt className="text-slate-500">Commande</dt><dd className="text-right text-slate-300">{order.label ?? '—'}</dd>
                 <dt className="text-slate-500">Montant</dt><dd className="text-right text-slate-300">{formatAmount(order.amount, order.currency)}</dd>
                 <dt className="text-slate-500">Référence</dt><dd className="text-right font-mono text-slate-300">{order.internal_reference}</dd>
-                <dt className="text-slate-500">État</dt><dd className="text-right text-slate-300">{state ? PAYMENT_STATE_LABELS[state] : '—'}</dd>
+                <dt className="text-slate-500">État</dt><dd className="text-right text-slate-300">{order.status === 'refunded' ? 'Remboursé' : state ? PAYMENT_STATE_LABELS[state] : '—'}</dd>
               </dl>
             )}
 

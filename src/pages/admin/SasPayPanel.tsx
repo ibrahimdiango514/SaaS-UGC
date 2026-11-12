@@ -1,12 +1,14 @@
 /**
  * Administration — paiements SasPay.
  *
- * Tout est en LECTURE SEULE :
- *  - les soldes marchands sont lus chez SasPay par le serveur ; VYORA n'expose
- *    aucun retrait, transfert ni recharge de portefeuille ;
- *  - un paiement ne peut être ni créé, ni modifié, ni validé à la main : son état
+ *  - Les soldes marchands sont lus chez SasPay par le serveur ; VYORA n'expose
+ *    aucun retrait, transfert ni recharge de portefeuille.
+ *  - Un paiement ne peut être ni créé, ni modifié, ni validé à la main : son état
  *    ne change que par une vérification auprès de SasPay (le bouton « Revérifier »
- *    ne fait que redemander cet état au serveur) ;
+ *    ne fait que redemander cet état au serveur).
+ *  - Seule écriture possible : enregistrer le remboursement d'un paiement
+ *    confirmé (reprise de ce qui a été livré, sans mouvement d'argent), puis
+ *    attester le versement fait hors de VYORA. Voir `SasPayOperations`.
  *  - Studio et Business Grow sont listés séparément, jamais additionnés.
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -16,8 +18,10 @@ import { asAppError } from '../../lib/errors';
 import { formatDate } from '../../lib/format';
 import {
   PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, adminListPayments, formatAmount, getPaymentStatus, getSasPayBalances,
-  isFinalState, type PaymentOrder, type PaymentProduct, type SasPayBalances,
+  adminPaymentHealth, isFinalState, refundBadge, type PaymentHealth, type PaymentOrder, type PaymentProduct,
+  type SasPayBalances,
 } from '../../lib/payments';
+import { PaymentHealthCard, RefundDialog, SettleRefundDialog } from './SasPayOperations';
 
 const MODE_LABELS: Record<string, string> = { test: 'Mode test', live: 'Production', unknown: 'Mode inconnu' };
 
@@ -31,6 +35,11 @@ export default function SasPayPanel() {
   const [ordersBusy, setOrdersBusy] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [health, setHealth] = useState<PaymentHealth | null>(null);
+  const [healthError, setHealthError] = useState('');
+  const [healthBusy, setHealthBusy] = useState(false);
+  const [refunding, setRefunding] = useState<PaymentOrder | null>(null);
+  const [settling, setSettling] = useState<PaymentOrder | null>(null);
 
   const loadBalances = useCallback(async () => {
     setBalanceBusy(true); setBalanceError('');
@@ -53,7 +62,24 @@ export default function SasPayPanel() {
     } finally { setOrdersBusy(false); }
   }, []);
 
+  const loadHealth = useCallback(async () => {
+    setHealthBusy(true); setHealthError('');
+    try {
+      setHealth(await adminPaymentHealth());
+    } catch (err) {
+      // Surveillance illisible : « non vérifiée », jamais « tout va bien ».
+      setHealth(null);
+      setHealthError(asAppError(err, 'L’état de la surveillance n’a pas pu être lu.').message);
+    } finally { setHealthBusy(false); }
+  }, []);
+
+  const afterRefund = (message: string) => {
+    setRefunding(null); setSettling(null); setNotice(message);
+    void loadOrders(product); void loadHealth();
+  };
+
   useEffect(() => { void loadBalances(); }, [loadBalances]);
+  useEffect(() => { void loadHealth(); }, [loadHealth]);
   useEffect(() => { void loadOrders(product); }, [loadOrders, product]);
 
   const recheck = async (order: PaymentOrder) => {
@@ -116,10 +142,12 @@ export default function SasPayPanel() {
         </div>
       </Card>
 
+      <PaymentHealthCard health={health} error={healthError} busy={healthBusy} onReload={() => void loadHealth()} />
+
       <Card>
         <CardHeader
           title="Paiements SasPay"
-          description="Consultation uniquement. L’état d’un paiement ne change que par vérification auprès de SasPay."
+          description="L’état d’un paiement ne change que par vérification auprès de SasPay. Un paiement confirmé peut être remboursé : VYORA reprend ce qui a été livré, vous rendez l’argent."
           action={(
             <Button size="sm" variant="outline" icon={<RefreshCw size={13} />} loading={ordersBusy} onClick={() => void loadOrders(product)}>
               Actualiser
@@ -158,9 +186,29 @@ export default function SasPayPanel() {
                     </p>
                   )}
                   {o.failure_code && <p className="text-[11px] text-rose-300/80">Motif : {o.failure_code}</p>}
+                  {o.status === 'refunded' && (
+                    <p className="text-[11px] text-amber-200/90" data-testid="saspay-refund">
+                      Remboursement de {formatAmount(o.refund_amount, o.currency)} enregistré le {formatDate(o.refunded_at ?? null, true)}
+                      {typeof o.refund_credits_recovered === 'number' && ` · ${o.refund_credits_recovered} crédits repris`}
+                      {typeof o.refund_credits_unrecovered === 'number' && o.refund_credits_unrecovered > 0 && ` (${o.refund_credits_unrecovered} déjà utilisés)`}
+                      {typeof o.refund_days_recovered === 'number' && ` · ${o.refund_days_recovered} jours retirés`}
+                      {o.refund_reason && ` · Motif : ${o.refund_reason}`}
+                      {o.refund_state === 'settled'
+                        ? ` · Versé le ${formatDate(o.refund_settled_at ?? null, true)} (réf. ${o.refund_external_reference ?? '—'})`
+                        : ' · Versement au client non attesté'}
+                    </p>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge tone={PAYMENT_STATE_TONES[o.state]}>{PAYMENT_STATE_LABELS[o.state]}</Badge>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {refundBadge(o)
+                    ? <Badge tone={refundBadge(o)?.tone}>{refundBadge(o)?.label}</Badge>
+                    : <Badge tone={PAYMENT_STATE_TONES[o.state]}>{PAYMENT_STATE_LABELS[o.state]}</Badge>}
+                  {o.status === 'paid' && (
+                    <Button size="sm" variant="outline" onClick={() => setRefunding(o)}>Rembourser</Button>
+                  )}
+                  {o.status === 'refunded' && o.refund_state !== 'settled' && (
+                    <Button size="sm" variant="outline" onClick={() => setSettling(o)}>Attester le versement</Button>
+                  )}
                   {!isFinalState(o.state) && (
                     <Button size="sm" variant="outline" loading={checking === o.id} onClick={() => void recheck(o)}>
                       Revérifier
@@ -172,6 +220,8 @@ export default function SasPayPanel() {
           </div>
         )}
       </Card>
+      {refunding && <RefundDialog order={refunding} onClose={() => setRefunding(null)} onDone={afterRefund} />}
+      {settling && <SettleRefundDialog order={settling} onClose={() => setSettling(null)} onDone={afterRefund} />}
     </div>
   );
 }
