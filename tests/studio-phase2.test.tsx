@@ -473,6 +473,22 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     expect(screen.getByTestId('studio-credit-summary').textContent).not.toMatch(/USD|MuAPI|Groq/i);
   });
 
+  it('présente une instruction manquante comme un état normal, pas comme un calcul bloqué', () => {
+    // Champ vide + modèle exigeant un prompt : le backend répond PROMPT_REQUIRED.
+    // L'interface ne doit pas laisser croire que le backend calcule sans fin.
+    const props = {
+      ...promptBarHealthProps({ groq: true }),
+      state: { ...initialFormState(), prompt: '' },
+      // Devis non calculable : aucune instruction à chiffrer.
+      estimate: null,
+    };
+    render(<MemoryRouter><PromptBar {...props} /></MemoryRouter>);
+    const summary = screen.getByTestId('studio-credit-summary').textContent ?? '';
+    expect(summary).toContain('En attente d’instruction');
+    expect(summary).not.toContain('Coût en cours');
+    cleanup();
+  });
+
   it('annonce la vérification Groq en cours sans afficher une relance prématurée', () => {
     render(<MemoryRouter><PromptBar {...promptBarHealthProps(null, true)} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));

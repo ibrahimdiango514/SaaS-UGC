@@ -123,6 +123,8 @@ export default function GenerationStudio() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [estimateError, setEstimateError] = useState('');
+  /** Code fournisseur expliquant un devis en attente (ex. PROMPT_REQUIRED). */
+  const [quotePendingCode, setQuotePendingCode] = useState<string | null>(null);
   const [reference, setReference] = useState<SignedReference | null>(null);
   // Projet demandé par le chemin d'arrivée : Business Grow (brief transféré) ou ?projet=.
   const [projectId, setProjectId] = useState(search.get('projet') ?? handedOffBrief?.projectId ?? '');
@@ -356,6 +358,10 @@ export default function GenerationStudio() {
     form.avatarId, form.mode, model?.model_id, requiredKey,
     inputFieldsKey, workspaceId, avatars, toast]);
 
+  // Ce modèle exige-t-il une instruction ? (déterminé par son schéma serveur)
+  const promptRequiredByModel = (model?.required_fields ?? [])
+    .some((field) => field.toLowerCase() === 'prompt');
+
   // Quote is computed EXCLUSIVELY by the backend, with exact model + params.
   useEffect(() => {
     if (!service || !model) {
@@ -364,8 +370,16 @@ export default function GenerationStudio() {
       return;
     }
     let active = true;
-    setEstimate(null); setEstimateError('');
+    setEstimate(null); setEstimateError(''); setQuotePendingCode(null);
     setProviderQuote(null); setProviderQuoteError('');
+    // Modèle exigeant une instruction et champ vide : inutile d'appeler le
+    // backend, le devis est impossible par construction. On évite un aller-retour
+    // réseau et un faux message d'erreur « backend indisponible ».
+    if (promptRequiredByModel && !form.prompt.trim()) {
+      setQuoteBusy(false);
+      setQuotePendingCode('PROMPT_REQUIRED');
+      return;
+    }
     const timer = window.setTimeout(() => {
       setQuoteBusy(true);
       void estimateVideo(service.service_key, model.model_id, {
@@ -379,7 +393,16 @@ export default function GenerationStudio() {
           setEstimate(e);
           setProviderQuote(e.provider_quote ?? null);
           setProviderQuoteError(e.provider_quote ? '' : 'Le serveur n’a pas renvoyé de devis fournisseur pour ces paramètres.');
-          setEstimateError(e.pricing_error ?? (!e.pricing_available ? 'Le coût en crédits est temporairement indisponible.' : ''));
+          // Un devis non disponible n'est pas toujours une panne : le code
+          // fournisseur permet de distinguer « il manque une instruction »
+          // (état normal) d'une vraie indisponibilité serveur.
+          const quoteCode = e.provider_quote?.error_code ?? null;
+          setQuotePendingCode(quoteCode === 'PROMPT_REQUIRED' ? quoteCode : null);
+          setEstimateError(
+            quoteCode === 'PROMPT_REQUIRED'
+              ? 'Renseignez une instruction vidéo pour obtenir un devis exact.'
+              : (e.pricing_error ?? (!e.pricing_available ? 'Le coût en crédits est temporairement indisponible.' : '')),
+          );
         })
         .catch(() => {
           if (!active) return;
@@ -391,7 +414,7 @@ export default function GenerationStudio() {
         .finally(() => { if (active) setQuoteBusy(false); });
     }, 350);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [service?.service_key, model?.model_id, schemaKey, inputFieldsKey, paramsKey, form.prompt,
+  }, [service?.service_key, model?.model_id, promptRequiredByModel, schemaKey, inputFieldsKey, paramsKey, form.prompt,
     reference?.url, reference?.lastUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshProviderQuote = useCallback(async () => {
@@ -430,7 +453,13 @@ export default function GenerationStudio() {
     if (estimateError) out.push(estimateError);
     if (form.prompt.trim().length < 20) out.push('Décrivez votre vidéo en au moins 20 caractères.');
     if (!projectId) out.push('Sélectionnez ou créez un projet.');
-    if (!estimate) out.push('Calcul du coût en crédits en cours…');
+    // Sans instruction, le devis n'est pas « en cours » : il ne démarrera
+    // qu'une fois la description saisie.
+    if (!estimate) {
+      out.push(promptRequiredByModel && !form.prompt.trim()
+        ? 'Renseignez une instruction vidéo pour obtenir un devis exact.'
+        : 'Calcul du coût en crédits en cours…');
+    }
     else {
       if (!estimate.service_active) out.push('Le service de crédits est inactif.');
       if (!estimate.model_available) out.push('Le modèle sélectionné n’est plus disponible.');
@@ -451,7 +480,7 @@ export default function GenerationStudio() {
     if (form.lastReferenceFile && form.lastReferenceFile.size > MAX_REFERENCE_BYTES) out.push('Image finale trop volumineuse (8 Mo maximum).');
     if (starting || (jobId && ACTIVE.includes(status))) out.push('Une génération est déjà en cours.');
     return out;
-  }, [model, service, catalog, catalogError, health, detailLoading, quoteBusy, estimateError,
+  }, [model, service, catalog, catalogError, health, detailLoading, quoteBusy, estimateError, promptRequiredByModel,
     form.prompt, form.mode, form.referenceFile, form.lastReferenceFile, form.avatarId, projectId,
     form.sourceVideoFile, form.sourceAudioFile,
     estimate, balance, reference, starting, jobId, status, requiresExactQuote,
@@ -700,6 +729,11 @@ export default function GenerationStudio() {
     productName: plan.product || null,
   }, { growthTab: 'strategy', section: 'growth' });
 
+  // Le devis attend une instruction : ce n'est pas une panne backend.
+  const promptPending = quotePendingCode === 'PROMPT_REQUIRED';
+  // Les médias de référence sont-ils fournis (image/vidéo/audio selon le modèle) ?
+  const referenceReady = Boolean(reference?.url || reference?.videoUrl || reference?.audioUrl);
+
   return (
     <div className="studio-canvas studio-v2 animate-fadeUp pb-2">
       <StudioTopBar />
@@ -718,7 +752,15 @@ export default function GenerationStudio() {
               La génération ne peut pas aboutir pour le moment. Réessayez plus tard.
             </Banner>
           )}
-          {estimateError && <Banner tone="danger" title="Devis backend indisponible">{estimateError}</Banner>}
+          {/* Un devis qui attend une instruction n'est PAS une panne : le dire
+              « Devis backend indisponible » en rouge faisait croire à une casse
+              serveur alors que le champ est simplement vide. */}
+          {estimateError && !promptPending && (
+            <Banner tone="danger" title="Devis backend indisponible">{estimateError}</Banner>
+          )}
+          {promptPending && estimateError && referenceReady && (
+            <Banner tone="info" title="Instruction vidéo requise">{estimateError}</Banner>
+          )}
         </div>
       )}
 

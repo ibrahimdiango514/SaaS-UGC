@@ -109,6 +109,10 @@ export function PromptBar({
   const requiresVideo = Boolean(model?.required_fields.some((f) => f === 'video_url' || f === 'input_video'));
   const requiresAudio = Boolean(model?.required_fields.includes('audio_url'));
   const summary = creditSummary(estimate, balance, Boolean(model?.dynamic_pricing));
+  // Le devis ne peut pas être calculé sans instruction : ce n'est pas un calcul
+  // bloqué, et l'afficher comme tel laissait croire à une panne du backend.
+  const needsInstruction = !state.prompt.trim()
+    && Boolean(model?.required_fields?.some((field) => field.toLowerCase() === 'prompt'));
   const cost = summary.creditsCost;
   const tier = QUALITY_TIERS.find((q) => q.id === state.quality);
   const service = services.find((s) => s.service_key === tier?.serviceKey);
@@ -248,7 +252,13 @@ export function PromptBar({
                 className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-full border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1.5 text-[11.5px] font-semibold text-cyan-200"
               >
                 <Coins size={12} />
-                <span>{cost !== null ? `${cost} crédits VYORA` : 'Coût en cours…'}</span>
+                <span>
+                  {cost !== null
+                    ? `${cost} crédits VYORA`
+                    : needsInstruction
+                      ? 'En attente d’instruction'
+                      : 'Coût en cours…'}
+                </span>
                 {/* Le montant n'est jamais « confirmé » sans devis serveur : le dire ici,
                     au plus près du bouton, évite toute génération sur un prix supposé. */}
                 {summary.quoteToConfirm && (
