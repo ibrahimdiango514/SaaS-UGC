@@ -113,9 +113,15 @@ describe('Video Studio : frontière des secrets et espaces non opérationnels', 
   });
   it('la navigation marque explicitement les espaces préparés', () => {
     const sections = read('src/studio/sections.ts');
+    // Ce qui n'a pas de moteur reste explicitement préparé, jamais présenté
+    // comme générable ; la fiche dédiée porte le libellé « non opérationnel ».
     expect(sections).toContain("status: 'prepared'");
-    expect(sections).toContain('non opérationnel');
+    expect(read('src/studio/components/PreparedSpace.tsx')).toContain('non opérationnel');
+    // …et Video→Video n'est plus présenté comme verrouillé : il route vers le
+    // Studio réel (import vidéo source + devis serveur).
     expect(sections).toContain("id: 'video-to-video'");
+    expect(sections).toMatch(/id: 'video-to-video'[\s\S]{0,200}status: 'live'/);
+    expect(sections).not.toMatch(/id: 'video-to-video'[\s\S]{0,200}status: 'prepared'/);
   });
 });
 

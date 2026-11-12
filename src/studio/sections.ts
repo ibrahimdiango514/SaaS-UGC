@@ -55,9 +55,9 @@ export const STUDIO_SECTIONS: StudioSection[] = [
     description: 'Espace réservé aux avatars parlants. La création avec audio n’est pas encore disponible.',
   },
   {
-    id: 'video-to-video', label: 'Video to Video', shortLabel: 'V→V', icon: Film, status: 'prepared',
-    route: '/app/studio/espace/video-to-video', group: 'roadmap',
-    description: 'Transformation vidéo → vidéo : cette capacité n’est pas encore disponible. Espace préparé, non opérationnel, sans bouton de génération ni résultat simulé.',
+    id: 'video-to-video', label: 'Video to Video', shortLabel: 'V→V', icon: Film, status: 'live',
+    route: '/app/studio?mode=video-source', group: 'creation',
+    description: 'Transformation d’une vidéo source par un modèle vidéo → vidéo du catalogue, avec import de la vidéo, devis serveur et suivi du rendu.',
   },
   {
     id: 'image-generation', label: 'Image Generation', shortLabel: 'Images IA', icon: WandSparkles, status: 'prepared',
@@ -72,8 +72,9 @@ export const STUDIO_SECTIONS: StudioSection[] = [
     route: '/app/studio/espace/clipping', group: 'roadmap', description: 'Découpe intelligente : non développée.',
   },
   {
-    id: 'lip-sync', label: 'Lip Sync', shortLabel: 'Lip Sync', icon: Mic2, status: 'prepared',
-    route: '/app/studio/espace/lip-sync', group: 'roadmap', description: 'Synchronisation labiale : non développée.',
+    id: 'lip-sync', label: 'Lip Sync', shortLabel: 'Lip Sync', icon: Mic2, status: 'live',
+    route: '/app/studio?mode=audio-source', group: 'creation',
+    description: 'Synchronisation d’un visage sur une piste audio : import de l’image et de l’audio, devis serveur et suivi du rendu.',
   },
   {
     id: 'vibe-motion', label: 'Vibe Motion', shortLabel: 'Motion', icon: Aperture, status: 'prepared',

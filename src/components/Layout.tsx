@@ -23,6 +23,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Modules', items: [
     { to: '/app/studio', label: 'Studio UGC', icon: Clapperboard },
     { to: '/app/business', label: 'Business Grow', icon: Brain },
+    { to: '/app/business/abonnement', label: 'Formules Business Grow', icon: CreditCard },
   ] },
   { label: 'Ressources', items: [
     { to: '/app/avatars', label: 'Avatars', icon: Users },

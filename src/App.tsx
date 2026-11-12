@@ -35,6 +35,7 @@ const StudioLegacy = lazy(() => import('./studio/StudioPages').then(({ StudioLeg
 const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioProjects: component }) => ({ default: component })));
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
+const BusinessGrowSubscription = lazy(() => import('./pages/BusinessGrowSubscription'));
 
 export default function App() {
   return (
@@ -63,6 +64,7 @@ export default function App() {
                       <Route path="projets/:id" element={<ProjectDetail />} />
                       <Route path="studio" element={<GenerationStudio />} />
                       <Route path="business" element={<BusinessGrow />} />
+                      <Route path="business/abonnement" element={<BusinessGrowSubscription />} />
                       <Route path="studio/classique" element={<VideoStudio />} />
                       <Route path="studio/montage" element={<VideoEditor />} />
                       <Route path="studio/avance" element={<StudioLegacy />} />

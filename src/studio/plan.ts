@@ -294,10 +294,21 @@ export function replanEditorScenes(project: EditorProject, plan: ProductionPlan)
   };
 }
 
-/** Modes that map to a real MuAPI capability from the verified catalog. */
-export const CREATION_MODES: { id: 'idea' | 'script' | 'product' | 'avatar'; label: string; description: string; mode: GenerationMode }[] = [
+export type CreationModeId = 'idea' | 'script' | 'product' | 'avatar' | 'video-source' | 'audio-source';
+
+/**
+ * Modes de création, chacun adossé à une capacité RÉELLE du catalogue vérifié.
+ * `video-source` (Video→Video : montage, clips, effets) et `audio-source`
+ * (Audio→Video : synchronisation labiale, avatars parlants) envoient le média
+ * importé par l'utilisateur au fournisseur, exactement comme `image-to-video`.
+ */
+export const CREATION_MODES: {
+  id: CreationModeId; label: string; description: string; mode: GenerationMode;
+}[] = [
   { id: 'idea', label: 'Une idée / un prompt', description: 'Décrivez simplement la vidéo souhaitée.', mode: 'text-to-video' },
   { id: 'script', label: 'Depuis un script', description: 'Collez un script : il enrichit le contexte sans texte à l’écran.', mode: 'text-to-video' },
   { id: 'product', label: 'Image de produit', description: 'Animez une image de référence importée.', mode: 'image-to-video' },
   { id: 'avatar', label: 'Depuis un avatar', description: 'Utilisez l’image d’un avatar existant.', mode: 'image-to-video' },
+  { id: 'video-source', label: 'Vidéo existante', description: 'Transformez une vidéo importée : montage, clips, effets, mise à l’échelle.', mode: 'video-to-video' },
+  { id: 'audio-source', label: 'Audio + image', description: 'Synchronisez une voix ou un audio sur une image : lip sync, avatar parlant.', mode: 'audio-to-video' },
 ];

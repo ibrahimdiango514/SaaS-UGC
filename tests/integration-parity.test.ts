@@ -34,14 +34,23 @@ describe('Une seule intégration MuAPI, de bout en bout', () => {
   });
 
   it('le frontend envoie des chemins Storage privés que la passerelle sait signer', () => {
-    const studio = read('src/studio/VideoStudio.tsx');
-    for (const key of ['image_storage_path', 'last_image_storage_path', 'image_url', 'last_image_url']) {
+    // Le Studio immersif est l'entrée principale : c'est lui qui porte les
+    // imports média (image, image finale, vidéo source, audio source).
+    const studio = read('src/studio/GenerationStudio.tsx');
+    for (const key of [
+      'image_storage_path', 'last_image_storage_path', 'image_url', 'last_image_url',
+      'video_storage_path', 'audio_storage_path', 'video_url', 'audio_url',
+    ]) {
       expect(studio).toContain(key);
     }
     for (const marker of ['function workspaceImagePath(', 'async function signStoragePath(', 'lastImageUrl', 'LAST_IMAGE_MISSING']) {
       expect(video).toContain(marker);
     }
-    expect(video).toContain('buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl)');
+    // Les sources média sont assemblées puis transmises à `buildMuapiBody`.
+    expect(video).toContain('buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, { videoUrl, audioUrl })');
+    for (const marker of ['VIDEO_MISSING', 'AUDIO_MISSING', 'video_storage_path', 'audio_storage_path']) {
+      expect(video).toContain(marker);
+    }
   });
 
   it('le worker enrichit result_payload avec les métadonnées affichées par la bibliothèque', () => {

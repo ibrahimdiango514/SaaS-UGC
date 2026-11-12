@@ -310,7 +310,10 @@ describe('System prompt interne, routes et ressources de démonstration', () => 
       expect(buf.length).toBeGreaterThan(10_000);
     }
     expect(read('src/studio/components/GenerationEmptyState.tsx')).toContain('Démo');
-    expect(read('src/studio/components/StudioTopBar.tsx')).toContain('À venir');
+    // Les catégories non opérationnelles ont été retirées de la navigation :
+    // plus d'étiquette « À venir » ni de cadenas, puisque tout ce qui est listé
+    // ouvre désormais une capacité réelle (Vidéo→Vidéo, Lip Sync inclus).
+    expect(read('src/studio/components/StudioTopBar.tsx')).not.toContain('À venir');
     expect(ASPECT_PRESETS['9:16'].platforms).toContain('TikTok');
   });
 });

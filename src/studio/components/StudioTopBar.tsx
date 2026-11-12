@@ -1,15 +1,13 @@
 import { Link, useLocation } from 'react-router-dom';
 import {
-  AudioLines, Clapperboard, Coins, CreditCard, Film, History, Image as ImageIcon,
-  LayoutGrid, Lock, Mic2, Scissors, Sparkles, UserRound,
+  Clapperboard, Coins, CreditCard, Film, History,
+  LayoutGrid, Mic2, Scissors, Sparkles, UserRound,
 } from 'lucide-react';
 import { cn } from '../../components/ui';
 import { BrandSymbol } from '../../components/Brand';
 import { useAuth } from '../../context/AuthContext';
 
 interface Category {
-  /** `planned` = capacité annoncée non intégrée ; `soon` = aucun moteur connecté. */
-  tier?: 'soon' | 'planned';
   id: string;
   label: string;
   icon: typeof Clapperboard;
@@ -22,17 +20,24 @@ interface Category {
  * Navigation du Studio, alignée sur la référence : une barre horizontale unique,
  * sans carte, sans ombre, posée directement sur le canvas noir.
  *
- * Seules les entrées reliées à une fonction réelle sont cliquables ; les autres
- * restent visibles, grisées et verrouillées — jamais présentées comme prêtes.
- * Le libellé « À venir » est conservé pour le verrou (traçabilité produit).
+ * Toutes les entrées listées ouvrent une capacité réellement disponible : le
+ * Studio n'affiche plus de cadenas ni d'étiquette de disponibilité. Une capacité
+ * absente du produit n'apparaît pas du tout, au lieu d'être présentée comme
+ * verrouillée.
  */
 export const STUDIO_CATEGORIES: Category[] = [
-  { id: 'video', label: 'Vidéo', icon: Clapperboard, to: '/app/studio', available: true },
-  { id: 'image', label: 'Image', icon: ImageIcon, available: false, tier: 'soon', note: 'Aucun modèle image intégré.' },
-  { id: 'audio', label: 'Audio Studio', icon: AudioLines, available: false, tier: 'soon', note: 'Aucun moteur audio / TTS connecté.' },
-  { id: 'lip-sync', label: 'Lip Sync', icon: Mic2, available: false, tier: 'planned', note: 'Nécessite une source audio non produite par VYORA.' },
-  { id: 'editor', label: 'Montage', icon: Scissors, to: '/app/studio/montage', available: true },
-  { id: 'creations', label: 'Mes créations', icon: Film, to: '/app/bibliotheque', available: true },
+  { id: 'video', label: 'Vidéo', icon: Clapperboard, to: '/app/studio', available: true,
+    note: 'Texte → Vidéo et Image → Vidéo.' },
+  { id: 'video-to-video', label: 'Vidéo → Vidéo', icon: Film, to: '/app/studio?mode=video-source', available: true,
+    note: 'Montage, clips, effets, mise à l’échelle sur une vidéo importée.' },
+  { id: 'lip-sync', label: 'Lip Sync', icon: Mic2, to: '/app/studio?mode=audio-source', available: true,
+    note: 'Synchronisation labiale et avatars parlants à partir d’un audio importé.' },
+  { id: 'editor', label: 'Montage', icon: Scissors, to: '/app/studio/montage', available: true,
+    note: 'Timeline, pistes, scènes, sous-titres et export.' },
+  { id: 'creations', label: 'Mes créations', icon: Film, to: '/app/bibliotheque', available: true,
+    note: 'Fichiers réellement produits, conservés dans le stockage privé.' },
+  { id: 'credits', label: 'Crédits', icon: Coins, to: '/app/credits', available: true,
+    note: 'Packs, solde et historique du portefeuille Studio.' },
 ];
 
 const SECONDARY = [
@@ -70,29 +75,21 @@ export function StudioTopBar() {
             const active = c.to && (pathname === c.to || (c.to !== '/app/studio' && pathname.startsWith(`${c.to}/`)));
             const content = (
               <>
-                <c.icon size={14} className={c.available ? (active ? 'text-cyan-300' : 'text-slate-300') : 'text-slate-600'} />
+                <c.icon size={14} className={active ? 'text-cyan-300' : 'text-slate-300'} />
                 <span className="whitespace-nowrap">{c.label}</span>
-                {!c.available && (
-                  <span className="hidden text-[9px] uppercase tracking-wide text-slate-600 xl:inline">
-                    {c.tier === 'planned' ? 'Démo' : 'À venir'}
-                  </span>
-                )}
               </>
             );
-            const cls = cn(
-              'studio-bar-tab',
-              active && 'studio-bar-tab-active',
-              !c.available && 'cursor-not-allowed text-slate-600 hover:border-transparent hover:text-slate-600',
-            );
-            return c.available && c.to ? (
-              <Link key={c.id} to={c.to} className={cls} aria-current={active ? 'page' : undefined}>
+            const cls = cn('studio-bar-tab', active && 'studio-bar-tab-active');
+            return (
+              <Link
+                key={c.id}
+                to={c.to ?? '/app/studio'}
+                className={cls}
+                title={c.note}
+                aria-current={active ? 'page' : undefined}
+              >
                 {content}
               </Link>
-            ) : (
-              <span key={c.id} className={cls} title={c.note ?? 'À venir'} aria-disabled="true">
-                {content}
-                <Lock size={9} className="opacity-60" />
-              </span>
             );
           })}
         </nav>

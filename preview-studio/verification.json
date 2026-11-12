@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-12T05:25:37.244Z",
+  "generatedAt": "2026-11-12T05:49:00.609Z",
   "base": "http://127.0.0.1:4180",
   "mode": "réseau navigateur intercepté — aucune requête Supabase réelle, aucun paiement, aucune génération",
   "viewportDesktop": "1440×1000",
@@ -15,11 +15,11 @@
         "detail": {
           "categories": [
             "Vidéo",
-            "ImageÀ venir",
-            "Audio StudioÀ venir",
-            "Lip SyncDémo",
+            "Vidéo → Vidéo",
+            "Lip Sync",
             "Montage",
-            "Mes créations"
+            "Mes créations",
+            "Crédits"
           ]
         }
       },
@@ -96,6 +96,5 @@
       "file": "screenshots/07-credits-mobile-bas.png",
       "title": "Crédits Studio mobile — recharge libre, historique et périmètre"
     }
-  ],
-  "chromium": "/tmp/chromium (@sparticuz/chromium 153, installé hors dépendances du projet)"
+  ]
 }

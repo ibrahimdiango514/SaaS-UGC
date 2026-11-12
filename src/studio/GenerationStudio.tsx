@@ -9,7 +9,7 @@ import { useToast } from '../context/ToastContext';
 import {
   cancelGeneration, createProject, estimateVideo, generateScript, getJob, getVideoProviderQuote,
   healthCheck, getVideoCatalog, getVideoModelDetail, listAvatars, listProjects, listServices,
-  newGenerationIdempotencyKey, signedStorageUrl, startGeneration, uploadReferenceImage,
+  newGenerationIdempotencyKey, signedStorageUrl, startGeneration, uploadEditorMedia, uploadReferenceImage,
   videoStart, videoStatus,
 } from '../lib/api';
 import { asAppError } from '../lib/errors';
@@ -57,6 +57,12 @@ interface SignedReference {
   lastPath?: string;
   lastUrl?: string;
   avatarId?: string;
+  /** Source vidéo importée (Video→Video, Lip Sync). */
+  videoPath?: string;
+  videoUrl?: string;
+  /** Source audio importée (Audio→Video, avatars parlants). */
+  audioPath?: string;
+  audioUrl?: string;
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -91,10 +97,14 @@ export default function GenerationStudio() {
   const [healthError, setHealthError] = useState('');
   const [form, setForm] = useState<GenerationFormState>(() => {
     const base = initialFormState();
-    if (!handedOffBrief) return base;
+    // Deep link depuis la barre de navigation du Studio (`?mode=…`) : ouvre
+    // directement la capacité demandée (Video→Video, Audio→Video).
+    const requestedMode = CREATION_MODES.find((m) => m.id === search.get('mode'))?.id;
+    const withMode = requestedMode ? { ...base, mode: requestedMode } : base;
+    if (!handedOffBrief) return withMode;
     const formattedPrompt = formatUgcPromptFromBrief(handedOffBrief);
     return {
-      ...base,
+      ...withMode,
       ...(formattedPrompt ? { prompt: formattedPrompt } : {}),
       ...(handedOffBrief.summary ? { script: handedOffBrief.summary } : {}),
       ...(handedOffBrief.product && !formattedPrompt ? { prompt: handedOffBrief.product } : {}),
@@ -297,14 +307,28 @@ export default function GenerationStudio() {
     const declaredLastImage = Boolean(model?.input_fields.includes('last_image'));
     const wantsImage = requiredImage || declaredImage || form.mode === 'product' || form.mode === 'avatar';
     const wantsLastImage = declaredLastImage && !!form.lastReferenceFile;
-    if (!wantsImage && !wantsLastImage) return;
-    if ((form.referenceFile || form.lastReferenceFile) && !workspaceId) {
-      toast.error('Espace de travail indisponible : import de référence impossible.');
+    const declaredVideo = Boolean(model?.input_fields.some((f) => f === 'video_url' || f === 'input_video'));
+    const declaredAudio = Boolean(model?.input_fields.includes('audio_url'));
+    const wantsVideo = declaredVideo && !!form.sourceVideoFile;
+    const wantsAudio = declaredAudio && !!form.sourceAudioFile;
+    if (!wantsImage && !wantsLastImage && !wantsVideo && !wantsAudio) return;
+    if ((form.referenceFile || form.lastReferenceFile || form.sourceVideoFile || form.sourceAudioFile) && !workspaceId) {
+      toast.error('Espace de travail indisponible : import de média impossible.');
       return;
     }
     void (async () => {
       try {
         const next: SignedReference = {};
+        if (wantsVideo && form.sourceVideoFile && workspaceId) {
+          const videoPath = await uploadEditorMedia(workspaceId, form.sourceVideoFile);
+          next.videoPath = videoPath;
+          next.videoUrl = await signedStorageUrl(videoPath, 86400);
+        }
+        if (wantsAudio && form.sourceAudioFile && workspaceId) {
+          const audioPath = await uploadEditorMedia(workspaceId, form.sourceAudioFile);
+          next.audioPath = audioPath;
+          next.audioUrl = await signedStorageUrl(audioPath, 86400);
+        }
         if (wantsLastImage && form.lastReferenceFile && workspaceId) {
           const lastPath = await uploadReferenceImage(workspaceId, form.lastReferenceFile);
           next.lastPath = lastPath;
@@ -328,7 +352,8 @@ export default function GenerationStudio() {
       } catch (err) { if (active) toast.error(asAppError(err).message); }
     })();
     return () => { active = false; };
-  }, [form.referenceFile, form.lastReferenceFile, form.avatarId, form.mode, model?.model_id, requiredKey,
+  }, [form.referenceFile, form.lastReferenceFile, form.sourceVideoFile, form.sourceAudioFile,
+    form.avatarId, form.mode, model?.model_id, requiredKey,
     inputFieldsKey, workspaceId, avatars, toast]);
 
   // Quote is computed EXCLUSIVELY by the backend, with exact model + params.
@@ -346,6 +371,7 @@ export default function GenerationStudio() {
       void estimateVideo(service.service_key, model.model_id, {
         params: compatible, prompt: form.prompt.trim(),
         image_url: reference?.url, last_image_url: reference?.lastUrl,
+        video_url: reference?.videoUrl, audio_url: reference?.audioUrl,
         param_schema: model.param_schema,
       })
         .then((e) => {
@@ -376,6 +402,7 @@ export default function GenerationStudio() {
       const result = await getVideoProviderQuote(model.model_id, {
         params: compatible, prompt: form.prompt.trim(),
         image_url: reference?.url, last_image_url: reference?.lastUrl,
+        video_url: reference?.videoUrl, audio_url: reference?.audioUrl,
         param_schema: model.param_schema,
       });
       setProviderQuote(result.quote);
@@ -414,6 +441,10 @@ export default function GenerationStudio() {
     }
     const needsImage = (model?.required_fields ?? []).some((f) => f.toLowerCase() === 'image_url');
     if (needsImage && !reference?.url) out.push('Importez une image de référence pour ce modèle.');
+    const needsVideo = (model?.required_fields ?? []).some((f) => ['video_url', 'input_video'].includes(f.toLowerCase()));
+    if (needsVideo && !reference?.videoUrl) out.push('Importez une vidéo source pour ce modèle.');
+    const needsAudio = (model?.required_fields ?? []).some((f) => f.toLowerCase() === 'audio_url');
+    if (needsAudio && !reference?.audioUrl) out.push('Importez un fichier audio source pour ce modèle.');
     if (form.mode === 'product' && !form.referenceFile) out.push('Importez une image de produit.');
     if (form.mode === 'avatar' && !form.avatarId) out.push('Choisissez un avatar existant.');
     if (form.referenceFile && form.referenceFile.size > MAX_REFERENCE_BYTES) out.push('Image trop volumineuse (8 Mo maximum).');
@@ -422,6 +453,7 @@ export default function GenerationStudio() {
     return out;
   }, [model, service, catalog, catalogError, health, detailLoading, quoteBusy, estimateError,
     form.prompt, form.mode, form.referenceFile, form.lastReferenceFile, form.avatarId, projectId,
+    form.sourceVideoFile, form.sourceAudioFile,
     estimate, balance, reference, starting, jobId, status, requiresExactQuote,
     summary.exactQuote, summary.quoteToConfirm, cost]);
   const blockedReason = issues[0] ?? '';
@@ -504,6 +536,10 @@ export default function GenerationStudio() {
           ...(reference.lastUrl ? { last_image_url: reference.lastUrl } : {}),
           ...(reference.lastPath ? { last_image_storage_path: reference.lastPath } : {}),
           ...(reference.avatarId ? { avatar_id: reference.avatarId } : {}),
+          ...(reference.videoUrl ? { video_url: reference.videoUrl } : {}),
+          ...(reference.videoPath ? { video_storage_path: reference.videoPath } : {}),
+          ...(reference.audioUrl ? { audio_url: reference.audioUrl } : {}),
+          ...(reference.audioPath ? { audio_storage_path: reference.audioPath } : {}),
         };
       } else if (form.mode === 'product' && form.referenceFile && workspaceId) {
         const path = await uploadReferenceImage(workspaceId, form.referenceFile);

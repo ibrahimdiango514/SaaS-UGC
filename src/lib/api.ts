@@ -541,6 +541,8 @@ export async function getVideoProviderQuote(modelId: string, quote?: VideoQuoteI
   if (quote?.prompt) body.prompt = quote.prompt;
   if (quote?.image_url) body.image_url = quote.image_url;
   if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
+  if (quote?.video_url) body.video_url = quote.video_url;
+  if (quote?.audio_url) body.audio_url = quote.audio_url;
   if (quote?.param_schema) body.param_schema = quote.param_schema;
   try {
     // Service de devis dédié (déployé indépendamment de la passerelle de génération).
@@ -557,6 +559,10 @@ export interface VideoQuoteInput {
   prompt?: string;
   image_url?: string;
   last_image_url?: string;
+  /** Source vidéo importée (Video→Video, Lip Sync). */
+  video_url?: string;
+  /** Source audio importée (Audio→Video, avatars parlants). */
+  audio_url?: string;
   /** Real schema fetched by model-detail; the server still validates every key. */
   param_schema?: Record<string, MuApiParamDef>;
 }
@@ -572,6 +578,8 @@ export async function estimateVideo(serviceKey: string, modelId: string, quote?:
   if (quote?.prompt) body.prompt = quote.prompt;
   if (quote?.image_url) body.image_url = quote.image_url;
   if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
+  if (quote?.video_url) body.video_url = quote.video_url;
+  if (quote?.audio_url) body.audio_url = quote.audio_url;
   if (quote?.param_schema) body.param_schema = quote.param_schema;
   const estimate = await invokeEdge<VideoCostEstimate>('reelora-video', body);
   if (estimate.provider_quote) return estimate;

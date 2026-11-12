@@ -329,7 +329,18 @@ type Access = "account" | "public_only" | "unverified";
 type Status = "active" | "disabled" | "coming_soon" | "unsupported" | "unverified";
 
 /** Required inputs VYORA can actually provide today. No audio/TTS/lipsync engine is connected. */
-const SUPPORTED_REQUIRED_FIELDS = new Set(["prompt", "image_url"]);
+/**
+ * Champs obligatoires réellement câblés par `buildMuapiBody` : une source image,
+ * une source vidéo et une source audio, chacune importée par l'utilisateur dans
+ * le bucket privé du workspace et signée côté serveur. Tout autre champ
+ * obligatoire (mask, LoRA, liste d'images…) reste refusé : il n'existe aucun
+ * contrôle VYORA pour le fournir, donc aucune génération ne doit être lancée.
+ */
+const SUPPORTED_REQUIRED_FIELDS = new Set([
+  "prompt", "image_url", "video_url", "audio_url",
+  // Variantes de nommage de la même capacité, déclarées par certains modèles.
+  "input_video", "first_frame_url", "first_frame_image",
+]);
 /** Media/structured fields are never exposed as tunable scalar parameters. */
 const SOURCE_FIELDS = new Set([
   "prompt", "image_url", "last_image", "audio_url", "video_url", "input_video",
@@ -675,6 +686,13 @@ function buildQuoteBody(body: Json, schema: Record<string, ParamDef>, fields: st
   if ((fields.includes("prompt") || required.includes("prompt")) && prompt) out.prompt = prompt;
   if ((fields.includes("image_url") || required.includes("image_url")) && imageUrl) out.image_url = imageUrl;
   if ((fields.includes("last_image") || required.includes("last_image")) && lastImageUrl) out.last_image = lastImageUrl;
+  // Sources vidéo / audio : uniquement si le modèle les déclare, jamais inventées.
+  const videoUrl = str(body.video_url, 2000);
+  const audioUrl = str(body.audio_url, 2000);
+  for (const key of ["video_url", "input_video"]) {
+    if ((fields.includes(key) || required.includes(key)) && videoUrl) out[key] = videoUrl;
+  }
+  if ((fields.includes("audio_url") || required.includes("audio_url")) && audioUrl) out.audio_url = audioUrl;
   const params = obj(body.params);
   for (const [key, def] of Object.entries(schema)) {
     if (!fields.includes(key) || isSourceField(key) || key.startsWith("__")) continue;
@@ -694,7 +712,14 @@ function buildQuoteBody(body: Json, schema: Record<string, ParamDef>, fields: st
 }
 /* -------------------------------- MuAPI --------------------------------- */
 
-function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: string, lastImageUrl = ""): Json {
+function buildMuapiBody(
+  model: Json,
+  payload: Json,
+  prompt: string,
+  imageUrl: string,
+  lastImageUrl = "",
+  media: { videoUrl?: string; audioUrl?: string } = {},
+): Json {
   const fields = asArray(model.input_fields);
   const required = asArray(model.required_fields);
   const body: Json = {};
@@ -702,6 +727,24 @@ function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: st
   if (fields.includes("image_url")) {
     if (required.includes("image_url") && !imageUrl) throw new Error("IMAGE_MISSING");
     if (imageUrl) body.image_url = imageUrl;
+  }
+  // Sources média importées par l'utilisateur : envoyées UNIQUEMENT si le
+  // modèle les déclare. Aucune valeur inventée, aucun média de démonstration.
+  const videoUrl = media.videoUrl ?? "";
+  const audioUrl = media.audioUrl ?? "";
+  for (const key of ["video_url", "input_video"]) {
+    if (!fields.includes(key)) continue;
+    if (required.includes(key) && !videoUrl) throw new Error("VIDEO_MISSING");
+    if (videoUrl) body[key] = videoUrl;
+  }
+  if (fields.includes("audio_url")) {
+    if (required.includes("audio_url") && !audioUrl) throw new Error("AUDIO_MISSING");
+    if (audioUrl) body.audio_url = audioUrl;
+  }
+  for (const key of ["first_frame_url", "first_frame_image"]) {
+    if (!fields.includes(key)) continue;
+    if (required.includes(key) && !imageUrl) throw new Error("IMAGE_MISSING");
+    if (imageUrl) body[key] = imageUrl;
   }
   // `last_image` is an optional, model-specific reference frame. It is sent
   // ONLY when the verified catalog explicitly declares that input field.
@@ -1246,8 +1289,21 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
   const lastImagePath = acceptsLastImage ? workspaceImagePath(payload.last_image_storage_path, workspaceId) : "";
   if (!lastImageUrl && lastImagePath) lastImageUrl = (await signStoragePath(lastImagePath)) ?? "";
 
+  // Sources vidéo / audio importées par l'utilisateur (Video→Video, Audio→Video).
+  // Le chemin Storage est vérifié dans le workspace de la tâche, puis signé.
+  const acceptsVideo = modelFields.some((f) => f === "video_url" || f === "input_video");
+  const acceptsAudio = modelFields.includes("audio_url");
+  let videoUrl = acceptsVideo ? str(payload.video_url, 2000) : "";
+  const videoPath = acceptsVideo ? workspaceImagePath(payload.video_storage_path, workspaceId) : "";
+  if (!videoUrl && videoPath) videoUrl = (await signStoragePath(videoPath)) ?? "";
+  let audioUrl = acceptsAudio ? str(payload.audio_url, 2000) : "";
+  const audioPath = acceptsAudio ? workspaceImagePath(payload.audio_storage_path, workspaceId) : "";
+  if (!audioUrl && audioPath) audioUrl = (await signStoragePath(audioPath)) ?? "";
+
   let submitBody: Json;
-  try { submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl); }
+  try {
+    submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, { videoUrl, audioUrl });
+  }
   catch (e) {
     const code = e instanceof Error ? e.message.split(":")[0] : "INVALID_INPUT";
     return await failJob(jobId, userId, code, e instanceof Error ? e.message : String(e));

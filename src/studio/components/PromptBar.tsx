@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
-  AlertCircle, Camera, ChevronDown, Coins, Database, ImagePlus, Info, Lock, Play,
+  AlertCircle, AudioLines, ChevronDown, Coins, Database, Film, ImagePlus, Info, Play,
   RefreshCw, Settings2, Sparkles, Subtitles, X,
 } from 'lucide-react';
 import { Button, Select, Toggle, cn } from '../../components/ui';
@@ -14,7 +14,7 @@ import {
 } from '../quality';
 import { CREATION_MODES } from '../plan';
 
-export type CreationModeId = 'idea' | 'script' | 'product' | 'avatar';
+export type CreationModeId = 'idea' | 'script' | 'product' | 'avatar' | 'video-source' | 'audio-source';
 
 export interface GenerationFormState {
   prompt: string;
@@ -29,6 +29,10 @@ export interface GenerationFormState {
   avatarId: string;
   referenceFile: File | null;
   lastReferenceFile: File | null;
+  /** Source vidéo importée (modèles Video→Video / Lip Sync). */
+  sourceVideoFile: File | null;
+  /** Source audio importée (modèles Audio→Video / avatars parlants). */
+  sourceAudioFile: File | null;
   language: string;
 }
 
@@ -36,7 +40,8 @@ export function initialFormState(): GenerationFormState {
   return {
     prompt: '', quality: 'standard', mode: 'script', ratio: '9:16', duration: 15,
     resolution: null, extras: {}, subtitles: true, script: '', avatarId: '',
-    referenceFile: null, lastReferenceFile: null, language: 'fr',
+    referenceFile: null, lastReferenceFile: null,
+    sourceVideoFile: null, sourceAudioFile: null, language: 'fr',
   };
 }
 
@@ -66,6 +71,7 @@ interface Props {
 const RESERVED_KEYS = ['aspect_ratio', 'resolution', 'duration'];
 const SHORT_MODES: Record<CreationModeId, string> = {
   idea: 'Une idée', script: 'Depuis un script', product: 'Image de produit', avatar: 'Avatar',
+  'video-source': 'Vidéo existante', 'audio-source': 'Audio + image',
 };
 
 /**
@@ -88,6 +94,8 @@ export function PromptBar({
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const lastFileRef = useRef<HTMLInputElement>(null);
+  const videoFileRef = useRef<HTMLInputElement>(null);
+  const audioFileRef = useRef<HTMLInputElement>(null);
 
   const ratios = selectOptions(model, 'aspect_ratio');
   const resolutions = selectOptions(model, 'resolution');
@@ -96,6 +104,10 @@ export function PromptBar({
   const extras = compatibleParams(model).filter(([key]) => !RESERVED_KEYS.includes(key));
   const modelAcceptsImage = Boolean(model?.input_fields.includes('image_url'));
   const modelAcceptsLastImage = Boolean(model?.input_fields.includes('last_image'));
+  const modelAcceptsVideo = Boolean(model?.input_fields.some((f) => f === 'video_url' || f === 'input_video'));
+  const modelAcceptsAudio = Boolean(model?.input_fields.includes('audio_url'));
+  const requiresVideo = Boolean(model?.required_fields.some((f) => f === 'video_url' || f === 'input_video'));
+  const requiresAudio = Boolean(model?.required_fields.includes('audio_url'));
   const summary = creditSummary(estimate, balance, Boolean(model?.dynamic_pricing));
   const cost = summary.creditsCost;
   const tier = QUALITY_TIERS.find((q) => q.id === state.quality);
@@ -428,14 +440,57 @@ export function PromptBar({
                   {avatars.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </Select>
               )}
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <span className="studio-pill opacity-50" title="Aucun moteur de synthèse vocale connecté">
-                  <Lock size={10} /> Voix · à venir
-                </span>
-                <span className="studio-pill opacity-50" title="Aucune génération audio / TTS connectée">
-                  <Camera size={10} /> Audio · à venir
-                </span>
-              </div>
+              {(modelAcceptsVideo || modelAcceptsAudio) && (
+                <div className="mt-3 space-y-2">
+                  {modelAcceptsVideo && (
+                    <div>
+                      <input
+                        ref={videoFileRef}
+                        type="file"
+                        accept="video/mp4,video/quicktime,video/webm"
+                        className="hidden"
+                        onChange={(e) => onPatch({ sourceVideoFile: e.target.files?.[0] ?? null })}
+                      />
+                      <button type="button" onClick={() => videoFileRef.current?.click()} className="studio-pill w-full justify-center">
+                        <Film size={11} />
+                        {state.sourceVideoFile
+                          ? state.sourceVideoFile.name.slice(0, 26)
+                          : `Vidéo source${requiresVideo ? ' *' : ''}`}
+                      </button>
+                      {state.sourceVideoFile && (
+                        <button type="button" onClick={() => onPatch({ sourceVideoFile: null })} className="mt-1 inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-rose-300">
+                          <X size={10} /> Retirer
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {modelAcceptsAudio && (
+                    <div>
+                      <input
+                        ref={audioFileRef}
+                        type="file"
+                        accept="audio/mpeg,audio/wav,audio/mp4,audio/x-m4a,audio/aac,audio/ogg"
+                        className="hidden"
+                        onChange={(e) => onPatch({ sourceAudioFile: e.target.files?.[0] ?? null })}
+                      />
+                      <button type="button" onClick={() => audioFileRef.current?.click()} className="studio-pill w-full justify-center">
+                        <AudioLines size={11} />
+                        {state.sourceAudioFile
+                          ? state.sourceAudioFile.name.slice(0, 26)
+                          : `Audio source${requiresAudio ? ' *' : ''}`}
+                      </button>
+                      {state.sourceAudioFile && (
+                        <button type="button" onClick={() => onPatch({ sourceAudioFile: null })} className="mt-1 inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-rose-300">
+                          <X size={10} /> Retirer
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-[9px] leading-snug text-slate-600">
+                    Vidéo et audio importés dans votre bucket privé, signés côté serveur. Aucun média de démonstration n’est utilisé.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] p-3 sm:col-span-2 lg:col-span-3">
