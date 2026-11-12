@@ -14,6 +14,8 @@ const steps = [
   ['audit.mjs', []],
   // Création softpay sans réponse : tentatives, blocage d'un second paiement, rapprochement manuel.
   ['unconfirmed.mjs', []],
+  // Tarification : provision, couverture des frais, devis figés, rapprochement, barème, rapport financier.
+  ['pricing.mjs', []],
   // Les Edge Functions sont du TypeScript : Node ≥ 22.6 sait en retirer les types.
   ['e2e.mjs', ['--experimental-strip-types', '--no-warnings']],
 ];

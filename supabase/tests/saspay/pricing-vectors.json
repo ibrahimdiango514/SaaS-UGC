@@ -1,0 +1,1219 @@
+{
+ "_comment": "Vecteurs communs au banc SQL (pricing.mjs) et aux tests vitest. Montants en centièmes ; pourcentages en millièmes de pour cent ; dates en jours par rapport à maintenant.",
+ "vectors": [
+  {
+   "name": "aucun tarif : base + provision",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 600000,
+    "fee": null,
+    "net": null,
+    "margin": null,
+    "pricing_fee": null,
+    "status": "missing"
+   },
+   "note": "5 000 + 1 000 = 6 000 FCFA"
+  },
+  {
+   "name": "1 % sur le total : frais inférieurs à la provision",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 600000,
+    "fee": 6000,
+    "net": 594000,
+    "margin": 94000,
+    "pricing_fee": 6000,
+    "status": "confirmed"
+   },
+   "note": "6 000 × 1 % = 60 ; net 5 940"
+  },
+  {
+   "name": "2,5 % sur le total : frais égaux à la provision",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 2500,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 3900000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 4000000,
+    "fee": 100000,
+    "net": 3900000,
+    "margin": 0,
+    "pricing_fee": 100000,
+    "status": "confirmed"
+   },
+   "note": "40 000 × 2,5 % = 1 000 ; net 39 000 = base"
+  },
+  {
+   "name": "2,5 % sur le total : frais supérieurs à la provision, prix relevé",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 2500,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 10000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 10256500,
+    "fee": 256413,
+    "net": 10000087,
+    "margin": 87,
+    "pricing_fee": 256413,
+    "status": "confirmed"
+   },
+   "note": "100 000 / 0,975 = 102 564,10 → 102 565 FCFA ; frais 2 564,13 ; net 100 000,87"
+  },
+  {
+   "name": "frais fixes de 500 FCFA",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 0,
+     "fixed": 50000,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 600000,
+    "fee": 50000,
+    "net": 550000,
+    "margin": 50000,
+    "pricing_fee": 50000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "frais fixes de 1 500 FCFA : au-dessus de la provision",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 0,
+     "fixed": 150000,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 650000,
+    "fee": 150000,
+    "net": 500000,
+    "margin": 0,
+    "pricing_fee": 150000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "2 % + 100 FCFA",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 2000,
+     "fixed": 10000,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 2500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 2600000,
+    "fee": 62000,
+    "net": 2538000,
+    "margin": 38000,
+    "pricing_fee": 62000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "minimum de frais de 1 200 FCFA",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": 120000,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 620000,
+    "fee": 120000,
+    "net": 500000,
+    "margin": 0,
+    "pricing_fee": 120000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "maximum de frais de 800 FCFA",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 5000,
+     "fixed": 0,
+     "floor": null,
+     "cap": 80000,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 10000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 10100000,
+    "fee": 80000,
+    "net": 10020000,
+    "margin": 20000,
+    "pricing_fee": 80000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "assiette = prix de base (3 %) : simple addition",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 3000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "base",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 5150000,
+    "fee": 150000,
+    "net": 5000000,
+    "margin": 0,
+    "pricing_fee": 150000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "arrondi au pas de 100 FCFA",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 10000
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 2500,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 10000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 10260000,
+    "fee": 256500,
+    "net": 10003500,
+    "margin": 3500,
+    "pricing_fee": 256500,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "stratégie provision seule : pas de relèvement",
+   "policy": {
+    "enabled": true,
+    "strategy": "provision_only",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 2500,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 10000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 10100000,
+    "fee": 252500,
+    "net": 9847500,
+    "margin": -152500,
+    "pricing_fee": 252500,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "opérateurs à 1 % et 3 % : le prix couvre le plus cher",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "orange_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "moov_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 3000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 5154700,
+    "fee": 154641,
+    "net": 5000059,
+    "margin": 59,
+    "pricing_fee": 154641,
+    "status": "confirmed"
+   },
+   "note": "50 000 / 0,97 = 51 546,39 → 51 547 FCFA"
+  },
+  {
+   "name": "même prix, commande Orange (1 %) : estimation propre à l'opérateur",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "orange_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "moov_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 3000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "ML",
+   "network": "orange_ml",
+   "expect": {
+    "final": 5154700,
+    "fee": 51547,
+    "net": 5103153,
+    "margin": 103153,
+    "pricing_fee": 154641,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "même prix, opérateur sans tarif : estimation absente",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "orange_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "moov_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 3000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "ML",
+   "network": "mobi_cash_ml",
+   "expect": {
+    "final": 5154700,
+    "fee": null,
+    "net": null,
+    "margin": null,
+    "pricing_fee": 154641,
+    "status": "missing"
+   }
+  },
+  {
+   "name": "opérateur non proposé ignoré (paiement direct seul)",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "orange_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "card_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 5000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 5100000,
+    "fee": 51000,
+    "net": 5049000,
+    "margin": 49000,
+    "pricing_fee": 51000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "page hébergée activée : tout opérateur du pays compte",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay",
+    "checkout"
+   ],
+   "configured": [
+    "orange_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "orange_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": "card_ml",
+     "min": 0,
+     "max": null,
+     "percent_milli": 5000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 5263200,
+    "fee": 263160,
+    "net": 5000040,
+    "margin": 40,
+    "pricing_fee": 263160,
+    "status": "confirmed"
+   },
+   "note": "50 000 / 0,95 = 52 631,58 → 52 632 FCFA"
+  },
+  {
+   "name": "ligne du pays prioritaire sur la ligne générique",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": null,
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 3000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 5100000,
+    "fee": 51000,
+    "net": 5049000,
+    "margin": 49000,
+    "pricing_fee": 51000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "autre pays : ligne générique",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": null,
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 3000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 5000000,
+   "country": "CI",
+   "network": null,
+   "expect": {
+    "final": 5154700,
+    "fee": 154641,
+    "net": 5000059,
+    "margin": 59,
+    "pricing_fee": 154641,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "paliers : le palier du total encaissé s'applique",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": 1000000,
+     "percent_milli": 0,
+     "fixed": 10000,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 1000001,
+     "max": null,
+     "percent_milli": 2000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 950000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 1050000,
+    "fee": 21000,
+    "net": 1029000,
+    "margin": 79000,
+    "pricing_fee": 21000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "lignes expirée et future ignorées",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 10000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -10,
+     "until_days": -1
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 10000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": 1,
+     "until_days": null
+    }
+   ],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 600000,
+    "fee": null,
+    "net": null,
+    "margin": null,
+    "pricing_fee": null,
+    "status": "missing"
+   }
+  },
+  {
+   "name": "la ligne la plus récente l'emporte",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 1000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -10,
+     "until_days": null
+    },
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 2000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -1,
+     "until_days": null
+    }
+   ],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 600000,
+    "fee": 12000,
+    "net": 588000,
+    "margin": 88000,
+    "pricing_fee": 12000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "politique désactivée : prix inchangé",
+   "policy": {
+    "enabled": false,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 2000,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 500000,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 500000,
+    "fee": 10000,
+    "net": 490000,
+    "margin": -10000,
+    "pricing_fee": 10000,
+    "status": "confirmed"
+   }
+  },
+  {
+   "name": "provision de 750 FCFA, pas de 25 FCFA",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 75000,
+    "step": 2500
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [],
+   "base": 1234500,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 1310000,
+    "fee": null,
+    "net": null,
+    "margin": null,
+    "pricing_fee": null,
+    "status": "missing"
+   }
+  },
+  {
+   "name": "1,255 % : frais arrondis au centième supérieur",
+   "policy": {
+    "enabled": true,
+    "strategy": "cover_fees",
+    "provision": 100000,
+    "step": 100
+   },
+   "flows": [
+    "softpay"
+   ],
+   "configured": [
+    "orange_ml",
+    "moov_ml",
+    "mobi_cash_ml"
+   ],
+   "lines": [
+    {
+     "type": "payin",
+     "country": "ML",
+     "network": null,
+     "min": 0,
+     "max": null,
+     "percent_milli": 1255,
+     "fixed": 0,
+     "floor": null,
+     "cap": null,
+     "fee_base": "total",
+     "from_days": -2,
+     "until_days": null
+    }
+   ],
+   "base": 777700,
+   "country": "ML",
+   "network": null,
+   "expect": {
+    "final": 877700,
+    "fee": 11016,
+    "net": 866684,
+    "margin": 88984,
+    "pricing_fee": 11016,
+    "status": "confirmed"
+   },
+   "note": "8 777 × 1,255 % = 110,15135 → 110,16"
+  }
+ ]
+}

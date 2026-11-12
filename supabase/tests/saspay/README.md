@@ -16,12 +16,13 @@ npm test         # Node ≥ 22.6
 | Étape | Rôle |
 | --- | --- |
 | `base.mjs` | Monte la base : rôles Supabase, `prod_subset.sql`, migrations Business Grow du dépôt. |
-| `mig.mjs` | Applique les deux migrations SasPay, dans l'ordre, deux fois (idempotence). |
+| `mig.mjs` | Applique les trois migrations SasPay, dans l'ordre, deux fois (idempotence), contrôle la politique de prix créée par défaut (active, 1 000 FCFA, barème vide), puis la désactive pour les scénarios historiques. |
 | `scenario.mjs` | Intégrité SQL : prix, idempotence, concurrence, gardes, droits, cloisonnement Studio / Business Grow. |
 | `legacy.mjs` | Anciennes RPC du navigateur (`ugc_create_recharge_order`, `reelora_admin_confirm_recharge`) face aux gardes. |
 | `refunds.mjs` | Remboursements Studio et Business Grow, attestation, forges en table, concurrence, entretien, sélection de réconciliation, anomalies, tâche planifiée (`net.http_post` remplacé par un enregistreur). |
 | `audit.mjs` | Audit avant mise en production, avec des connexions réellement simultanées : Business Grow (deux formules, paiements tardifs, encaissement non applicable et son remboursement intégral), remboursements (fuseaux, jours entamés, concurrence avec un renouvellement ou une dépense, attestation), réconciliation (exécution unique, anomalies, prérequis). Rejouable sans réinitialiser la base. |
 | `unconfirmed.mjs` | Demande Mobile Money restée sans réponse : tentative enregistrée avec son corps, rejeu borné (4 envois, 10 min), blocage de tout autre paiement du client (y compris par deux connexions simultanées et par insertion directe), passage en rapprochement manuel au lieu de l'expiration, candidates, rattachement, clôture attestée, réouverture sur encaissement tardif, Business Grow, droits. Rejouable sans réinitialiser la base. |
+| `pricing.mjs` | Prix tout compris : vecteurs de calcul communs avec le moteur TypeScript (`pricing-vectors.json`), devis client sans détail interne, prix final figé sur la commande, rapprochement (frais réels, net, marge, alertes, rejeu, panne d'écriture), administration (politique, barème en ajout seul, import des tarifs, simulateurs, droits), rapport financier filtré. Rejouable ; remet la configuration dans l'état trouvé. |
 | `e2e.mjs` | Bout en bout : vraies Edge Functions + base réelle + faux SasPay, dont la réconciliation planifiée (webhook perdu, réponse de création perdue, double encaissement, montant différent), l'audit (rafales de webhooks rejoués, pannes réseau, liste SasPay sans libellé, parcours Studio et Business Grow d'un même utilisateur) et la réponse de création perdue quand le client ne revient jamais (webhook d'une transaction inconnue, SasPay sans libellé, recherche par numéro, décision de l'administrateur, requête jamais reçue). Demande une base neuve (`base.mjs` puis `mig.mjs`). |
 
 ## Limites à connaître
