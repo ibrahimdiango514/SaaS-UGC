@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // Source de vérité unique : ce script génère aussi le fichier livré.
-import { buildBundle } from '../scripts/build-edge-bundle.mjs';
+import { buildBundle, buildEdgeArtifact, EDGE } from '../scripts/build-edge-bundle.mjs';
 import { handler as sourceHandler } from '../supabase/functions/reelora-video/index.ts';
 import { handler as bundleHandler } from '../supabase/functions/reelora-video.bundle.ts';
 
@@ -70,6 +70,14 @@ describe('Bundle de déploiement reelora-video', () => {
     }
     expect(bundle).toContain('audio_url');
     expect(bundle).toContain('input_video');
+  });
+
+  it('l’artefact déployé (.edge.js) correspond à l’empreinte du générateur', () => {
+    const artifact = buildEdgeArtifact();
+    expect(read(EDGE)).toBe(artifact.content);
+    // L'empreinte affichée dans la bannière est vérifiable côté production.
+    expect(read(EDGE).split('\n')[0]).toContain(`VYORA-EDGE-SHA256:${artifact.digest}`);
+    expect(artifact.digest).toMatch(/^[0-9a-f]{12}$/);
   });
 
   it('exporte le même handler que la source', () => {

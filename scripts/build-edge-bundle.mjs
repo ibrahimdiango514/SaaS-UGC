@@ -26,6 +26,7 @@
  *   node scripts/build-edge-bundle.mjs           # (re)génère le bundle
  *   node scripts/build-edge-bundle.mjs --check   # échoue si désynchronisé
  */
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -34,6 +35,8 @@ import esbuild from 'esbuild';
 export const ENTRY = 'supabase/functions/reelora-video/index.ts';
 export const SHARED = 'supabase/functions/_shared/video-quote.ts';
 export const BUNDLE = 'supabase/functions/reelora-video.bundle.ts';
+// Artefact réellement téléversé : minifié, avec une empreinte vérifiable.
+export const EDGE = 'supabase/functions/reelora-video.edge.js';
 
 const HEADER = [
   '// @ts-nocheck — artefact esbuild : verifie et execute par les tests.',
@@ -52,7 +55,7 @@ const HEADER = [
  * @param {string} root racine du dépôt
  * @returns {string}
  */
-export function buildBundle(root = process.cwd()) {
+export function buildBundle(root = process.cwd(), { minify = false } = {}) {
   const result = esbuild.buildSync({
     entryPoints: [join(root, ENTRY)],
     bundle: true,
@@ -62,6 +65,7 @@ export function buildBundle(root = process.cwd()) {
     write: false,
     sourcemap: false,
     legalComments: 'none',
+    minify,
     logLevel: 'warning',
   });
   const out = result.outputFiles?.[0];
@@ -73,9 +77,18 @@ export function buildBundle(root = process.cwd()) {
   return HEADER + code;
 }
 
+/** Empreinte SHA-256 (12 hex) du code déployé : preuve d'identité en prod. */
+export function buildEdgeArtifact(root = process.cwd()) {
+  const payload = buildBundle(root, { minify: true });
+  const digest = createHash('sha256').update(payload).digest('hex').slice(0, 12);
+  const banner = `/* VYORA-EDGE-SHA256:${digest} | artefact genere, ne pas editer */\n`;
+  return { content: banner + payload, digest };
+}
+
 const isMain = process.argv[1] && process.argv[1].endsWith('build-edge-bundle.mjs');
 if (isMain) {
   const expected = buildBundle();
+  const edge = buildEdgeArtifact();
   const check = process.argv.includes('--check');
   if (check) {
     const current = readFileSync(join(process.cwd(), BUNDLE), 'utf8');
@@ -83,9 +96,17 @@ if (isMain) {
       console.error(`${BUNDLE} désynchronisé : relancer node scripts/build-edge-bundle.mjs`);
       process.exit(1);
     }
-    console.log(`${BUNDLE} à jour (${expected.length} octets, ${expected.split('\n').length} lignes).`);
+    const currentEdge = readFileSync(join(process.cwd(), EDGE), 'utf8');
+    if (currentEdge !== edge.content) {
+      console.error(`${EDGE} désynchronisé : relancer node scripts/build-edge-bundle.mjs`);
+      process.exit(1);
+    }
+    console.log(`${BUNDLE} à jour (${expected.length} octets).`);
+    console.log(`${EDGE} à jour (${edge.content.length} octets, sha256 ${edge.digest}).`);
   } else {
     writeFileSync(join(process.cwd(), BUNDLE), expected);
+    writeFileSync(join(process.cwd(), EDGE), edge.content);
     console.log(`${BUNDLE} régénéré (${expected.length} octets, ${expected.split('\n').length} lignes).`);
+    console.log(`${EDGE} régénéré (${edge.content.length} octets, sha256 ${edge.digest}).`);
   }
 }
