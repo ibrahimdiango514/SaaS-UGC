@@ -11,7 +11,8 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check:edge-imports": "node scripts/check-edge-imports.mjs"
+    "check:edge-imports": "node scripts/check-edge-imports.mjs",
+    "preview:studio": "node scripts/studio-preview.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",

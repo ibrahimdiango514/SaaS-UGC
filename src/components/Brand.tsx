@@ -1,6 +1,12 @@
+import { useId } from 'react';
 import { cn } from './ui';
 
 export function BrandSymbol({ className, size = 36 }: { className?: string; size?: number }) {
+  // Un dégradé SVG partagé par plusieurs instances porte le même `id` : le
+  // navigateur ne résout alors que la première, et les symboles suivants
+  // s'affichent vides. L'identifiant est donc unique par instance.
+  const gradientId = `vyora-mark-${useId().replace(/[:]/g, '')}`;
+
   return (
     <span
       className={cn(
@@ -11,10 +17,10 @@ export function BrandSymbol({ className, size = 36 }: { className?: string; size
       aria-hidden="true"
     >
       <svg viewBox="0 0 40 40" width={size * 0.72} height={size * 0.72} fill="none">
-        <path d="M7 11.5h8.2l5.1 15 5.2-15H33L23.1 32h-5.7L7 11.5Z" fill="url(#vyora-mark)" />
+        <path d="M7 11.5h8.2l5.1 15 5.2-15H33L23.1 32h-5.7L7 11.5Z" fill={`url(#${gradientId})`} />
         <path d="M28.5 8.5v5M26 11h5" stroke="#E8FDFF" strokeLinecap="round" strokeWidth="1.5" />
         <defs>
-          <linearGradient id="vyora-mark" x1="7" y1="11.5" x2="29" y2="31" gradientUnits="userSpaceOnUse">
+          <linearGradient id={gradientId} x1="7" y1="11.5" x2="29" y2="31" gradientUnits="userSpaceOnUse">
             <stop stopColor="#A5F3FC" />
             <stop offset=".58" stopColor="#22D3EE" />
             <stop offset="1" stopColor="#A78BFA" />

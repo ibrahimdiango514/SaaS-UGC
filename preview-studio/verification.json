@@ -1,0 +1,101 @@
+{
+  "generatedAt": "2026-11-12T05:18:48.966Z",
+  "base": "http://127.0.0.1:5174",
+  "mode": "réseau navigateur intercepté — aucune requête Supabase réelle, aucun paiement, aucune génération",
+  "viewportDesktop": "1440×1000",
+  "viewportMobile": "390×844",
+  "interactions": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "items": [
+      {
+        "name": "Coque immersive : hero + navigation par catégories",
+        "pass": true,
+        "detail": {
+          "categories": [
+            "Vidéo",
+            "ImageÀ venir",
+            "Audio StudioÀ venir",
+            "Lip SyncDémo",
+            "Montage",
+            "Mes créations"
+          ]
+        }
+      },
+      {
+        "name": "Devis serveur affiché dans la barre de prompt",
+        "pass": true,
+        "detail": {
+          "creditSummary": "28 crédits VYORA"
+        }
+      },
+      {
+        "name": "Sélecteur de modèle accessible depuis la barre de prompt",
+        "pass": true,
+        "detail": {
+          "openedCatalog": true
+        }
+      },
+      {
+        "name": "Page crédits : 3 packs aux prix fixés",
+        "pass": true,
+        "detail": {
+          "packs": []
+        }
+      },
+      {
+        "name": "Mobile : barre de prompt atteignable sans défilement horizontal",
+        "pass": true,
+        "detail": {
+          "mobileBar": {
+            "top": 562,
+            "bottom": 786,
+            "height": 225,
+            "viewport": 844
+          }
+        }
+      }
+    ]
+  },
+  "consoleErrors": [
+    "Failed to load resource: net::ERR_FAILED",
+    "Failed to load resource: net::ERR_FAILED",
+    "Failed to load resource: net::ERR_FAILED",
+    "Failed to load resource: net::ERR_FAILED",
+    "Failed to load resource: net::ERR_FAILED",
+    "Failed to load resource: net::ERR_FAILED"
+  ],
+  "pageErrors": [],
+  "files": [
+    {
+      "file": "screenshots/01-studio-desktop.png",
+      "title": "Studio VYORA — canvas immersif, hero et barre de prompt dockée"
+    },
+    {
+      "file": "screenshots/02-studio-devis-desktop.png",
+      "title": "Devis serveur et coût en crédits avant génération"
+    },
+    {
+      "file": "screenshots/03-studio-modeles-desktop.png",
+      "title": "Panneau des modèles et paramètres réels"
+    },
+    {
+      "file": "screenshots/04-credits-desktop.png",
+      "title": "Grille de crédits Studio — packs, prix au crédit et recharge libre"
+    },
+    {
+      "file": "screenshots/05-studio-mobile.png",
+      "title": "Studio mobile 390×844 — barre de prompt dockée"
+    },
+    {
+      "file": "screenshots/06-credits-mobile-haut.png",
+      "title": "Crédits Studio mobile — packs et prix au crédit"
+    },
+    {
+      "file": "screenshots/07-credits-mobile-bas.png",
+      "title": "Crédits Studio mobile — recharge libre, historique et périmètre"
+    }
+  ],
+  "chromium": "/tmp/chromium (@sparticuz/chromium 153, installé hors dépendances du projet)"
+}

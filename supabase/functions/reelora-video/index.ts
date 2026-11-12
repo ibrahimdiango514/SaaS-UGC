@@ -204,17 +204,70 @@ async function loadVideoPricingConfig(): Promise<VideoPricingConfig | null> {
   };
 }
 
+/**
+ * Calcule le nombre de crédits Studio d'une opération.
+ *
+ * SEULE AUTORITÉ : ce calcul. Le client reçoit le résultat, il ne le propose
+ * jamais. Si un seul paramètre est inconnu (coût fournisseur, change, valeur du
+ * crédit, marge), la fonction renvoie `null` et l'appelant DOIT refuser
+ * l'opération commerciale : aucun coût n'est deviné.
+ *
+ * Formule : ((coût fournisseur + traitement) × change × (1 + marge)) / valeur du crédit
+ * puis arrondi supérieur, minimum 1 crédit.
+ *
+ * `secondaryCostsUsd` couvre les traitements complémentaires réellement
+ * facturés par le fournisseur ou par le pipeline (rendu, remux, audio).
+ */
 export function calculateVideoCredits(
   providerCostUsd: number,
   config: Pick<VideoPricingConfig, "usd_to_xof" | "credit_value_xof" | "markup_percent" | "additional_cost_usd">,
+  secondaryCostsUsd: number[] = [],
 ): number | null {
   const { usd_to_xof, credit_value_xof, markup_percent, additional_cost_usd } = config;
+  const extras = secondaryCostsUsd.map((value) => Number(value));
   if (![providerCostUsd, usd_to_xof, credit_value_xof, markup_percent, additional_cost_usd].every(Number.isFinite)
     || providerCostUsd <= 0 || (usd_to_xof ?? 0) <= 0 || (credit_value_xof ?? 0) <= 0
     || (markup_percent ?? -1) < 0 || (additional_cost_usd ?? -1) < 0) return null;
-  const totalXof = (providerCostUsd + additional_cost_usd!) * usd_to_xof! * (1 + markup_percent! / 100);
+  if (extras.some((value) => !Number.isFinite(value) || value < 0)) return null;
+
+  const extrasUsd = extras.reduce((total, value) => total + value, 0);
+  const totalXof = (providerCostUsd + additional_cost_usd! + extrasUsd)
+    * usd_to_xof! * (1 + markup_percent! / 100);
   const credits = Math.ceil(totalXof / credit_value_xof!);
   return Number.isSafeInteger(credits) && credits > 0 ? credits : null;
+}
+
+/**
+ * Grille d'achat Studio : prix par crédit dégressif selon le pack.
+ * Les packs et leurs montants viennent de `ugc_app_settings.studio_pricing_config`
+ * (administrable), jamais d'une constante côté navigateur.
+ */
+export interface StudioPack {
+  pack_key: string;
+  label: string;
+  price_xof: number;
+  credits: number;
+  recommended?: boolean;
+}
+
+export function packPricePerCredit(pack: Pick<StudioPack, "price_xof" | "credits">): number | null {
+  if (!Number.isFinite(pack.price_xof) || !Number.isFinite(pack.credits)
+    || pack.price_xof <= 0 || pack.credits <= 0) return null;
+  return Math.round((pack.price_xof / pack.credits) * 10000) / 10000;
+}
+
+/** Vérifie qu'un pack est cohérent : plus de crédits ⇒ prix par crédit plus bas. */
+export function assertPackLadder(packs: StudioPack[]): string | null {
+  const sorted = packs
+    .map((pack) => ({ pack, unit: packPricePerCredit(pack) }))
+    .sort((a, b) => (a.pack.credits - b.pack.credits));
+  for (let index = 1; index < sorted.length; index += 1) {
+    const previous = sorted[index - 1].unit;
+    const current = sorted[index].unit;
+    if (previous === null || current === null) return "invalid_pack_values";
+    if (current >= previous) return "pack_ladder_not_degressive";
+  }
+  return null;
 }
 async function loadAvatar(id: string): Promise<Json | null> {
   const rows = await restService<Json>(`reelora_avatars?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
