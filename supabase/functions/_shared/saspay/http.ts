@@ -32,7 +32,10 @@ export function readPaymentsEnv(get: EnvReader): PaymentsEnv {
     supabaseUrl: get('SUPABASE_URL'),
     anonKey: get('SUPABASE_ANON_KEY'),
     serviceRoleKey: get('SUPABASE_SERVICE_ROLE_KEY'),
-    sasPaySecretKey: (get('VYORA_SASPAY_SECRET_KEY') || get('SASPAY_SECRET_KEY')).trim(),
+    // Clé DÉDIÉE à VYORA. Aucun repli sur `SASPAY_SECRET_KEY` : cette variable
+    // appartient à un autre produit hébergé sur le même projet et ne doit jamais
+    // servir à encaisser pour VYORA par simple oubli de configuration.
+    sasPaySecretKey: get('VYORA_SASPAY_SECRET_KEY').trim(),
     // Chaque webhook SasPay possède son propre secret : celui de VYORA n'est pas
     // celui d'un autre produit hébergé sur le même projet.
     webhookSecret: get('VYORA_SASPAY_WEBHOOK_SECRET').trim(),
@@ -209,6 +212,36 @@ export function createWebhookHandler(deps: HandlerDeps) {
         signature: request.headers.get('x-webhook-signature'),
         timestamp: request.headers.get('x-webhook-timestamp'),
       }), 200);
+    } catch (error) {
+      return failure(error);
+    }
+  };
+}
+
+/**
+ * Gestionnaire appelé par la tâche planifiée (pg_cron → pg_net). Aucune session :
+ * l'en-tête dédié puis le jeton serveur (Vault) font foi. Aucun paramètre n'est lu
+ * dans la requête hormis l'étiquette de provenance.
+ */
+export function createReconcileHandler(deps: HandlerDeps) {
+  const service = buildService(deps);
+
+  return async function handler(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Méthode non autorisée.' } }, 405);
+    }
+    // Refus avant toute lecture en base : une requête anonyme ne coûte rien.
+    if (request.headers.get('x-vyora-cron') !== 'payments-reconcile') {
+      return json({ error: { code: 'CRON_FORBIDDEN', message: 'Appel non autorisé.' } }, 403);
+    }
+    const presented = /^Bearer\s+(\S+)$/i.exec(request.headers.get('authorization') ?? '')?.[1] ?? '';
+    try {
+      if (!(await service.isCronToken(presented))) {
+        return json({ error: { code: 'CRON_UNAUTHORIZED', message: 'Jeton invalide.' } }, 401);
+      }
+      const body = await request.json().catch(() => null) as { source?: unknown } | null;
+      const source = body && typeof body.source === 'string' && /^[a-z_-]{1,20}$/.test(body.source) ? body.source : 'cron';
+      return json(await service.reconcile({ source }), 200);
     } catch (error) {
       return failure(error);
     }

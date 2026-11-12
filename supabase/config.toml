@@ -64,3 +64,11 @@ verify_jwt = true
 # paiement (`GET /payments/{id}/verify/`) avant toute livraison.
 [functions.vyora-saspay-webhook]
 verify_jwt = false
+
+# Réconciliation planifiée des paiements SasPay (pg_cron -> pg_net). Le job ne
+# peut pas présenter de JWT utilisateur : la protection repose sur l'en-tête
+# `x-vyora-cron: payments-reconcile` puis sur le jeton Vault
+# `vyora_payments_reconcile_token`, comparé à temps constant. Lecture seule côté
+# SasPay ; ne livre que par le règlement idempotent, après vérification.
+[functions.vyora-payments-reconcile]
+verify_jwt = false

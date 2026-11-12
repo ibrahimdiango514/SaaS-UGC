@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createPaymentsHandler, createWebhookHandler, isAllowedOrigin, readPaymentsEnv, type PaymentsEnv,
+  createPaymentsHandler, createReconcileHandler, createWebhookHandler, isAllowedOrigin, readPaymentsEnv, type PaymentsEnv,
 } from '../supabase/functions/_shared/saspay/http';
 import { createPaymentService } from '../supabase/functions/_shared/saspay/payments';
 import { createSasPayClient } from '../supabase/functions/_shared/saspay/client';
 import {
-  NOW, TEST_KEY, WEBHOOK_SECRET, createFakeSasPay, createFakeStore, jsonResponse, signedWebhook,
+  CRON_TOKEN, NOW, TEST_KEY, WEBHOOK_SECRET, createFakeSasPay, createFakeStore, jsonResponse, signedWebhook,
 } from './helpers/saspay-fakes';
 
 const ORIGIN = 'https://vyora-ugc.netlify.app';
@@ -40,6 +40,7 @@ function setup() {
     ...fake, saspay, authCalls,
     payments: createPaymentsHandler({ env, fetcher, service }),
     webhook: createWebhookHandler({ env, fetcher, service }),
+    reconcile: createReconcileHandler({ env, fetcher, service }),
   };
 }
 
@@ -62,8 +63,8 @@ describe('Edge Function vyora-payments', () => {
       SASPAY_SECRET_KEY: ' sk_test_shared ', SASPAY_WEBHOOK_SECRET: 'secret-autre-produit',
     };
     const read = readPaymentsEnv((key) => values[key] ?? '');
-    expect(read.sasPaySecretKey).toBe('sk_test_shared');
-    // Le secret du webhook d'un autre produit n'est jamais réutilisé pour VYORA.
+    // Ni la clé ni le secret de webhook d'un autre produit ne sont réutilisés pour VYORA.
+    expect(read.sasPaySecretKey).toBe('');
     expect(read.webhookSecret).toBe('');
     values.VYORA_SASPAY_SECRET_KEY = 'sk_test_vyora';
     values.VYORA_SASPAY_WEBHOOK_SECRET = 'whsec_vyora';
@@ -238,5 +239,75 @@ describe('Edge Function vyora-saspay-webhook', () => {
     const response = await ctx.webhook(await request({ event: 'webhook.test', data: {} }, { headers: { origin: ORIGIN } }));
     expect(response.status).toBe(200);
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});
+
+describe('Edge Function vyora-payments-reconcile', () => {
+  const cron = (headers: Record<string, string> = {}, init: RequestInit = {}) => new Request('https://edge.test/r', {
+    method: 'POST', body: JSON.stringify({ source: 'cron' }),
+    headers: { 'content-type': 'application/json', 'x-vyora-cron': 'payments-reconcile', authorization: `Bearer ${CRON_TOKEN}`, ...headers },
+    ...init,
+  });
+
+  it('exécute la réconciliation pour la tâche planifiée et livre un paiement dont le webhook s’est perdu', async () => {
+    const ctx = setup();
+    await ctx.payments(post(createBody));
+    const txId = [...ctx.orders.values()][0].provider_payment_id as string;
+    ctx.saspay.setTransaction(txId, { status: 'SUCCESS' });
+    const authBefore = ctx.authCalls.length;
+    const response = await ctx.reconcile(cron());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ran: true, status: 'ok', settled: 1 });
+    expect(ctx.credits.studio.get(USER.id)).toBe(27);
+    expect(ctx.runs[0]).toMatchObject({ source: 'cron', status: 'ok' });
+    // Aucune session utilisateur n'est consultée, aucun en-tête CORS n'est émis.
+    expect(ctx.authCalls.length).toBe(authBefore);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('refuse sans l’en-tête dédié, avant toute lecture en base', async () => {
+    const ctx = setup();
+    for (const headers of [{ 'x-vyora-cron': '' }, { 'x-vyora-cron': 'provider-health' }]) {
+      const response = await ctx.reconcile(cron(headers));
+      expect(response.status).toBe(403);
+    }
+    expect(ctx.calls).toHaveLength(0);
+    expect(ctx.runs).toHaveLength(0);
+  });
+
+  it('refuse un jeton absent, faux, un JWT utilisateur ou la clé de service', async () => {
+    const ctx = setup();
+    await ctx.payments(post(createBody));
+    ctx.saspay.setTransaction([...ctx.orders.values()][0].provider_payment_id as string, { status: 'SUCCESS' });
+    for (const authorization of ['', 'Bearer ', `Bearer ${CRON_TOKEN.replace(/.$/, '0')}`, 'Bearer jwt-alice', 'Bearer jwt-admin',
+      'Bearer service-role-key', `Basic ${CRON_TOKEN}`, CRON_TOKEN]) {
+      const response = await ctx.reconcile(cron({ authorization }));
+      expect(response.status).toBe(401);
+      expect((await response.json()).error.code).toBe('CRON_UNAUTHORIZED');
+    }
+    expect(ctx.runs).toHaveLength(0);
+    expect(ctx.credits.studio.size).toBe(0);
+    expect(ctx.authCalls.filter((u) => u.endsWith('/auth/v1/user'))).toHaveLength(1); // uniquement l'appel « create »
+  });
+
+  it('refuse les autres méthodes ; tolère un corps vide ou illisible', async () => {
+    const ctx = setup();
+    expect((await ctx.reconcile(new Request('https://edge.test/r', { method: 'GET' }))).status).toBe(405);
+    const empty = await ctx.reconcile(cron({}, { body: 'pas du json' }));
+    expect(empty.status).toBe(200);
+    expect(ctx.runs[0].source).toBe('cron');
+  });
+
+  it('ne lit dans la requête que l’étiquette de provenance : aucune commande ne peut être désignée', async () => {
+    const ctx = setup();
+    await ctx.payments(post(createBody));
+    const order = [...ctx.orders.values()][0];
+    const response = await ctx.reconcile(cron({}, {
+      body: JSON.stringify({ source: 'Manuel; drop', order_id: order.id, status: 'SUCCESS', amount: '1.00', credits: 9999 }),
+    }));
+    expect(response.status).toBe(200);
+    expect(ctx.runs[0].source).toBe('cron');
+    expect(order.status).toBe('processing');
+    expect(ctx.credits.studio.size).toBe(0);
   });
 });

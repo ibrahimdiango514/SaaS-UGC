@@ -1,4 +1,4 @@
-// Lance tout le banc : base → migration SasPay (2 passes) → scénario SQL → bout en bout.
+// Lance tout le banc : base → migrations SasPay (2 passes) → scénarios SQL → bout en bout.
 //   cd supabase/tests/saspay && npm install && npm test
 import { spawnSync } from 'node:child_process';
 import { start, HERE } from './pg.mjs';
@@ -8,6 +8,8 @@ const steps = [
   ['mig.mjs', []],
   ['scenario.mjs', []],
   ['legacy.mjs', []],
+  // Remboursements, entretien, sélection de réconciliation, anomalies, planification.
+  ['refunds.mjs', []],
   // Les Edge Functions sont du TypeScript : Node ≥ 22.6 sait en retirer les types.
   ['e2e.mjs', ['--experimental-strip-types', '--no-warnings']],
 ];

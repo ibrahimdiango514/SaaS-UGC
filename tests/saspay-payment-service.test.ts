@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createSasPayClient } from '../supabase/functions/_shared/saspay/client';
 import {
-  PaymentError, createPaymentService, maskMsisdn, normalizeMsisdn, paymentState, publicOrder,
+  PaymentError, constantTimeEqual, createPaymentService, maskMsisdn, normalizeMsisdn, orderReferenceIn, paymentState,
+  publicOrder,
   type OrderRecord,
 } from '../supabase/functions/_shared/saspay/payments';
 import {
-  LIVE_KEY, ML_COUNTRY, NOW, TEST_KEY, WEBHOOK_SECRET, createFakeSasPay, createFakeStore, jsonResponse,
+  CRON_TOKEN, LIVE_KEY, ML_COUNTRY, NOW, TEST_KEY, WEBHOOK_SECRET, createFakeSasPay, createFakeStore, jsonResponse,
   signedWebhook, type FakeStoreOptions,
 } from './helpers/saspay-fakes';
 
@@ -117,7 +118,9 @@ describe('paiement SasPay — création (softpay)', () => {
       // Le prix du produit, SANS les frais : SasPay les applique une seule fois.
       amount: '5000.00', currency: 'XOF', country: 'ML', network: 'orange_ml',
       customer: { email: 'alice@example.ml', first_name: 'Alice', last_name: 'Koné', phone: '+22370123456' },
-      description: 'Pack Creator',
+      // La référence interne figure dans le libellé : la réconciliation s'en sert
+      // pour retrouver un paiement dont la réponse ou le webhook s'est perdu.
+      description: `Pack Creator — ${order.internal_reference}`,
       metadata: { order_reference: order.internal_reference, product: 'studio' },
     });
   });
@@ -714,5 +717,229 @@ describe('paiement SasPay — vue publique d’une commande', () => {
     expect(view.provider_session_id).toBeUndefined();
     expect(view.pricing_snapshot).toBeUndefined();
     expect(view).toMatchObject({ id: 'o1', amount: '5000.00', state: 'pending', internal_reference: 'VYS-1' });
+  });
+});
+
+describe('réconciliation SasPay — tâche planifiée', () => {
+  const HOUR = 3_600_000;
+  const first = <T,>(map: Map<string, T>) => [...map.values()][0];
+
+  it('repère la référence interne dans un libellé, et rien d’autre', () => {
+    const ref = `VYS-${'0A'.repeat(16)}`;
+    expect(orderReferenceIn(`Pack Creator — ${ref}`)).toBe(ref);
+    expect(orderReferenceIn(`VYB-${'F'.repeat(32)}`)).toBe(`VYB-${'F'.repeat(32)}`);
+    for (const bad of [null, '', 'Pack Creator', `VYX-${'0'.repeat(32)}`, `VYS-${'0'.repeat(31)}`, `VYS-${'0'.repeat(33)}`,
+      `VYS-${'g'.repeat(32)}`, `XVYS-${'0'.repeat(32)}`]) {
+      expect(orderReferenceIn(bad)).toBeNull();
+    }
+  });
+
+  it('compare le jeton à temps constant et refuse tout jeton malformé ou absent', async () => {
+    expect(constantTimeEqual('abc', 'abc')).toBe(true);
+    expect(constantTimeEqual('abc', 'abd')).toBe(false);
+    expect(constantTimeEqual('abc', 'abcd')).toBe(false);
+    const { service, calls } = setup();
+    expect(await service.isCronToken(CRON_TOKEN)).toBe(true);
+    expect(await service.isCronToken(CRON_TOKEN.replace(/.$/, '0'))).toBe(false);
+    calls.length = 0;
+    // Un jeton malformé est refusé sans même lire le coffre.
+    for (const bad of ['', 'x', CRON_TOKEN.toUpperCase(), `${CRON_TOKEN}00`, TEST_KEY]) {
+      expect(await service.isCronToken(bad)).toBe(false);
+    }
+    expect(calls).not.toContain('reconcileToken');
+    const missing = setup({ cronToken: null });
+    expect(await missing.service.isCronToken(CRON_TOKEN)).toBe(false);
+  });
+
+  it('webhook perdu : le paiement réussi est retrouvé, vérifié puis livré une seule fois', async () => {
+    const { service, saspay, credits, runs, orders } = setup();
+    await service.create(alice, softpay('idem-recon-0001'));
+    const order = first(orders);
+    saspay.setTransaction(order.provider_payment_id as string, { status: 'SUCCESS' });
+    // Aucun webhook, aucune consultation du client : seule la tâche planifiée passe.
+    const result = await service.reconcile();
+    expect(result).toMatchObject({ ran: true, status: 'ok', checked: 1, settled: 1, errors: 0, anomalies: 0 });
+    expect(order.status).toBe('paid');
+    expect(credits.studio.get(alice.id)).toBe(27);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ source: 'cron', status: 'ok', counts: { settled: 1, sweep_done: true } });
+    // Deuxième passage : plus rien à faire, aucun second crédit.
+    const again = await service.reconcile();
+    expect(again).toMatchObject({ ran: true, settled: 0 });
+    expect(credits.studio.get(alice.id)).toBe(27);
+  });
+
+  it('ne livre rien tant que SasPay répond « en attente » ; clôt la commande sur échec vérifié', async () => {
+    const { service, saspay, credits, orders } = setup();
+    await service.create(alice, softpay('idem-recon-0002'));
+    const order = first(orders);
+    expect(await service.reconcile()).toMatchObject({ checked: 1, settled: 0, closed: 0 });
+    expect(order.status).toBe('processing');
+    saspay.setTransaction(order.provider_payment_id as string, { status: 'FAILED' });
+    expect(await service.reconcile()).toMatchObject({ checked: 1, settled: 0, closed: 1 });
+    expect(order.status).toBe('failed');
+    expect(credits.studio.get(alice.id)).toBeUndefined();
+  });
+
+  it('succès tardif après un échec : la commande close est revérifiée et honorée', async () => {
+    const { service, saspay, credits, orders } = setup();
+    await service.create(alice, softpay('idem-recon-0003'));
+    const order = first(orders);
+    saspay.setTransaction(order.provider_payment_id as string, { status: 'FAILED' });
+    await service.reconcile();
+    expect(order.status).toBe('failed');
+    saspay.setTransaction(order.provider_payment_id as string, { status: 'SUCCESS' });
+    expect(await service.reconcile()).toMatchObject({ settled: 1 });
+    expect(order.status).toBe('paid');
+    expect(credits.studio.get(alice.id)).toBe(27);
+  });
+
+  it('montant vérifié différent du montant commandé : rien n’est livré, une anomalie est signalée', async () => {
+    const { service, saspay, credits, anomalies, orders } = setup();
+    await service.create(alice, softpay('idem-recon-0004'));
+    const order = first(orders);
+    saspay.setTransaction(order.provider_payment_id as string, { status: 'SUCCESS', requested_amount: '500.00' });
+    expect(await service.reconcile()).toMatchObject({ settled: 0, anomalies: 1 });
+    expect(credits.studio.get(alice.id)).toBeUndefined();
+    expect(anomalies).toEqual([expect.objectContaining({
+      kind: 'amount_mismatch', product: 'studio', orderId: order.id, reference: order.internal_reference,
+    })]);
+  });
+
+  it('réponse de création perdue : le paiement est retrouvé par la référence du libellé, vérifié et livré', async () => {
+    const { service, saspay, credits, orders, anomalies } = setup();
+    saspay.respondWith((call) => (call.path === '/payments/softpay/' ? jsonResponse({ detail: 'timeout' }, 504) : undefined));
+    await service.create(alice, softpay('idem-recon-0005')).catch(() => undefined);
+    saspay.respondWith(null);
+    const order = first(orders);
+    expect(order.provider_payment_id).toBeNull();
+    // SasPay a pourtant encaissé : la transaction porte la référence interne.
+    const txId = saspay.addTransaction({
+      requested_amount: '5000.00', debited_amount: '5100.00', net_amount: '5000.00',
+      description: `Pack Creator — ${order.internal_reference}`,
+    });
+    const result = await service.reconcile();
+    expect(result).toMatchObject({ swept: 1, settled: 1, sweep_done: true });
+    expect(order).toMatchObject({ status: 'paid', provider_payment_id: txId });
+    expect(credits.studio.get(alice.id)).toBe(27);
+    expect(anomalies).toHaveLength(0);
+    // La transaction listée n'est jamais crue : elle a été revérifiée unitairement.
+    expect(saspay.count('GET', `/payments/${txId}/verify/`)).toBe(1);
+  });
+
+  it('paiement listé d’un montant différent : la référence ne suffit pas, rien n’est livré', async () => {
+    const { service, saspay, credits, orders, anomalies } = setup();
+    saspay.respondWith((call) => (call.path === '/payments/softpay/' ? jsonResponse({ detail: 'timeout' }, 504) : undefined));
+    await service.create(alice, softpay('idem-recon-0006')).catch(() => undefined);
+    saspay.respondWith(null);
+    const order = first(orders);
+    saspay.addTransaction({
+      requested_amount: '100.00', debited_amount: '100.00', net_amount: '100.00',
+      description: `Pack Creator — ${order.internal_reference}`,
+    });
+    await service.reconcile();
+    expect(order.status).not.toBe('paid');
+    expect(credits.studio.get(alice.id)).toBeUndefined();
+    expect(anomalies.map((a) => a.kind)).toEqual(['amount_mismatch']);
+  });
+
+  it('second encaissement pour une commande déjà payée : aucun second crédit, anomalie « doublon »', async () => {
+    const { service, saspay, credits, orders, anomalies } = setup();
+    await service.create(alice, softpay('idem-recon-0007'));
+    const order = first(orders);
+    saspay.setTransaction(order.provider_payment_id as string, { status: 'SUCCESS' });
+    await service.reconcile();
+    expect(credits.studio.get(alice.id)).toBe(27);
+    const duplicate = saspay.addTransaction({
+      requested_amount: '5000.00', debited_amount: '5100.00', net_amount: '5000.00',
+      description: `Pack Creator — ${order.internal_reference}`,
+    });
+    await service.reconcile();
+    expect(credits.studio.get(alice.id)).toBe(27);
+    expect(order.provider_payment_id).not.toBe(duplicate);
+    expect(anomalies).toEqual([expect.objectContaining({
+      kind: 'duplicate_payment', orderId: order.id, paymentId: duplicate,
+      details: { tracked_payment_id: order.provider_payment_id },
+    })]);
+  });
+
+  it('ignore les encaissements des autres produits du compte marchand et les références inconnues', async () => {
+    const { service, saspay, anomalies, credits } = setup();
+    saspay.addTransaction({ requested_amount: '5000.00', description: 'Loyer novembre — appartement 12' });
+    saspay.addTransaction({ requested_amount: '5000.00', description: `Pack — VYS-${'F'.repeat(32)}` });
+    const result = await service.reconcile();
+    expect(result).toMatchObject({ ran: true, status: 'ok', swept: 1, settled: 0, anomalies: 0 });
+    expect(anomalies).toHaveLength(0);
+    expect(credits.studio.size).toBe(0);
+    expect(saspay.calls.some((c) => c.path.includes('/verify/'))).toBe(false);
+  });
+
+  it('paiement inconnu de SasPay : signalé ; clos seulement après 24 h', async () => {
+    const { service, saspay, orders, anomalies, clock, reconcile } = setup();
+    reconcile.sweep = false;
+    await service.create(alice, softpay('idem-recon-0008'));
+    const order = first(orders);
+    saspay.transactions.delete(order.provider_payment_id as string);
+    expect(await service.reconcile()).toMatchObject({ status: 'partial', errors: 1, anomalies: 1, closed: 0 });
+    expect(order.status).toBe('processing');
+    expect(anomalies[0]).toMatchObject({ kind: 'payment_not_found', orderId: order.id });
+    clock.now = NOW + 25 * HOUR;
+    expect(await service.reconcile()).toMatchObject({ closed: 1 });
+    expect(order).toMatchObject({ status: 'cancelled', failure_code: 'provider_payment_not_found' });
+  });
+
+  it('panne SasPay : aucune commande n’est modifiée, l’exécution est journalisée en erreur partielle', async () => {
+    const { service, saspay, orders, runs, credits, reconcile } = setup();
+    reconcile.sweep = false;
+    await service.create(alice, softpay('idem-recon-0009'));
+    await service.create(bob, softpay('idem-recon-0010'));
+    saspay.respondWith((call) => (call.path.includes('/verify/') ? jsonResponse({ detail: 'down' }, 503) : undefined));
+    const result = await service.reconcile();
+    expect(result).toMatchObject({ ran: true, status: 'partial', checked: 0, errors: 2, settled: 0 });
+    expect([...orders.values()].map((o) => o.status)).toEqual(['processing', 'processing']);
+    expect(credits.studio.size).toBe(0);
+    expect(runs[0].status).toBe('partial');
+  });
+
+  it('une seule exécution à la fois ; rien ne tourne sans clé SasPay', async () => {
+    const { service, store, runs } = setup();
+    await store.reconcileStart('cron');
+    expect(await service.reconcile()).toEqual({ ran: false, reason: 'already_running' });
+    expect(runs).toHaveLength(1);
+    const unconfigured = setup({ key: null });
+    expect(await unconfigured.service.reconcile()).toEqual({ ran: false, reason: 'not_configured' });
+    expect(unconfigured.runs).toHaveLength(0);
+  });
+
+  it('s’arrête à l’épuisement du budget de temps et le journalise', async () => {
+    const { service, saspay, runs, clock, reconcile } = setup();
+    reconcile.sweep = false;
+    await service.create(alice, softpay('idem-recon-0011'));
+    await service.create(bob, softpay('idem-recon-0012'));
+    saspay.respondWith((call) => { if (call.path.includes('/verify/')) clock.now += 60_000; return undefined; });
+    const result = await service.reconcile({ budgetMs: 40_000 });
+    expect(result).toMatchObject({ status: 'partial', checked: 1 });
+    expect(runs[0].counts?.detail).toMatchObject({ stopped: 'time_budget' });
+  });
+
+  it('n’appelle SasPay qu’en lecture : aucun paiement, aucun décaissement n’est initié', async () => {
+    const { service, saspay, orders } = setup();
+    await service.create(alice, softpay('idem-recon-0013'));
+    saspay.setTransaction(first(orders).provider_payment_id as string, { status: 'SUCCESS' });
+    saspay.calls.length = 0;
+    await service.reconcile();
+    expect(saspay.calls.length).toBeGreaterThan(0);
+    expect(saspay.calls.every((c) => c.method === 'GET')).toBe(true);
+    expect(saspay.calls.every((c) => /^\/(payments\/[^/]+\/verify\/|transactions\/|checkout-sessions\/[^/]+\/status\/)/.test(c.path))).toBe(true);
+  });
+
+  it('session hébergée payée sans webhook : la transaction est retrouvée par la session puis livrée', async () => {
+    const { service, saspay, credits, orders } = setup();
+    await service.create(alice, checkout('idem-recon-0014'));
+    const order = first(orders);
+    const txId = saspay.paySession(order.provider_session_id as string);
+    expect(await service.reconcile()).toMatchObject({ settled: 1 });
+    expect(order).toMatchObject({ status: 'paid', provider_payment_id: txId });
+    expect(credits.studio.get(alice.id)).toBe(95);
   });
 });

@@ -1032,7 +1032,8 @@ begin
   end if;
   if v_status = 'SUCCESS' and v_payment is null then raise exception 'payment_id_required'; end if;
 
-  if v_order.status = 'paid' then
+  -- Déjà réglée (ou remboursée depuis) : aucune seconde activation.
+  if v_order.status in ('paid', 'refunded') then
     update saas_business.payment_orders
        set last_verified_at = now(), verify_count = verify_count + 1
      where id = p_order_id returning * into v_order;

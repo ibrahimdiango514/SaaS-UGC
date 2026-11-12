@@ -2,8 +2,8 @@
 // Le faux stockage reproduit les règles portées par la migration
 // `vyora_saspay_payments` (prix serveur, idempotence, crédit unique).
 import {
-  type CreateOrderInput, type OrderRecord, type PaymentStore, type Product, type QuoteContext,
-  type SettleInput, type SettleResult, PaymentError,
+  type CreateOrderInput, type OrderRecord, type PaymentAnomaly, type PaymentStore, type Product, type QuoteContext,
+  type ReconcileCounts, type SettleInput, type SettleResult, PaymentError,
 } from '../../supabase/functions/_shared/saspay/payments';
 import { signWebhook } from '../../supabase/functions/_shared/saspay/webhook';
 
@@ -11,6 +11,7 @@ export const TEST_KEY = 'sk_test_unit_0123456789abcdef';
 export const LIVE_KEY = 'sk_live_unit_0123456789abcdef';
 export const WEBHOOK_SECRET = 'whsec_unit_test_secret';
 export const NOW = Date.parse('2026-11-13T10:00:00Z');
+export const CRON_TOKEN = 'a1b2c3d4'.repeat(8);
 
 export const ML_COUNTRY = {
   name: 'Mali', currency: 'XOF', dial_code: '223', national_number_length: 8,
@@ -34,6 +35,8 @@ export interface FakeStoreOptions {
   admins?: string[];
   businessEnabled?: boolean;
   businessPlans?: Record<string, { price: number; label: string }>;
+  /** Jeton de la tâche planifiée (`null` : absent de Vault). */
+  cronToken?: string | null;
 }
 
 export function createFakeStore(options: FakeStoreOptions = {}) {
@@ -50,6 +53,9 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
   };
   const plans = options.businessPlans ?? { croissance: { price: 25000, label: 'Business Grow — Croissance' } };
   let sequence = 0;
+  const anomalies: PaymentAnomaly[] = [];
+  const runs: Array<{ id: string; source: string; status: string; counts?: ReconcileCounts & { detail?: Record<string, unknown> } }> = [];
+  const reconcile = { sweep: true, due: null as Array<{ product: Product; orderId: string }> | null };
 
   function price(product: Product, item: Record<string, unknown>) {
     if (product === 'studio') {
@@ -96,7 +102,8 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       const order: OrderRecord = {
         product: input.product, id, user_id: input.userId, status: 'pending',
         amount: quoted.amount, currency: quoted.currency, country: input.country,
-        internal_reference: `${input.product === 'studio' ? 'VYS' : 'VYB'}-${String(sequence).padStart(8, '0')}`,
+        internal_reference: `${input.product === 'studio' ? 'VYS' : 'VYB'}-${String(sequence).padStart(32, '0')}`,
+        created_at: new Date(NOW).toISOString(),
         label: quoted.label, payment_flow: input.flow, network_code: input.network,
         provider_payment_id: null, provider_session_id: null, provider_status: null, checkout_url: null,
         last_verified_at: null, credits: 'credits' in quoted ? quoted.credits : undefined,
@@ -139,6 +146,8 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       if (!order || order.product !== product) throw new PaymentError('PAYMENT_NOT_FOUND', 404, 'Commande introuvable.');
       order.last_verified_at = new Date(NOW).toISOString();
       if (order.status === 'paid') return { ...order, outcome: 'already_paid', credited: false };
+      // Comme en base : une commande remboursée ne se relivre jamais.
+      if (order.status === 'refunded') return { ...order, outcome: 'already_paid', credited: false };
       if (input.status === 'SUCCESS') {
         if (!input.paymentId) throw new Error('payment_id_required');
         if (input.requestedAmount !== order.amount || input.currency !== order.currency) {
@@ -195,9 +204,45 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
     async isAdmin(userId) {
       return (options.admins ?? []).includes(userId);
     },
+
+    async reconcileToken() {
+      calls.push('reconcileToken');
+      return options.cronToken === undefined ? CRON_TOKEN : options.cronToken;
+    },
+
+    async reconcileStart(source) {
+      if (runs.some((run) => run.status === 'running')) return null;
+      const id = `run-${runs.length + 1}`;
+      runs.push({ id, source, status: 'running' });
+      return id;
+    },
+
+    async reconcileBatch(limit) {
+      const due = reconcile.due ?? [...orders.values()]
+        .filter((o) => (o.provider_payment_id || o.provider_session_id)
+          && ['pending', 'processing', 'failed', 'cancelled'].includes(o.status))
+        .map((o) => ({ product: o.product, orderId: o.id }));
+      return { due: due.slice(0, limit), sweep: reconcile.sweep, sweepSince: new Date(NOW - 72 * 3_600_000).toISOString() };
+    },
+
+    async reconcileFinish(runId, status, counts) {
+      const run = runs.find((r) => r.id === runId);
+      if (run && run.status === 'running') { run.status = status; run.counts = counts; }
+    },
+
+    async findOrderByReference(reference) {
+      if (!/^VY[SB]-[0-9A-F]{32}$/.test(reference)) return null;
+      const order = [...orders.values()].find((o) => o.internal_reference === reference);
+      return order ? { product: order.product, orderId: order.id } : null;
+    },
+
+    async reportAnomaly(anomaly) {
+      anomalies.push(anomaly);
+      return true;
+    },
   };
 
-  return { store, orders, credits, webhooks, calls, config };
+  return { store, orders, credits, webhooks, calls, config, anomalies, runs, reconcile };
 }
 
 export interface SasPayCall {
@@ -221,6 +266,8 @@ export function createFakeSasPay() {
   const idempotent = new Map<string, Record<string, unknown>>();
   let override: Responder | null = null;
   let sequence = 0;
+  let listingHonoursFilters = true;
+  let nextOverride: string | null = null;
   let rates: unknown[] = [{
     country_code: 'ML', currency: 'XOF', network_code: 'orange_ml', network_name: 'Orange Money Mali',
     payin: { available: true, is_custom: false, otp_required: false, otp_instructions: null,
@@ -261,6 +308,8 @@ export function createFakeSasPay() {
       transactions.set(id, {
         id, reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: call.body?.currency,
         fee_charge_mode: 'ADD_ON', client_fee: '100.00', debited_amount: (Number(amount) + 100).toFixed(2), net_amount: amount,
+        description: call.body?.description ?? null, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
+        created_at: new Date(NOW).toISOString(),
       });
       const data = { message: 'Payment initiated', id, status: 'PENDING', checkout_url: '' };
       if (key) idempotent.set(key, data);
@@ -269,7 +318,7 @@ export function createFakeSasPay() {
     if (call.method === 'POST' && call.path === '/checkout-sessions/') {
       sequence += 1;
       const id = `cs-${String(sequence).padStart(8, '0')}`;
-      sessions.set(id, { id, slug: id, status: 'PENDING', transaction_id: null, transaction_status: null, transaction_reference: null, amount: call.body?.amount, currency: call.body?.currency });
+      sessions.set(id, { id, slug: id, status: 'PENDING', transaction_id: null, transaction_status: null, transaction_reference: null, amount: call.body?.amount, currency: call.body?.currency, description: call.body?.description ?? null });
       // Forme « nue » (sans enveloppe), comme dans les exemples OpenAPI.
       return jsonResponse({ id, slug: id, checkout_url: `https://pay.saspay.me/c/${id}`, status: 'PENDING', transaction: null, paid_at: null }, 201);
     }
@@ -284,6 +333,19 @@ export function createFakeSasPay() {
       const tx = transactions.get(verify[1]);
       return tx ? jsonResponse({ success: true, data: tx, code: 200 })
         : jsonResponse({ success: false, error: { code: 'not_found', message: 'Not found' }, code: 404 }, 404);
+    }
+    if (call.method === 'GET' && call.path.startsWith('/transactions/')) {
+      // Liste paginée par curseur, au format documenté : `{next, previous, results}`.
+      const query = new URL(`https://x${call.path}`).searchParams;
+      const size = Number(query.get('page_size') ?? 50);
+      const offset = Number(query.get('cursor') ?? 0);
+      const since = Date.parse(query.get('created_at__gte') ?? '') || 0;
+      const rows = [...transactions.values()].filter((tx) => (!listingHonoursFilters
+        || ((!query.get('status') || tx.status === query.get('status'))
+          && (Date.parse(String(tx.created_at ?? new Date(NOW).toISOString())) >= since))));
+      query.set('cursor', String(offset + size));
+      const next = offset + size < rows.length ? `${url.origin}/api/v1/transactions/?${query.toString()}` : null;
+      return jsonResponse({ success: true, code: 200, data: { next: nextOverride ?? next, previous: null, results: rows.slice(offset, offset + size) } });
     }
     if (call.method === 'GET' && call.path === '/pricing/my-rates/') return jsonResponse({ success: true, data: rates, code: 200 });
     if (call.method === 'GET' && call.path.startsWith('/merchant-balances/')) {
@@ -300,6 +362,20 @@ export function createFakeSasPay() {
     /** Force la prochaine réponse (ou toutes) pour simuler une panne. */
     respondWith(responder: Responder | null) { override = responder; },
     setRates(next: unknown[]) { rates = next; },
+    /** Simule une API qui ignorerait les filtres de la liste des transactions. */
+    ignoreListFilters() { listingHonoursFilters = false; },
+    /** Force l'adresse de page suivante renvoyée par la liste (curseur hostile). */
+    setNextPage(next: string | null) { nextOverride = next; },
+    /** Paiement encaissé chez SasPay sans que VYORA en ait eu connaissance. */
+    addTransaction(patch: Record<string, unknown>) {
+      sequence += 1;
+      const id = String(patch.id ?? `tx-${String(sequence).padStart(8, '0')}`);
+      transactions.set(id, {
+        id, reference: `SP-${id}`, status: 'SUCCESS', currency: 'XOF', fee_charge_mode: 'ADD_ON', client_fee: '0.00',
+        transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date(NOW).toISOString(), ...patch,
+      });
+      return id;
+    },
     setTransaction(id: string, patch: Record<string, unknown>) {
       transactions.set(id, { ...(transactions.get(id) ?? { id }), ...patch });
     },
@@ -312,6 +388,8 @@ export function createFakeSasPay() {
         id, reference: `SP-${id}`, status: txStatus, requested_amount: session.amount, currency: session.currency,
         fee_charge_mode: 'DEDUCTED', client_fee: '0.00', debited_amount: session.amount,
         net_amount: (Number(session.amount) * 0.97).toFixed(2),
+        description: session.description ?? null, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
+        created_at: new Date(NOW).toISOString(),
       });
       Object.assign(session, { status: txStatus === 'SUCCESS' ? 'PAID' : 'PENDING', transaction_id: id, transaction_status: txStatus, transaction_reference: `SP-${id}` });
       return id;

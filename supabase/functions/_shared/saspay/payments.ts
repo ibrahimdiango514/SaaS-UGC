@@ -58,7 +58,7 @@ export interface SettleInput {
   net: string | null;
   feeMode: string | null;
   reference: string | null;
-  source: 'verify' | 'webhook' | 'initiate';
+  source: 'verify' | 'webhook' | 'initiate' | 'reconcile';
   failureCode?: string | null;
 }
 
@@ -115,6 +115,58 @@ export interface PaymentStore {
   recordWebhook(product: Product, eventKey: string, eventType: string, payload: Record<string, unknown>): Promise<{ first: boolean; processed: boolean }>;
   finishWebhook(product: Product, eventKey: string, ok: boolean, error?: string): Promise<void>;
   isAdmin(userId: string): Promise<boolean>;
+
+  // Réconciliation (tâche planifiée).
+  /** Jeton serveur de la tâche planifiée (Vault). `null` s'il n'existe pas. */
+  reconcileToken(): Promise<string | null>;
+  /** Ouvre une exécution ; `null` si une autre est déjà en cours. */
+  reconcileStart(source: string): Promise<string | null>;
+  reconcileBatch(limit: number): Promise<ReconcileBatch>;
+  reconcileFinish(runId: string, status: 'ok' | 'partial' | 'error', counts: ReconcileCounts & { detail?: Record<string, unknown> }): Promise<void>;
+  findOrderByReference(reference: string): Promise<{ product: Product; orderId: string } | null>;
+  reportAnomaly(anomaly: PaymentAnomaly): Promise<boolean>;
+}
+
+export interface ReconcileBatch {
+  due: Array<{ product: Product; orderId: string }>;
+  /** Vrai si le balayage des encaissements SasPay est dû. */
+  sweep: boolean;
+  /** Borne basse du balayage (ISO 8601). */
+  sweepSince: string;
+}
+
+export interface ReconcileCounts {
+  checked: number;
+  settled: number;
+  closed: number;
+  errors: number;
+  swept: number;
+  anomalies: number;
+  sweep_done: boolean;
+}
+
+export type AnomalyKind = 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found';
+
+export interface PaymentAnomaly {
+  kind: AnomalyKind;
+  product: Product | null;
+  orderId: string | null;
+  paymentId: string | null;
+  reference: string | null;
+  details: Record<string, unknown>;
+}
+
+/** Référence interne VYORA (`VYS-…` Studio, `VYB-…` Business Grow) présente dans un texte. */
+export function orderReferenceIn(value: string | null | undefined): string | null {
+  return /(?:^|[^A-Za-z0-9])(VY[SB]-[0-9A-F]{32})(?![A-Za-z0-9])/.exec(value ?? '')?.[1] ?? null;
+}
+
+/** Comparaison à temps constant (longueurs égales uniquement). */
+export function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 export class PaymentError extends Error {
@@ -511,7 +563,10 @@ export function createPaymentService(deps: PaymentServiceDeps) {
 
     const { first, last } = splitName(user.name, user.email);
     const metadata = { order_reference: order.internal_reference, product };
-    const description = order.label.slice(0, 120);
+    // La référence interne figure dans le libellé transmis à SasPay : c'est elle
+    // qui permet à la réconciliation de retrouver une commande dont la réponse
+    // de création ou le webhook se serait perdu.
+    const description = `${order.label.slice(0, 80)} — ${order.internal_reference}`;
     try {
       let attached: OrderRecord;
       if (flow === 'softpay') {
@@ -683,7 +738,132 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     }
   }
 
-  return { options, create, refresh, webhook, balances };
+  /** Vrai si le jeton présenté est celui de la tâche planifiée. */
+  async function isCronToken(presented: string): Promise<boolean> {
+    if (!/^[0-9a-f]{64}$/.test(presented)) return false;
+    const expected = await store.reconcileToken();
+    return typeof expected === 'string' && expected.length === 64 && constantTimeEqual(presented, expected);
+  }
+
+  /**
+   * Réconciliation : revérifie auprès de SasPay les commandes en attente, puis
+   * balaie les encaissements réussis pour retrouver ceux qu'aucun webhook n'a
+   * signalés. Ne livre que par `sync` → `settle` : mêmes preuves, même
+   * idempotence que le reste. Aucun appel SasPay d'écriture.
+   */
+  async function reconcile(options: { source?: string; limit?: number; budgetMs?: number } = {}) {
+    const sasPay = client;
+    if (!sasPay) return { ran: false as const, reason: 'not_configured' as const };
+    const runId = await store.reconcileStart(options.source ?? 'cron');
+    if (!runId) return { ran: false as const, reason: 'already_running' as const };
+
+    const startedAt = deps.now();
+    const budgetMs = options.budgetMs ?? 40_000;
+    const outOfTime = () => deps.now() - startedAt > budgetMs;
+    const counts: ReconcileCounts = { checked: 0, settled: 0, closed: 0, errors: 0, swept: 0, anomalies: 0, sweep_done: false };
+    const detail: Record<string, unknown> = {};
+    let status: 'ok' | 'partial' | 'error' = 'ok';
+    const isOpen = (order: OrderRecord) => order.status === 'pending' || order.status === 'processing';
+    /** Commandes déjà interrogées pendant cette exécution : une seule vérification chacune. */
+    const seen = new Set<string>();
+
+    async function flag(anomaly: PaymentAnomaly): Promise<void> {
+      counts.anomalies += 1;
+      log('saspay_reconcile_anomaly', { kind: anomaly.kind, product: anomaly.product, order: anomaly.orderId });
+      await store.reportAnomaly(anomaly).catch(() => undefined);
+    }
+
+    async function verifyOne(order: OrderRecord, knownPaymentId: string | null = null): Promise<void> {
+      if (seen.has(order.id)) return;
+      seen.add(order.id);
+      try {
+        const result = await sync(order, 'reconcile', knownPaymentId);
+        counts.checked += 1;
+        if (result.outcome === 'paid') {
+          counts.settled += 1;
+          log('saspay_reconcile_settled', { product: order.product, order: order.id });
+        } else if ((result.outcome === 'failed' || result.outcome === 'cancelled') && isOpen(order)) {
+          counts.closed += 1;
+        } else if (result.outcome === 'amount_mismatch') {
+          await flag({
+            kind: 'amount_mismatch', product: order.product, orderId: order.id,
+            paymentId: result.provider_payment_id ?? knownPaymentId, reference: order.internal_reference,
+            details: { expected: order.amount, currency: order.currency },
+          });
+        }
+      } catch (error) {
+        counts.errors += 1;
+        const code = error instanceof SasPayError || error instanceof PaymentError ? error.code : 'unexpected_error';
+        log('saspay_reconcile_order_failed', { product: order.product, order: order.id, code });
+        if (!(error instanceof SasPayError) || error.kind !== 'not_found' || !isOpen(order)) return;
+        // SasPay ne connaît pas (ou plus) ce paiement : signalé, puis clos après
+        // 24 h. Un succès tardif rouvrirait la commande (revérifiée 72 h).
+        await flag({
+          kind: 'payment_not_found', product: order.product, orderId: order.id,
+          paymentId: order.provider_payment_id, reference: order.internal_reference, details: {},
+        });
+        const createdAt = Date.parse(String(order.created_at ?? ''));
+        if (Number.isFinite(createdAt) && deps.now() - createdAt > 24 * 3_600_000) {
+          await store.settle(order.product, order.id, {
+            paymentId: null, status: 'CANCELLED', requestedAmount: null, currency: null, fee: null, charged: null,
+            net: null, feeMode: null, reference: null, source: 'reconcile', failureCode: 'provider_payment_not_found',
+          }).then(() => { counts.closed += 1; }).catch(() => undefined);
+        }
+      }
+    }
+
+    try {
+      const batch = await store.reconcileBatch(Math.min(Math.max(options.limit ?? 20, 1), 50));
+      for (const due of batch.due) {
+        if (outOfTime()) { detail.stopped = 'time_budget'; break; }
+        const order = await store.getOrder(due.product, due.orderId);
+        if (order) await verifyOne(order);
+      }
+
+      if (batch.sweep && !outOfTime()) {
+        const listing = await sasPay.listSuccessfulPayments({ createdAfter: batch.sweepSince, maxPages: 3, pageSize: 100 });
+        if (listing.truncated) detail.sweep_truncated = true;
+        for (const tx of listing.transactions) {
+          if (outOfTime()) { detail.stopped = 'time_budget'; break; }
+          const reference = orderReferenceIn(tx.description);
+          // Le compte marchand peut servir d'autres produits : sans référence VYORA, ignoré.
+          if (!reference) continue;
+          counts.swept += 1;
+          const match = await store.findOrderByReference(reference);
+          const order = match ? await store.getOrder(match.product, match.orderId) : null;
+          if (!order) continue;
+          const settled = order.status === 'paid' || order.status === 'refunded';
+          if (order.provider_payment_id === tx.id) {
+            if (!settled) await verifyOne(order);
+            continue;
+          }
+          if (order.provider_payment_id) {
+            // Un second encaissement réussi porte la référence d'une commande
+            // déjà liée à un autre paiement : rien n'est livré, un humain tranche.
+            await flag({
+              kind: settled ? 'duplicate_payment' : 'payment_conflict', product: order.product, orderId: order.id,
+              paymentId: tx.id, reference, details: { tracked_payment_id: order.provider_payment_id },
+            });
+            continue;
+          }
+          // Aucune transaction connue : session hébergée (SasPay dira laquelle)
+          // ou création restée sans réponse (la transaction trouvée est vérifiée).
+          await verifyOne(order, order.provider_session_id ? null : tx.id);
+        }
+        counts.sweep_done = detail.stopped !== 'time_budget';
+      }
+      if (counts.errors > 0 || detail.stopped) status = 'partial';
+    } catch (error) {
+      status = counts.checked > 0 ? 'partial' : 'error';
+      detail.error = error instanceof SasPayError || error instanceof PaymentError ? error.code : 'unexpected_error';
+      log('saspay_reconcile_failed', { code: detail.error });
+    }
+    await store.reconcileFinish(runId, status, { ...counts, detail }).catch(() => undefined);
+    log('saspay_reconcile_done', { status, ...counts });
+    return { ran: true as const, status, ...counts };
+  }
+
+  return { options, create, refresh, webhook, balances, reconcile, isCronToken };
 }
 
 export type PaymentService = ReturnType<typeof createPaymentService>;

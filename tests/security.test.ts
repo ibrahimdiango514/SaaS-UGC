@@ -66,7 +66,7 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(5);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(6);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
@@ -98,6 +98,22 @@ describe('configuration des Edge Functions', () => {
     expect(sasPayService).toContain('WEBHOOK_NOT_CONFIGURED');
     expect(sasPayService).toContain('WEBHOOK_SIGNATURE_INVALID');
     expect(sasPayService).toContain('verifyWebhookSignature');
+    // Réconciliation planifiée : en-tête dédié contrôlé AVANT toute lecture en base,
+    // puis jeton Vault comparé à temps constant. Ni JWT utilisateur, ni clé de service.
+    expect(config).toMatch(/\[functions\.vyora-payments-reconcile\][\s\S]*?verify_jwt\s*=\s*false/);
+    expect(sasPayHttp).toMatch(/createReconcileHandler[\s\S]*?x-vyora-cron[\s\S]*?payments-reconcile[\s\S]*?isCronToken/);
+    expect(sasPayService).toMatch(/async function isCronToken[\s\S]*?constantTimeEqual\(presented, expected\)/);
+    expect(read('supabase/functions/_shared/saspay/store.ts')).toContain('vyora_payments_reconcile_token');
+    const reconcile = read('supabase/functions/vyora-payments-reconcile/index.ts');
+    expect(reconcile).toContain('createReconcileHandler');
+    // Le jeton n'est écrit nulle part dans le dépôt : il naît dans Vault, à la migration.
+    const reconcileMigration = read('supabase/migrations/20261113110000_vyora_saspay_refunds_reconcile.sql');
+    expect(reconcileMigration).toContain("vault.create_secret(");
+    expect(reconcileMigration).toContain("'vyora_payments_reconcile_token'");
+    expect(reconcileMigration).not.toMatch(/Bearer [0-9a-f]{32,}/);
+    // La clé SasPay est propre à VYORA : aucun repli sur celle d'un autre produit.
+    expect(sasPayHttp).not.toMatch(/get\('SASPAY_SECRET_KEY'\)/);
+    expect(sasPayHttp).not.toMatch(/get\('SASPAY_WEBHOOK_SECRET'\)/);
     const worker = read('supabase/functions/reelora-video-worker/index.ts');
     expect(worker).toContain('constantTimeEqual');
     expect(worker).toContain('reelora_worker_token');

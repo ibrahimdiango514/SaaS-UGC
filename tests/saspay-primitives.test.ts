@@ -261,7 +261,78 @@ describe('SasPay — client HTTP', () => {
   it('n’expose aucune opération de décaissement, de transfert ou de recharge', () => {
     const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: vi.fn() as unknown as typeof fetch });
     expect(Object.keys(client).sort()).toEqual(
-      ['checkoutStatus', 'createCheckoutSession', 'merchantBalances', 'mode', 'myRates', 'softpay', 'verifyPayment'],
+      ['checkoutStatus', 'createCheckoutSession', 'listSuccessfulPayments', 'merchantBalances', 'mode', 'myRates', 'softpay', 'verifyPayment'],
     );
+  });
+});
+
+describe('SasPay — liste des encaissements (réconciliation)', () => {
+  const page = (results: unknown[], next: string | null = null) =>
+    new Response(JSON.stringify({ success: true, code: 200, data: { next, previous: null, results } }), { status: 200 });
+  const row = (id: string, extra: Record<string, unknown> = {}) => ({
+    id, status: 'SUCCESS', flow_direction: 'INBOUND', transaction_type: 'PAIEMENT',
+    description: `Pack — VYS-${'A'.repeat(32)}`, reference: `SP-${id}`, created_at: '2026-11-13T09:00:00Z', ...extra,
+  });
+
+  it('demande les encaissements réussis depuis une date, en lecture seule, et suit le curseur', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(page([row('tx-00000001')], 'https://api.saspay.me/api/v1/transactions/?cursor=abc&page_size=100'))
+      .mockResolvedValueOnce(page([row('tx-00000002')]));
+    const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: fetcher as unknown as typeof fetch });
+    const listing = await client.listSuccessfulPayments({ createdAfter: '2026-11-10T10:00:00.000Z' });
+    expect(listing.truncated).toBe(false);
+    expect(listing.transactions.map((tx) => tx.id)).toEqual(['tx-00000001', 'tx-00000002']);
+    const [first, second] = fetcher.mock.calls.map(([url, init]) => ({ url: new URL(String(url)), init: init as RequestInit }));
+    expect(first.init.method).toBe('GET');
+    expect(first.init.body).toBeUndefined();
+    expect(first.url.pathname).toBe('/api/v1/transactions/');
+    expect(Object.fromEntries(first.url.searchParams)).toEqual({
+      status: 'SUCCESS', transaction_type: 'PAIEMENT', created_at__gte: '2026-11-10T10:00:00.000Z', page_size: '100',
+    });
+    expect(second.url.searchParams.get('cursor')).toBe('abc');
+  });
+
+  it('n’envoie jamais la clé secrète vers une adresse de page suivante étrangère à SasPay', async () => {
+    for (const hostile of [
+      'https://evil.example/api/v1/transactions/?cursor=x',
+      'https://api.saspay.me.evil.example/api/v1/transactions/?cursor=x',
+      'http://api.saspay.me/api/v1/transactions/?cursor=x',
+      'https://api.saspay.me/api/v1/payouts/initialize/',
+    ]) {
+      const fetcher = vi.fn().mockResolvedValue(page([row('tx-00000001')], hostile));
+      const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: fetcher as unknown as typeof fetch });
+      const listing = await client.listSuccessfulPayments({ createdAfter: '2026-11-10T10:00:00.000Z' });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(listing.transactions).toHaveLength(1);
+    }
+  });
+
+  it('réapplique les filtres : ni décaissement, ni paiement non abouti, ni identifiant malformé', async () => {
+    const fetcher = vi.fn().mockResolvedValue(page([
+      row('tx-00000001'),
+      row('tx-00000002', { status: 'PENDING' }),
+      row('tx-00000003', { flow_direction: 'OUTBOUND', transaction_type: 'RETRAIT' }),
+      row('../../payouts', {}),
+      'pas un objet',
+    ]));
+    const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: fetcher as unknown as typeof fetch });
+    const listing = await client.listSuccessfulPayments({ createdAfter: '2026-11-10T10:00:00.000Z' });
+    expect(listing.transactions.map((tx) => tx.id)).toEqual(['tx-00000001']);
+  });
+
+  it('s’arrête au nombre de pages demandé et le signale', async () => {
+    const fetcher = vi.fn().mockImplementation(async () =>
+      page([row('tx-00000001')], 'https://api.saspay.me/api/v1/transactions/?cursor=again'));
+    const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: fetcher as unknown as typeof fetch });
+    const listing = await client.listSuccessfulPayments({ createdAfter: '2026-11-10T10:00:00.000Z', maxPages: 2 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(listing.truncated).toBe(true);
+  });
+
+  it('refuse une réponse qui n’est pas une liste', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, data: { oops: true } }), { status: 200 }));
+    const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: fetcher as unknown as typeof fetch });
+    await expect(client.listSuccessfulPayments({ createdAfter: '2026-11-10T10:00:00.000Z' }))
+      .rejects.toMatchObject({ code: 'invalid_response' });
   });
 });

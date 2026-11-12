@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { client, REPO } from './pg.mjs';
 import { connectAs, ok, summary, assert } from './t.mjs';
-const { createPaymentsHandler, createWebhookHandler } = await import(pathToFileURL(path.join(REPO, 'supabase/functions/_shared/saspay/http.ts')).href);
+const { createPaymentsHandler, createWebhookHandler, createReconcileHandler } = await import(pathToFileURL(path.join(REPO, 'supabase/functions/_shared/saspay/http.ts')).href);
 
 const admin = client('postgres'); await admin.connect();
 const one = async (sql, params = []) => (await admin.query(sql, params)).rows[0];
@@ -37,20 +37,27 @@ const fetcher = async (input, init = {}) => {
     if (softpayFailure) return J({ success: false, error: softpayFailure.error, code: softpayFailure.status }, softpayFailure.status);
     const k = headers.get('idempotency-key'); if (idem.has(k)) return J({ success: true, data: idem.get(k) }, 201);
     const id = `tx-${String(++seq).padStart(8, '0')}`; const amount = body.amount;
-    tx.set(id, { id, reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: body.currency, fee_charge_mode: 'ADD_ON', client_fee: (Number(amount) * 0.02).toFixed(2), debited_amount: (Number(amount) * 1.02).toFixed(2), net_amount: amount });
+    tx.set(id, { id, description: body.description, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date().toISOString(), reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: body.currency, fee_charge_mode: 'ADD_ON', client_fee: (Number(amount) * 0.02).toFixed(2), debited_amount: (Number(amount) * 1.02).toFixed(2), net_amount: amount });
     const data = { id, status: 'PENDING', checkout_url: '' }; idem.set(k, data); return J({ success: true, data }, 201);
   }
   if (path === '/checkout-sessions/') { const id = `cs-${String(++seq).padStart(8, '0')}`; sessions.set(id, { id, status: 'PENDING', transaction_id: null, amount: body.amount, currency: body.currency }); return J({ id, status: 'PENDING', checkout_url: `https://pay.saspay.me/c/${id}` }, 201); }
   let m = path.match(/^\/checkout-sessions\/(.+)\/status\/$/); if (m) return sessions.has(m[1]) ? J({ success: true, data: sessions.get(m[1]) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
   m = path.match(/^\/payments\/(.+)\/verify\/$/); if (m) return tx.has(m[1]) ? J({ success: true, data: tx.get(m[1]) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
+  if (path === '/transactions/') {
+    assert.equal(init.method ?? 'GET', 'GET');
+    listings.push(Object.fromEntries(url.searchParams));
+    return J({ success: true, data: { next: null, previous: null, results: [...tx.values()].filter((t) => t.status === 'SUCCESS') } });
+  }
   if (path.startsWith('/merchant-balances/')) return J({ success: true, data: { count: 1, next: null, results: [{ id: 'b1', country: 'ML', currency: 'XOF', available_amount: '42000.00', pending_amount: '0.00', is_frozen: false }] } });
   return J({ error: { code: 'not_found', message: 'x' } }, 404);
 };
 
+const listings = [];
 let clock = Date.now();
 const env = { supabaseUrl: 'https://db.local', anonKey: 'anon', serviceRoleKey: 'service-key', sasPaySecretKey: KEY, webhookSecret: WH, extraOrigins: '' };
 const payments = createPaymentsHandler({ env, fetcher, now: () => clock });
 const webhook = createWebhookHandler({ env, fetcher, now: () => clock });
+const reconcileFn = createReconcileHandler({ env, fetcher, now: () => clock });
 const call = async (token, body) => { const r = await payments(new Request('https://edge/vyora-payments', { method: 'POST', headers: { origin: ORIGIN, authorization: token, 'content-type': 'application/json' }, body: JSON.stringify(body) })); return { status: r.status, body: await r.json() }; };
 const hook = async (body, { secret = WH, tamper = false } = {}) => {
   const raw = JSON.stringify(body); const ts = String(Math.floor(clock / 1000));
@@ -198,6 +205,118 @@ assert.deepEqual(await one(`select coalesce(sum(available_balance), 0) s from sa
 r = await call(C, { action: 'status', product: 'studio', order_id: bgId }); assert.equal(r.status, 404);
 r = await call(C, { action: 'status', product: 'business', order_id: bgId }); assert.equal(r.body.order.state, 'confirmed');
 ok('abonnement Business Grow activé par webhook vérifié ; soldes Studio intacts ; commande invisible côté Studio');
+
+console.log('Bout en bout — réconciliation planifiée');
+// Jeton lu comme le fait pg_cron : dans le coffre, jamais dans le code.
+const cronToken = (await one(`select decrypted_secret t from vault.decrypted_secrets where name = 'vyora_payments_reconcile_token'`)).t;
+assert.match(cronToken, /^[0-9a-f]{64}$/);
+const cron = async (headers = {}) => {
+  const res = await reconcileFn(new Request('https://edge/vyora-payments-reconcile', {
+    method: 'POST', body: JSON.stringify({ source: 'cron' }),
+    headers: { 'content-type': 'application/json', 'x-vyora-cron': 'payments-reconcile', authorization: `Bearer ${cronToken}`, ...headers },
+  }));
+  return { status: res.status, body: await res.json() };
+};
+// Vieillit une commande (les gardes interdisent de modifier `created_at` : désactivées le temps du test).
+const ageOrder = async (id, interval) => {
+  await admin.query(`alter table saas_ugc.ugc_recharge_orders disable trigger user`);
+  await admin.query(`update saas_ugc.ugc_recharge_orders set created_at = now() - $2::interval, last_verified_at = null where id = $1`, [id, interval]);
+  await admin.query(`alter table saas_ugc.ugc_recharge_orders enable trigger user`);
+};
+const runCount = async () => Number((await one(`select count(*) n from saas_ugc.vyora_payment_reconcile_runs`)).n);
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+await admin.query(`delete from saas_ugc.vyora_payment_anomalies`);
+
+r = await cron({ authorization: 'Bearer ' + 'f'.repeat(64) }); assert.equal(r.status, 401);
+r = await cron({ authorization: 'Bearer service-key' }); assert.equal(r.status, 401);
+r = await cron({ 'x-vyora-cron': 'autre' }); assert.equal(r.status, 403);
+assert.equal(await runCount(), 0);
+ok('appel sans en-tête dédié → 403 ; jeton faux ou clé de service → 401 ; aucune exécution ouverte');
+
+// 1. Webhook perdu : paiement réussi chez SasPay, VYORA n'en a rien su.
+const beforeLost = await wallet(bob);
+r = await call(B, { action: 'create', product: 'studio', item: { kind: 'pack', pack_key: 'creator' }, country: 'ML', flow: 'softpay', network: 'orange_ml', phone: '+22366112233', idempotency_key: 'e2e-key-recon01' });
+assert.equal(r.status, 200, JSON.stringify(r.body));
+const lostId = r.body.order.id; const lostTx = (await dbOrder(lostId)).provider_payment_id;
+tx.get(lostTx).status = 'SUCCESS';
+// Balayage tenu à l'écart (il vient d'avoir lieu) : seule la revérification ciblée est observée ici.
+await admin.query(`insert into saas_ugc.vyora_payment_reconcile_runs(trigger_source, status, sweep_done, finished_at) values ('test', 'ok', true, now())`);
+r = await cron(); assert.equal(r.status, 200); assert.equal(r.body.settled, 0); assert.equal(r.body.sweep_done, false);
+assert.equal(await wallet(bob), beforeLost);
+ok('commande de moins de 2 minutes : pas encore revérifiée individuellement (le webhook a la priorité)');
+await ageOrder(lostId, '3 minutes');
+r = await cron(); assert.equal(r.status, 200, JSON.stringify(r.body));
+assert.equal(r.body.ran, true); assert.equal(r.body.settled, 1);
+assert.equal((await dbOrder(lostId)).status, 'paid');
+assert.equal(await wallet(bob), beforeLost + 27);
+const lostLedger = await one(`select count(*) n from saas_ugc.ugc_credit_ledger where user_id = $1 and idempotency_key like '%' || $2 || '%'`, [bob, lostId]);
+assert.equal(Number(lostLedger.n), 1);
+ok('webhook perdu → la tâche planifiée vérifie auprès de SasPay et crédite 27 crédits, une seule fois');
+
+r = await cron(); assert.equal(r.body.settled, 0); assert.equal(await wallet(bob), beforeLost + 27);
+// Le webhook arrive finalement, en retard : aucun second crédit.
+clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: lostTx, status: 'SUCCESS' } });
+assert.equal(r.body.credited, false); assert.equal(await wallet(bob), beforeLost + 27);
+ok('nouveau passage puis webhook tardif → aucun second crédit');
+
+// 2. Réponse de création perdue : aucun identifiant SasPay connu, paiement pourtant encaissé.
+softpayFailure = { status: 503, error: { code: 'unavailable', message: 'down' } };
+r = await call(B, { action: 'create', product: 'studio', item: { kind: 'pack', pack_key: 'pro_creator' }, country: 'ML', flow: 'softpay', network: 'orange_ml', phone: '+22366112233', idempotency_key: 'e2e-key-recon02' });
+softpayFailure = null;
+const ghostId = r.body.error.order_id; const ghost = await dbOrder(ghostId);
+assert.equal(ghost.provider_payment_id, null);
+tx.set('tx-ghost-0001', { id: 'tx-ghost-0001', reference: 'SP-ghost', status: 'SUCCESS', transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
+  description: `Pack Pro Creator — ${ghost.internal_reference}`, requested_amount: '15000.00', currency: 'XOF', fee_charge_mode: 'ADD_ON',
+  client_fee: '300.00', debited_amount: '15300.00', net_amount: '15000.00', created_at: new Date().toISOString() });
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`); // le balayage est limité à un par quart d'heure
+listings.length = 0;
+r = await cron(); assert.equal(r.status, 200, JSON.stringify(r.body));
+assert.equal(r.body.sweep_done, true); assert.equal(r.body.settled, 1);
+assert.deepEqual(Object.keys(listings[0]).sort(), ['created_at__gte', 'page_size', 'status', 'transaction_type']);
+const found = await dbOrder(ghostId);
+assert.equal(found.status, 'paid'); assert.equal(found.provider_payment_id, 'tx-ghost-0001');
+assert.equal(await wallet(bob), beforeLost + 27 + 95);
+ok('réponse de création perdue → paiement retrouvé par la référence interne, revérifié, 95 crédits livrés');
+
+// 3. Second encaissement portant la référence d'une commande déjà payée.
+tx.set('tx-dup-0001', { ...tx.get('tx-ghost-0001'), id: 'tx-dup-0001', reference: 'SP-dup' });
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+// (La commande au montant falsifié de la section précédente est, elle aussi, re-signalée — sans doublon en base.)
+r = await cron(); assert.ok(r.body.anomalies >= 1); assert.equal(r.body.settled, 0);
+assert.equal(await wallet(bob), beforeLost + 27 + 95);
+const dup = await one(`select kind, product, order_id, provider_payment_id, seen_count from saas_ugc.vyora_payment_anomalies where kind = 'duplicate_payment'`);
+assert.deepEqual(dup, { kind: 'duplicate_payment', product: 'studio', order_id: ghostId, provider_payment_id: 'tx-dup-0001', seen_count: 1 });
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+r = await cron();
+assert.equal(Number((await one(`select count(*) n from saas_ugc.vyora_payment_anomalies where kind = 'duplicate_payment'`)).n), 1);
+const alerts = await one(`select count(*) n from saas_ugc.ugc_notifications where title ilike '%doublon%' or body ilike '%tx-dup-0001%'`);
+ok(`double encaissement → aucun second crédit, une seule anomalie « doublon » (alertes administrateur : ${alerts.n})`);
+tx.delete('tx-dup-0001');
+
+// 4. Montant encaissé différent du montant commandé.
+softpayFailure = { status: 503, error: { code: 'unavailable', message: 'down' } };
+r = await call(A, { action: 'create', product: 'studio', item: { kind: 'pack', pack_key: 'creator' }, country: 'ML', flow: 'softpay', network: 'orange_ml', phone: '+22366112233', idempotency_key: 'e2e-key-recon03' });
+softpayFailure = null;
+const cheapId = r.body.error.order_id; const cheap = await dbOrder(cheapId); const aliceBefore = await wallet(alice);
+tx.set('tx-cheap-0001', { id: 'tx-cheap-0001', reference: 'SP-cheap', status: 'SUCCESS', transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
+  description: `Pack Creator — ${cheap.internal_reference}`, requested_amount: '100.00', currency: 'XOF', fee_charge_mode: 'ADD_ON',
+  client_fee: '0.00', debited_amount: '100.00', net_amount: '100.00', created_at: new Date().toISOString() });
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+r = await cron(); assert.equal(r.body.settled, 0);
+assert.notEqual((await dbOrder(cheapId)).status, 'paid'); assert.equal(await wallet(alice), aliceBefore);
+assert.equal(Number((await one(`select count(*) n from saas_ugc.vyora_payment_anomalies where kind = 'amount_mismatch' and order_id = $1`, [cheapId])).n), 1);
+ok('100 FCFA encaissés pour une commande de 5 000 FCFA → rien n’est livré, anomalie « montant »');
+tx.delete('tx-cheap-0001');
+
+// 5. Journal et vue d'exploitation.
+const lastRun = await one(`select status, trigger_source, finished_at is not null done from saas_ugc.vyora_payment_reconcile_runs order by started_at desc limit 1`);
+assert.equal(lastRun.trigger_source, 'cron'); assert.equal(lastRun.done, true); assert.ok(['ok', 'partial'].includes(lastRun.status));
+const health = (await asBoss.query(`select public.vyora_admin_payment_health() r`)).rows[0].r;
+assert.ok(health.runs.length >= 1); assert.ok(health.anomalies.some((a) => a.kind === 'duplicate_payment'));
+assert.ok(!JSON.stringify(health).includes(cronToken));
+await assert.rejects(asAlice.query(`select public.vyora_admin_payment_health()`));
+ok('exécutions journalisées ; vue d’exploitation lisible par l’administrateur seul, sans le jeton');
 
 summary();
 for (const c of [svc, asBoss, asAlice, admin]) await c.end();

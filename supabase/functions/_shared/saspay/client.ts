@@ -169,6 +169,19 @@ export interface MerchantBalance {
   updated_at: string | null;
 }
 
+/** Transaction telle que listée par SasPay. Sert à REPÉRER un paiement, jamais à le croire. */
+export interface ListedTransaction {
+  id: string;
+  description: string | null;
+  reference: string | null;
+  created_at: string | null;
+}
+export interface TransactionListing {
+  transactions: ListedTransaction[];
+  /** Vrai si SasPay avait encore des pages au-delà de la limite demandée. */
+  truncated: boolean;
+}
+
 export interface SasPayClientOptions {
   secretKey: string;
   baseUrl?: string;
@@ -184,6 +197,8 @@ export interface SasPayClient {
   verifyPayment(paymentId: string): Promise<VerifiedPayment>;
   myRates(): Promise<Json[]>;
   merchantBalances(): Promise<MerchantBalance[]>;
+  /** Encaissements réussis depuis une date (lecture seule, pagination par curseur). */
+  listSuccessfulPayments(options: { createdAfter: string; maxPages?: number; pageSize?: number }): Promise<TransactionListing>;
 }
 
 function text(value: unknown): string | null {
@@ -363,5 +378,50 @@ export function createSasPayClient(options: SasPayClientOptions): SasPayClient {
       }
       return balances;
     },
+
+    async listSuccessfulPayments({ createdAfter, maxPages = 3, pageSize = 100 }) {
+      const query = new URLSearchParams({
+        status: 'SUCCESS', transaction_type: 'PAIEMENT', created_at__gte: createdAfter,
+        page_size: String(Math.min(Math.max(Math.trunc(pageSize), 1), 200)),
+      });
+      const transactions: ListedTransaction[] = [];
+      let path: string | null = `/transactions/?${query.toString()}`;
+      for (let page = 0; path && page < Math.max(maxPages, 1); page += 1) {
+        const data = await request('GET', path);
+        const rows = Array.isArray(data) ? data : isRecord(data) && Array.isArray(data.results) ? data.results : null;
+        if (!rows) {
+          throw new SasPayError(200, 'invalid_response', 'invalid_response', 'Liste de transactions SasPay inattendue');
+        }
+        for (const row of rows.filter(isRecord)) {
+          const id = text(row.id);
+          if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) continue;
+          // Les filtres sont réappliqués ici : on ne dépend pas de leur respect par l'API.
+          if ((text(row.status) ?? '').toUpperCase() !== 'SUCCESS') continue;
+          const direction = (text(row.flow_direction) ?? 'INBOUND').toUpperCase();
+          if (direction !== 'INBOUND') continue;
+          transactions.push({
+            id,
+            description: text(row.description)?.slice(0, 300) ?? null,
+            reference: text(row.reference),
+            created_at: text(row.created_at),
+          });
+        }
+        path = nextPagePath(isRecord(data) ? data.next : null, baseUrl);
+      }
+      return { transactions, truncated: path !== null };
+    },
   };
+}
+
+/**
+ * Chemin de la page suivante. Le curseur est une adresse absolue fournie par
+ * SasPay : elle n'est suivie que si elle reste sur l'API SasPay configurée —
+ * la clé secrète n'est jamais envoyée ailleurs.
+ */
+export function nextPagePath(next: unknown, baseUrl: string): string | null {
+  if (typeof next !== 'string' || !next) return null;
+  const prefix = `${baseUrl.replace(/\/+$/, '')}/`;
+  if (!next.startsWith(prefix)) return null;
+  const path = next.slice(prefix.length - 1);
+  return path.startsWith('/transactions/') ? path : null;
 }

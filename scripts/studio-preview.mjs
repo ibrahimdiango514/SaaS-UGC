@@ -317,6 +317,10 @@ function edgeResponse(url, body) {
     }
     return { error: { code: 'PAYMENTS_DISABLED', message: 'Le paiement en ligne n’est pas encore activé.' } };
   }
+  if (fn === 'vyora-payments-reconcile') {
+    // Appelée par la tâche planifiée uniquement (en-tête dédié + jeton Vault).
+    return { error: { code: 'CRON_FORBIDDEN', message: 'Appel non autorisé.' } };
+  }
   if (fn === 'vyora-saspay-webhook') {
     // Appelé par SasPay uniquement (signature HMAC) : jamais par le navigateur.
     return { error: { code: 'WEBHOOK_SIGNATURE_INVALID', message: 'Signature de webhook invalide.' } };

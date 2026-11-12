@@ -155,5 +155,44 @@ export function createSupabasePaymentStore(config: StoreConfig): PaymentStore {
     async isAdmin(userId) {
       return (await rpc<boolean>('vyora_payment_is_admin', { p_user_id: userId })) === true;
     },
+
+    async reconcileToken() {
+      const token = await rpc<string | null>('vyora_payments_reconcile_token', {});
+      return typeof token === 'string' && token ? token : null;
+    },
+
+    async reconcileStart(source) {
+      const id = await rpc<string | null>('vyora_payment_reconcile_start', { p_source: source });
+      return typeof id === 'string' && id ? id : null;
+    },
+
+    async reconcileBatch(limit) {
+      const batch = await rpc<{
+        due?: Array<{ product: Product; order_id: string }>; sweep?: boolean; sweep_since?: string;
+      } | null>('vyora_payment_reconcile_batch', { p_limit: limit });
+      return {
+        due: (batch?.due ?? []).map((row) => ({ product: row.product, orderId: row.order_id })),
+        sweep: batch?.sweep === true,
+        sweepSince: typeof batch?.sweep_since === 'string' ? batch.sweep_since : new Date(Date.now() - 72 * 3_600_000).toISOString(),
+      };
+    },
+
+    async reconcileFinish(runId, status, counts) {
+      await rpc<null>('vyora_payment_reconcile_finish', { p_run_id: runId, p_status: status, p_counts: counts });
+    },
+
+    async findOrderByReference(reference) {
+      const row = await rpc<{ product: Product; order_id: string } | null>('vyora_payment_find_by_reference', {
+        p_reference: reference,
+      });
+      return row ? { product: row.product, orderId: row.order_id } : null;
+    },
+
+    async reportAnomaly(anomaly) {
+      return (await rpc<boolean>('vyora_payment_report_anomaly', {
+        p_kind: anomaly.kind, p_product: anomaly.product, p_order_id: anomaly.orderId,
+        p_payment_id: anomaly.paymentId, p_reference: anomaly.reference, p_details: anomaly.details,
+      })) === true;
+    },
   };
 }
