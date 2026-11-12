@@ -10,8 +10,8 @@ import {
   GrowthActivitySection, KpiSection, ModelsSection, ProvidersSection, RevenueSection, StudioActivitySection, money,
 } from './admin/AdminSections';
 import {
-  adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminMetrics, adminProviderSpendSummary,
-  adminSetProviderSpendCap, adminSetVideoPricing,
+  adminAckProviderSpendAlert, adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminMetrics,
+  adminProviderSpendSummary, adminSetProviderSpendCap, adminSetProviderSpendPolicy, adminSetVideoPricing,
   adminVideoCatalog,
   adminListRecharges, adminListSettings, adminListUsers, adminOverview, adminSetAccountStatus,
   adminSetPlan, adminSetRole, adminSetSetting, adminUpdateService, listPlans, listServices,
@@ -176,6 +176,17 @@ export default function Admin() {
 
   const onDisableProviderSpend = async () => {
     await run('provider-spend', () => adminSetProviderSpendCap(providerSpend?.max_usd ?? 0, false), 'Tests payants désactivés immédiatement.');
+  };
+
+  const onSaveProviderSpendPolicy = async (alertPercent: number, providerCaps: Record<string, number>) => {
+    const maxUsd = providerSpend?.max_usd ?? Number(providerSpendCapDraft);
+    await run('provider-policy', () => adminSetProviderSpendPolicy(
+      maxUsd, providerSpend?.enabled ?? false, alertPercent, providerCaps,
+    ), 'Politique de budget fournisseur enregistrée.');
+  };
+
+  const onAckProviderSpendAlert = async (alertId: string) => {
+    await run('provider-alert', () => adminAckProviderSpendAlert(alertId), 'Alerte de budget prise en compte.');
   };
 
   const refreshVideoCatalog = async () => {
@@ -399,6 +410,8 @@ export default function Admin() {
               onSave={(event) => void onSaveProviderSpendCap(event)}
               onEnable={() => void onEnableProviderSpend()}
               onDisable={() => void onDisableProviderSpend()}
+              onSavePolicy={onSaveProviderSpendPolicy}
+              onAckAlert={onAckProviderSpendAlert}
             />
             : <Card><CardHeader title="Paramètres de la plateforme" description="Valeurs JSON réellement utilisées par le backend." />
               {genericSettings.length === 0 ? <EmptyState icon={<Settings2 size={22} />} title="Aucun paramètre" /> : (

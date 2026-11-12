@@ -419,9 +419,27 @@ export interface AdminProviderSpendEntry {
   completed_at: string | null;
 }
 
+export type ProviderSpendAlertState = 'ok' | 'threshold' | 'cap_reached' | 'disabled';
+
+export interface AdminProviderSpendAlert {
+  id: string;
+  provider: string | null;
+  kind: 'threshold' | 'cap_exceeded' | 'blocked_attempt' | 'cap_reached';
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  reason: string;
+  created_at: string;
+  acknowledged_at: string | null;
+}
+
 export interface AdminProviderSpendSummary {
   enabled: boolean;
   max_usd: number;
+  /** Seuil d'alerte en pourcentage du plafond global (0 = alertes désactivées). */
+  alert_percent: number;
+  /** Plafonds optionnels par fournisseur ; absent = seul le plafond global s'applique. */
+  provider_caps_usd: Record<string, number>;
+  alert_state: ProviderSpendAlertState;
   actual_spent_usd: number;
   reserved_usd: number;
   estimated_unpriced_usd: number;
@@ -429,7 +447,16 @@ export interface AdminProviderSpendSummary {
   remaining_usd: number;
   tests_count: number;
   blocked_count: number;
-  by_provider: { provider: string; actual_spent_usd: number; reserved_usd: number; committed_usd: number }[];
+  by_provider: {
+    provider: string;
+    actual_spent_usd: number;
+    reserved_usd: number;
+    committed_usd: number;
+    /** Plafond dédié au fournisseur (chaîne numérique SQL) ou null. */
+    cap_usd: string | null;
+    remaining_usd: number | null;
+  }[];
+  alerts: AdminProviderSpendAlert[];
   history: AdminProviderSpendEntry[];
 }
 

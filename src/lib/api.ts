@@ -899,6 +899,30 @@ export async function adminSetProviderSpendCap(maxUsd: number, enabled: boolean)
   });
 }
 
+/**
+ * Politique de budget fournisseur complète : plafond global, seuil d'alerte
+ * et plafonds par fournisseur. Les plafonds par fournisseur ne peuvent pas
+ * dépasser le plafond global ; un fournisseur sans plafond dédié reste borné
+ * par le plafond global.
+ */
+export async function adminSetProviderSpendPolicy(
+  maxUsd: number,
+  enabled: boolean,
+  alertPercent: number,
+  providerCapsUsd: Record<string, number>,
+): Promise<{ enabled: boolean; max_usd: number; alert_percent: number; provider_caps_usd: Record<string, number> }> {
+  return rpc('reelora_admin_set_provider_spend_policy', {
+    p_max_usd: maxUsd,
+    p_enabled: enabled,
+    p_alert_percent: alertPercent,
+    p_provider_caps_usd: providerCapsUsd,
+  });
+}
+
+export async function adminAckProviderSpendAlert(alertId: string): Promise<boolean> {
+  return rpc<boolean>('reelora_admin_ack_provider_spend_alert', { p_alert_id: alertId });
+}
+
 export async function adminCreatePromo(code: string, bonusCredits: number, maxRedemptions = 100) {
   return rpc<boolean>('reelora_admin_create_promo', {
     p_code: code, p_bonus_credits: bonusCredits, p_max_redemptions: maxRedemptions,

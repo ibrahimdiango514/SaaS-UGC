@@ -1,5 +1,5 @@
-import type { FormEvent } from 'react';
-import { Coins, FileClock, Power, PowerOff } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { AlertTriangle, BellRing, Coins, FileClock, Power, PowerOff } from 'lucide-react';
 import { Banner, Badge, Button, Card, CardHeader, EmptyState, Input } from '../../components/ui';
 import { formatDate, statusLabel } from '../../lib/format';
 import type { AdminProviderSpendSummary } from '../../lib/types';
@@ -7,6 +7,11 @@ import type { AdminProviderSpendSummary } from '../../lib/types';
 const formatUsd = (amount: number) => new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', maximumFractionDigits: 6,
 }).format(amount);
+
+const providerLabel = (provider: string | null) => {
+  if (!provider) return 'Global';
+  return provider === 'muapi' ? 'MuAPI' : provider;
+};
 
 interface ProviderBudgetSettingsProps {
   summary: AdminProviderSpendSummary | null;
@@ -17,11 +22,47 @@ interface ProviderBudgetSettingsProps {
   onSave: (event: FormEvent) => void;
   onEnable: () => void;
   onDisable: () => void;
+  onSavePolicy: (alertPercent: number, providerCaps: Record<string, number>) => Promise<void>;
+  onAckAlert: (alertId: string) => Promise<void>;
 }
 
 export default function ProviderBudgetSettings({
-  summary, error, capDraft, busy, onCapDraftChange, onSave, onEnable, onDisable,
+  summary, error, capDraft, busy, onCapDraftChange, onSave, onEnable, onDisable, onSavePolicy, onAckAlert,
 }: ProviderBudgetSettingsProps) {
+  const [alertPercent, setAlertPercent] = useState('80');
+  const [capMuapi, setCapMuapi] = useState('');
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [ackBusy, setAckBusy] = useState<string | null>(null);
+
+  // Les valeurs serveur font foi : le formulaire ne fait que les refléter.
+  useEffect(() => {
+    if (!summary) return;
+    setAlertPercent(String(summary.alert_percent ?? 80));
+    const caps = summary.provider_caps_usd ?? {};
+    setCapMuapi(caps.muapi === undefined || caps.muapi === null ? '' : String(caps.muapi));
+  }, [summary]);
+
+  const submitPolicy = async (event: FormEvent) => {
+    event.preventDefault();
+    const percent = Number(alertPercent);
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) return;
+    const caps: Record<string, number> = {};
+    if (capMuapi.trim() !== '') {
+      const value = Number(capMuapi);
+      if (!Number.isFinite(value) || value < 0) return;
+      caps.muapi = value;
+    }
+    setPolicyBusy(true);
+    try { await onSavePolicy(percent, caps); } finally { setPolicyBusy(false); }
+  };
+
+  const ack = async (alertId: string) => {
+    setAckBusy(alertId);
+    try { await onAckAlert(alertId); } finally { setAckBusy(null); }
+  };
+
+  const pendingAlerts = (summary?.alerts ?? []).filter((alert) => !alert.acknowledged_at);
+
   return (
     <div className="space-y-5">
       <Card>
@@ -36,6 +77,11 @@ export default function ProviderBudgetSettings({
         {summary && (summary.max_usd === 0 || summary.remaining_usd === 0) && (
           <div className="px-5 pb-4"><Banner tone="warning" title={summary.max_usd === 0 ? 'Aucun test payant autorisé' : 'Plafond atteint'}>
             Les nouvelles générations payantes sont bloquées côté serveur. Les dépenses réelles restent séparées des réservations et estimations.
+          </Banner></div>
+        )}
+        {summary?.alert_state === 'threshold' && (
+          <div className="px-5 pb-4"><Banner tone="warning" title={`Seuil d’alerte franchi (${summary.alert_percent} %)`}>
+            {formatUsd(summary.committed_usd)} engagés sur {formatUsd(summary.max_usd)}. Les générations restent possibles jusqu’à épuisement du plafond.
           </Banner></div>
         )}
         {summary && summary.estimated_unpriced_usd > 0 && (
@@ -61,13 +107,50 @@ export default function ProviderBudgetSettings({
       </Card>
 
       <Card>
+        <CardHeader title="Plafonds par fournisseur et alertes" description="Second verrou indépendant du plafond global. Un fournisseur sans plafond dédié reste borné par le plafond global." />
+        <form onSubmit={submitPolicy} className="space-y-4 p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input label="Seuil d’alerte (% du plafond global)" type="number" min="0" max="100" step="1" required
+              value={alertPercent} onChange={(event) => setAlertPercent(event.target.value)}
+              hint="0 désactive les alertes. Une alerte est émise une seule fois par palier." />
+            <Input label="Plafond dédié MuAPI (USD)" type="number" min="0" step="0.01"
+              value={capMuapi} onChange={(event) => setCapMuapi(event.target.value)}
+              hint="Vide = pas de plafond dédié (le plafond global s’applique seul)." />
+          </div>
+          <Button type="submit" loading={policyBusy} icon={<BellRing size={14} />}>Enregistrer la politique d’alerte</Button>
+          <p className="text-xs text-slate-500">Les deux plafonds sont vérifiés côté base avant tout appel payant ; un refus ne consomme aucun crédit fournisseur.</p>
+        </form>
+      </Card>
+
+      <Card>
         <CardHeader title="Dépenses par fournisseur" description="Montants établis à partir des réservations et des coûts réellement connus." />
         {!summary?.by_provider.length ? <div className="p-5"><EmptyState icon={<Coins size={22} />} title="Aucune dépense fournisseur enregistrée" /></div> : (
-          <div className="table-wrap"><table className="table"><thead><tr><th>Fournisseur</th><th>Dépenses réelles</th><th>Réservé</th><th>Engagé</th></tr></thead>
+          <div className="table-wrap"><table className="table"><thead><tr><th>Fournisseur</th><th>Dépenses réelles</th><th>Réservé</th><th>Engagé</th><th>Plafond dédié</th></tr></thead>
             <tbody>{summary.by_provider.map((provider) => <tr key={provider.provider}>
-              <td className="font-medium text-white">{provider.provider === 'muapi' ? 'MuAPI' : provider.provider}</td>
+              <td className="font-medium text-white">{providerLabel(provider.provider)}</td>
               <td>{formatUsd(provider.actual_spent_usd)}</td><td>{formatUsd(provider.reserved_usd)}</td><td>{formatUsd(provider.committed_usd)}</td>
+              <td>{provider.cap_usd === null ? <span className="text-xs text-slate-500">Plafond global uniquement</span> : <span>{formatUsd(Number(provider.cap_usd))}{provider.remaining_usd !== null && <span className="ml-1 text-xs text-slate-500">({formatUsd(provider.remaining_usd)} restants)</span>}</span>}</td>
             </tr>)}</tbody></table></div>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader title="Alertes de budget" description="Émises côté serveur, dédupliquées par palier, et notifiées aux administrateurs." />
+        {!summary?.alerts.length ? <div className="p-5"><EmptyState icon={<AlertTriangle size={22} />} title="Aucune alerte de budget" /></div> : (
+          <div className="table-wrap"><table className="table"><thead><tr><th>Date</th><th>Portée</th><th>Alerte</th><th>Détail</th><th>État</th><th /></tr></thead>
+            <tbody>{summary.alerts.map((alert) => <tr key={alert.id}>
+              <td className="whitespace-nowrap text-xs text-slate-400">{formatDate(alert.created_at, true)}</td>
+              <td>{providerLabel(alert.provider)}</td>
+              <td><Badge status={alert.severity}>{alert.title}</Badge></td>
+              <td className="text-xs text-slate-400">{alert.reason}</td>
+              <td>{alert.acknowledged_at
+                ? <span className="text-xs text-slate-500">Prise en compte</span>
+                : <span className="text-xs text-amber-200">À traiter</span>}</td>
+              <td>{!alert.acknowledged_at && <Button size="sm" variant="ghost" loading={ackBusy === alert.id} onClick={() => void ack(alert.id)}>Acquitter</Button>}</td>
+            </tr>)}</tbody></table></div>
+        )}
+        {pendingAlerts.length > 0 && (
+          <div className="px-5 pb-4"><p className="text-xs text-amber-200">{pendingAlerts.length} alerte(s) de budget non acquittée(s).</p></div>
         )}
       </Card>
 
@@ -77,7 +160,7 @@ export default function ProviderBudgetSettings({
           <div className="table-wrap"><table className="table"><thead><tr><th>Date</th><th>Fournisseur</th><th>Modèle / génération</th><th>Statut</th><th>Coût estimé</th><th>Coût réel</th><th>Référence fournisseur</th></tr></thead>
             <tbody>{summary.history.map((entry) => <tr key={entry.id}>
               <td className="whitespace-nowrap text-xs text-slate-400">{formatDate(entry.created_at, true)}</td>
-              <td>{entry.provider === 'muapi' ? 'MuAPI' : entry.provider}</td>
+              <td>{providerLabel(entry.provider)}</td>
               <td><p className="font-medium text-white">{entry.model_id}</p><p className="font-mono text-[10px] text-slate-500">{entry.generation_job_id}</p></td>
               <td><Badge status={entry.status}>{entry.status === 'blocked' ? 'Bloqué' : statusLabel(entry.status)}</Badge>{entry.reason_code && <p className="mt-1 text-[10px] text-slate-500">{entry.reason_code}</p>}</td>
               <td>{formatUsd(entry.estimated_cost_usd)}</td>
