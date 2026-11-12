@@ -37,6 +37,23 @@ vi.mock('../src/context/AuthContext', () => ({
   })(),
 }));
 
+/**
+ * Implémentation par défaut de `verifyProvider`, réarmée dans `beforeEach`.
+ * Les `mockResolvedValueOnce` d'un test restent ainsi réservés à ce test : la
+ * sonde automatique de fin de test ne peut plus les consommer.
+ */
+const defaultVerifyProvider = async (providerKey: string) => ({
+  providerKey,
+  modelKey: 'verified-groq-model',
+  status: 'healthy' as const,
+  latencyMs: 38,
+  errorCode: null,
+  availableModels: ['verified-groq-model'],
+});
+const verifyProviderImpl = { current: defaultVerifyProvider };
+/** Préférences de routage réellement servies par le backend mocké. */
+const savedPreferences = { current: [] as Array<Record<string, unknown>> };
+
 const businessMocks = vi.hoisted(() => {
   const state: {
     conversations: Array<{ id: string; title: string; created_at: string; updated_at: string; last_message?: string }>;
@@ -93,14 +110,7 @@ const businessMocks = vi.hoisted(() => {
     }> => {
       throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
     }),
-    verifyProvider: vi.fn(async (providerKey: string) => ({
-      providerKey,
-      modelKey: 'verified-groq-model',
-      status: 'healthy' as const,
-      latencyMs: 38,
-      errorCode: null,
-      availableModels: ['verified-groq-model'],
-    })),
+    verifyProvider: vi.fn(async (providerKey: string) => verifyProviderImpl.current(providerKey)),
     listModels: vi.fn(async () => ({ models: [], remoteModels: {} })),
     getQuota: vi.fn(async (): Promise<{
       domain: 'business_grow';
@@ -158,6 +168,7 @@ beforeEach(() => {
   businessMocks.state.messages = [];
   businessMocks.state.memory = { consent: false, policyVersion: null, profile: null, items: [] };
   vi.clearAllMocks();
+  verifyProviderImpl.current = defaultVerifyProvider;
   businessMocks.getStatus.mockResolvedValue({ providers: [] });
   businessMocks.listModels.mockResolvedValue({ models: [], remoteModels: {} });
   businessMocks.getQuota.mockResolvedValue({
@@ -170,11 +181,15 @@ beforeEach(() => {
   businessMocks.listRequests.mockResolvedValue({ requests: [] });
   businessMocks.listTools.mockResolvedValue({ tools: [] });
   businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
+  savedPreferences.current = [];
+  businessMocks.getRouting.mockImplementation(async () => ({ preferences: savedPreferences.current }));
   businessMocks.listConversations.mockImplementation(async () => ({ conversations: businessMocks.state.conversations }));
   businessMocks.listMessages.mockImplementation(async () => ({ messages: businessMocks.state.messages }));
+  businessMocks.sendMessage.mockReset();
   businessMocks.sendMessage.mockImplementation(async () => {
     throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
   });
+  businessMocks.createConversation.mockClear();
   businessMocks.listBrands.mockClear();
   businessMocks.listProducts.mockClear();
 });
@@ -436,15 +451,19 @@ describe('Business Grow', () => {
     expect(screen.getByTestId('business-message-assistant').textContent).not.toContain('verified-gemini-model');
   });
 
-  it('n’affiche pas le backend comme disponible si Supabase/Edge ne répond pas', async () => {
+  it('affiche un chargement puis un message factuel — jamais « backend non déployé »', async () => {
     businessMocks.getStatus.mockRejectedValue(new Error('Fonction Business Grow introuvable.'));
     businessMocks.listConversations.mockRejectedValue(new Error('Backend indisponible.'));
 
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    expect(await screen.findByText('Backend Business Grow indisponible')).toBeTruthy();
+    // Le premier appel est en vol : ce n'est pas une panne.
+    expect(screen.getByTestId('business-ai-loading')).toBeTruthy();
+    expect(screen.queryByTestId('business-ai-unavailable')).toBeNull();
+    expect(await screen.findByText('Business Grow ne répond pas pour le moment', undefined, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByTestId('business-overall-status').textContent).toContain('Backend en attente');
     expect((screen.getByRole('button', { name: 'Envoyer' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/Aucune donnée n’est enregistrée localement/)).toBeTruthy();
+    // Aucune cause inventée sur le déploiement.
+    expect(screen.queryByText(/pas déployée|absent ou injoignable|pas encore installé/i)).toBeNull();
   });
 
   it('enregistre et révoque le consentement avant d’afficher les données mémoire', async () => {
@@ -654,7 +673,8 @@ describe('Business Grow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
-    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    expect(businessMocks.getRouting.mock.calls.length).toBeGreaterThan(0);
+    const options = businessMocks.sendMessage.mock.calls[0][3];
     expect(options).toMatchObject({
       roleKey: 'action_plan',
       routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: true },
@@ -706,11 +726,12 @@ describe('Business Grow', () => {
     expect(geminiCard.textContent).not.toContain('gemini');
     expect(geminiCard.textContent).not.toContain('gemini-2.5-flash');
 
-    const verifyBtn = groqCard.querySelector('button');
-    if (verifyBtn) fireEvent.click(verifyBtn);
+    // La sonde part désormais automatiquement (aucune action manuelle requise).
+    await waitFor(() => expect(businessMocks.verifyProvider).toHaveBeenCalledWith('groq'));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Impossible de vérifier la connexion au service IA.');
+    // Le détail technique reste masqué et l'aide affichée est celle du code réel.
     expect(alert.textContent).toContain('contactez le support VYORA');
     expect(alert.textContent).not.toContain('PROVIDER_AUTH_FAILED');
     expect(alert.textContent).not.toContain('Supabase Edge Functions Secrets');
@@ -727,15 +748,13 @@ describe('Business Grow', () => {
         checked_at: '2026-11-10T18:00:00Z',
       }],
     });
-    businessMocks.getRouting.mockResolvedValueOnce({
-      preferences: [{
-        role_key: 'business_advisor',
-        selection_mode: 'manual',
-        preferred_provider_key: 'gemini',
-        preferred_model_key: 'gemini-2.5-flash',
-        allow_fallback: false,
-      }],
-    });
+    savedPreferences.current = [{
+      role_key: 'business_advisor',
+      selection_mode: 'manual',
+      preferred_provider_key: 'gemini',
+      preferred_model_key: 'gemini-2.5-flash',
+      allow_fallback: false,
+    }];
     businessMocks.sendMessage.mockResolvedValueOnce({
       requestId: 'req-auto-override',
       inputMessageId: 'msg-auto-override',
@@ -747,11 +766,17 @@ describe('Business Grow', () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
+    // Attendre que la préférence de routage sauvegardée soit réellement chargée :
+    // l'envoi doit refléter l'état serveur, pas une course avec son chargement.
+    fireEvent.click(screen.getByRole('button', { name: /Services IA/ }));
+    expect(await screen.findByTestId('saved-routing-rules')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Assistant/ }));
+
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Priorités du mois.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
-    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    const options = businessMocks.sendMessage.mock.calls[0][3];
     expect(options).toMatchObject({
       roleKey: 'business_advisor',
       routing: { selectionMode: 'auto', allowFallback: true },

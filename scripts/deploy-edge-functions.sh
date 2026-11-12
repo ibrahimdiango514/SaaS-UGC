@@ -20,6 +20,14 @@ supabase link --project-ref "$PROJECT_REF"
 supabase functions deploy reelora-ai --project-ref "$PROJECT_REF"
 supabase functions deploy reelora-video --project-ref "$PROJECT_REF"
 
+# Business Grow : verify_jwt=true (chaque requête exige un JWT VYORA).
+# La source déployée est le chargeur autonome, pas index.ts : le canal de
+# déploiement ne transmet pas fidèlement une source multi-fichiers. Régénérer
+# le chargeur avec `node scripts/build-business-grow-artifact.mjs` avant de
+# déployer, puis vérifier `--check` (parité octet pour octet).
+node scripts/build-business-grow-artifact.mjs --check
+supabase functions deploy business-grow --project-ref "$PROJECT_REF"
+
 # verify_jwt=false UNIQUEMENT pour la sonde et le worker. Le worker est protégé
 # par le jeton Vault `reelora_worker_token` comparé en temps constant.
 supabase functions deploy reelora-health --project-ref "$PROJECT_REF" --no-verify-jwt

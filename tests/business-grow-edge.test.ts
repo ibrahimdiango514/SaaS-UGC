@@ -116,7 +116,10 @@ describe('Business Grow Edge handler', () => {
     }));
 
     expect(response.status).toBe(403);
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    // Le refus est renvoyé AVEC l'en-tête d'origine : sans lui le navigateur
+    // transforme ce 403 en erreur réseau, affichée à tort « backend absent ».
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://attacker.example');
+    expect(await response.json()).toMatchObject({ error: { code: 'ORIGIN_NOT_ALLOWED' } });
   });
 
   it('derives the owner from the validated session, not a body user id', async () => {
@@ -848,7 +851,10 @@ describe('Business Grow Edge handler', () => {
       headers: { Origin: 'https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com' },
     }));
     expect(spoofedPreflight.status).toBe(403);
-    expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin'))
+      .toBe('https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com');
+    const spoofedBody = await spoofedPreflight.json() as { error?: { code?: string } };
+    expect(spoofedBody.error?.code).toBe('ORIGIN_NOT_ALLOWED');
   });
 
   it('falls back cleanly when preferredModelKey is unavailable and allowFallback is true', async () => {
@@ -916,7 +922,11 @@ describe('Origines des aperçus de travail (régression CORS)', () => {
         headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
       }));
       expect(blocked.status).toBe(403);
-      expect(blocked.headers.get('Access-Control-Allow-Origin')).toBeNull();
+      // Refus explicite et lisible : l'origine est renvoyée pour que le navigateur
+      // expose le 403 ORIGIN_NOT_ALLOWED au lieu d'une erreur réseau opaque.
+      expect(blocked.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+      const blockedBody = await blocked.json() as { error?: { code?: string } };
+      expect(blockedBody.error?.code).toBe('ORIGIN_NOT_ALLOWED');
     }
   });
 });

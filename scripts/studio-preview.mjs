@@ -244,6 +244,35 @@ function edgeResponse(url, body) {
       model_available: true, model_reason: null,
     };
   }
+  if (fn === 'business-grow') {
+    // Miroir de l'Edge Function `business-grow` (v16+). Sans cette branche, la
+    // preview renvoyait `{configured:{}}` et la page Business affichait
+    // « backend absent ou injoignable » : le harnais masquait la panne réelle.
+    const action = body?.action ?? 'status';
+    if (action === 'status') {
+      return {
+        data: {
+          providers: [
+            { provider_key: 'anthropic', display_name: 'Anthropic Claude', enabled: false, status: 'unverified', config_status: 'missing', checked_at: null, verified_model_keys: [] },
+            { provider_key: 'deepseek', display_name: 'DeepSeek', enabled: false, status: 'unverified', config_status: 'missing', checked_at: null, verified_model_keys: [] },
+            { provider_key: 'gemini', display_name: 'Gemini', enabled: true, status: 'available', config_status: 'configured', checked_at: iso(-60000), verified_model_keys: ['gemini-2.5-flash'] },
+            { provider_key: 'groq', display_name: 'Groq', enabled: true, status: 'available', config_status: 'configured', checked_at: iso(-60000), verified_model_keys: ['openai/gpt-oss-120b'] },
+          ],
+        },
+      };
+    }
+    if (action === 'providers.verify') {
+      return {
+        data: {
+          providerKey: body?.providerKey ?? 'groq',
+          modelKey: body?.providerKey === 'gemini' ? 'gemini-2.5-flash' : 'openai/gpt-oss-120b',
+          status: 'healthy', latencyMs: 420, errorCode: null,
+          availableModels: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+        },
+      };
+    }
+    return { data: { action, preview: true } };
+  }
   if (fn === 'reelora-video') {
     const action = body?.action ?? 'estimate';
     if (action === 'catalog') {
@@ -256,7 +285,26 @@ function edgeResponse(url, body) {
     if (action === 'quote') return { quote: edgeResponse(url, { action: 'video-quote' }).quote, model_available: true, model_reason: null };
     return { error: { code: 'PREVIEW_ONLY', message: 'Action non simulée dans la preview : ' + action } };
   }
-  return { configured: {} };
+  // Fonctions secondaires : elles ne portent aucune décision métier de la page
+  // Business, mais elles doivent répondre un corps plausible plutôt qu'un
+  // objet générique qui masquerait une fonction réellement absente.
+  if (fn === 'reelora-owner-bootstrap') {
+    return { user_id: USER_ID, workspace_id: WORKSPACE_ID, role: 'owner', needs_bootstrap: false };
+  }
+  if (fn === 'vyora-ai' || fn === 'reelora-ai') {
+    const action = body?.action ?? 'health';
+    if (action === 'health') return { configured: { groq: true, gemini: true }, providers: ['groq', 'gemini'], status: 'ok' };
+    return { ok: true, preview: true, action };
+  }
+  if (fn === 'vyora-provider-health') {
+    return { providers: [{ provider_key: 'groq', status: 'available' }, { provider_key: 'gemini', status: 'available' }] };
+  }
+  if (fn === 'reelora-video-worker') {
+    return { ok: true, queued: false, preview: true };
+  }
+  // Ne jamais retomber sur un corps générique : cela fait passer une fonction
+  // réellement absente pour une fonction saine.
+  return { error: { code: 'UNKNOWN_FUNCTION', message: 'Fonction non simulée dans la preview : ' + fn } };
 }
 
 function rpcResponse(name) {

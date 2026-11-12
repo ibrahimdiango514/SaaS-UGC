@@ -188,3 +188,52 @@ premier coup sur Groq. Aucune bascule de secours n'a encore été observée en p
   (`handler.ts`), et `vary: Origin` est présent : preuve indirecte, pas directe.
 * **PR #6 non fusionnée** : les correctifs sont commités sur la branche de la PR, pas déployés
   en `main`. Le déploiement Edge v13, lui, est bien actif en production.
+
+---
+
+## Résolution — v15/v16 déployées
+
+### Cause racine n°2 (v15) : `postgres` indisponible pour le bundle
+
+La v15 avait supprimé **tous** les `import` du bundle (contrainte `new Function`),
+y compris la réécriture `import postgres from "npm:postgres@3.4.5"` →
+`const X = globalThis.__bgPostgres`. Mais le chargeur ne définissait
+`globalThis.__bgPostgres` nulle part : la fonction démarrait puis échouait en
+`WORKER_ERROR` (HTTP 500) sur chaque requête.
+
+### Correctif (v16)
+
+Le chargeur est un **module ESM valide** pour Deno : il peut importer `postgres`,
+et l'injecte **avant** d'exécuter le bundle.
+
+```ts
+import postgres from "npm:postgres@3.4.5";
+// …
+(globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;
+new Function(CODE)();
+```
+
+Le bundle lui-même reste 100 % sans `import` (contrainte de `new Function`).
+
+### Preuves de production (v16, ACTIVE)
+
+| Contrôle | Résultat |
+| --- | --- |
+| `{"action":"status"}` via la passerelle + JWT utilisateur | **200**, corps applicatif |
+| `access-control-allow-origin` | `https://vyora-ugc.netlify.app` |
+| `providers.verify` groq | **200**, `healthy`, 451 ms, 11 modèles |
+| `providers.verify` gemini | **200**, `healthy`, 642 ms |
+| `status` relu | groq + gemini = `available` (persisté) |
+| `get_edge_function` | version **16**, `ACTIVE`, `verify_jwt: true` |
+| Parité dépôt ↔ prod | payload base64 + SHA-256 `91585eb6…` identiques |
+
+### Garde-fous ajoutés
+
+1. `tests/business-grow-artifact.test.ts` (7 tests) vérifie que l'injection
+   `__bgPostgres = postgres` **précède** `new Function(CODE)()`.
+2. `tests/studio-preview-coverage.test.ts` (3 tests) interdit au harnais de
+   captures de retomber sur un corps générique : toute fonction déclarée dans
+   `supabase/config.toml` doit être simulée explicitement, dont `business-grow`.
+   C'est ce trou qui avait masqué l'incident.
+3. `scripts/studio-preview.mjs` simule désormais `business-grow` (`status`,
+   `providers.verify`) et renvoie `UNKNOWN_FUNCTION` pour toute fonction inconnue.
