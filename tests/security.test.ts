@@ -66,7 +66,7 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(4);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(5);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
@@ -80,6 +80,24 @@ describe('configuration des Edge Functions', () => {
     // Contrôle catalogue uniquement : aucune complétion, donc aucune génération.
     expect(providerHealth).not.toContain('chat/completions');
     expect(providerHealth).not.toContain(':generateContent');
+    // Webhook SasPay : appelé par SasPay, donc sans JWT utilisateur. Il s'authentifie
+    // par signature HMAC-SHA256 du corps brut, comparée à temps constant, avec un
+    // secret propre à VYORA et une fenêtre anti-rejeu ; sans secret, tout est refusé.
+    expect(config).toMatch(/\[functions\.vyora-saspay-webhook\][\s\S]*?verify_jwt\s*=\s*false/);
+    const sasPayWebhook = read('supabase/functions/_shared/saspay/webhook.ts');
+    expect(sasPayWebhook).toContain("name: 'HMAC', hash: 'SHA-256'");
+    expect(sasPayWebhook).toContain('timingSafeEqualHex');
+    expect(sasPayWebhook).toContain('WEBHOOK_TOLERANCE_SECONDS');
+    const sasPayHttp = read('supabase/functions/_shared/saspay/http.ts');
+    expect(sasPayHttp).toContain('x-webhook-signature');
+    expect(sasPayHttp).toContain('x-webhook-timestamp');
+    expect(sasPayHttp).toContain('VYORA_SASPAY_WEBHOOK_SECRET');
+    // Le corps est lu brut (texte) avant toute analyse JSON : la signature porte dessus.
+    expect(sasPayHttp).toMatch(/createWebhookHandler[\s\S]*?await request\.text\(\)/);
+    const sasPayService = read('supabase/functions/_shared/saspay/payments.ts');
+    expect(sasPayService).toContain('WEBHOOK_NOT_CONFIGURED');
+    expect(sasPayService).toContain('WEBHOOK_SIGNATURE_INVALID');
+    expect(sasPayService).toContain('verifyWebhookSignature');
     const worker = read('supabase/functions/reelora-video-worker/index.ts');
     expect(worker).toContain('constantTimeEqual');
     expect(worker).toContain('reelora_worker_token');

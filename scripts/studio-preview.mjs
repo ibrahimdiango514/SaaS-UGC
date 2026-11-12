@@ -302,6 +302,25 @@ function edgeResponse(url, body) {
   if (fn === 'reelora-video-worker') {
     return { ok: true, queued: false, preview: true };
   }
+  if (fn === 'vyora-payments') {
+    // État par défaut réel : paiement en ligne désactivé. La preview ne simule
+    // jamais un paiement, une commande ni un solde marchand.
+    const action = body && typeof body === 'object' ? body.action : undefined;
+    if (action === 'options') {
+      return {
+        product: body.product === 'business' ? 'business' : 'studio', available: false, reason: 'PAYMENTS_DISABLED',
+        message: 'Le paiement en ligne n’est pas encore activé.', mode: 'test', flows: [], price: null, countries: [],
+      };
+    }
+    if (action === 'balances') {
+      return { configured: false, mode: null, balances: [], message: 'Aucune clé SasPay n’est installée côté serveur.' };
+    }
+    return { error: { code: 'PAYMENTS_DISABLED', message: 'Le paiement en ligne n’est pas encore activé.' } };
+  }
+  if (fn === 'vyora-saspay-webhook') {
+    // Appelé par SasPay uniquement (signature HMAC) : jamais par le navigateur.
+    return { error: { code: 'WEBHOOK_SIGNATURE_INVALID', message: 'Signature de webhook invalide.' } };
+  }
   // Ne jamais retomber sur un corps générique : cela fait passer une fonction
   // réellement absente pour une fonction saine.
   return { error: { code: 'UNKNOWN_FUNCTION', message: 'Fonction non simulée dans la preview : ' + fn } };

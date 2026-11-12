@@ -15,10 +15,12 @@ const ai = read('supabase/functions/reelora-ai/index.ts');
 const config = read('supabase/config.toml');
 
 describe('Une seule intégration MuAPI, de bout en bout', () => {
-  it('déclare les quatre fonctions Studio, Business Grow et le bootstrap propriétaire', () => {
+  it('déclare les quatre fonctions Studio, Business Grow, le bootstrap propriétaire et les deux fonctions de paiement', () => {
     const declared = [...config.matchAll(/^\[functions\.([a-z0-9-]+)\]/gm)].map((m) => m[1]);
-    expect(declared.sort()).toEqual(['business-grow', 'reelora-ai', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker', 'vyora-provider-health']);
+    expect(declared.sort()).toEqual(['business-grow', 'reelora-ai', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker', 'vyora-payments', 'vyora-provider-health', 'vyora-saspay-webhook']);
     expect(config).toMatch(/\[functions\.business-grow\]\r?\nverify_jwt = true/);
+    // Paiement : la fonction appelée par le navigateur exige un JWT.
+    expect(config).toMatch(/\[functions\.vyora-payments\]\r?\nverify_jwt = true/);
   });
 
   it('la passerelle vidéo lit uniquement le secret serveur MUAPI_API_KEY', () => {

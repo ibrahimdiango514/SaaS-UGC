@@ -52,3 +52,15 @@ verify_jwt = false
 # uniquement (aucune génération, aucun crédit).
 [functions.vyora-provider-health]
 verify_jwt = false
+
+# Paiements SasPay de VYORA (devis, création de commande, statut, soldes en
+# lecture seule). Appelée par le navigateur : JWT utilisateur obligatoire.
+[functions.vyora-payments]
+verify_jwt = true
+
+# Webhook SasPay : SasPay ne peut pas présenter de JWT Supabase. La protection
+# repose sur la signature HMAC-SHA256 du corps brut (secret
+# VYORA_SASPAY_WEBHOOK_SECRET, tolérance 300 s) + re-vérification serveur du
+# paiement (`GET /payments/{id}/verify/`) avant toute livraison.
+[functions.vyora-saspay-webhook]
+verify_jwt = false
