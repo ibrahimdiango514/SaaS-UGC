@@ -649,6 +649,95 @@ async function probeAccount(): Promise<AccountProbe> {
     auth,
   };
 }
+/** Solde fournisseur : toujours lu en direct, jamais estimé ni simulé. */
+interface ProviderBalance {
+  status: "ok" | "error";
+  balance_usd: number | null;
+  currency: string | null;
+  http_status: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  data: Json;
+}
+
+async function fetchProviderBalance(): Promise<ProviderBalance> {
+  if (!MUAPI_KEY()) {
+    return { status: "error", balance_usd: null, currency: null, http_status: null,
+      error_code: "provider_key_missing", error_message: "Clé MuAPI absente côté serveur.", data: {} };
+  }
+  const reply = await muapiFetch("/api/v1/account/balance", { useKey: true, timeout: 12000 });
+  const data = obj(reply.data);
+  const raw = obj(data.data ?? data);
+  const balance = finite(raw.balance ?? data.balance);
+  if (!reply.ok || balance === null) {
+    return { status: "error", balance_usd: null, currency: null, http_status: reply.status ?? null,
+      error_code: reply.ok ? "provider_balance_unreadable" : "provider_balance_unavailable",
+      error_message: reply.ok
+        ? "La réponse de solde MuAPI ne contient pas de montant exploitable."
+        : reply.error || `HTTP ${reply.status}`,
+      data: {} };
+  }
+  return { status: "ok", balance_usd: balance, currency: str(raw.currency ?? data.currency, 10) || "USD",
+    http_status: reply.status ?? null, error_code: null, error_message: null, data: raw };
+}
+
+/** Persiste le solde observé (service_role uniquement) pour l'affichage admin. */
+async function persistProviderBalance(probe: ProviderBalance): Promise<void> {
+  const d = probe.data;
+  const payload: Json = {
+    provider: "muapi",
+    balance_usd: probe.balance_usd,
+    currency: probe.currency,
+    account_email: str(d.email, 200) || null,
+    bonus_balances: obj(d.bonus_balances),
+    topup_totals: obj(d.topup_totals),
+    http_status: probe.http_status,
+    status: probe.status,
+    error_code: probe.error_code,
+    error_message: probe.error_message ? redact(probe.error_message).slice(0, 500) : null,
+    synced_at: probe.status === "ok" ? new Date().toISOString() : null,
+    checked_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const res = await fetch(`${SUPABASE_URL()}/rest/v1/ugc_provider_balance?on_conflict=provider`, {
+    method: "POST",
+    headers: svcHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) {
+    console.error("provider balance persist failed", res.status);
+    return;
+  }
+  // Un échec de synchro doit aussi laisser une trace exploitable côté admin.
+  if (probe.status !== "ok") {
+    await fetch(`${SUPABASE_URL()}/rest/v1/ugc_provider_spend_alerts`, {
+      method: "POST",
+      headers: svcHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
+      body: JSON.stringify({
+        alert_key: `balance_sync_${new Date().toISOString().slice(0, 13)}`,
+        provider: "muapi",
+        kind: "balance_sync_failed",
+        severity: "warning",
+        title: "Solde MuAPI non vérifiable",
+        reason: probe.error_message ? redact(probe.error_message).slice(0, 300) : probe.error_code,
+        metadata: { http_status: probe.http_status, error_code: probe.error_code },
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+  }
+}
+
+/**
+ * Condition B du double contrôle : le solde fournisseur doit couvrir le coût.
+ * Un solde illisible bloque l'appel payant (jamais d'optimisme par défaut).
+ */
+function balanceGate(probe: ProviderBalance, costUsd: number): string | null {
+  if (probe.status !== "ok" || probe.balance_usd === null) return "PROVIDER_BALANCE_UNAVAILABLE";
+  if (costUsd > 0 && probe.balance_usd < costUsd) return "PROVIDER_BALANCE_INSUFFICIENT";
+  return null;
+}
+
 function entriesOf(reply: MuapiReply): Json[] {
   const data = obj(reply.data);
   return Array.isArray(data.models) ? (data.models as unknown[]).filter((x): x is Json => !!x && typeof x === "object") : [];
@@ -838,6 +927,10 @@ function friendly(code: string, _detail: string): string {
     PROVIDER_SPEND_CAP_EXCEEDED: "Le budget fournisseur disponible ne couvre pas cette génération.",
     PROVIDER_SPEND_UNAVAILABLE: "La vérification du budget fournisseur est indisponible. Aucun appel payant n’a été lancé.",
     PROVIDER_SPEND_ALREADY_RESERVED: "La réservation du budget est déjà utilisée ou nécessite une vérification administrative.",
+    PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED: "Le plafond VYORA de ce fournisseur est atteint. Aucun appel payant n’a été lancé.",
+    PROVIDER_SPEND_PROVIDER_CAP_UNAVAILABLE: "Le plafond de ce fournisseur n’a pas pu être vérifié. Aucun appel payant n’a été lancé.",
+    PROVIDER_BALANCE_INSUFFICIENT: "Le solde fournisseur MuAPI est insuffisant pour cette génération. Aucun appel payant n’a été lancé : rechargez le compte MuAPI depuis l’espace administration.",
+    PROVIDER_BALANCE_UNAVAILABLE: "Impossible de vérifier le solde MuAPI. Aucun appel payant n’a été lancé. Réessayez ou vérifiez la clé et la connexion au fournisseur.",
   };
   return map[code] ?? "La génération a échoué. Les crédits réservés ont été restitués.";
 }
@@ -1039,6 +1132,66 @@ async function actionAdminCatalog(userJwt: string): Promise<Response> {
   if (!response.ok) return fail("FORBIDDEN", "Accès administrateur requis.", 403);
   await actionModels();
   return actionCatalog(true);
+}
+
+/**
+ * Solde fournisseur pour l'administration : lecture réelle + resynchronisation.
+ * Accessible aux seuls admins (vérifié par `reelora_admin_overview` avec le JWT
+ * de l'appelant). Aucune valeur n'est inventée : en cas d'échec, `balance_usd`
+ * reste null et `error_code` explique pourquoi.
+ */
+async function actionAdminProviderBalance(userJwt: string, refresh: boolean): Promise<Response> {
+  const response = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_overview`, {
+    method: "POST",
+    headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) return fail("FORBIDDEN", "Accès administrateur requis.", 403);
+
+  if (refresh) {
+    const probe = await fetchProviderBalance();
+    await persistProviderBalance(probe);
+    // Recalcule le plafond consommé/restant à la même occasion.
+    const summary = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_spend_summary`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    });
+    const spend = summary.ok ? await summary.json() as Json : null;
+    return json({
+      balance: {
+        provider: "muapi",
+        status: probe.status,
+        balance_usd: probe.balance_usd,
+        currency: probe.currency,
+        http_status: probe.http_status,
+        error_code: probe.error_code,
+        error_message: probe.error_message ? redact(probe.error_message) : null,
+        checked_at: new Date().toISOString(),
+      },
+      spend,
+    });
+  }
+
+  const [stored, spend] = await Promise.all([
+    fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_balance`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    }),
+    fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_spend_summary`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    }),
+  ]);
+  const balance = stored.ok ? await stored.json() as Json : { error: "read_failed" };
+  const spendData = spend.ok ? await spend.json() as Json : null;
+  return json({ balance, spend: spendData });
 }
 
 interface ResolvedProviderQuote {
@@ -1328,6 +1481,18 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
         : "PROVIDER_SPEND_ALREADY_RESERVED";
     return await failJob(jobId, userId, code, "");
   }
+
+  // Condition B — solde fournisseur réellement vérifié AVANT tout appel payant.
+  const estimatedUsd = finite(spendDecision.estimated_cost_usd) ?? 0;
+  const providerBalance = await fetchProviderBalance();
+  void persistProviderBalance(providerBalance);
+  const gate = balanceGate(providerBalance, estimatedUsd);
+  if (gate) {
+    console.warn("provider balance gate blocked", redact(gate));
+    return await failJob(jobId, userId, gate,
+      providerBalance.error_message || `solde=${providerBalance.balance_usd ?? "inconnu"} requis=${estimatedUsd}`);
+  }
+
   let submitUrl = `${MUAPI_BASE}${endpoint}`;
   const token = await workerToken();
   if (token) {
@@ -1421,10 +1586,15 @@ export async function handler(req: Request): Promise<Response> {
 
   let body: Json;
   try { body = await req.json() as Json; } catch { return fail("INVALID_BODY", "Corps de requête JSON invalide.", 400); }
-  const action = str(body.action, 20);
+  // 40 et non 20 : « admin-provider-balance » fait 22 caracteres et etait
+  // tronque, ce qui le faisait tomber dans la branche « job_id requis ».
+  const action = str(body.action, 40);
   try {
     if (action === "catalog") return await actionCatalog();
     if (action === "admin-catalog") return await actionAdminCatalog(userJwt);
+    if (action === "admin-provider-balance") {
+      return await actionAdminProviderBalance(userJwt, bool(body.refresh, false));
+    }
     if (action === "model-detail") return await actionModelDetail(body);
     if (action === "models") return await actionModels();
     if (action === "estimate") return await actionEstimate(body, userId);

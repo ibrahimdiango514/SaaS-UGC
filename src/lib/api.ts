@@ -1,7 +1,7 @@
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
-  AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
+  AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
   ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
@@ -890,6 +890,27 @@ export async function adminSetVideoPricing(config: {
 
 export function adminProviderSpendSummary(): Promise<AdminProviderSpendSummary> {
   return rpc<AdminProviderSpendSummary>('reelora_admin_provider_spend_summary');
+}
+
+/**
+ * Solde fournisseur MuAPI lu côté serveur. `balance_usd` vaut `null` quand le
+ * solde n'a PAS pu être vérifié : ce n'est jamais 0 et l'interface doit le dire
+ * explicitement plutôt que d'afficher un montant inventé.
+ */
+export function adminProviderBalance(): Promise<AdminProviderBalance> {
+  return rpc<AdminProviderBalance>('reelora_admin_provider_balance');
+}
+
+/**
+ * Force une resynchronisation réelle du solde auprès de MuAPI (appel serveur).
+ * Aucune génération n'est déclenchée : seul `GET /api/v1/account/balance` est lu.
+ */
+export async function adminRefreshProviderBalance(): Promise<AdminProviderBalance> {
+  const data = await invokeEdge<{ balance: AdminProviderBalance; spend: AdminProviderSpendSummary | null }>(
+    'reelora-video',
+    { action: 'admin-provider-balance', refresh: true },
+  );
+  return data.balance;
 }
 
 export async function adminSetProviderSpendCap(maxUsd: number, enabled: boolean): Promise<boolean> {

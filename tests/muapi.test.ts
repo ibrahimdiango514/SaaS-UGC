@@ -109,6 +109,8 @@ const state = {
   accountModels: [] as Record<string, unknown>[],
   accountModelsStatus: 200,
   balanceStatus: 200,
+  balanceResponse: { balance: 100 } as Record<string, unknown>,
+  balancePersists: [] as Record<string, unknown>[],
   keysStatus: 200,
   keysResponse: [{ is_test: false }] as Record<string, unknown>[],
   detailStatus: 200,
@@ -249,6 +251,13 @@ async function fakeFetch(input: string | URL | Request, init?: RequestInit): Pro
     return json([state.jobsById[id ?? ''] ?? state.job]);
   }
   if (url.includes('/rest/v1/ugc_project_scripts')) return json([{ script_text: 'Script de secours valide pour le test.' }]);
+  // Persistance du solde fournisseur (upsert service_role) : n'échoue jamais en
+  // silence côté test, sinon la synchro admin ne serait pas couverte.
+  if (url.includes('/rest/v1/ugc_provider_balance')) {
+    state.balancePersists.push(JSON.parse(String(init?.body ?? '{}')));
+    return new Response(null, { status: 201 });
+  }
+  if (url.includes('/rest/v1/ugc_provider_spend_alerts')) return new Response(null, { status: 201 });
   if (url.includes('/rest/v1/reelora_avatars')) return json([]);
   if (url.includes('/storage/v1/object/sign/')) return json({ signedURL: '/object/sign/ugc-assets/signed-token' });
   if (url.includes('/storage/v1/object/ugc-assets/')) return json({ Key: 'ugc-assets/ok' });
@@ -260,7 +269,7 @@ async function fakeFetch(input: string | URL | Request, init?: RequestInit): Pro
       : state.publicModels;
     return json({ models, total: models.length }, authenticated ? state.accountModelsStatus : 200);
   }
-  if (url === 'https://api.muapi.ai/api/v1/account/balance') return json({ balance: 42.5 }, state.balanceStatus);
+  if (url === 'https://api.muapi.ai/api/v1/account/balance') return json(state.balanceResponse, state.balanceStatus);
   if (url === 'https://api.muapi.ai/api/v1/keys') return json(state.keysResponse, state.keysStatus);
   if (url.includes('/estimate-cost')) return json(state.estimateResponse, state.estimateStatus);
   if (method === 'GET' && url.startsWith('https://api.muapi.ai/api/v1/models/')) return json(state.detailResponse, state.detailStatus);
@@ -319,6 +328,8 @@ beforeEach(() => {
   state.accountModels = [];
   state.accountModelsStatus = 200;
   state.balanceStatus = 200;
+  state.balanceResponse = { balance: 100 };
+  state.balancePersists = [];
   state.keysStatus = 200;
   state.keysResponse = [{ is_test: false }];
   state.detailStatus = 200;
@@ -471,6 +482,38 @@ describe('Plafond atomique de dépenses fournisseur', () => {
     expect((await bodyOf(r)).error).toMatchObject({ code: 'PROVIDER_SPEND_CAP_EXCEEDED' });
     expect(state.providerSpendRows).toMatchObject([{ status: 'blocked', reason_code: 'provider_spend_cap_exceeded' }]);
     expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  /* ------------------- Condition B : solde fournisseur MuAPI ------------------ */
+
+  it('bloque l’appel payant quand le solde MuAPI est inférieur au coût estimé', async () => {
+    state.balanceResponse = { balance: 0 };
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(503);
+    expect((await bodyOf(r)).error).toMatchObject({ code: 'PROVIDER_BALANCE_INSUFFICIENT' });
+    // Aucun appel de génération n'a été émis vers MuAPI.
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('bloque l’appel payant quand le solde MuAPI est illisible', async () => {
+    state.balanceStatus = 500;
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(503);
+    expect((await bodyOf(r)).error).toMatchObject({ code: 'PROVIDER_BALANCE_UNAVAILABLE' });
+    expect(muapiSubmits()).toHaveLength(0);
+  });
+
+  it('vérifie le solde fournisseur AVANT la soumission payante', async () => {
+    state.balanceResponse = { balance: 100 };
+    const r = await videoHandler(post(EDGE_URL, { action: 'start', job_id: JOB_ID }));
+    expect(r.status).toBe(200);
+    const balanceIndex = calls.findIndex((call) => call.url.endsWith('/api/v1/account/balance'));
+    const submitIndex = calls.findIndex((call) => call.url.startsWith('https://api.muapi.ai/api/v1/')
+      && !call.url.includes('/estimate-cost') && !call.url.includes('/account/balance'));
+    expect(balanceIndex).toBeGreaterThanOrEqual(0);
+    expect(balanceIndex).toBeLessThan(submitIndex);
+    // Le solde observé est réellement persisté pour l'écran admin.
+    expect(state.balancePersists).toMatchObject([{ provider: 'muapi', status: 'ok', balance_usd: 100, currency: 'USD' }]);
   });
 
   it('sérialise deux demandes concurrentes et ne réserve pas au-delà du budget partagé', async () => {

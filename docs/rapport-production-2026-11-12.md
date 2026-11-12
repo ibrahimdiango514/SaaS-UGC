@@ -1,252 +1,131 @@
-# VYORA Studio — rapport d'état de production
+# VYORA Studio — Rapport final de production
 
-> Établi le **12 novembre 2026**. Branche `arena/323bad30-saas-ugc`, HEAD `055cf24`.
-> Projet Supabase : `xbuuhfwobrafcbgtdgjx`.
-
-Ce rapport distingue systématiquement trois niveaux de preuve :
-
-| Niveau | Signification |
-| --- | --- |
-| **PROD VÉRIFIÉ** | Opération réellement exécutée sur la production, résultat observé |
-| **PROD CONFIGURÉ** | Objet déployé en production, contenu contrôlé, mais non exercé de bout en bout |
-| **LOCAL** | Vérifié dans le dépôt (tests, typecheck, build) — aucune preuve de production |
+**Date** : 2026-11-12
+**Branche** : `arena/323bad30-saas-ugc` (issue de `1a572be`)
+**Projet Supabase** : `xbuuhfwobrafcbgtdgjx`
+**Règle de lecture** : chaque affirmation ci-dessous a été vérifiée soit en production (SQL/Edge), soit par test automatisé. Tout ce qui reste bloqué est écrit comme bloqué.
 
 ---
 
-## 1. `reelora-video` — état réellement déployé
+## 1. Pourquoi le message « débit backend indisponible » apparaissait
 
-**Version en production : `v15`, statut `ACTIVE`, `verify_jwt = true`.**
+Le message n'existe pas littéralement dans le code. Le seul libellé d'indisponibilité de débit du Studio est **« Devis backend indisponible »** (`src/studio/GenerationStudio.tsx`, bannière d'erreur du devis).
 
-Le code métier n'a **pas** été remplacé ni simplifié. Le canal de déploiement
-disponible tronque les charges longues (~5 Ko) : la version 43 Ko est stockée en
-base (`public._edge_deploy_artifact`, 4 tranches gzip+base64) et la fonction
-déployée est un **chargeur court** (`supabase/functions/reelora-video/bootstrap.ts`,
-4 487 caractères) qui, à chaque démarrage à froid :
+Cause racine trouvée et **corrigée** : l'appel `estimate`/`quote` échouait lorsque le corps envoyé ne correspondait pas au modèle. Deux défauts distincts ont été isolés :
 
-1. relit les 4 tranches ;
-2. décompresse (`DecompressionStream("gzip")`) ;
-3. vérifie la longueur (**43 519 caractères**) et le **SHA-256**
-   (`4d00f46c84719c51eb6d67cc02fb3e74e3ead31b8e44bbd5fd63799a95a40e61`) ;
-4. retire l'auto-serve inliné puis importe le module via une URL `data:`
-   (aucun `eval`, aucun `new Function`) ;
-5. délègue au `handler` **d'origine**.
+1. **Identifiant de modèle** : `estimate` recevait un `model_id` technique (`creatify-lipsync`) au lieu du `public_id` UUID. Résultat : `MODEL_NOT_FOUND` (« Ce modèle vidéo n'existe pas dans le catalogue VYORA »).
+2. **Nom de modèle transmis au fournisseur** : avec un UUID à la place du nom technique, `POST /api/v1/models/{name}/estimate-cost` renvoyait **404 `Unknown model: 5fa1a3b3-…`**, ce que le classifieur traduisait par `PROVIDER_BAD_RESPONSE` (« Le fournisseur a renvoyé une réponse illisible »). L'endpoint existait et la clé était valide : c'était bien l'identifiant qui était faux.
 
-**Preuves de production :**
+Preuve : le même endpoint, appelé avec le **nom technique** (`creatify-lipsync`), renvoie `200 {"cost":0.11,"currency":"USD"}`.
 
-| Contrôle | Résultat |
-| --- | --- |
-| `get_edge_function` | corps complet stocké, `verify_jwt: true`, v15 |
-| `net.http_post` sans jeton (id 5021) | `401 UNAUTHENTICATED` « Authentification requise. » — **émis par le handler de l'artefact** |
-| `net.http_post` avec jeton `service_role` (id 5022) | `401 UNAUTHENTICATED` « Jeton utilisateur invalide. » — le code est allé jusqu'à la vérification du porteur |
-| Intégrité des tranches en base | 4 tranches, 19 040 caractères, SHA-256 base64 `32c47717…0382f5` = empreinte d'origine |
+## 2. Comment cela a été corrigé
 
-Le premier rejet (503 `ARTIFACT_LOAD_FAILED`) n'apparaît plus : le runtime
-déploie, relit, décompresse, valide et exécute le vrai code métier.
+- Le chemin de devis utilise désormais le **nom technique** pour l'estimation fournisseur et le **`public_id`** pour le catalogue client (séparation déjà présente dans `loadModel`, validée en production).
+- **Défaut de routage réel corrigé** : `str(body.action, 20)` tronquait `admin-provider-balance` (22 caractères) et faisait tomber la requête dans la branche « job_id requis ». Limite portée à 40 caractères.
+- **Artefact Edge reconstruit** : le générateur produisait du SQL avec des guillemets doubles (invalide) ; les tranches sont maintenant écrites en littéraux SQL et le gzip est **déterministe** (`mtime: 0`), ce qui rend l'artefact reproductible octet pour octet.
+- **Nouvelle barrière fournisseur** ajoutée avant tout appel payant : lecture du solde MuAPI + refus si insuffisant ou illisible.
 
-**Contrôle fonctionnel authentifié : BLOQUÉ (externe).** L'action `catalog`
-exige un **JWT utilisateur réel** (`authUserId(userJwt)` → `/auth/v1/user`). Ce
-n'est pas contournable et n'a pas été contourné : aucun outil disponible ne
-permet d'émettre un jeton utilisateur sans mot de passe réel. Le handler est donc
-prouvé « chargé et exécuté » (401 métier), pas « réponse 200 ».
+## 3. Débit de crédits réellement fonctionnel en production
 
-## 2. Autres Edge Functions
+Vérifié en production avec un **compte de test dédié** (`studio-debit-test@vyora.test`), sans toucher aux portefeuilles réels :
 
-| Fonction | Version | `verify_jwt` | Preuve |
-| --- | --- | --- | --- |
-| `reelora-video` | **15** | true | PROD VÉRIFIÉ (boot + handler) |
-| `video-quote` | 5 | true | PROD CONFIGURÉ (corps complet, calcul serveur, aucun crédit) |
-| `vyora-ai` | 4 | true | PROD CONFIGURÉ |
-| `business-grow` | 14 | true | PROD CONFIGURÉ |
-| `reelora-video-worker` | 8 | false | PROD CONFIGURÉ |
-| `reelora-health`, `reelora-ai`, `vyora-provider-health`, `saspay-*`, agences | — | — | inchangées |
+| Étape | Résultat observé en prod |
+|---|---|
+| Authentification du compte de test | `POST /auth/v1/token?grant_type=password` → **200** |
+| Devis Audio→Vidéo (`creatify-lipsync`) | `200` — **2 crédits**, devis créé, `provider_quote.cost_usd = 0.11` |
+| Devis Texte→Vidéo (`flux-3-text-to-video`) | `200` — **13 crédits**, `provider_quote.cost_usd = 1.25` |
+| Devis Image→Vidéo (`flux-3-image-to-video`) | `200` — **13 crédits**, coût réel `1.25 USD` |
+| `pricing_available` | `true`, `pricing_error: null` |
+| Enregistrement du devis (`reelora_record_video_quote`) | Devis réel créé, expirant à 10 minutes, lié au modèle et à la config tarifaire |
 
-`vyora-deploy-probe` (sonde temporaire) a été **supprimée**.
+Le cycle réservation → capture → restitution avait déjà été prouvé transactionnellement (5 → réserve 3 = 2/3 → rejeu idempotent → capture 2/0 → réserve 2 = 0/2 → release = 0/2).
 
-## 3. Migrations réellement appliquées
+**Limite honnête** : aucune génération payante n'a été lancée (interdiction explicite). Le dernier maillon — appel MuAPI réel et capture — est donc vérifié par test automatisé et par le code déployé, **pas** par une génération réelle facturée.
 
-Nouvelles migrations appliquées en production le 12 novembre 2026 :
+## 4. Plafond 10 USD configuré et actif
 
-| Version | Nom | Effet |
-| --- | --- | --- |
-| `20261112062028` | `vyora_edge_artifact_store` | Table de tranches du chargeur (restaurée après suppression accidentelle, contenu vérifié) |
-| `20261112062614` | `vyora_provider_spend_caps_alerts` | Table d'alertes, politique de budget, acquittement |
-| `20261112062625` | `vyora_provider_spend_reserve_per_provider` | Réservation avec verrou global **et** par fournisseur |
-| `20261112062634` | `vyora_provider_spend_summary_v2` | Résumé admin : plafonds par fournisseur, état d'alerte, journal |
-| `20261112062818` | `vyora_provider_spend_reason_alias` | Motif de refus aligné sur le message client |
-| `20261112063245` | `vyora_ledger_account_erasure` | Correctif d'effacement de compte (voir §5) |
+- Politique appliquée en production : `max_usd = 10`, `enabled = true`, `alert_percent = 80`, `provider_caps_usd = {"muapi": 10}`.
+- Contrôle **côté serveur** (`reelora_reserve_provider_spend`) avant chaque opération, avec double verrou global/fournisseur.
+- Vérifié juste après application : `remaining_usd = 10`, `committed_usd = 0`, `actual_spent_usd = 0`, `alert_state = ok`.
+- **Jamais illimité** : `max_usd` est borné, et une valeur `0` bloque tout test payant.
 
-Toutes ces migrations sont répliquées dans `supabase/migrations/`.
+## 5. Solde MuAPI consultable en admin
 
-## 4. Plafond fournisseur — état réel
+- Nouvelle action Edge `admin-provider-balance`, réservée aux admins (vérifiée : un compte non-admin reçoit **403 « Accès administrateur requis »**).
+- Nouvelle table `saas_ugc.ugc_provider_balance` + RPC `reelora_admin_provider_balance()` (service_role uniquement, aucune policy pour `anon`/`authenticated`).
+- **Solde réel mesuré le 2026-11-12** : `GET /api/v1/account/balance` → **`200`**, `balance = 0`, `currency = USD`, compte `babergang009@gmail.com`, clé de 64 caractères valide.
 
-**Configuration actuelle en production : `{"enabled": false, "max_usd": 0}`.**
-Conservée telle quelle : **aucune génération payante n'est possible**, et le
-plafond n'a jamais été remplacé par une valeur illimitée.
+**Conséquence décisive : le solde MuAPI est à 0 USD.** Les générations payantes échoueraient de toute façon ; VYORA les bloque désormais **avant** l'appel fournisseur.
 
-Ce qui existe et fonctionne (vérifié par exécution SQL transactionnelle annulée) :
+## 6. Rechargement : portail officiel uniquement, aucun faux bouton
 
-- **plafond global** en USD, lu `for update` (deux réservations concurrentes ne
-  peuvent pas le franchir ensemble) ;
-- **plafond par fournisseur** (`provider_caps_usd`, ex. `{"muapi": 1}`), second
-  verrou indépendant, jamais supérieur au plafond global ;
-- **refus sans appel payant** : la tentative est journalisée `blocked` avec le
-  motif précis (`provider_spend_disabled`, `provider_spend_cap_exceeded`,
-  `provider_spend_provider_cap_exceeded`), dépense fournisseur = 0 ;
-- **alertes de consommation** : seuil (`alert_percent`), plafond global atteint
-  (alerte critique), tentative bloquée — dédupliquées par clé, notifiées aux
-  administrateurs via le canal de notifications existant ;
-- **arrêt automatique** : dès que le budget engagé atteint le plafond, toute
-  nouvelle réservation est refusée ;
-- **suivi des dépenses** : estimé / réservé / réel distincts, historiques par
-  fournisseur et par génération dans la console admin ;
-- **protection double facturation** : `generation_job_id` unique, clés
-  d'idempotence du portefeuille, statut `unknown` conservé engagé par prudence.
+L'API MuAPI expose une lecture de solde mais **aucun endpoint de rechargement** documenté utilisable ici. Aucun bouton de recharge fictif n'a été ajouté. L'interface indique explicitement que le rechargement se fait **depuis le portail officiel MuAPI**, et le blocage côté serveur empêche toute dépense non financée.
 
-Exercices réalisés en production (transaction annulée, aucune ligne conservée) :
+**Aucune recharge n'a été effectuée** : elle exige votre confirmation explicite.
 
-| Cas | Résultat observé |
-| --- | --- |
-| Plafond 10 USD + plafond muapi 0,30, coût 0,10 puis 0,50 | 1re réservée, 2e **bloquée** `provider_spend_provider_cap_exceeded`, alerte `blocked_attempt` |
-| Plafond global 0,10, coût 0,10 ×2 | 1re réservée, 2e **bloquée**, alerte `cap_reached` critique |
-| Seuil 1 % franchi | alerte `threshold` (une seule fois) |
-| Configuration réelle (0 USD, désarmée) | refus `provider_spend_disabled`, 0 écriture persistante |
+## 7. Alertes de solde insuffisant
 
-### Budget à confirmer par vous
+Quatre messages explicites, côté serveur, avant tout appel payant :
 
-Aucun montant n'a été inventé. Le plafond restera à **0 USD** (donc toutes les
-générations payantes refusées) jusqu'à votre autorisation explicite.
+- `PROVIDER_BALANCE_INSUFFICIENT` — « Le solde fournisseur MuAPI est insuffisant pour cette génération. Aucun appel payant n'a été lancé… »
+- `PROVIDER_BALANCE_UNAVAILABLE` — « Impossible de vérifier le solde MuAPI. Aucun appel payant n'a été lancé… »
+- `PROVIDER_SPEND_CAP_EXCEEDED` / `PROVIDER_SPEND_DISABLED` — plafond VYORA atteint ou tests payants désactivés.
+- `PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED` / `_UNAVAILABLE` — plafond par fournisseur (mapping manquant, désormais ajouté).
 
-Pour activer, il faut **deux valeurs** :
+Une synchro en échec écrit aussi une alerte `balance_sync_failed` exploitable en administration.
 
-1. **le plafond global en USD** (ex. un montant que vous acceptez de perdre) ;
-2. **le plafond MuAPI en USD**, ≤ au plafond global (ou vide = plafond global seul).
+## 8. Fonctionnalités Studio réellement opérationnelles
 
-Et une valeur de confort : le **seuil d'alerte en %** (défaut 80).
+**Vérifié en production** : catalogue (415 modèles, 325 actifs), détail modèle, devis de crédits réel avec coût fournisseur, création de devis, barrière budgétaire, barrière de solde.
 
-Repère de coût : les tarifs catalogue relevés vont d'environ 0,10 USD à quelques
-dollars par génération selon le modèle et la durée. Un plafond global de test
-typique se situe donc entre **1 et 5 USD**. **Je n'active rien avant votre
-confirmation écrite du montant.**
+**Vérifié hors génération payante** : réservation/capture/restitution des crédits, idempotence, refus de solde insuffisant.
 
-## 5. Débit de crédits — état réel
+**Non vérifié par exécution réelle** (et non déclaré comme acquis) : la génération vidéo de bout en bout, l'export, la publication sociale — bloqués par le **solde MuAPI à 0** et par l'absence d'identifiants OAuth.
 
-Vérifié en base par transactions annulées (`ugc_private.apply_wallet_delta`) :
+## 9. Réseaux sociaux réellement connectables
 
-| Étape | Solde disponible / réservé |
-| --- | --- |
-| départ | 5 / 0 |
-| réserve 3 | 2 / 3 |
-| même clé rejouée | **2 / 3** (aucun second débit) |
-| capture 3 | 2 / 0 |
-| réserve 2 | 0 / 2 |
-| restitution | 2 / 0 |
+**Non livré.** Aucune connexion OAuth réelle n'a été établie, et rien n'est présenté comme connecté. Les prérequis externes sont listés en point 14.
 
-| Cas adverse | Résultat |
-| --- | --- |
-| réserver 50 sur 1 crédit | refusé « Insufficient or inconsistent credit balance » |
-| delta négatif de 500 | refusé, solde inchangé |
-| écriture directe du solde | impossible : tous les appelants passent par la primitive |
-| mise à jour arbitraire du journal | refusée « UGC credit ledger is append-only » |
-
-État courant de la production : 4 portefeuilles, **5 crédits disponibles, 0
-réservé, 0 solde négatif, 0 job**. Aucune transaction artificielle n'a été
-conservée dans un portefeuille réel.
-
-**Défaut réel corrigé** : la suppression d'un compte possédant un historique de
-crédits **échouait** (la clé étrangère `ON DELETE SET NULL` déclenchait le
-trigger append-only). L'effacement RGPD était donc cassé. Le trigger autorise
-désormais cette seule mutation (anonymisation), et rien d'autre. Vérifié en
-base : mise à jour arbitraire toujours refusée, suppression de compte acceptée,
-journal conservé et anonymisé, portefeuille supprimé.
-
-## 6. V2V et Lip Sync
-
-`Video→Video` et `Lip Sync` sont `status: 'live'` dans
-`src/studio/sections.ts` avec de vraies routes (`?mode=video-source`,
-`?mode=audio-source`). Le socle est en place : import vidéo/audio, stockage
-privé, URL signées, construction du corps fournisseur, devis serveur,
-réservation de crédits puis de budget, suivi, récupération du résultat.
-
-**Aucun rendu V2V ou Lip Sync n'a été exécuté en production** : cela exige une
-génération payante, donc votre autorisation de budget. Tant que le plafond est à
-0 USD, ces parcours s'arrêtent proprement sur un refus explicite (message
-« budget fournisseur disponible insuffisant, aucun crédit débité »), ce qui est
-le comportement attendu et non un mensonge de disponibilité.
-
-Un modèle sans support vidéo/audio n'est pas présenté comme compatible : la
-compatibilité est dérivée du catalogue réel (83/83 modèles Video→Video,
-6 modèles Audio→Video actifs).
-
-## 7. Parcours Studio
+## 10. Déploiements effectués
 
 | Élément | État |
-| --- | --- |
-| Text→Video, Image→Video, Video→Video, Lip Sync | routés, devis serveur, suivi |
-| Projets, historique, créations enregistrées | live (routes réelles) |
-| Imports, timeline, scènes, audio/voix, sous-titres | présents (montage) |
-| Image Studio, Avatar, Audio, Clipping, Workflows, Storyboarding… | `prepared` — **aucun** bouton de génération, message explicite |
-| Prélèvement du montant | **jamais** décidé par le frontend (le devis vient du serveur) |
+|---|---|
+| `reelora-video` | **v17 ACTIVE**, `verify_jwt: true`, artefact sha256 `5ca3a72d…`, assemblage `be2c891b…` (11 tranches) |
+| Démarrage de l'artefact en prod | Vérifié (`action: models` → 200, 415 modèles) |
+| `saas_ugc.ugc_provider_balance` + RPC | Appliqués en production |
+| `reelora-video` v16/v17 | Déployées puis vérifiées par `get_edge_function` |
+| Sonde temporaire `vyora-provider-probe` | Créée pour le diagnostic, **supprimée** |
+| `public._vyora_muapi_probe` | **Supprimée** |
+| Netlify | **Aucun déploiement** |
 
-Réserve honnête : les fonctions `prepared` sont explicitement annoncées comme
-non disponibles, sans cadenas inutile ni message de disponibilité trompeur.
+## 11. Tests réalisés
 
-## 8. Séparation BG / Studio
+- `npx vitest run` → **50 fichiers / 529 tests ✅**
+- `npx tsc -b` → **0 erreur**
+- Nouveaux tests de la Condition B : refus si solde inférieur au coût, refus si solde illisible, **ordre vérifié** (lecture du solde strictement avant la soumission payante), persistance du relevé.
+- Tests de production : authentification du compte de test, 4 actions Edge authentifiées, devis réels sur 3 modèles, application et lecture de la politique budgétaire, barrière admin 403.
 
-`saas_ugc.*` (Studio, marge 60 %) et `saas_business.*` (Business Grow, marge
-95 %) restent des schémas distincts, avec portefeuilles et catalogues séparés.
-Aucune dépense Studio ne touche la marge BG. Aucun tarif non validé n'a été
-publié : `video_pricing_config` est inchangé.
+## 12. Liens
 
-## 9. Tests et vérifications
+- Studio : `/studio` de l'application déployée.
+- Aperçu local : `node scripts/studio-preview.mjs` (vérifié, 5/5).
+- Aucune URL Netlify n'a été publiée : aucun déploiement non maîtrisé n'a été fait.
 
-| Vérification | Résultat |
-| --- | --- |
-| `npx vitest run` | **50 fichiers / 526 tests ✅** (dont 20 nouveaux) |
-| `npx tsc -b` | 0 erreur |
-| `npm run build` | ✅ build de production |
-| Parité artefact ↔ source | 8 tests ✅ |
-| Chargeur Edge | 4 tests ✅ (handler appelable, crédits identiques, OPTIONS identiques) |
-| Imports Edge | conformes |
+## 13. Branche et commits
 
-**LOCAL :** tous les tests ci-dessus. **PROD VÉRIFIÉ :** boot `reelora-video`,
-refus de budget, intégrité des tranches, invariants de crédits en SQL.
+- Branche : `arena/323bad30-saas-ugc` — **aucune fusion dans `main`**.
+- Commits antérieurs préservés (`2318f5b` → `5785563`), nouveaux commits en fin de session.
+- Worktree propre, aucun `reset`.
 
-## 10. Déploiement du frontend
+## 14. Autorisations externes encore nécessaires
 
-**Aucun déploiement Netlify n'a été déclenché.** Le dépôt ne contient **aucun
-workflow GitHub Actions** ; le seul mécanisme identifié est le build Netlify des
-**Deploy Previews de pull request** (`netlify.toml`). Pousser la branche
-déclencherait donc une preview Netlify non maîtrisée. Conformément à votre
-consigne, rien n'a été poussé.
+1. **Recharge MuAPI** : crédit du compte fournisseur — je ne l'ai pas fait, cela requiert votre accord explicite.
+2. **Validation MuAPI** : confirmer que la clé de production doit rester sur ce compte (`babergang009@gmail.com`).
+3. **Réseaux sociaux** : création des applications développeur et validation des scopes — YouTube (Google Cloud, vérification OAuth), TikTok (Content Posting API), Meta (Facebook/Instagram, App Review), LinkedIn (Marketing Developer Platform), X (API payante), Pinterest (accès standard).
+4. **Publication** : domaine et variables d'environnement Netlify, si vous souhaitez un déploiement — non lancé volontairement.
 
-Pour publier le frontend, il faut soit merger la PR #6 (déploiement de
-production), soit autoriser explicitement un Deploy Preview.
+---
 
-## 11. Blocages externes restants
+### Ce qui reste bloqué, sans détour
 
-1. **Contrôle fonctionnel authentifié de `reelora-video`** : exige un mot de
-   passe utilisateur réel pour obtenir un JWT (aucune émission de jeton possible
-   depuis cet environnement).
-2. **Aucune génération payante** : plafond à 0 USD, en attente de votre montant.
-3. **Déploiement frontend** : dépend de votre décision sur la PR #6 / Netlify.
-4. **Accès réseau** : `*.supabase.co` et `api.supabase.com` sont injoignables
-   depuis cet environnement ; toutes les opérations de production passent par le
-   connecteur Supabase (SQL + gestion des Edge Functions).
-
-## 12. Liens, branche et commits
-
-- Branche : `arena/323bad30-saas-ugc` — HEAD **`055cf24`**, 16 commits d'avance
-  sur `main` (`1a572be`), aucun commit de `main` manquant.
-- PR #6 ouverte, **non mergée** (aucune fusion dans `main`).
-- Preview locale : `http://127.0.0.1:4180` (serveur de développement uniquement).
-- Studio en production : dépend du déploiement frontend (§10), donc **pas encore
-  publié**.
-
-### Commits de cette session
-
-```
-055cf24 Budget fournisseur: plafond par fournisseur, alertes et arret auto; effacement de compte repare
-a3b66fa Edge: chargeur runtime verifie, artefact 43 Ko servi en production
-58a02f0 Edge: artefact minifie .edge.js avec empreinte SHA-256 verifiable
-e1445f4 Edge: bundle autonome deployable pour reelora-video (import _shared inline)
-```
+Le Studio **calcule, devis et bloque correctement**, mais il **ne peut pas encore produire de vidéo réelle** : le solde MuAPI est à **0 USD**. Dès que le compte est rechargé (par vous, sur le portail officiel), la chaîne est prête : devis vérifié → réservation → double contrôle (plafond VYORA **et** solde MuAPI) → génération → capture ou restitution. Aucune recharge n'a été faite et aucune génération payante n'a été lancée.

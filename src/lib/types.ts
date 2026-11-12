@@ -669,3 +669,28 @@ export interface AdminCreditHistory {
   reserved: number;
   entries: AdminCreditHistoryEntry[];
 }
+
+/**
+ * Solde fournisseur réel (MuAPI) tel que persisté par le serveur.
+ *
+ * Règle d'affichage : `balance_usd === null` signifie « non vérifié » — il ne
+ * faut jamais l'afficher comme 0 USD ni le confondre avec le plafond VYORA, la
+ * dépense VYORA ou le budget restant, qui sont des montants distincts.
+ */
+export interface AdminProviderBalance {
+  provider: string;
+  status: 'ok' | 'error' | 'unknown';
+  balance_usd: number | null;
+  currency: string | null;
+  account_email?: string | null;
+  bonus_balances?: Record<string, number>;
+  topup_totals?: Record<string, number>;
+  http_status?: number | null;
+  /** Dernière synchronisation réussie (null si jamais vérifiée). */
+  synced_at?: string | null;
+  /** Dernière tentative de lecture, réussie ou non. */
+  checked_at?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  error?: string | null;
+}

@@ -5,18 +5,20 @@ import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
 import { formatDate, formatMoney, statusLabel, truncate } from '../lib/format';
 import ProviderBudgetSettings from './admin/ProviderBudgetSettings';
+import ProviderBalanceCard from './admin/ProviderBalanceCard';
 import CreditManager from './admin/CreditManager';
 import {
   GrowthActivitySection, KpiSection, ModelsSection, ProvidersSection, RevenueSection, StudioActivitySection, money,
 } from './admin/AdminSections';
 import {
   adminAckProviderSpendAlert, adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminMetrics,
-  adminProviderSpendSummary, adminSetProviderSpendCap, adminSetProviderSpendPolicy, adminSetVideoPricing,
+  adminProviderBalance, adminProviderSpendSummary, adminRefreshProviderBalance,
+  adminSetProviderSpendCap, adminSetProviderSpendPolicy, adminSetVideoPricing,
   adminVideoCatalog,
   adminListRecharges, adminListSettings, adminListUsers, adminOverview, adminSetAccountStatus,
   adminSetPlan, adminSetRole, adminSetSetting, adminUpdateService, listPlans, listServices,
 } from '../lib/api';
-import type { AdminMetrics, AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
+import type { AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
 
 type AuditLog = { id: string; action: string; target_type: string | null; target_id: string | null; details: Record<string, unknown>; created_at: string; actor_user_id: string };
 type Setting = { setting_key: string; setting_value: Record<string, unknown>; description: string | null };
@@ -57,6 +59,9 @@ export default function Admin() {
   const [providerSpend, setProviderSpend] = useState<AdminProviderSpendSummary | null>(null);
   const [providerSpendError, setProviderSpendError] = useState('');
   const [providerSpendCapDraft, setProviderSpendCapDraft] = useState('0');
+  const [providerBalance, setProviderBalance] = useState<AdminProviderBalance | null>(null);
+  const [providerBalanceError, setProviderBalanceError] = useState('');
+  const [providerBalanceBusy, setProviderBalanceBusy] = useState(false);
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState('');
@@ -82,6 +87,10 @@ export default function Admin() {
           return null;
         }),
       ]);
+      // Solde fournisseur : lecture seule du dernier relevé serveur (aucune
+      // resynchronisation automatique à chaque affichage de la page).
+      try { setProviderBalance(await adminProviderBalance()); setProviderBalanceError(''); }
+      catch (err) { setProviderBalance(null); setProviderBalanceError(asAppError(err).message); }
       setOverview(o); setUsers(Array.isArray(u) ? u : []); setRecharges(r); setServices(s); setPlans(p); setSettings(st); setLogs(l as AuditLog[]);
       setProviderSpend(spend);
       if (spend) setProviderSpendCapDraft(String(spend.max_usd));
@@ -183,6 +192,23 @@ export default function Admin() {
     await run('provider-policy', () => adminSetProviderSpendPolicy(
       maxUsd, providerSpend?.enabled ?? false, alertPercent, providerCaps,
     ), 'Politique de budget fournisseur enregistrée.');
+  };
+
+  const onRefreshProviderBalance = async () => {
+    setProviderBalanceBusy(true);
+    setProviderBalanceError('');
+    try {
+      const fresh = await adminRefreshProviderBalance();
+      setProviderBalance(fresh);
+      if (fresh.status !== 'ok') {
+        setProviderBalanceError(fresh.error_message ?? 'La lecture du solde MuAPI a échoué.');
+      }
+      setProviderSpend(await adminProviderSpendSummary());
+    } catch (err) {
+      setProviderBalanceError(asAppError(err).message);
+    } finally {
+      setProviderBalanceBusy(false);
+    }
   };
 
   const onAckProviderSpendAlert = async (alertId: string) => {
@@ -401,18 +427,27 @@ export default function Admin() {
             { id: 'general', label: 'Paramètres généraux', icon: <Settings2 size={14} /> },
           ]} />
           {settingsSection === 'provider-budget'
-            ? <ProviderBudgetSettings
-              summary={providerSpend}
-              error={providerSpendError}
-              capDraft={providerSpendCapDraft}
-              busy={busy === 'provider-spend'}
-              onCapDraftChange={setProviderSpendCapDraft}
-              onSave={(event) => void onSaveProviderSpendCap(event)}
-              onEnable={() => void onEnableProviderSpend()}
-              onDisable={() => void onDisableProviderSpend()}
-              onSavePolicy={onSaveProviderSpendPolicy}
-              onAckAlert={onAckProviderSpendAlert}
-            />
+            ? <div className="space-y-5">
+              <ProviderBalanceCard
+                balance={providerBalance}
+                summary={providerSpend}
+                loading={providerBalanceBusy}
+                error={providerBalanceError}
+                onRefresh={() => void onRefreshProviderBalance()}
+              />
+              <ProviderBudgetSettings
+                summary={providerSpend}
+                error={providerSpendError}
+                capDraft={providerSpendCapDraft}
+                busy={busy === 'provider-spend'}
+                onCapDraftChange={setProviderSpendCapDraft}
+                onSave={(event) => void onSaveProviderSpendCap(event)}
+                onEnable={() => void onEnableProviderSpend()}
+                onDisable={() => void onDisableProviderSpend()}
+                onSavePolicy={onSaveProviderSpendPolicy}
+                onAckAlert={onAckProviderSpendAlert}
+              />
+            </div>
             : <Card><CardHeader title="Paramètres de la plateforme" description="Valeurs JSON réellement utilisées par le backend." />
               {genericSettings.length === 0 ? <EmptyState icon={<Settings2 size={22} />} title="Aucun paramètre" /> : (
                 <div className="divide-y divide-white/[0.06]">{genericSettings.map((s) => (

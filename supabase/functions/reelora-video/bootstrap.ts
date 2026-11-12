@@ -12,8 +12,8 @@
 //   - chargement par import d'une URL data: (pas d'eval, pas de new Function) ;
 //   - l'auto-serve Deno inliné dans l'artefact est retire avant import, car la
 //     plateforme Edge sert deja la fonction.
-const ARTIFACT_SHA256 = "4d00f46c84719c51eb6d67cc02fb3e74e3ead31b8e44bbd5fd63799a95a40e61";
-const ARTIFACT_CHARS = 43519;
+const ARTIFACT_SHA256 = "5ca3a72d8b63c71f0df017efb716251dd0e6b734abb66756f06f6fe339c9b165";
+const ARTIFACT_CHARS = 48026;
 const TABLE = "_edge_deploy_artifact";
 
 const env = (k: string): string => (globalThis as any).Deno?.env?.get?.(k) ?? "";

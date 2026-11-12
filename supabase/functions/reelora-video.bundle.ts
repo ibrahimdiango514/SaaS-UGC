@@ -833,6 +833,92 @@ async function probeAccount() {
     auth
   };
 }
+async function fetchProviderBalance() {
+  if (!MUAPI_KEY()) {
+    return {
+      status: "error",
+      balance_usd: null,
+      currency: null,
+      http_status: null,
+      error_code: "provider_key_missing",
+      error_message: "Cl\xE9 MuAPI absente c\xF4t\xE9 serveur.",
+      data: {}
+    };
+  }
+  const reply = await muapiFetch("/api/v1/account/balance", { useKey: true, timeout: 12e3 });
+  const data = obj(reply.data);
+  const raw = obj(data.data ?? data);
+  const balance = finite(raw.balance ?? data.balance);
+  if (!reply.ok || balance === null) {
+    return {
+      status: "error",
+      balance_usd: null,
+      currency: null,
+      http_status: reply.status ?? null,
+      error_code: reply.ok ? "provider_balance_unreadable" : "provider_balance_unavailable",
+      error_message: reply.ok ? "La r\xE9ponse de solde MuAPI ne contient pas de montant exploitable." : reply.error || `HTTP ${reply.status}`,
+      data: {}
+    };
+  }
+  return {
+    status: "ok",
+    balance_usd: balance,
+    currency: str(raw.currency ?? data.currency, 10) || "USD",
+    http_status: reply.status ?? null,
+    error_code: null,
+    error_message: null,
+    data: raw
+  };
+}
+async function persistProviderBalance(probe) {
+  const d = probe.data;
+  const payload = {
+    provider: "muapi",
+    balance_usd: probe.balance_usd,
+    currency: probe.currency,
+    account_email: str(d.email, 200) || null,
+    bonus_balances: obj(d.bonus_balances),
+    topup_totals: obj(d.topup_totals),
+    http_status: probe.http_status,
+    status: probe.status,
+    error_code: probe.error_code,
+    error_message: probe.error_message ? redact(probe.error_message).slice(0, 500) : null,
+    synced_at: probe.status === "ok" ? (/* @__PURE__ */ new Date()).toISOString() : null,
+    checked_at: (/* @__PURE__ */ new Date()).toISOString(),
+    updated_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const res = await fetch(`${SUPABASE_URL()}/rest/v1/ugc_provider_balance?on_conflict=provider`, {
+    method: "POST",
+    headers: svcHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15e3)
+  });
+  if (!res.ok) {
+    console.error("provider balance persist failed", res.status);
+    return;
+  }
+  if (probe.status !== "ok") {
+    await fetch(`${SUPABASE_URL()}/rest/v1/ugc_provider_spend_alerts`, {
+      method: "POST",
+      headers: svcHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
+      body: JSON.stringify({
+        alert_key: `balance_sync_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 13)}`,
+        provider: "muapi",
+        kind: "balance_sync_failed",
+        severity: "warning",
+        title: "Solde MuAPI non v\xE9rifiable",
+        reason: probe.error_message ? redact(probe.error_message).slice(0, 300) : probe.error_code,
+        metadata: { http_status: probe.http_status, error_code: probe.error_code }
+      }),
+      signal: AbortSignal.timeout(15e3)
+    });
+  }
+}
+function balanceGate(probe, costUsd) {
+  if (probe.status !== "ok" || probe.balance_usd === null) return "PROVIDER_BALANCE_UNAVAILABLE";
+  if (costUsd > 0 && probe.balance_usd < costUsd) return "PROVIDER_BALANCE_INSUFFICIENT";
+  return null;
+}
 function entriesOf(reply) {
   const data = obj(reply.data);
   return Array.isArray(data.models) ? data.models.filter((x) => !!x && typeof x === "object") : [];
@@ -998,7 +1084,11 @@ function friendly(code, _detail) {
     PROVIDER_SPEND_DISABLED: "Les tests payants du fournisseur sont d\xE9sactiv\xE9s par l\u2019administration.",
     PROVIDER_SPEND_CAP_EXCEEDED: "Le budget fournisseur disponible ne couvre pas cette g\xE9n\xE9ration.",
     PROVIDER_SPEND_UNAVAILABLE: "La v\xE9rification du budget fournisseur est indisponible. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9.",
-    PROVIDER_SPEND_ALREADY_RESERVED: "La r\xE9servation du budget est d\xE9j\xE0 utilis\xE9e ou n\xE9cessite une v\xE9rification administrative."
+    PROVIDER_SPEND_ALREADY_RESERVED: "La r\xE9servation du budget est d\xE9j\xE0 utilis\xE9e ou n\xE9cessite une v\xE9rification administrative.",
+    PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED: "Le plafond VYORA de ce fournisseur est atteint. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9.",
+    PROVIDER_SPEND_PROVIDER_CAP_UNAVAILABLE: "Le plafond de ce fournisseur n\u2019a pas pu \xEAtre v\xE9rifi\xE9. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9.",
+    PROVIDER_BALANCE_INSUFFICIENT: "Le solde fournisseur MuAPI est insuffisant pour cette g\xE9n\xE9ration. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9 : rechargez le compte MuAPI depuis l\u2019espace administration.",
+    PROVIDER_BALANCE_UNAVAILABLE: "Impossible de v\xE9rifier le solde MuAPI. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9. R\xE9essayez ou v\xE9rifiez la cl\xE9 et la connexion au fournisseur."
   };
   return map[code] ?? "La g\xE9n\xE9ration a \xE9chou\xE9. Les cr\xE9dits r\xE9serv\xE9s ont \xE9t\xE9 restitu\xE9s.";
 }
@@ -1189,6 +1279,56 @@ async function actionAdminCatalog(userJwt) {
   if (!response.ok) return fail("FORBIDDEN", "Acc\xE8s administrateur requis.", 403);
   await actionModels();
   return actionCatalog(true);
+}
+async function actionAdminProviderBalance(userJwt, refresh) {
+  const response = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_overview`, {
+    method: "POST",
+    headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(15e3)
+  });
+  if (!response.ok) return fail("FORBIDDEN", "Acc\xE8s administrateur requis.", 403);
+  if (refresh) {
+    const probe = await fetchProviderBalance();
+    await persistProviderBalance(probe);
+    const summary = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_spend_summary`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15e3)
+    });
+    const spend2 = summary.ok ? await summary.json() : null;
+    return json({
+      balance: {
+        provider: "muapi",
+        status: probe.status,
+        balance_usd: probe.balance_usd,
+        currency: probe.currency,
+        http_status: probe.http_status,
+        error_code: probe.error_code,
+        error_message: probe.error_message ? redact(probe.error_message) : null,
+        checked_at: (/* @__PURE__ */ new Date()).toISOString()
+      },
+      spend: spend2
+    });
+  }
+  const [stored, spend] = await Promise.all([
+    fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_balance`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15e3)
+    }),
+    fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_spend_summary`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15e3)
+    })
+  ]);
+  const balance = stored.ok ? await stored.json() : { error: "read_failed" };
+  const spendData = spend.ok ? await spend.json() : null;
+  return json({ balance, spend: spendData });
 }
 async function resolveProviderQuote(body) {
   const requested = str(body.model_id, 120);
@@ -1449,6 +1589,19 @@ async function actionStart(jobId, userId) {
     const code = reason === "provider_spend_disabled" ? "PROVIDER_SPEND_DISABLED" : reason === "provider_spend_cap_exceeded" ? "PROVIDER_SPEND_CAP_EXCEEDED" : "PROVIDER_SPEND_ALREADY_RESERVED";
     return await failJob(jobId, userId, code, "");
   }
+  const estimatedUsd = finite(spendDecision.estimated_cost_usd) ?? 0;
+  const providerBalance = await fetchProviderBalance();
+  void persistProviderBalance(providerBalance);
+  const gate = balanceGate(providerBalance, estimatedUsd);
+  if (gate) {
+    console.warn("provider balance gate blocked", redact(gate));
+    return await failJob(
+      jobId,
+      userId,
+      gate,
+      providerBalance.error_message || `solde=${providerBalance.balance_usd ?? "inconnu"} requis=${estimatedUsd}`
+    );
+  }
   let submitUrl = `${MUAPI_BASE}${endpoint}`;
   const token = await workerToken();
   if (token) {
@@ -1561,10 +1714,13 @@ async function handler(req) {
   } catch {
     return fail("INVALID_BODY", "Corps de requ\xEAte JSON invalide.", 400);
   }
-  const action = str(body.action, 20);
+  const action = str(body.action, 40);
   try {
     if (action === "catalog") return await actionCatalog();
     if (action === "admin-catalog") return await actionAdminCatalog(userJwt);
+    if (action === "admin-provider-balance") {
+      return await actionAdminProviderBalance(userJwt, bool(body.refresh, false));
+    }
     if (action === "model-detail") return await actionModelDetail(body);
     if (action === "models") return await actionModels();
     if (action === "estimate") return await actionEstimate(body, userId);
