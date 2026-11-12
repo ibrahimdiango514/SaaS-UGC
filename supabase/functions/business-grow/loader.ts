@@ -1,126 +1,75 @@
-// business-grow — chargeur de production (source réellement déployée).
+// business-grow — chargeur de production (seule source déployée).
+// Généré par scripts/build-business-grow-artifact.mjs : ne pas éditer.
 //
-// ## Pourquoi un chargeur et pas directement le handler
-// Le canal de déploiement n'achemine pas fidèlement une source longue : une
-// source multi-fichiers produit `BOOT_ERROR`, et un corps inline de ~17 Ko peut
-// arriver altéré (instruction `import` refusée par `new Function`, ou SHA-256
-// qui ne correspond plus). Cette source déployée est **courte** (~1,5 Ko) : elle
-// ne peut pas être tronquée.
-//
-// Le bundle exécuté est publié en statique (`public/edge-artifacts/`) et
-// versionné dans le dépôt ; son intégrité est vérifiée par SHA-256 avant
-// exécution. Le code exécuté reste exactement celui du dépôt.
-//
-// ## Contrat d'erreur
-// - 500 `BUSINESS_GROW_ARTIFACT_UNAVAILABLE` : artefact non récupérable.
-// - 500 `BUSINESS_GROW_ARTIFACT_INTEGRITY` : taille ou SHA-256 différent.
-// Jamais de 503 muet : le client reçoit un code métier et un message, donc
-// jamais « backend absent ou injoignable ».
-//
-// Les deux constantes miroir de `business-grow.meta.json` sont vérifiées par
-// `tests/business-grow-artifact.test.ts`.
-
+// Le canal de déploiement altère les sources longues : ce fichier reste court.
+// Le code métier (bundle esbuild de ce dossier) est lu dans
+// public._edge_function_artifact par nom + SHA-256, puis vérifié avant exécution :
+// un artefact absent ou modifié n'est jamais exécuté.
 import postgres from "npm:postgres@3.4.5";
 
-const ARTIFACT_URL = "https://vyora-ugc.netlify.app/edge-artifacts/business-grow.bundle.js";
+const ARTIFACT_NAME = "business-grow";
 const ARTIFACT_SHA256 = "4f7b9f037aac61569278ffbbd5a29078c5dd4708dba21f4cf6bfd940292faeb9";
 const ARTIFACT_CHARS = 39323;
 
-const ALLOWED = [
-  "https://vyora-ugc.netlify.app",
-  "https://saas-ugc-growth.netlify.app",
-  "https://*.netlify.app",
-  "https://*.e2b.app",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-  "http://localhost:4173",
-  "http://127.0.0.1:4173",
-];
-
-function originAllowed(origin: string | null): boolean {
-  if (!origin) return false;
-  return ALLOWED.some((pattern) => {
-    if (pattern === origin) return true;
-    if (!pattern.includes("*")) return false;
-    const rx = new RegExp(
-      "^" + pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[a-z0-9-]+") + "$",
-      "i",
-    );
-    return rx.test(origin);
+async function readArtifact(): Promise<string> {
+  const base = Deno.env.get("SUPABASE_URL") ?? "";
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!base || !key) throw new Error("runtime_env_missing");
+  const url = base + "/rest/v1/_edge_function_artifact?select=source&name=eq." + ARTIFACT_NAME +
+    "&sha256=eq." + ARTIFACT_SHA256;
+  const res = await fetch(url, {
+    headers: { apikey: key, Authorization: "Bearer " + key },
+    signal: AbortSignal.timeout(15000),
   });
+  if (!res.ok) throw new Error("artifact_read_failed:" + res.status);
+  const rows = (await res.json()) as Array<{ source?: unknown }>;
+  const source = rows[0]?.source;
+  if (typeof source !== "string") throw new Error("artifact_missing");
+  if (source.length !== ARTIFACT_CHARS) throw new Error("artifact_size_mismatch:" + source.length);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (hex !== ARTIFACT_SHA256) throw new Error("artifact_digest_mismatch");
+  return source;
 }
 
-function cors(origin: string | null): Record<string, string> {
-  // Une origine inconnue n'obtient pas d'en-tête CORS : le navigateur bloque,
-  // mais la requête n'est jamais acceptée silencieusement à sa place.
-  return {
-    ...(origin && originAllowed(origin) ? { "Access-Control-Allow-Origin": origin } : {}),
+let CODE = "";
+let failure = "";
+// Trois essais : une lecture ratée à froid ne doit pas figer l'instance en panne.
+for (let attempt = 1; attempt <= 3 && !CODE; attempt++) {
+  try {
+    CODE = await readArtifact();
+    failure = "";
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+  }
+}
+
+if (CODE) {
+  // Le bundle s'exécute hors module : il ne contient aucun import et reçoit
+  // postgres ici, AVANT son exécution. Il enregistre lui-même Deno.serve.
+  (globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;
+  new Function(CODE)();
+} else {
+  // Panne explicite et lisible par le navigateur (CORS ouvert : la réponse ne
+  // contient qu'un code d'erreur), au lieu d'un 500 opaque pris pour une
+  // absence de backend.
+  console.error("business-grow artifact load failed: " + failure);
+  const headers = {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Vary": "Origin",
   };
-}
-
-function failure(code: string, detail: string, origin: string | null): Response {
-  return new Response(JSON.stringify({ error: { code, message: detail } }), {
-    status: 500,
-    headers: { "Content-Type": "application/json", ...cors(origin) },
+  const body = JSON.stringify({
+    error: {
+      code: "BUSINESS_GROW_ARTIFACT_UNAVAILABLE",
+      message: "Le service Business Grow n'a pas pu charger son code (" + failure + ").",
+    },
   });
+  Deno.serve((request: Request) =>
+    request.method === "OPTIONS"
+      ? new Response("ok", { headers })
+      : new Response(body, { status: 503, headers })
+  );
 }
-
-let booting: Promise<void> | null = null;
-
-async function load(): Promise<void> {
-  let text: string;
-  try {
-    const res = await fetch(ARTIFACT_URL, { headers: { "cache-control": "no-cache" } });
-    if (!res.ok) throw new Error(`http_${res.status}`);
-    text = await res.text();
-  } catch (error) {
-    throw new Error(`BUSINESS_GROW_ARTIFACT_UNAVAILABLE: ${String(error)}`);
-  }
-  if (text.length !== ARTIFACT_CHARS) {
-    throw new Error(`BUSINESS_GROW_ARTIFACT_INTEGRITY: taille ${text.length} ≠ ${ARTIFACT_CHARS}`);
-  }
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  if (hex !== ARTIFACT_SHA256) {
-    throw new Error("BUSINESS_GROW_ARTIFACT_INTEGRITY: sha256 différent");
-  }
-  // Le bundle ne contient aucune instruction `import` : il s'exécute hors
-  // module et reçoit `postgres` par ce point d'injection. Il enregistre
-  // lui-même son `Deno.serve`.
-  (globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;
-  new Function(text)();
-}
-
-Deno.serve(async (request: Request) => {
-  const origin = request.headers.get("origin");
-  if (request.method === "OPTIONS") return new Response("ok", { headers: cors(origin) });
-  if (!originAllowed(origin)) {
-    return new Response(
-      JSON.stringify({ error: { code: "ORIGIN_NOT_ALLOWED", message: "Origine non autorisée." } }),
-      { status: 403, headers: { "Content-Type": "application/json", ...cors(origin) } },
-    );
-  }
-  if (!booting) {
-    booting = load().catch((error) => {
-      // La promesse rejetée est conservée : une relance par requête
-      // masquerait la panne derrière de la latence.
-      console.error("business-grow boot failed", String(error));
-      throw error;
-    });
-  }
-  try {
-    await booting;
-  } catch (error) {
-    const message = String(error);
-    const code = message.includes("INTEGRITY")
-      ? "BUSINESS_GROW_ARTIFACT_INTEGRITY"
-      : "BUSINESS_GROW_ARTIFACT_UNAVAILABLE";
-    return failure(code, message, origin);
-  }
-  // Le handler du bundle a pris le relais via son propre `Deno.serve` : cette
-  // branche n'est atteinte qu'en cas de double enregistrement.
-  return new Response("business-grow ready", { status: 204, headers: cors(origin) });
-});

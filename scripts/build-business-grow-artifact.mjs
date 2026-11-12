@@ -14,8 +14,20 @@
  * produiraient deux empreintes. MTIME est forcé à 0, l'artefact est donc
  * reproductible octet pour octet — vérifié par `tests/business-grow-artifact.test.ts`.
  *
+ * ## Trois fichiers générés
+ *  - `business-grow.edge.js` : le bundle exact (39 Ko). C'est lui qui est
+ *    publié dans `public._edge_function_artifact` (nom + SHA-256).
+ *  - `business-grow/loader.ts` : **la source déployée en production**. Courte
+ *    (~2 Ko), elle lit le bundle en base et vérifie taille + SHA-256 avant de
+ *    l'exécuter. Le canal de déploiement altère les corps longs (incident v18 :
+ *    payload inline de 16 Ko arrivé corrompu ⇒ `WORKER_ERROR`) ; un fichier
+ *    court ne peut pas l'être sans que le SHA-256 le révèle.
+ *  - `business-grow/bootstrap.ts` : variante autonome (bundle inline
+ *    gzip+base64), sans dépendance à la base. À réserver à un canal fiable
+ *    (`supabase functions deploy`).
+ *
  * ## Usage
- *   node scripts/build-business-grow-artifact.mjs           # écrit le chargeur
+ *   node scripts/build-business-grow-artifact.mjs           # écrit les trois fichiers
  *   node scripts/build-business-grow-artifact.mjs --check   # échoue si désynchronisé
  *   node scripts/build-business-grow-artifact.mjs --print   # empreinte seulement
  */
@@ -28,6 +40,10 @@ import esbuild from 'esbuild';
 
 export const ENTRY = 'supabase/functions/business-grow/index.ts';
 export const LOADER = 'supabase/functions/business-grow/bootstrap.ts';
+export const HOSTED_LOADER = 'supabase/functions/business-grow/loader.ts';
+export const BUNDLE = 'supabase/functions/business-grow.edge.js';
+export const ARTIFACT_TABLE = '_edge_function_artifact';
+export const ARTIFACT_NAME = 'business-grow';
 const POSTGRES = 'npm:postgres@3.4.5';
 
 /**
@@ -118,6 +134,94 @@ new Function(CODE)();
 `;
 }
 
+/**
+ * Chargeur déployé : lit le bundle dans `public._edge_function_artifact`.
+ *
+ * Écrit sans gabarit imbriqué (concaténations) pour rester lisible ici, et
+ * volontairement court : c'est le seul texte qui transite par le canal de
+ * déploiement.
+ */
+export function renderHostedLoader({ sha256, chars }) {
+  return [
+    '// business-grow — chargeur de production (seule source déployée).',
+    '// Généré par scripts/build-business-grow-artifact.mjs : ne pas éditer.',
+    '//',
+    '// Le canal de déploiement altère les sources longues : ce fichier reste court.',
+    '// Le code métier (bundle esbuild de ce dossier) est lu dans',
+    '// public.' + ARTIFACT_TABLE + ' par nom + SHA-256, puis vérifié avant exécution :',
+    '// un artefact absent ou modifié n\'est jamais exécuté.',
+    'import postgres from "npm:postgres@3.4.5";',
+    '',
+    'const ARTIFACT_NAME = "' + ARTIFACT_NAME + '";',
+    'const ARTIFACT_SHA256 = "' + sha256 + '";',
+    'const ARTIFACT_CHARS = ' + chars + ';',
+    '',
+    'async function readArtifact(): Promise<string> {',
+    '  const base = Deno.env.get("SUPABASE_URL") ?? "";',
+    '  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";',
+    '  if (!base || !key) throw new Error("runtime_env_missing");',
+    '  const url = base + "/rest/v1/' + ARTIFACT_TABLE + '?select=source&name=eq." + ARTIFACT_NAME +',
+    '    "&sha256=eq." + ARTIFACT_SHA256;',
+    '  const res = await fetch(url, {',
+    '    headers: { apikey: key, Authorization: "Bearer " + key },',
+    '    signal: AbortSignal.timeout(15000),',
+    '  });',
+    '  if (!res.ok) throw new Error("artifact_read_failed:" + res.status);',
+    '  const rows = (await res.json()) as Array<{ source?: unknown }>;',
+    '  const source = rows[0]?.source;',
+    '  if (typeof source !== "string") throw new Error("artifact_missing");',
+    '  if (source.length !== ARTIFACT_CHARS) throw new Error("artifact_size_mismatch:" + source.length);',
+    '  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));',
+    '  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");',
+    '  if (hex !== ARTIFACT_SHA256) throw new Error("artifact_digest_mismatch");',
+    '  return source;',
+    '}',
+    '',
+    'let CODE = "";',
+    'let failure = "";',
+    '// Trois essais : une lecture ratée à froid ne doit pas figer l\'instance en panne.',
+    'for (let attempt = 1; attempt <= 3 && !CODE; attempt++) {',
+    '  try {',
+    '    CODE = await readArtifact();',
+    '    failure = "";',
+    '  } catch (error) {',
+    '    failure = error instanceof Error ? error.message : String(error);',
+    '    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));',
+    '  }',
+    '}',
+    '',
+    'if (CODE) {',
+    '  // Le bundle s\'exécute hors module : il ne contient aucun import et reçoit',
+    '  // postgres ici, AVANT son exécution. Il enregistre lui-même Deno.serve.',
+    '  (globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;',
+    '  new Function(CODE)();',
+    '} else {',
+    '  // Panne explicite et lisible par le navigateur (CORS ouvert : la réponse ne',
+    '  // contient qu\'un code d\'erreur), au lieu d\'un 500 opaque pris pour une',
+    '  // absence de backend.',
+    '  console.error("business-grow artifact load failed: " + failure);',
+    '  const headers = {',
+    '    "Content-Type": "application/json",',
+    '    "Access-Control-Allow-Origin": "*",',
+    '    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
+    '    "Access-Control-Allow-Methods": "POST, OPTIONS",',
+    '  };',
+    '  const body = JSON.stringify({',
+    '    error: {',
+    '      code: "BUSINESS_GROW_ARTIFACT_UNAVAILABLE",',
+    '      message: "Le service Business Grow n\'a pas pu charger son code (" + failure + ").",',
+    '    },',
+    '  });',
+    '  Deno.serve((request: Request) =>',
+    '    request.method === "OPTIONS"',
+    '      ? new Response("ok", { headers })',
+    '      : new Response(body, { status: 503, headers })',
+    '  );',
+    '}',
+    '',
+  ].join('\n');
+}
+
 const isMain = process.argv[1] && process.argv[1].endsWith('build-business-grow-artifact.mjs');
 if (isMain) {
   const built = artifact();
@@ -127,17 +231,30 @@ if (isMain) {
   console.log(`sha256     : ${built.sha256}`);
   if (process.argv.includes('--print')) process.exit(0);
 
-  const loader = renderLoader(built);
-  const target = join(process.cwd(), LOADER);
+  const outputs = [
+    [LOADER, renderLoader(built)],
+    [HOSTED_LOADER, renderHostedLoader(built)],
+    [BUNDLE, built.source],
+  ];
   if (process.argv.includes('--check')) {
-    const current = readFileSync(target, 'utf8');
-    if (current !== loader) {
-      console.error('bootstrap.ts désynchronisé : relancer sans --check.');
+    const stale = outputs
+      .filter(([file, expected]) => {
+        try {
+          return readFileSync(join(process.cwd(), file), 'utf8') !== expected;
+        } catch {
+          return true;
+        }
+      })
+      .map(([file]) => file);
+    if (stale.length) {
+      console.error(`désynchronisé : ${stale.join(', ')} — relancer sans --check.`);
       process.exit(1);
     }
-    console.log('bootstrap.ts à jour.');
+    console.log('artefacts à jour.');
     process.exit(0);
   }
-  writeFileSync(target, loader);
-  console.log(`chargeur écrit : ${LOADER}`);
+  for (const [file, content] of outputs) {
+    writeFileSync(join(process.cwd(), file), content);
+    console.log(`écrit      : ${file} (${Buffer.byteLength(content)} octets)`);
+  }
 }

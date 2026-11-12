@@ -237,3 +237,98 @@ Le bundle lui-même reste 100 % sans `import` (contrainte de `new Function`).
    C'est ce trou qui avait masqué l'incident.
 3. `scripts/studio-preview.mjs` simule désormais `business-grow` (`status`,
    `providers.verify`) et renvoie `UNKNOWN_FUNCTION` pour toute fonction inconnue.
+
+## Rechute v17/v18 et résolution définitive — v19
+
+### Ce qui s'est passé
+
+| Version | Contenu déployé | Résultat |
+| --- | --- | --- |
+| v16 | `bootstrap.ts` (bundle inline, 17 Ko) | ✅ 200 |
+| v17 | corps d'emplacement envoyé par erreur | ❌ fonction cassée |
+| v18 | `bootstrap.ts` + motif CORS (17 Ko) | ❌ `WORKER_ERROR` 500 |
+| **v19** | **`loader.ts` (3,3 Ko) + bundle lu en base** | ✅ 200 |
+
+Cause racine n°3 : le canal de déploiement ne restitue pas fidèlement un corps
+long. Le payload base64 de 16 Ko de la v18 est arrivé altéré ; le garde
+d'intégrité du chargeur a refusé de l'exécuter (c'est son rôle), d'où le 500.
+La v16 n'avait fonctionné que parce que cette transcription-là était passée.
+Un déploiement qui réussit « la plupart du temps » n'est pas un déploiement.
+
+### Correctif : le texte long ne transite plus par le canal de déploiement
+
+- `supabase/functions/business-grow.edge.js` — bundle exact (39 323 car.),
+  généré et committé.
+- `public._edge_function_artifact` (migration
+  `20261112190000_vyora_edge_function_artifact.sql`) — bundles versionnés par
+  `(name, sha256)`. La base recalcule l'empreinte (contrainte `CHECK`) : une
+  ligne ne peut pas mentir sur son contenu. RLS active, aucun droit pour
+  `anon`/`authenticated`, lecture `service_role` seulement.
+- `supabase/functions/business-grow/loader.ts` — **seule source déployée**
+  (3,3 Ko). Lit la ligne `business-grow` + SHA-256 attendu, vérifie taille et
+  empreinte, injecte `postgres`, exécute le bundle. Trois essais à froid ; en
+  cas d'échec, répond `503 BUSINESS_GROW_ARTIFACT_UNAVAILABLE` avec le motif et
+  des en-têtes CORS, au lieu d'un 500 opaque que l'interface prenait pour un
+  backend absent.
+
+Le bundle a été copié **par la base elle-même** (`net.http_get` sur le fichier
+épinglé au commit, puis `insert … select`) : aucun intermédiaire ne retranscrit
+le code.
+
+### Publier une nouvelle version (procédure)
+
+1. `node scripts/build-business-grow-artifact.mjs`, committer et pousser.
+2. Faire récupérer le bundle par la base, au commit poussé :
+   ```sql
+   select net.http_get(
+     url := 'https://raw.githubusercontent.com/ibrahimdiango514/SaaS-UGC/<commit>/supabase/functions/business-grow.edge.js'
+   );  -- note l'identifiant renvoyé
+   ```
+3. Publier la ligne, uniquement si l'empreinte est celle de `loader.ts` :
+   ```sql
+   insert into public._edge_function_artifact (name, sha256, chars, source, source_ref)
+   select 'business-grow',
+          encode(extensions.digest(convert_to(content, 'UTF8'), 'sha256'), 'hex'),
+          char_length(content), content,
+          'ibrahimdiango514/SaaS-UGC@<commit>:supabase/functions/business-grow.edge.js'
+   from net._http_response
+   where id = <identifiant> and status_code = 200
+     and encode(extensions.digest(convert_to(content, 'UTF8'), 'sha256'), 'hex') = '<ARTIFACT_SHA256>';
+   ```
+   L'ancienne ligne reste en place : la version en service n'est pas touchée.
+4. Déployer `loader.ts` tel quel, puis sonder `{"action":"status"}` → 200.
+5. Retour arrière : redéployer le `loader.ts` précédent (sa ligne existe encore).
+
+Ne jamais supprimer la ligne dont le SHA-256 figure dans le chargeur en
+service : la fonction ne démarrerait plus à froid (503 explicite).
+
+### Preuves de production (v19, ACTIVE, `updated_at` 1794511091637)
+
+| Sonde `pg_net` | Origine | Résultat |
+| --- | --- | --- |
+| 5843 `status` | `https://vyora-ugc.netlify.app` | 200, `access-control-allow-origin` = origine |
+| 5844 `status` | `https://deploy-preview-6--vyora.netlify.app` | 200 (motif d'aperçu ajouté) |
+| 5845 `status` | `https://evil.example.com` | 403 `ORIGIN_NOT_ALLOWED` (refus lisible) |
+| 5846 `providers.verify` groq | prod | `healthy`, 419 ms |
+| 5847 `providers.verify` gemini | prod | `healthy`, 657 ms |
+| 5848 `status` | prod | groq + gemini `available` |
+| 5849 lecture table, clé publique | — | 401 `permission denied` |
+| 5850 lecture table, utilisateur connecté | — | 403 `permission denied` |
+
+Compte sonde `bg-verify@vyora.test` supprimé après les mesures (6 comptes).
+
+### Garde-fous ajoutés
+
+- `tests/business-grow-loader.test.ts` (12 tests) **exécute** le chargeur :
+  un seul `Deno.serve`, `postgres` injecté avant le bundle, refus d'un artefact
+  absent / tronqué / altéré, reprise au 2ᵉ essai, 503 explicite avec CORS.
+- `build-business-grow-artifact.mjs --check` couvre désormais les trois
+  fichiers générés (`loader.ts`, `bootstrap.ts`, `business-grow.edge.js`).
+
+### Limites connues
+
+- Démarrage à froid : une lecture PostgREST de 39 Ko en plus. Si la base ou
+  PostgREST est indisponible, la fonction répond 503 — mais elle ne pourrait de
+  toute façon rien faire sans la base.
+- `bootstrap.ts` (variante inline) reste générée pour un canal fiable
+  (`supabase functions deploy`) ; ce n'est **pas** ce qui tourne en production.
