@@ -1,6 +1,15 @@
 [build]
   command = "npm ci && npm run build"
   publish = "dist"
+  # Filet de sécurité : aucun build Netlify pour la branche de travail
+  # `arena/323bad30-saas-ugc` (PR #6), tant que son déploiement n'est pas décidé.
+  # Code 0 = build annulé avant toute installation ; tout autre code = build
+  # normal. La condition ne vise que cette branche : `main` et les autres
+  # branches continuent de se construire exactement comme avant.
+  # La première protection est la mention [skip netlify] dans le titre de la PR
+  # et dans le message du commit de tête. Pour rétablir l'aperçu de cette
+  # branche : retirer cette ligne ET la mention du titre de la PR.
+  ignore = '[ "$HEAD" = "arena/323bad30-saas-ugc" ] || [ "$BRANCH" = "arena/323bad30-saas-ugc" ]'
 
 [build.environment]
   NODE_VERSION = "22"
