@@ -215,8 +215,15 @@ export default function BusinessGrowSubscription() {
                 {refundBadge(row)
                   ? <Badge tone={refundBadge(row)?.tone}>{refundBadge(row)?.label}{row.refund_amount ? ` · ${formatAmount(row.refund_amount, row.currency)}` : ''}</Badge>
                   : <Badge tone={PAYMENT_STATE_TONES[row.state]}>{PAYMENT_STATE_LABELS[row.state]}</Badge>}
-                {(row.state === 'pending' || row.state === 'todo') && (
-                  <Link to={`/app/paiement/retour?produit=business&commande=${row.id}`} className="text-violet-300 hover:text-white">Suivre</Link>
+                {(row.state === 'pending' || row.state === 'todo' || row.state === 'unapplied') && (
+                  <Link to={`/app/paiement/retour?produit=business&commande=${row.id}`} className="text-violet-300 hover:text-white">
+                    {row.state === 'unapplied' ? 'Détails' : 'Suivre'}
+                  </Link>
+                )}
+                {row.state === 'unapplied' && (
+                  <p className="w-full text-[11px] text-amber-200" data-testid="business-unapplied">
+                    Paiement reçu mais non appliqué à votre abonnement : le support vous rembourse intégralement.
+                  </p>
                 )}
               </li>
             ))}

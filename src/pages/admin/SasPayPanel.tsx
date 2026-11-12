@@ -185,13 +185,20 @@ export default function SasPayPanel() {
                       {' '}· Net reçu : {formatAmount(o.net_amount, o.currency)}
                     </p>
                   )}
+                  {o.state === 'unapplied' && (
+                    <p className="text-[11px] text-amber-200" data-testid="saspay-unapplied">
+                      Encaissé par SasPay mais non appliqué : rien n’a été livré. À rembourser intégralement au client.
+                    </p>
+                  )}
                   {o.failure_code && <p className="text-[11px] text-rose-300/80">Motif : {o.failure_code}</p>}
                   {o.status === 'refunded' && (
                     <p className="text-[11px] text-amber-200/90" data-testid="saspay-refund">
                       Remboursement de {formatAmount(o.refund_amount, o.currency)} enregistré le {formatDate(o.refunded_at ?? null, true)}
                       {typeof o.refund_credits_recovered === 'number' && ` · ${o.refund_credits_recovered} crédits repris`}
                       {typeof o.refund_credits_unrecovered === 'number' && o.refund_credits_unrecovered > 0 && ` (${o.refund_credits_unrecovered} déjà utilisés)`}
-                      {typeof o.refund_days_recovered === 'number' && ` · ${o.refund_days_recovered} jours retirés`}
+                      {typeof o.refund_days_recovered === 'number' && (o.refund_days_recovered > 0
+                        ? ` · ${o.refund_days_recovered} jours retirés`
+                        : ' · paiement jamais appliqué, abonnement inchangé')}
                       {o.refund_reason && ` · Motif : ${o.refund_reason}`}
                       {o.refund_state === 'settled'
                         ? ` · Versé le ${formatDate(o.refund_settled_at ?? null, true)} (réf. ${o.refund_external_reference ?? '—'})`
@@ -203,7 +210,7 @@ export default function SasPayPanel() {
                   {refundBadge(o)
                     ? <Badge tone={refundBadge(o)?.tone}>{refundBadge(o)?.label}</Badge>
                     : <Badge tone={PAYMENT_STATE_TONES[o.state]}>{PAYMENT_STATE_LABELS[o.state]}</Badge>}
-                  {o.status === 'paid' && (
+                  {(o.status === 'paid' || o.state === 'unapplied') && (
                     <Button size="sm" variant="outline" onClick={() => setRefunding(o)}>Rembourser</Button>
                   )}
                   {o.status === 'refunded' && o.refund_state !== 'settled' && (

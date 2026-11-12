@@ -11,8 +11,19 @@ import { invokeEdge, rpc } from './api';
 
 export type PaymentProduct = 'studio' | 'business';
 export type PaymentFlow = 'softpay' | 'checkout';
-/** Les cinq états présentés à l'utilisateur. */
-export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled';
+/**
+ * États présentés à l'utilisateur. `unapplied` : paiement encaissé mais non
+ * appliqué (Business Grow, abonnement incompatible au moment du paiement) —
+ * rien n'a été livré, le support rembourse. État final.
+ */
+export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled' | 'unapplied';
+
+/** Motifs de refus d'activation d'un encaissement (posés par la base, définitifs). */
+export const UNAPPLIED_CODES: readonly string[] = ['business_plan_change_not_supported', 'business_subscription_managed_elsewhere'];
+
+/** Message montré au client dont le paiement a été reçu mais n'a pas pu être appliqué. */
+export const UNAPPLIED_MESSAGE = 'Votre paiement a bien été reçu, mais il n’a pas pu être appliqué à votre abonnement en cours. '
+  + 'Rien n’a été modifié sur votre abonnement. Le support a été alerté et vous remboursera intégralement.';
 
 export type PaymentItem =
   | { kind: 'pack'; pack_key: string }
@@ -229,6 +240,9 @@ export interface RefundPreview {
   days_recoverable?: number;
   new_period_end?: string | null;
   will_cancel?: boolean;
+  /** Encaissement jamais appliqué : remboursement intégral, abonnement inchangé. */
+  undelivered?: boolean;
+  failure_code?: string | null;
 }
 
 export type RefundResult = PaymentOrder & { outcome?: 'refunded' | 'already_refunded' };
@@ -260,7 +274,8 @@ export async function adminSettleRefund(product: PaymentProduct, orderId: string
   return { ...row, product, state: paymentStateOf(row) };
 }
 
-export type AnomalyKind = 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found';
+export type AnomalyKind = 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found'
+  | 'subscription_conflict' | 'sweep_unreliable';
 
 export interface PaymentAnomaly {
   id: string;
@@ -287,12 +302,18 @@ export interface ReconcileRun {
   swept: number;
   anomalies: number;
   sweep_done: boolean;
+  /** Le rattrapage a atteint sa limite de lecture : des encaissements n'ont pas été examinés. */
+  sweep_truncated?: boolean;
+  /** La liste SasPay ne portait aucun libellé : le rattrapage par référence était impossible. */
+  sweep_blind?: boolean;
 }
 
 export interface PaymentHealth {
   enabled: boolean;
   mode: 'test' | 'live' | string;
   cron: { available: boolean; scheduled: boolean; schedule?: string; active?: boolean };
+  /** Prérequis de l'appel planifié : jeton présent dans le coffre, extension HTTP disponible. */
+  dispatch?: { token_present: boolean; http_available: boolean };
   open_orders: { studio: number; business: number };
   refunds_awaiting_settlement: number;
   runs: ReconcileRun[];
@@ -316,6 +337,8 @@ export const ANOMALY_LABELS: Record<string, string> = {
   payment_conflict: 'Encaissement non rattachable à la commande',
   amount_mismatch: 'Montant encaissé différent de la commande',
   payment_not_found: 'Paiement introuvable chez SasPay',
+  subscription_conflict: 'Paiement encaissé mais non appliqué à l’abonnement',
+  sweep_unreliable: 'Rattrapage des paiements incomplet',
 };
 
 /** Ce qu'il faut faire, en clair, face à chaque anomalie. */
@@ -325,6 +348,8 @@ export const ANOMALY_ADVICE: Record<string, string> = {
   payment_conflict: 'Un encaissement réussi porte la référence d’une commande liée à une autre transaction. Rien n’a été livré : comparez les deux transactions chez SasPay.',
   amount_mismatch: 'Rien n’a été livré. Rendez le montant encaissé au client ou demandez-lui de repasser commande.',
   payment_not_found: 'SasPay ne connaît pas cette transaction. La commande est close après 24 h ; un succès tardif la rouvrirait.',
+  subscription_conflict: 'Le client a payé, mais son abonnement en cours ne permettait pas d’appliquer ce paiement : rien n’a été livré ni modifié. Remboursez-le intégralement depuis la liste des paiements Business Grow (« Rembourser »), rendez l’argent, puis attestez le versement : l’anomalie se classera seule.',
+  sweep_unreliable: 'La liste des transactions SasPay n’a pas permis de rechercher les paiements dont la réponse s’est perdue (libellé absent, ou trop de transactions à lire). Les paiements rattachés à une commande restent revérifiés un par un. Comparez les encaissements récents du tableau de bord SasPay avec la liste des paiements.',
 };
 
 export const RUN_STATUS_LABELS: Record<string, string> = {
@@ -370,10 +395,12 @@ export function getBusinessSubscription(): Promise<BusinessSubscription | null> 
 /** Même correspondance que le serveur, pour les listes lues directement en base. */
 export function paymentStateOf(order: {
   status?: string | null; state?: string | null; has_payment?: boolean | null;
-  provider_payment_id?: string | null; provider_session_id?: string | null;
+  provider_payment_id?: string | null; provider_session_id?: string | null; failure_code?: string | null;
 }): PaymentState {
   if (order.state === 'todo' || order.state === 'pending' || order.state === 'confirmed'
-    || order.state === 'failed' || order.state === 'cancelled') return order.state;
+    || order.state === 'failed' || order.state === 'cancelled' || order.state === 'unapplied') return order.state;
+  if (order.status !== 'paid' && order.status !== 'refunded'
+    && typeof order.failure_code === 'string' && UNAPPLIED_CODES.includes(order.failure_code)) return 'unapplied';
   switch (order.status) {
     case 'paid': case 'refunded': return 'confirmed';
     case 'failed': return 'failed';
@@ -393,15 +420,16 @@ export const PAYMENT_STATE_LABELS: Record<PaymentState, string> = {
   confirmed: 'Confirmé',
   failed: 'Échoué',
   cancelled: 'Annulé',
+  unapplied: 'Reçu, non appliqué',
 };
 
 export const PAYMENT_STATE_TONES: Record<PaymentState, string> = {
-  todo: 'neutral', pending: 'warning', confirmed: 'success', failed: 'danger', cancelled: 'danger',
+  todo: 'neutral', pending: 'warning', confirmed: 'success', failed: 'danger', cancelled: 'danger', unapplied: 'warning',
 };
 
 /** Un paiement terminé n'a plus besoin d'être interrogé. */
 export function isFinalState(state: PaymentState): boolean {
-  return state === 'confirmed' || state === 'failed' || state === 'cancelled';
+  return state === 'confirmed' || state === 'failed' || state === 'cancelled' || state === 'unapplied';
 }
 
 /**

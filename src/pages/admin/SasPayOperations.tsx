@@ -29,6 +29,8 @@ const BLOCKED_LABELS: Record<string, string> = {
   refund_wallet_has_reserved_credits: 'Des générations sont en cours sur ce compte : attendez leur fin avant de rembourser.',
   refund_nothing_recoverable: 'Il ne reste rien à reprendre sur cette commande : aucun remboursement n’est possible depuis la console.',
   refund_subscription_missing: 'L’abonnement lié à ce paiement est introuvable.',
+  refund_subscription_plan_changed: 'L’abonnement est passé à une autre formule depuis ce paiement : la période payée ici est terminée, il ne reste rien à reprendre.',
+  refund_wallet_missing: 'Le solde de crédits de ce compte est introuvable.',
 };
 
 /** Résumé, en clair, de ce que le remboursement reprendra. */
@@ -42,6 +44,15 @@ function PreviewSummary({ preview }: { preview: RefundPreview }) {
         {(preview.credits_unrecoverable ?? 0) > 0 && (
           <li className="text-amber-200">Crédits déjà utilisés, non récupérables : <strong>{preview.credits_unrecoverable}</strong></li>
         )}
+      </ul>
+    );
+  }
+  if (preview.undelivered) {
+    return (
+      <ul className="space-y-1 text-[12.5px] text-slate-300" data-testid="refund-preview">
+        <li className="text-amber-200">Ce paiement a été encaissé mais <strong>n’a jamais été appliqué</strong> : l’abonnement du client ne le permettait pas.</li>
+        <li>Rien n’a été livré, il n’y a donc rien à reprendre : l’abonnement en cours et son quota restent inchangés.</li>
+        <li>Le remboursement est <strong className="text-white">intégral</strong> : le montant encaissé, ni plus ni moins.</li>
       </ul>
     );
   }
@@ -82,7 +93,9 @@ export function RefundDialog({ order, onClose, onDone }: {
     return () => { alive = false; };
   }, [order.product, order.id]);
 
-  const parsed = preview ? parseRefundAmount(amount, preview.max_refund_xof) : null;
+  const typed = preview ? parseRefundAmount(amount, preview.max_refund_xof) : null;
+  // Encaissement jamais appliqué : seul le montant intégral est accepté (le serveur le revérifie).
+  const parsed = preview?.undelivered && typed !== preview.max_refund_xof ? null : typed;
   const reasonOk = reason.trim().length >= 5 && reason.trim().length <= 500;
   const ready = Boolean(preview?.refundable) && parsed !== null && reasonOk && (!preview?.needs_partial || partialOk);
 
@@ -110,7 +123,7 @@ export function RefundDialog({ order, onClose, onDone }: {
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>Annuler</Button>
           <Button variant="danger" loading={busy} disabled={!ready} onClick={() => void submit()}>
-            Reprendre et enregistrer
+            {preview?.undelivered ? 'Enregistrer le remboursement' : 'Reprendre et enregistrer'}
           </Button>
         </>
       )}
@@ -136,8 +149,12 @@ export function RefundDialog({ order, onClose, onDone }: {
             </p>
             <Input
               label="Montant à rendre au client (FCFA)" inputMode="numeric" value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              error={amount !== '' && parsed === null ? `Saisissez un montant entier entre 1 et ${preview.max_refund_xof} FCFA.` : undefined}
+              onChange={(e) => setAmount(e.target.value)} disabled={Boolean(preview.undelivered)}
+              error={amount !== '' && parsed === null
+                ? (preview.undelivered
+                  ? `Ce paiement n’a pas été appliqué : rendez exactement ${preview.max_refund_xof} FCFA.`
+                  : `Saisissez un montant entier entre 1 et ${preview.max_refund_xof} FCFA.`)
+                : undefined}
             />
             <Textarea
               label="Motif (note interne, non montrée au client)" rows={3} maxLength={500} value={reason}
@@ -250,6 +267,9 @@ export function PaymentHealthCard({ health, error, busy, onReload }: {
   const [resolving, setResolving] = useState<PaymentAnomaly | null>(null);
   const lastRun = health?.runs[0] ?? null;
   const scheduled = Boolean(health?.cron.scheduled) && health?.cron.active !== false;
+  // Prérequis de l'appel planifié. Absents de la réponse (ancienne base) : on n'affirme rien.
+  const dispatch = health?.dispatch;
+  const blindRun = health?.runs.slice(0, 5).find((run) => run.sweep_blind || run.sweep_truncated) ?? null;
 
   return (
     <Card data-testid="saspay-health">
@@ -280,6 +300,25 @@ export function PaymentHealthCard({ health, error, busy, onReload }: {
                   : 'pg_cron n’est pas disponible sur cette base : aucune vérification automatique ne tourne.'}
               </Banner>
             )}
+            {scheduled && dispatch && !dispatch.token_present && (
+              <Banner tone="danger" title="Tâche planifiée sans jeton">
+                Le jeton de la tâche planifiée est absent du coffre : la tâche tourne mais ne peut pas appeler le service
+                de vérification. Réappliquez la migration des paiements, ou recréez le secret <span className="font-mono">vyora_payments_reconcile_token</span>.
+              </Banner>
+            )}
+            {scheduled && dispatch && !dispatch.http_available && (
+              <Banner tone="danger" title="Appel HTTP indisponible">
+                L’extension pg_net n’est pas disponible sur cette base : la tâche planifiée ne peut pas appeler le service de vérification.
+              </Banner>
+            )}
+            {blindRun && (
+              <Banner tone="warning" title="Rattrapage des paiements incomplet">
+                {blindRun.sweep_blind
+                  ? 'La liste des transactions SasPay ne contenait pas le libellé des paiements : un paiement dont la réponse de création s’est perdue ne peut pas être retrouvé automatiquement. '
+                  : 'Trop de transactions à lire en une fois : une partie des encaissements récents n’a pas été examinée. '}
+                Les paiements rattachés à une commande restent revérifiés un par un.
+              </Banner>
+            )}
             {health.refunds_awaiting_settlement > 0 && (
               <Banner tone="warning" title={`${health.refunds_awaiting_settlement} remboursement(s) à verser`}>
                 Les crédits ou jours ont été repris, mais le versement au client n’est pas encore attesté.
@@ -295,7 +334,11 @@ export function PaymentHealthCard({ health, error, busy, onReload }: {
                   {health.runs.slice(0, 5).map((run) => (
                     <li key={run.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5" data-testid="saspay-run">
                       <span>{formatDate(run.started_at, true)}</span>
-                      <span>{run.checked} vérifié(s) · {run.settled} livré(s) · {run.closed} clos · {run.errors} erreur(s)</span>
+                      <span>
+                        {run.checked} vérifié(s) · {run.settled} livré(s) · {run.closed} clos · {run.errors} erreur(s)
+                        {run.sweep_blind && ' · rattrapage sans libellé'}
+                        {run.sweep_truncated && ' · rattrapage tronqué'}
+                      </span>
                       <Badge tone={run.status === 'ok' ? 'success' : run.status === 'running' ? 'info' : run.status === 'partial' ? 'warning' : 'danger'}>
                         {RUN_STATUS_LABELS[run.status] ?? run.status}
                       </Badge>

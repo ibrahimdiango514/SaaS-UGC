@@ -54,7 +54,11 @@ function status(overrides: Partial<BusinessProviderStatus>): BusinessProviderSta
   };
 }
 
-afterEach(() => cleanup());
+// L'horloge est figée (Date seulement, les minuteries restent réelles) : sans
+// cela, les contrôles « récents » des jeux de données finissent par dépasser
+// 24 h d'ancienneté réelle et les tests de rendu échouent avec le temps.
+beforeEach(() => { vi.useFakeTimers({ now: NOW, toFake: ['Date'] }); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('Validité réelle des contrôles fournisseur (24 h côté SQL)', () => {
   it('signale un fournisseur configuré dont le contrôle a expiré', () => {

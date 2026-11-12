@@ -20,7 +20,7 @@ import PaymentReturn, { RETURN_POLL_INTERVAL_MS } from '../src/pages/PaymentRetu
 import SasPayPanel from '../src/pages/admin/SasPayPanel';
 import {
   createIntentKeeper, describeFee, formatAmount, isOrderId, isPaymentProduct, isPlausiblePhone, isSafeCheckoutUrl,
-  parseRefundAmount, paymentStateOf, refundBadge,
+  parseRefundAmount, paymentStateOf, refundBadge, isFinalState, ANOMALY_ADVICE, ANOMALY_LABELS, PAYMENT_STATE_LABELS,
 } from '../src/lib/payments';
 import { ledgerOperationLabel } from '../src/lib/format';
 import { asAppError } from '../src/lib/errors';
@@ -98,6 +98,23 @@ describe('aides de paiement (navigateur)', () => {
     expect(isPaymentProduct('admin')).toBe(false);
     expect(isSafeCheckoutUrl('https://pay.example/c/1')).toBe(true);
     for (const ko of ['http://pay.example/c/1', 'javascript:alert(1)', 'data:text/html,x', '', null]) expect(isSafeCheckoutUrl(ko)).toBe(false);
+  });
+
+  it('paiement encaissé mais non appliqué : état à part, final, jamais « en attente » ni « échoué »', () => {
+    for (const code of ['business_plan_change_not_supported', 'business_subscription_managed_elsewhere']) {
+      expect(paymentStateOf({ status: 'processing', failure_code: code })).toBe('unapplied');
+      expect(paymentStateOf({ status: 'failed', failure_code: code })).toBe('unapplied');
+      // Une fois remboursé, c'est l'état de remboursement qui prime.
+      expect(paymentStateOf({ status: 'refunded', failure_code: code })).toBe('confirmed');
+    }
+    expect(paymentStateOf({ status: 'processing', failure_code: 'amount_mismatch' })).toBe('pending');
+    expect(paymentStateOf({ status: 'processing', state: 'unapplied' })).toBe('unapplied');
+    expect(isFinalState('unapplied')).toBe(true);
+    expect(PAYMENT_STATE_LABELS.unapplied).toBe('Reçu, non appliqué');
+    expect(ANOMALY_LABELS.subscription_conflict).toMatch(/non appliqué/);
+    expect(ANOMALY_ADVICE.subscription_conflict).toMatch(/Remboursez-le intégralement/);
+    expect(ANOMALY_LABELS.sweep_unreliable).toMatch(/incomplet/);
+    expect(ANOMALY_ADVICE.sweep_unreliable).toMatch(/tableau de bord SasPay/);
   });
 
   it('ramène tout statut à l’un des cinq états', () => {
@@ -263,6 +280,29 @@ describe('fenêtre de paiement', () => {
     expect(keys[1]).not.toBe(keys[0]);
   });
 
+  it('paiement reçu mais non appliqué : le dit, annonce le remboursement, ne propose pas de repayer', async () => {
+    const unapplied = order({ product: 'business', status: 'processing', state: 'unapplied', failure_code: 'business_plan_change_not_supported',
+      amount: '25000.00', label: 'Business Grow — Croissance', credits: undefined, internal_reference: 'VYB-XYZ' });
+    edge({
+      options: () => options({ product: 'business', price: { amount: '25000.00', currency: 'XOF', label: 'Business Grow — Croissance', period_days: 30 } }),
+      create: () => ({ order: unapplied, next: 'done', reused: true }),
+    });
+    const { onConfirmed } = renderDialog({ product: 'business', item: { plan_key: 'croissance' } });
+    await waitFor(() => submitButton());
+    fillPhone('70123456');
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(screen.getByTestId('payment-unapplied')).toBeTruthy());
+    const result = screen.getByTestId('payment-result').textContent ?? '';
+    expect(result).toContain('Paiement reçu, non appliqué');
+    expect(result).toMatch(/vous remboursera intégralement/);
+    expect(result).toContain('Ne payez pas une seconde fois');
+    expect(result).toContain('VYB-XYZ');
+    expect(result).not.toMatch(/n’a pas abouti|Rien n’a été crédité|Paiement confirmé/);
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+    expect(onConfirmed).not.toHaveBeenCalled();
+    expect(calls('status')).toHaveLength(0);
+  });
+
   it('attente prolongée : arrête d’interroger et l’explique, sans annoncer de succès', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     edge({
@@ -368,6 +408,24 @@ describe('page de retour de paiement', () => {
     renderReturn(`?produit=studio&commande=${ORDER_ID}`);
     await waitFor(() => expect(screen.getByText('Paiement annulé')).toBeTruthy());
     expect(screen.getByText(/Rien n’a été crédité/)).toBeTruthy();
+    expect(refreshQuota).not.toHaveBeenCalled();
+  });
+
+  it('paiement reçu mais non appliqué : expliqué, remboursement annoncé, plus aucune interrogation', async () => {
+    edge({ status: () => ({
+      order: order({ product: 'business', status: 'processing', state: 'unapplied', failure_code: 'business_plan_change_not_supported', internal_reference: 'VYB-XYZ' }),
+      verified: true, credited: false, message: 'ignoré',
+    }) });
+    renderReturn(`?produit=business&commande=${ORDER_ID}`);
+    await waitFor(() => expect(screen.getByTestId('payment-unapplied')).toBeTruthy());
+    expect(screen.getByText(/vous remboursera intégralement/)).toBeTruthy();
+    expect(screen.getByText(/Ne payez pas une seconde fois/)).toBeTruthy();
+    expect(screen.getByText('Reçu, non appliqué')).toBeTruthy();
+    expect(screen.queryByText('Paiement confirmé')).toBeNull();
+    expect(screen.queryByText(/n’a pas abouti/)).toBeNull();
+    expect(screen.queryByText('Paiement en attente de confirmation')).toBeNull();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(calls('status')).toHaveLength(1);
     expect(refreshQuota).not.toHaveBeenCalled();
   });
 
@@ -551,7 +609,12 @@ describe('administration — remboursement', () => {
     expect(message('refund_wallet_has_reserved_credits')).toMatch(/générations sont en cours/i);
     expect(message('refund_already_settled')).toMatch(/déjà attesté/);
     expect(message('anomaly_note_required')).toMatch(/Décrivez ce qui a été fait/);
-    for (const code of ['refund_reason_required', 'refund_nothing_recoverable', 'refund_is_immutable', 'refund_settlement_requires_reference']) {
+    expect(message('refund_subscription_plan_changed')).toMatch(/autre formule/);
+    expect(message('subscription_conflict_is_final')).toMatch(/remboursé intégralement/);
+    expect(message('business_other_plan_payment_in_progress')).toMatch(/déjà en cours pour une autre formule/);
+    expect(message('refund_wallet_missing')).toMatch(/introuvable/);
+    for (const code of ['refund_reason_required', 'refund_nothing_recoverable', 'refund_is_immutable', 'refund_settlement_requires_reference',
+      'refund_subscription_plan_changed', 'subscription_conflict_is_final', 'business_other_plan_payment_in_progress', 'refund_wallet_missing']) {
       expect(message(code)).not.toMatch(/refund_/);
     }
   });
@@ -687,6 +750,51 @@ describe('administration — remboursement', () => {
     expect(rpcNamed('vyora_admin_refund_studio')).toHaveLength(0);
   });
 
+  it('Business Grow : paiement encaissé non appliqué → remboursable, intégralement seulement, sans rien reprendre', async () => {
+    noBalances();
+    const unapplied = order({
+      id: ORDER_ID, product: 'business', status: 'processing', state: undefined, failure_code: 'business_plan_change_not_supported',
+      provider_status: 'SUCCESS', provider_payment_id: 'tx-9', user_email: 'client@vyora.test',
+      amount: '25000.00', label: 'Business Grow — Croissance', credits: undefined, internal_reference: 'VYB-ABC',
+    });
+    adminRpc({
+      vyora_admin_payments: (args: Record<string, unknown>) => (args.p_product === 'business' ? [unapplied] : []),
+      vyora_admin_refund_preview: {
+        product: 'business', order_id: ORDER_ID, status: 'processing', internal_reference: 'VYB-ABC', price_xof: 25000, plan_key: 'croissance',
+        period_days: 30, subscription_status: null, days_recoverable: 0, new_period_end: null, will_cancel: false,
+        max_refund_xof: 25000, needs_partial: false, undelivered: true, failure_code: 'business_plan_change_not_supported',
+        refundable: true, blocked: null,
+      },
+      vyora_admin_refund_business: { ...unapplied, status: 'refunded', refund_state: 'credits_recovered', refund_amount: '25000.00', refund_days_recovered: 0, outcome: 'refunded' },
+    });
+    render(<SasPayPanel />);
+    fireEvent.click(await screen.findByText('Business Grow (abonnements)'));
+    // La ligne dit clairement ce qui s'est passé, et n'offre pas de « Revérifier » (état final).
+    await waitFor(() => expect(screen.getByTestId('saspay-unapplied')).toBeTruthy());
+    expect(screen.getByText('Reçu, non appliqué')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Revérifier' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Rembourser' }));
+    await waitFor(() => screen.getByTestId('refund-preview'));
+    const summary = screen.getByTestId('refund-preview').textContent ?? '';
+    expect(summary).toContain('n’a jamais été appliqué');
+    expect(summary).toContain('l’abonnement en cours et son quota restent inchangés');
+    expect(summary).not.toContain('Jours restants');
+    expect(screen.getByTestId('refund-max').textContent).toBe('25\u202f000\u00a0FCFA');
+    // Montant imposé : la saisie est verrouillée sur le montant encaissé.
+    expect(field(AMOUNT).value).toBe('25000');
+    expect(field(AMOUNT).disabled).toBe(true);
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    const record = screen.getByRole('button', { name: 'Enregistrer le remboursement' }) as HTMLButtonElement;
+    expect(record.disabled).toBe(true);
+    fireEvent.change(field(REASON), { target: { value: 'Paiement non applicable' } });
+    expect(record.disabled).toBe(false);
+    fireEvent.click(record);
+    await waitFor(() => expect(rpcNamed('vyora_admin_refund_business')).toHaveLength(1));
+    expect(rpcNamed('vyora_admin_refund_business')[0][1]).toEqual({
+      p_order_id: ORDER_ID, p_reason: 'Paiement non applicable', p_refund_amount_xof: 25000, p_allow_partial: false,
+    });
+  });
+
   it('commande remboursée : détail affiché, versement à attester avec une référence', async () => {
     noBalances();
     const refunded = paid({
@@ -761,6 +869,65 @@ describe('administration — surveillance des paiements', () => {
     expect(card).toContain('Réussie');
     expect(card).toContain('Partielle');
     expect(card).toContain('Aucune anomalie ouverte.');
+  });
+
+  it('prérequis de l’appel planifié : jeton absent ou appel HTTP indisponible → alerte, même si la tâche est planifiée', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, dispatch: { token_present: false, http_available: true } } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getByText('Tâche planifiée sans jeton')).toBeTruthy());
+    expect(screen.queryByText('Appel HTTP indisponible')).toBeNull();
+    cleanup();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, dispatch: { token_present: true, http_available: false } } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getByText('Appel HTTP indisponible')).toBeTruthy());
+    expect(screen.queryByText('Tâche planifiée sans jeton')).toBeNull();
+    cleanup();
+    // Tout est en place, ou information absente (ancienne base) : aucune alerte inventée.
+    for (const dispatch of [{ token_present: true, http_available: true }, undefined]) {
+      adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, dispatch } });
+      render(<SasPayPanel />);
+      await waitFor(() => expect(screen.getByText(/Vérification automatique active/)).toBeTruthy());
+      expect(screen.queryByText('Tâche planifiée sans jeton')).toBeNull();
+      expect(screen.queryByText('Appel HTTP indisponible')).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('rattrapage aveugle ou tronqué : signalé sur l’exécution et par une alerte ; rien si le rattrapage est sain', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, runs: [run({ status: 'partial', sweep_blind: true })] } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getByText('Rattrapage des paiements incomplet')).toBeTruthy());
+    expect(screen.getByTestId('saspay-health').textContent).toContain('ne contenait pas le libellé');
+    expect(screen.getByTestId('saspay-run').textContent).toContain('rattrapage sans libellé');
+    cleanup();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, runs: [run({ status: 'partial', sweep_truncated: true })] } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getByText('Rattrapage des paiements incomplet')).toBeTruthy());
+    expect(screen.getByTestId('saspay-health').textContent).toContain('Trop de transactions à lire');
+    expect(screen.getByTestId('saspay-run').textContent).toContain('rattrapage tronqué');
+    cleanup();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, runs: [run({ sweep_blind: false, sweep_truncated: false })] } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getAllByTestId('saspay-run')).toHaveLength(1));
+    expect(screen.queryByText('Rattrapage des paiements incomplet')).toBeNull();
+  });
+
+  it('anomalies « non appliqué » et « rattrapage incomplet » : libellé et conduite à tenir en clair', async () => {
+    noBalances();
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: { ...HEALTH, anomalies: [
+      anomaly({ id: 'an-2', kind: 'subscription_conflict', product: 'business', internal_reference: 'VYB-ABC', provider_payment_id: 'tx-9' }),
+      anomaly({ id: 'an-3', kind: 'sweep_unreliable', product: null, order_id: null, internal_reference: null, provider_payment_id: null }),
+    ] } });
+    render(<SasPayPanel />);
+    await waitFor(() => expect(screen.getAllByTestId('saspay-anomaly')).toHaveLength(2));
+    const [conflict, sweep] = screen.getAllByTestId('saspay-anomaly').map((node) => node.textContent ?? '');
+    expect(conflict).toContain('Paiement encaissé mais non appliqué à l’abonnement');
+    expect(conflict).toContain('Remboursez-le intégralement');
+    expect(conflict).toContain('VYB-ABC');
+    expect(sweep).toContain('Rattrapage des paiements incomplet');
+    expect(sweep).not.toContain('subscription_conflict');
   });
 
   it('tâche absente ou désactivée : alerte explicite, jamais « active »', async () => {

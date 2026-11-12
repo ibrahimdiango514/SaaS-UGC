@@ -13,7 +13,7 @@ import { CheckCircle2, ExternalLink, Loader2, ShieldCheck, Smartphone, XCircle }
 import { Banner, Button, Modal, cn } from './ui';
 import { asAppError } from '../lib/errors';
 import {
-  PAYMENT_STATE_LABELS, createIntentKeeper, createPayment, describeFee, formatAmount, getPaymentOptions,
+  PAYMENT_STATE_LABELS, UNAPPLIED_MESSAGE, createIntentKeeper, createPayment, describeFee, formatAmount, getPaymentOptions,
   getPaymentStatus, isFinalState, isPlausiblePhone, isSafeCheckoutUrl,
   type PaymentFlow, type PaymentItem, type PaymentOptions, type PaymentOrder, type PaymentProduct,
 } from '../lib/payments';
@@ -371,6 +371,15 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
                   {' '}Référence : {order.internal_reference}.
                 </p>
               </>
+            ) : order.state === 'unapplied' ? (
+              <>
+                <p className="flex items-center gap-2 text-sm font-semibold text-amber-100" data-testid="payment-unapplied">
+                  <ShieldCheck size={16} /> Paiement reçu, non appliqué
+                </p>
+                <p className="text-[12.5px] leading-relaxed text-slate-300">
+                  {UNAPPLIED_MESSAGE} Ne payez pas une seconde fois. Référence : {order.internal_reference}.
+                </p>
+              </>
             ) : (
               <>
                 <p className="flex items-center gap-2 text-sm font-semibold text-rose-200">
@@ -385,7 +394,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
               </>
             )}
             <div className="flex flex-wrap justify-end gap-2">
-              {order.state !== 'confirmed' && <Button variant="outline" size="sm" onClick={retry}>Réessayer</Button>}
+              {order.state !== 'confirmed' && order.state !== 'unapplied' && <Button variant="outline" size="sm" onClick={retry}>Réessayer</Button>}
               <Button size="sm" onClick={onClose}>Fermer</Button>
             </div>
           </div>

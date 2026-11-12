@@ -13,7 +13,7 @@ import { Banner, Button, Card } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
 import {
-  PAYMENT_STATE_LABELS, formatAmount, getPaymentStatus, isFinalState, isOrderId, isPaymentProduct,
+  PAYMENT_STATE_LABELS, UNAPPLIED_MESSAGE, formatAmount, getPaymentStatus, isFinalState, isOrderId, isPaymentProduct,
   type PaymentOrder,
 } from '../lib/payments';
 
@@ -137,6 +137,18 @@ export default function PaymentReturn() {
                 <p className="text-sm leading-relaxed text-slate-300">
                   {state === 'cancelled' ? 'Le paiement a été annulé ou a expiré.' : 'Le paiement n’a pas abouti.'}
                   {' '}Rien n’a été crédité.
+                </p>
+              </>
+            )}
+
+            {order && state === 'unapplied' && (
+              <>
+                <p className="flex items-center gap-2 text-base font-semibold text-amber-100" data-testid="payment-unapplied">
+                  <Clock size={17} /> Paiement reçu, non appliqué
+                </p>
+                <p className="text-sm leading-relaxed text-slate-300">{UNAPPLIED_MESSAGE}</p>
+                <p className="text-[12px] text-slate-400">
+                  Conservez la référence ci-dessous : elle permet au support de retrouver votre paiement. Ne payez pas une seconde fois.
                 </p>
               </>
             )}

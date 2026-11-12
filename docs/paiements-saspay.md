@@ -36,6 +36,32 @@ Le crédit n'est accordé que si la **vérification serveur** auprès de SasPay
 renvoie `SUCCESS` avec le montant et la devise de la commande. Ni le webhook
 seul, ni l'adresse de retour, ni le navigateur ne peuvent déclencher un crédit.
 
+**Webhooks rejoués.** Un événement déjà traité est acquitté sans effet
+(`duplicate`). Un événement n'est marqué « traité » que si la vérification a
+abouti à une issue : si le webhook devance l'état de SasPay (vérification encore
+`PENDING`), il reste **rejouable** — sa relance, ou un renvoi manuel depuis le
+tableau de bord SasPay, revérifie au lieu d'être écartée. Si SasPay est
+injoignable pendant la vérification, le webhook répond 503 pour être retenté.
+
+### Business Grow : une formule à la fois
+
+Un utilisateur n'a qu'un abonnement courant. Les règles sont tenues en base, sous
+un verrou par utilisateur partagé par la création de commande et le règlement :
+
+- **Même formule** payée de nouveau : la période est prolongée de 30 jours
+  (30 × 24 h exactes, indépendamment du fuseau et des changements d'heure).
+- **Autre formule pendant une période en cours** : refusée à la création (409).
+- **Autre formule alors qu'un paiement est déjà en cours** (deux onglets) :
+  refusée à la création (`BUSINESS_OTHER_PLAN_PAYMENT_IN_PROGRESS`) tant que la
+  première commande n'est ni aboutie, ni échouée, ni expirée.
+- **Encaissement devenu inapplicable** (paiement tardif d'une ancienne commande
+  alors qu'une autre formule a été activée entre-temps, ou abonnement repris par
+  un autre prestataire) : **rien n'est livré**, la formule en cours n'est ni
+  remplacée ni raccourcie. La commande passe à l'état « Reçu, non appliqué »
+  (définitif), le client lit que son paiement a été reçu et sera remboursé, et
+  une anomalie `subscription_conflict` alerte l'administrateur. Seule issue : le
+  remboursement intégral (voir « Remboursements »).
+
 ### Réconciliation planifiée (filet de sécurité)
 
 Un webhook peut se perdre, un client peut fermer sa page. Une tâche pg_cron
@@ -54,9 +80,16 @@ Un webhook peut se perdre, un client peut fermer sa page. Une tâche pg_cron
      (30 jours) ; une commande en échec est revérifiée toutes les 6 h pendant
      72 h, car SasPay permet de relancer un paiement échoué ;
    - au plus une fois par quart d'heure, **balaie les encaissements réussis** des
-     72 dernières heures (`GET /transactions/`) et retrouve la commande par sa
-     référence interne (`VYS-…`/`VYB-…`), que VYORA place dans le libellé de
-     chaque paiement. C'est ce qui rattrape une réponse de création perdue.
+     72 dernières heures (`GET /transactions/`, 5 pages de 200 au plus) et
+     retrouve la commande par sa référence interne (`VYS-…`/`VYB-…`), que VYORA
+     place dans le libellé de chaque paiement. C'est ce qui rattrape une réponse
+     de création perdue. **Ce filet dépend d'un champ que la spécification SasPay
+     ne garantit pas** (`description` n'apparaît que dans un exemple de réponse) :
+     si la liste arrive sans libellé, ou si elle dépasse 1 000 lignes, le passage
+     est marqué « partiel », une anomalie `sweep_unreliable` est levée et
+     l'administration l'affiche — le filet ne se déclare jamais sain à tort.
+
+Une seule exécution peut être « en cours » à la fois (index unique en base).
 
 Dans tous les cas la livraison passe par le même règlement idempotent, après la
 même vérification unitaire : la liste sert à **repérer** un paiement, jamais à
@@ -72,6 +105,8 @@ l'administration (onglet SasPay) et notifié une fois aux administrateurs :
 | `amount_mismatch` | Montant ou devise encaissés ≠ commande | Ne livre rien |
 | `payment_not_found` | SasPay ne connaît pas la transaction | Clôt la commande après 24 h (un succès tardif la rouvre) |
 | `order_stuck` | Commande toujours en attente après 24 h | Continue de la revérifier |
+| `subscription_conflict` | Paiement Business Grow encaissé mais inapplicable à l'abonnement en cours | Ne livre rien ; à rembourser intégralement (l'anomalie se classe à l'attestation du versement) |
+| `sweep_unreliable` | Liste SasPay sans libellé, ou tronquée | Passage « partiel » ; les commandes rattachées restent revérifiées une à une |
 
 ## 2 bis. Remboursements
 
@@ -92,13 +127,22 @@ depuis l'administration (onglet SasPay), sur un paiement confirmé :
    - *Business Grow* : la période payée est retirée de l'abonnement ; s'il ne
      reste rien, l'abonnement est résilié et le quota ramené à la valeur par
      défaut (hors abonnement). Montant plafonné au prorata des jours restants (journée entamée
-     comptée au client).
+     comptée au client ; une journée = 24 h exactes, sans effet du fuseau). Si
+     l'abonnement est depuis passé à une autre formule, la période payée par
+     cette commande est terminée : il n'y a plus rien à reprendre.
+   - *Business Grow, paiement « reçu, non appliqué »* : rien n'a été livré, donc
+     rien n'est repris. Le remboursement est **intégral et seulement intégral**
+     (le montant encaissé), l'abonnement en cours et son quota ne sont pas
+     touchés, aucun événement de facturation n'est créé.
 2. **Rendre l'argent hors de VYORA** (transfert Mobile Money, décaissement depuis
    le tableau de bord SasPay), puis **attester le versement** avec sa référence.
    VYORA ne vérifie pas ce versement : la référence saisie fait foi.
 
 Entre les deux, la commande apparaît « Remboursement en cours » (client comme
-administrateur) et un rappel « remboursement(s) à verser » reste affiché. Le
+administrateur) et un rappel « remboursement(s) à verser » reste affiché. Un
+client Studio reçoit une notification au versement ; un client Business Grow
+(qui n'a pas de centre de notifications) le lit dans son historique de
+paiements. Le
 motif et la référence du versement sont des notes internes, jamais montrées au
 client. Chaque étape est tracée dans `ugc_audit_logs`
 (`saspay_refund_recorded`, `saspay_refund_settled`).
@@ -123,7 +167,12 @@ un webhook de paiement rejoué ne relivre rien.
 | Remboursement réservé à l'administrateur, plafonné, définitif, sans solde négatif | Base (`vyora_admin_refund_*`, triggers `refund_is_immutable`) |
 | Remboursement concurrent d'une dépense : un seul des deux aboutit | Base (verrou du portefeuille) |
 | Tâche planifiée non déclenchable par un tiers | Edge (en-tête dédié, puis jeton Vault comparé à temps constant) ; base (`dispatch` sans rôle d'API) |
-| Une seule réconciliation à la fois | Base (verrou consultatif + journal des exécutions) |
+| Une seule réconciliation à la fois | Base (verrou consultatif + index unique sur l'exécution « en cours ») |
+| Business Grow : jamais deux formules, jamais une formule en cours écrasée par un paiement tardif | Base (verrou par utilisateur à la création et au règlement ; contrôle refait au règlement) |
+| Encaissement non applicable : jamais livré plus tard, jamais clos en silence, remboursable une seule fois et intégralement | Base (trigger `subscription_conflict_is_final`, `vyora_admin_refund_business`) + anomalie |
+| Deux règlements simultanés du même utilisateur n'échouent jamais sur une date d'événement | Base (événement daté après les verrous, jamais avant le dernier état de l'abonnement) |
+| Le filet de réconciliation ne se déclare pas sain s'il est aveugle ou tronqué | Edge (`sweep_unreliable`, exécution « partielle ») + administration |
+| Un webhook arrivé trop tôt reste rejouable | Edge (événement non marqué « traité » tant que SasPay ne confirme pas) |
 | La clé SasPay n'est jamais envoyée ailleurs qu'à SasPay | Edge (curseur de pagination restreint à l'API configurée) |
 | Clé SasPay propre à VYORA | Edge (`VYORA_SASPAY_SECRET_KEY` seule ; aucun repli sur `SASPAY_SECRET_KEY`) |
 
@@ -141,7 +190,7 @@ un webhook de paiement rejoué ne relivre rien.
 | `src/lib/payments.ts`, `src/components/PaymentDialog.tsx` | Fenêtre de paiement commune |
 | `src/pages/PaymentReturn.tsx` | `/app/paiement/retour` — suivi après la page hébergée |
 | `src/pages/admin/SasPayPanel.tsx` | Admin : soldes (lecture seule) et paiements |
-| `supabase/tests/saspay/` | Banc PostgreSQL local (voir son `README.md`) |
+| `supabase/tests/saspay/` | Banc PostgreSQL local (voir son `README.md`) ; `audit.mjs` = audit de concurrence avant mise en production |
 | `tests/saspay-*.test.ts(x)` | Tests unitaires et d'interface |
 
 ## 5. Mise en service (à faire par un humain, dans cet ordre)
@@ -208,6 +257,20 @@ une hypothèse que les tests locaux n'ont pu que simuler.
 | 7 | Admin → SasPay → « Rembourser » l'achat n° 1 (crédits intacts) | Crédits retirés ; « Remboursement en cours » côté client | Reprise des crédits |
 | 8 | « Attester le versement » avec une référence | « Remboursé » | Attestation |
 | 9 | `select * from cron.job_run_details where jobid = (select jobid from cron.job where jobname = 'vyora-payments-reconcile') order by start_time desc limit 5;` | Statut `succeeded` toutes les 5 min | pg_cron tourne |
+| 10 | Après les achats précédents, attendre un quart d'heure puis ouvrir Admin → SasPay | Aucune alerte « Rattrapage des paiements incomplet », aucune anomalie `sweep_unreliable` ; aucune alerte « sans jeton » ni « Appel HTTP indisponible » | **`GET /transactions/` renvoie bien le libellé** ; scope de la clé suffisant pour lister ; Vault et pg_net en place |
+| 11 | Business Grow (si activé) : ouvrir deux onglets, lancer le paiement de deux formules différentes | Le second est refusé avec un message clair ; un seul paiement créé chez SasPay | Verrou par utilisateur |
+| 12 | Business Grow : payer deux fois la même formule | Fin de période repoussée de 60 jours au total | Prolongation |
+
+**Si la ligne 10 affiche « Rattrapage des paiements incomplet », ne pas passer en
+production sans décision** : le rattrapage d'une réponse de création perdue ne
+fonctionne pas avec ce compte SasPay. Les autres filets restent actifs (webhook,
+page de retour, revérification ciblée des commandes rattachées, rejeu de la même
+intention avec la clé d'idempotence SasPay), mais un cas resterait sans filet :
+un paiement Mobile Money dont la réponse de création se perd, que le client
+valide tout de même sur son téléphone, sans jamais relancer l'achat ni rouvrir
+la page. L'argent serait encaissé et la commande close « non payée ». (Une
+session hébergée n'a pas ce risque : sans réponse, le client ne reçoit jamais le
+lien de paiement.)
 
 Si la ligne 2 échoue (libellé absent ou tronqué), le balayage ne retrouvera pas
 les paiements dont la réponse de création s'est perdue ; la revérification
@@ -238,9 +301,31 @@ recrée).
   l'abonnement, au prorata des jours. Les unités déjà consommées pendant la
   période ne sont pas décomptées du montant.
 - **Balayage** : repose sur la présence de la référence interne dans le libellé
-  renvoyé par `GET /transactions/` — décrit par la documentation SasPay, jamais
-  observé en réel. Il lit au plus 300 transactions par passage (signalé dans le
-  journal si la limite est atteinte).
+  renvoyé par `GET /transactions/`. Ce champ figure dans l'exemple de la
+  documentation SasPay mais **dans aucun schéma** ; la recherche (`search`) ne
+  porte ni sur le libellé ni sur les métadonnées, et les webhooks ne portent ni
+  l'un ni l'autre : il n'existe pas d'autre moyen documenté de retrouver un
+  paiement sans son identifiant. Le balayage lit au plus 1 000 transactions par
+  passage (5 × 200) sur 72 h, sans reprise au-delà. Dans les deux cas (libellé
+  absent, limite atteinte) le passage est « partiel » et signalé — voir la
+  ligne 10 de la recette.
+- **Page hébergée, webhook sans commande connue** : la transaction d'une session
+  hébergée n'est connue qu'après paiement ; le webhook la cherche parmi les 10
+  sessions ouvertes les plus récentes. Au-delà, il est ignoré et c'est la tâche
+  planifiée qui livre (sous ~5 min) en interrogeant l'état de la session.
+- **Quota d'appels SasPay** : 300 requêtes par minute **par compte marchand**. Si
+  la clé de VYORA appartient au même compte que le produit immobilier, le quota
+  est partagé. Un passage de réconciliation vérifie 20 commandes au plus (une
+  ou deux lectures chacune) et lit 5 pages de liste : quelques dizaines d'appels,
+  toutes les 5 minutes au plus, et aucun s'il n'y a rien à vérifier.
+- **Studio : crédits fongibles.** Le portefeuille ne sait pas de quel achat
+  vient un crédit. Rembourser un achat reprend des crédits *disponibles* à
+  hauteur de cet achat, quels que soient les achats dont ils proviennent ; le
+  plafond de remboursement suit ce qui est effectivement repris.
+- **Montant différent encaissé** (`amount_mismatch`) : rien n'est livré et
+  l'anomalie est levée, mais le montant à rendre n'étant pas celui de la
+  commande, ce cas ne passe pas par l'écran de remboursement : il se traite chez
+  SasPay puis se classe à la main, avec une note.
 - **Renouvellement Business Grow** : manuel. À l'échéance, l'abonnement expire
   (tâche planifiée, une heure de tolérance) et le quota revient à la valeur par
   défaut. Le changement de formule en cours de période est refusé.
@@ -250,8 +335,36 @@ recrée).
 - **Tâche planifiée** : dépend de `pg_cron`, `pg_net` et Vault (présents en
   production). Si la tâche est absente ou désactivée, l'administration l'affiche
   en rouge ; le rattrapage ne se fait alors plus qu'à la consultation.
-- **Unités** : `ugc_recharge_orders.amount_minor` est en centimes alors que
-  d'autres fonctions Studio manipulent des FCFA entiers. La migration convertit
-  explicitement (`amount_minor = prix × 100`) sans corriger l'existant.
+- **Unités** : `ugc_recharge_orders.amount_minor` (Studio) est en centimes alors
+  que `saas_business.payment_orders.amount_minor` (Business Grow) est en FCFA
+  entiers, comme le catalogue de chaque produit. La migration convertit
+  explicitement côté Studio (`amount_minor = prix × 100`) sans corriger
+  l'existant ; les deux colonnes ne doivent jamais être additionnées.
 - **Banc local** : repose sur une copie partielle du schéma de production
   (`prod_subset.sql`), à rafraîchir si la production évolue.
+
+## 7. Audit avant mise en production (novembre 2026)
+
+Audit mené sur PostgreSQL 17 réel avec des connexions réellement simultanées
+(`supabase/tests/saspay/audit.mjs`), les vraies Edge Functions (`e2e.mjs`) et la
+spécification publique de SasPay. **Aucun essai SasPay réel, rien de déployé.**
+
+Défauts trouvés et corrigés :
+
+| Défaut | Conséquence avant correction | Correction |
+| --- | --- | --- |
+| Business Grow : deux formules payées en même temps sans abonnement préalable | Le second règlement échouait sur une contrainte d'unicité brute : paiement encaissé, commande sans issue | Verrou par utilisateur au règlement ; refus de la seconde commande à la création |
+| Business Grow : paiement tardif d'une autre formule | La formule en cours était remplacée et sa période écrasée | Contrôle refait au règlement ; état « reçu, non appliqué », anomalie, remboursement intégral |
+| Business Grow : deux règlements simultanés de la même formule | Échec intermittent « stale or mismatched subscription event » | Événement daté après la prise des verrous |
+| Encaissement non applicable sans issue | Commande « en cours » indéfiniment, re-signalée sans pouvoir être close | Remboursement intégral dédié ; anomalie classée à l'attestation |
+| Webhook `transaction.success` arrivé avant la confirmation de SasPay | Marqué « traité » : ses relances étaient écartées comme doublons (livraison retardée jusqu'à la tâche planifiée) | L'événement reste rejouable tant que la vérification n'a pas abouti |
+| Balayage muet si la liste SasPay n'a pas de libellé, ou tronquée à 300 lignes | Le filet pouvait ne rien rattraper tout en s'affichant « réussi » | Lecture portée à 1 000 lignes ; passage « partiel », anomalie et alerte dans l'administration |
+| Deux réconciliations simultanées | Possibles en théorie (verrou consultatif seul) | Index unique sur l'exécution « en cours » |
+| Durées d'abonnement en « jours » de calendrier | Sensibles au fuseau de la session lors d'un changement d'heure | Durées en secondes (30 × 86 400) |
+| Prérequis de la tâche planifiée invisibles | Tâche « active » même sans jeton ni extension HTTP | Affichés dans la vue d'exploitation |
+
+Points vérifiés sans défaut : crédit Studio unique sous rafales (webhooks rejoués
++ vérifications simultanées), remboursement Studio concurrent d'une dépense
+(solde jamais négatif, grand livre équilibré), attestation unique, cloisonnement
+Studio / Business Grow (même utilisateur, même clé d'intention), pannes réseau
+(réponse de création perdue, SasPay injoignable pendant un webhook).
