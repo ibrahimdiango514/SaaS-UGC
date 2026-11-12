@@ -641,7 +641,7 @@ end $$;
 select cron.schedule(
   'vyora-provider-health-daily',
   '0 2,14 * * *',
-  $$select public.vyora_provider_health_dispatch()$$
+  $$select public.vyora_provider_health_dispatch(false)$$
 );
 
 -- Collecte des réponses : toutes les 5 minutes.
@@ -656,7 +656,7 @@ select cron.schedule(
 select cron.schedule(
   'vyora-provider-health-fresh-guard',
   '20 * * * *',
-  $$select public.vyora_provider_health_dispatch()$$
+  $$select public.vyora_provider_health_dispatch(false)$$
 );
 
 -- Garde-fou : une fois par jour, contrôle que la surveillance tourne encore.
