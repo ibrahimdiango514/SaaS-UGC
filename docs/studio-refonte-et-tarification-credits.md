@@ -194,8 +194,10 @@ cassait `tests/studio-phase2.test.tsx`. Le message a été réintégré dans cet
 
 ## 6. Preview navigateur réelle
 
-URL locale : **http://127.0.0.1:5174** — `npm run dev` (Vite 6.4.5, processus
-`vyora-studio-dev-25fe5290`, pid 11501) ; ports 4180/5173/5174 écoutés.
+URL locale : **http://127.0.0.1:4180** — `npm run dev -- --port 4180 --strictPort`
+(Vite 6.4.5, processus `vyora-studio-4180-f2718d97`, pid 15652, rattaché à la
+session courante). Les serveurs orphelins des sessions précédentes (5173, 5174)
+sont arrêtés ; un seul serveur de développement tourne.
 
 Captures reproductibles dans `preview-studio/` :
 

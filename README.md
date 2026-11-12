@@ -314,7 +314,7 @@ npx vitest run                     # 44 fichiers / 478 tests
 npm run check:edge-imports         # imports Deno conformes
 npm run build                      # build de production
 npm run dev                        # puis, dans un autre terminal :
-node scripts/studio-preview.mjs --base http://127.0.0.1:5174 --out preview-studio
+node scripts/studio-preview.mjs --base http://127.0.0.1:4180 --out preview-studio
 ```
 
 Les captures de `preview-studio/` sont obtenues avec le réseau du navigateur

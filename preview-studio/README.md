@@ -5,7 +5,7 @@ lancée par `npm run dev`), prises dans Chromium par
 [`scripts/studio-preview.mjs`](../scripts/studio-preview.mjs).
 
 ```
-node scripts/studio-preview.mjs --base http://127.0.0.1:5174 --out preview-studio
+node scripts/studio-preview.mjs --base http://127.0.0.1:4180 --out preview-studio
 ```
 
 ## Ce que les captures prouvent — et ce qu'elles ne prouvent pas
@@ -36,7 +36,7 @@ joignable. La capture a donc utilisé un Chromium distribué via npm
 npm i --no-save @sparticuz/chromium puppeteer-core
 node -e "require('@sparticuz/chromium').executablePath().then(console.log)"  # → /tmp/chromium
 CHROMIUM_PATH=/tmp/chromium LD_LIBRARY_PATH=/tmp/al2023/lib \
-  node scripts/studio-preview.mjs --base http://127.0.0.1:5174 --out preview-studio
+  node scripts/studio-preview.mjs --base http://127.0.0.1:4180 --out preview-studio
 ```
 
 Sur une machine disposant de Chrome/Chromium, seul `puppeteer-core` et

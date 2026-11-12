@@ -17,7 +17,7 @@
  * elles prouvent le rendu et les interactions de l'interface.
  *
  * ## Usage
- *   node scripts/studio-preview.mjs [--base http://127.0.0.1:5174] [--out preview-studio]
+ *   node scripts/studio-preview.mjs [--base http://127.0.0.1:4180] [--out preview-studio]
  *
  * Prérequis : `npm run dev` doit tourner, et un binaire Chromium doit être
  * disponible (`PLAYWRIGHT/CHROMIUM`). Voir README du dossier de captures.
@@ -36,7 +36,7 @@ const arg = (name, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 
-const BASE = arg('base', process.env.STUDIO_PREVIEW_BASE ?? 'http://127.0.0.1:5174');
+const BASE = arg('base', process.env.STUDIO_PREVIEW_BASE ?? 'http://127.0.0.1:4180');
 const OUT = path.resolve(arg('out', 'preview-studio'));
 const SHOTS = path.join(OUT, 'screenshots');
 const EXECUTABLE = process.env.CHROMIUM_PATH ?? '/tmp/chromium';
