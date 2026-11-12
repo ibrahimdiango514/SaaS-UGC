@@ -6,16 +6,21 @@
  *  - le navigateur n'envoie qu'une intention (article, réseau, numéro) ;
  *  - l'écran ne dit « confirmé » que lorsque le serveur a vérifié le paiement
  *    auprès de SasPay. Fermer la fenêtre ne change rien à la commande ;
- *  - un double clic ne crée ni seconde commande ni second débit (clé d'intention).
+ *  - un double clic ne crée ni seconde commande ni second débit (clé d'intention) ;
+ *  - si SasPay ne répond pas à la demande Mobile Money, l'écran n'affiche ni
+ *    « payé » ni « échoué » : la commande est « en vérification ». Le client peut
+ *    relancer LA MÊME demande (même clé, même corps : ce n'est pas un nouveau
+ *    paiement), jamais en lancer une autre.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { CheckCircle2, ExternalLink, Loader2, ShieldCheck, Smartphone, XCircle } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Loader2, ShieldAlert, ShieldCheck, Smartphone, XCircle } from 'lucide-react';
 import { Banner, Button, Modal, cn } from './ui';
 import { asAppError } from '../lib/errors';
 import {
-  PAYMENT_STATE_LABELS, UNAPPLIED_MESSAGE, createIntentKeeper, createPayment, describeFee, formatAmount, getPaymentOptions,
+  PAYMENT_STATE_LABELS, REVIEW_MESSAGE, UNAPPLIED_MESSAGE, createIntentKeeper, createPayment, describeFee, formatAmount, getPaymentOptions,
   getPaymentStatus, isFinalState, isPlausiblePhone, isSafeCheckoutUrl,
-  type PaymentFlow, type PaymentItem, type PaymentOptions, type PaymentOrder, type PaymentProduct,
+  type CreatePaymentInput, type CreatePaymentResult, type PaymentFlow, type PaymentItem, type PaymentOptions,
+  type PaymentOrder, type PaymentProduct,
 } from '../lib/payments';
 
 /** Intervalle entre deux vérifications et durée maximale d'attente à l'écran. */
@@ -32,7 +37,15 @@ interface PaymentDialogProps {
   onConfirmed?: (order: PaymentOrder) => void;
 }
 
-type Step = 'loading' | 'unavailable' | 'form' | 'submitting' | 'waiting' | 'redirecting' | 'done';
+type Step = 'loading' | 'unavailable' | 'form' | 'submitting' | 'waiting' | 'review' | 'unanswered' | 'redirecting' | 'done';
+
+/**
+ * Erreurs qui ne disent PAS si la demande Mobile Money est partie : notre
+ * serveur n'a pas répondu (coupure réseau, délai dépassé) ou a échoué de façon
+ * imprévue. Tout autre code est un refus explicite, prononcé avant tout envoi.
+ */
+const AMBIGUOUS_CODES: readonly string[] = ['EDGE_ERROR', 'UNKNOWN_ERROR', 'PAYMENT_INTERNAL_ERROR'];
+const UNANSWERED_NOTICE = 'Nous n’avons pas reçu de réponse à votre demande : elle est peut-être partie quand même.';
 
 export default function PaymentDialog({ open, product, item, title, onClose, onConfirmed }: PaymentDialogProps) {
   const [step, setStep] = useState<Step>('loading');
@@ -47,12 +60,21 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
   const [timedOut, setTimedOut] = useState(false);
   const intent = useRef(createIntentKeeper());
   const confirmedFor = useRef<string | null>(null);
+  /** Demande restée sans réponse : conservée À L'IDENTIQUE pour être relancée, même après fermeture. */
+  const unanswered = useRef<{ scope: string; request: CreatePaymentInput; known: boolean } | null>(null);
+  const [resending, setResending] = useState(false);
   const itemKey = item ? JSON.stringify(item) : '';
 
   // Chargement du devis à l'ouverture (et à chaque changement d'article).
   useEffect(() => {
     if (!open || !item) return undefined;
     let cancelled = false;
+    // Une demande sans réponse n'est pas oubliée en fermant la fenêtre : on y revient.
+    if (unanswered.current?.scope === `${product}:${itemKey}`) {
+      setStep(unanswered.current.known ? 'review' : 'unanswered'); setTimedOut(false);
+      return undefined;
+    }
+    unanswered.current = null;
     setStep('loading'); setError(''); setNotice(''); setOrder(null); setTimedOut(false); setPhone('');
     intent.current.reset();
     getPaymentOptions(product, item).then((result) => {
@@ -103,18 +125,25 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
       }
     } else if (isFinalState(next.state)) {
       setStep('done');
+    } else if (next.state === 'review') {
+      setStep('review');
+    } else if (next.state === 'pending') {
+      // Le paiement a été retrouvé : il n'attend plus que la validation du client.
+      setStep((current) => (current === 'review' ? 'waiting' : current));
     }
+    if (next.state !== 'review') unanswered.current = null;
   }, [onConfirmed]);
 
   // Suivi d'un paiement en attente : seul le serveur fait foi.
   useEffect(() => {
-    if (!open || step !== 'waiting' || !order) return undefined;
+    if (!open || (step !== 'waiting' && step !== 'review') || !order) return undefined;
     let stopped = false;
     const startedAt = Date.now();
     const tick = async () => {
       if (stopped) return;
       if (Date.now() - startedAt >= POLL_MAX_MS) { setTimedOut(true); return; }
       try {
+        // En vérification, cet appel ne sollicite pas SasPay et ne relance rien : il lit l'état.
         const result = await getPaymentStatus(order.product, order.id);
         if (stopped) return;
         setNotice(result.message ?? '');
@@ -132,6 +161,29 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, step, order?.id, applyOrder]);
 
+  /** Suite d'une création. Renvoie `false` si le lien de paiement reçu est inutilisable. */
+  const afterCreate = (result: CreatePaymentResult, request: CreatePaymentInput): boolean => {
+    setOrder(result.order);
+    if (isFinalState(result.order.state)) { applyOrder(result.order); return true; }
+    if (result.next === 'review' || result.order.state === 'review') {
+      // Issue inconnue : ni payé, ni échoué. La demande est gardée telle quelle pour être relancée.
+      unanswered.current = { scope: `${request.product}:${itemKey}`, request, known: true };
+      setNotice(result.message ?? REVIEW_MESSAGE);
+      setStep('review');
+      return true;
+    }
+    unanswered.current = null;
+    if (result.next === 'redirect') {
+      if (!isSafeCheckoutUrl(result.order.checkout_url)) return false;
+      setStep('redirecting');
+      window.location.assign(result.order.checkout_url);
+      return true;
+    }
+    setNotice('');
+    setStep('waiting');
+    return true;
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!item || !country || step === 'submitting') return;
@@ -140,35 +192,64 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
     const choice = flow === 'softpay'
       ? { product, item: itemKey, country: country.code, flow, network, phone: phone.replace(/\s/g, '') }
       : { product, item: itemKey, country: country.code, flow };
+    const request: CreatePaymentInput = {
+      product, item, country: country.code, flow,
+      network: flow === 'softpay' ? network : undefined,
+      phone: flow === 'softpay' ? phone : undefined,
+      idempotencyKey: intent.current.keyFor(choice),
+    };
     try {
-      const result = await createPayment({
-        product, item, country: country.code, flow,
-        network: flow === 'softpay' ? network : undefined,
-        phone: flow === 'softpay' ? phone : undefined,
-        idempotencyKey: intent.current.keyFor(choice),
-      });
-      setOrder(result.order);
-      if (isFinalState(result.order.state)) { applyOrder(result.order); return; }
-      if (result.next === 'redirect') {
-        if (!isSafeCheckoutUrl(result.order.checkout_url)) {
-          setError('Le lien de paiement reçu est invalide. Aucun paiement n’a été lancé.');
-          setStep('form');
-          return;
-        }
-        setStep('redirecting');
-        window.location.assign(result.order.checkout_url);
+      if (!afterCreate(await createPayment(request), request)) {
+        setError('Le lien de paiement reçu est invalide. Aucun paiement n’a été lancé.');
+        setStep('form');
+      }
+    } catch (err) {
+      const failure = asAppError(err, 'Le paiement n’a pas pu être lancé.');
+      if (flow === 'softpay' && AMBIGUOUS_CODES.includes(failure.code)) {
+        // Aucune réponse de notre serveur : la demande est peut-être déjà sur le
+        // téléphone du client. On ne dit pas « non lancé » et on ne rend pas le
+        // formulaire (changer de numéro créerait un second paiement).
+        unanswered.current = { scope: `${product}:${itemKey}`, request, known: false };
+        setNotice(UNANSWERED_NOTICE);
+        setStep('unanswered');
         return;
       }
-      setStep('waiting');
-    } catch (err) {
-      // Même clé au prochain essai tant que les choix ne changent pas : aucun doublon.
-      setError(asAppError(err, 'Le paiement n’a pas pu être lancé.').message);
+      // Refus explicite du serveur, avant tout envoi. Même clé au prochain essai
+      // tant que les choix ne changent pas : aucun doublon.
+      setError(failure.message);
       setStep('form');
     }
   };
 
+  /**
+   * Relance la demande restée sans réponse : même clé, mêmes choix. Le serveur
+   * rejoue alors la requête d'origine auprès de SasPay, qui renvoie le paiement
+   * déjà créé s'il existe — ce n'est jamais un second paiement.
+   */
+  const resend = async () => {
+    const pending = unanswered.current;
+    if (!pending || resending) return;
+    setResending(true); setTimedOut(false);
+    try {
+      afterCreate(await createPayment(pending.request), pending.request);
+    } catch (err) {
+      const failure = asAppError(err, 'La relance n’a pas abouti. Ne payez pas une seconde fois.');
+      if (!pending.known && !AMBIGUOUS_CODES.includes(failure.code)) {
+        // Le serveur répond enfin, par un refus explicite : rien n'était parti.
+        unanswered.current = null;
+        setNotice(''); setError(failure.message); setStep('form');
+      } else {
+        setNotice(pending.known ? failure.message : UNANSWERED_NOTICE);
+      }
+    } finally {
+      setResending(false);
+    }
+  };
+
   const retry = () => {
+    // Uniquement après un échec ou une annulation DÉFINITIFS : nouvelle intention, nouvelle clé.
     intent.current.reset();
+    unanswered.current = null;
     setOrder(null); setError(''); setNotice(''); setTimedOut(false);
     setStep('form');
   };
@@ -180,7 +261,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
       const result = await getPaymentStatus(order.product, order.id);
       setNotice(result.message ?? '');
       applyOrder(result.order);
-      if (!isFinalState(result.order.state)) setStep('waiting');
+      if (!isFinalState(result.order.state) && result.order.state !== 'review') setStep('waiting');
     } catch (err) {
       setNotice(asAppError(err, 'Vérification momentanément impossible.').message);
       setTimedOut(true);
@@ -355,6 +436,60 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={onClose}>Fermer</Button>
               <Button variant="outline" size="sm" onClick={() => void checkNow()}>Vérifier maintenant</Button>
+            </div>
+          </div>
+        )}
+
+        {step === 'review' && order && (
+          <div className="space-y-3" role="status" aria-live="polite" data-testid="payment-review" data-retry={order.retry_allowed ? 'yes' : 'no'}>
+            <p className="flex items-center gap-2 text-sm font-semibold text-amber-100">
+              <ShieldAlert size={16} /> Paiement en cours de vérification
+            </p>
+            <Banner tone="warning" title="Ne payez pas une seconde fois">
+              {notice || REVIEW_MESSAGE}
+            </Banner>
+            <p className="text-[12.5px] leading-relaxed text-slate-400">
+              Demande de {formatAmount(order.quoted_total_amount ?? order.amount, order.currency)}
+              {order.payer_msisdn_masked ? ` sur le ${order.payer_msisdn_masked}` : ''}.
+              Ce paiement n’est ni confirmé ni refusé : rien n’est crédité tant que SasPay ne l’a pas confirmé, et aucun
+              autre paiement ne peut être lancé entre-temps. Référence à conserver : {order.internal_reference}.
+            </p>
+            {order.retry_allowed
+              ? (
+                <p className="text-[11.5px] leading-relaxed text-slate-500">
+                  « Relancer cette demande » renvoie exactement la même demande : si elle était déjà partie, vous ne serez pas débité deux fois.
+                </p>
+              )
+              : (
+                <p className="text-[11.5px] leading-relaxed text-slate-500">
+                  Notre équipe vérifie ce paiement auprès de SasPay. Vous serez prévenu de l’issue ; vous pouvez fermer cette fenêtre.
+                </p>
+              )}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={onClose}>Fermer</Button>
+              <Button variant="outline" size="sm" onClick={() => void checkNow()}>Vérifier l’état</Button>
+              {order.retry_allowed && unanswered.current && (
+                <Button size="sm" loading={resending} disabled={resending} onClick={() => void resend()}>Relancer cette demande</Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {step === 'unanswered' && (
+          <div className="space-y-3" role="status" aria-live="polite" data-testid="payment-unanswered">
+            <p className="flex items-center gap-2 text-sm font-semibold text-amber-100">
+              <ShieldAlert size={16} /> Demande restée sans réponse
+            </p>
+            <Banner tone="warning" title="Ne payez pas une seconde fois">
+              {notice || UNANSWERED_NOTICE} Vérifiez votre connexion, puis relancez cette demande.
+            </Banner>
+            <p className="text-[12.5px] leading-relaxed text-slate-400">
+              « Relancer cette demande » renvoie exactement la même demande : si elle était déjà partie, vous ne serez pas
+              débité deux fois. Rien n’est crédité tant que SasPay n’a pas confirmé le paiement.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={onClose}>Fermer</Button>
+              <Button size="sm" loading={resending} disabled={resending} onClick={() => void resend()}>Relancer cette demande</Button>
             </div>
           </div>
         )}

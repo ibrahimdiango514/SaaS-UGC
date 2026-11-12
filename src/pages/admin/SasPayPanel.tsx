@@ -142,7 +142,10 @@ export default function SasPayPanel() {
         </div>
       </Card>
 
-      <PaymentHealthCard health={health} error={healthError} busy={healthBusy} onReload={() => void loadHealth()} />
+      <PaymentHealthCard
+        health={health} error={healthError} busy={healthBusy} onReload={() => void loadHealth()}
+        onOrdersChanged={() => void loadOrders(product)}
+      />
 
       <Card>
         <CardHeader
@@ -190,7 +193,13 @@ export default function SasPayPanel() {
                       Encaissé par SasPay mais non appliqué : rien n’a été livré. À rembourser intégralement au client.
                     </p>
                   )}
-                  {o.failure_code && <p className="text-[11px] text-rose-300/80">Motif : {o.failure_code}</p>}
+                  {o.state === 'review' && (
+                    <p className="text-[11px] text-amber-200" data-testid="saspay-review">
+                      Demande restée sans réponse de SasPay : on ignore si le client a été débité. Rien n’a été livré ;
+                      à suivre dans « Paiements sans réponse » (Exploitation).
+                    </p>
+                  )}
+                  {o.failure_code && o.state !== 'review' && <p className="text-[11px] text-rose-300/80">Motif : {o.failure_code}</p>}
                   {o.status === 'refunded' && (
                     <p className="text-[11px] text-amber-200/90" data-testid="saspay-refund">
                       Remboursement de {formatAmount(o.refund_amount, o.currency)} enregistré le {formatDate(o.refunded_at ?? null, true)}
@@ -216,7 +225,7 @@ export default function SasPayPanel() {
                   {o.status === 'refunded' && o.refund_state !== 'settled' && (
                     <Button size="sm" variant="outline" onClick={() => setSettling(o)}>Attester le versement</Button>
                   )}
-                  {!isFinalState(o.state) && (
+                  {!isFinalState(o.state) && o.state !== 'review' && (
                     <Button size="sm" variant="outline" loading={checking === o.id} onClick={() => void recheck(o)}>
                       Revérifier
                     </Button>

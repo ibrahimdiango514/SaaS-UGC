@@ -21,6 +21,7 @@ import SasPayPanel from '../src/pages/admin/SasPayPanel';
 import {
   createIntentKeeper, describeFee, formatAmount, isOrderId, isPaymentProduct, isPlausiblePhone, isSafeCheckoutUrl,
   parseRefundAmount, paymentStateOf, refundBadge, isFinalState, ANOMALY_ADVICE, ANOMALY_LABELS, PAYMENT_STATE_LABELS,
+  PAYMENT_STATE_TONES,
 } from '../src/lib/payments';
 import { ledgerOperationLabel } from '../src/lib/format';
 import { asAppError } from '../src/lib/errors';
@@ -987,5 +988,514 @@ describe('administration — surveillance des paiements', () => {
     await waitFor(() => expect(rpcNamed('vyora_admin_resolve_anomaly')).toHaveLength(1));
     expect(rpcNamed('vyora_admin_resolve_anomaly')[0][1]).toEqual({ p_anomaly_id: 'an-1', p_note: 'Second paiement rendu par Orange Money, réf. OM-779' });
     await waitFor(() => expect(screen.getByText('Aucune anomalie ouverte.')).toBeTruthy());
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Demande Mobile Money restée sans réponse de SasPay                          */
+/* -------------------------------------------------------------------------- */
+
+const SERVER_UNCONFIRMED = 'Le service de paiement n’a pas confirmé cette demande : elle a peut-être été envoyée sur votre téléphone. '
+  + 'Ne payez pas une seconde fois. Vous pouvez relancer cette même demande — ce n’est pas un nouveau paiement.';
+const SERVER_REVIEW = 'Votre paiement est en cours de vérification par notre équipe. Ne payez pas une seconde fois.';
+const unanswered = (extra: Record<string, unknown> = {}) => order({
+  status: 'pending', state: 'review', failure_code: 'initiation_unconfirmed', retry_allowed: true, ...extra,
+});
+const inReview = (extra: Record<string, unknown> = {}) => unanswered({ failure_code: 'manual_review', retry_allowed: false, ...extra });
+
+describe('paiement sans réponse — états', () => {
+  it('ni « à effectuer », ni « échoué », ni final : un état « en vérification » à part', () => {
+    for (const code of ['initiation_unconfirmed', 'manual_review']) {
+      // Lu en base : aucun paiement rattaché, et pourtant le client a peut-être payé.
+      expect(paymentStateOf({ status: 'pending', failure_code: code, has_payment: false })).toBe('review');
+      expect(paymentStateOf({ status: 'pending', failure_code: code })).toBe('review');
+    }
+    expect(paymentStateOf({ state: 'review', status: 'pending' })).toBe('review');
+    expect(isFinalState('review')).toBe(false);
+    expect(PAYMENT_STATE_LABELS.review).toBe('En vérification');
+    expect(PAYMENT_STATE_TONES.review).toBe('warning');
+    // Une fois tranchée, la commande reprend un état ordinaire.
+    expect(paymentStateOf({ status: 'paid', failure_code: null })).toBe('confirmed');
+    expect(paymentStateOf({ status: 'cancelled', failure_code: 'unconfirmed_closed' })).toBe('cancelled');
+    expect(paymentStateOf({ status: 'failed', failure_code: 'provider_failed' })).toBe('failed');
+  });
+
+  it('messages de la base traduits en clair', () => {
+    const message = (code: string) => asAppError(new Error(code), 'défaut').message;
+    expect(message('anomaly_requires_decision')).toMatch(/ne se classe pas/);
+    expect(message('review_note_required')).toMatch(/10 à 500 caractères/);
+    expect(message('payment_not_under_review')).toMatch(/n’est pas \(ou plus\) en rapprochement manuel/);
+    expect(message('payment_under_review')).toMatch(/aucun autre paiement ne peut être lancé/);
+    expect(message('payment_attempt_in_progress')).toMatch(/déjà en cours d’envoi/);
+    expect(ANOMALY_LABELS.initiation_unconfirmed).toMatch(/sans réponse de SasPay/);
+    expect(ANOMALY_ADVICE.initiation_unconfirmed).toMatch(/on ignore si le client a été débité/);
+  });
+});
+
+describe('paiement sans réponse — fenêtre de paiement', () => {
+  const renderDialog = (props: Partial<Parameters<typeof PaymentDialog>[0]> = {}) => {
+    const onConfirmed = vi.fn();
+    const onClose = vi.fn();
+    const view = render(<PaymentDialog open product="studio" item={{ kind: 'pack', pack_key: 'creator' }} title="Acheter" onClose={onClose} onConfirmed={onConfirmed} {...props} />);
+    return { onConfirmed, onClose, ...view };
+  };
+  const pay = async () => {
+    await waitFor(() => screen.getByTestId('payment-price'));
+    fireEvent.change(screen.getByPlaceholderText('8 chiffres'), { target: { value: '70123456' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Payer/ }));
+  };
+  const resendButton = () => screen.queryByRole('button', { name: 'Relancer cette demande' });
+  const bodies = () => calls('create').map(([, body]) => body as Record<string, unknown>);
+
+  it('issue inconnue : ni « confirmé » ni « échoué » — « en vérification », avec la consigne de ne pas repayer', async () => {
+    edge({
+      options: () => options(),
+      create: () => ({ order: unanswered(), next: 'review', reused: false, message: SERVER_UNCONFIRMED }),
+      status: () => ({ order: unanswered(), verified: false, credited: false, message: SERVER_UNCONFIRMED }),
+    });
+    const { onConfirmed } = renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    const text = screen.getByTestId('payment-dialog').textContent ?? '';
+    expect(text).toContain('Paiement en cours de vérification');
+    expect(text).toContain('Ne payez pas une seconde fois');
+    expect(text).toContain('elle a peut-être été envoyée sur votre téléphone');
+    expect(text).toContain('ni confirmé ni refusé');
+    expect(text).toContain('VYS-ABC');
+    expect(text).toContain('+223••••••56');
+    expect(text).not.toContain('Paiement confirmé');
+    expect(text).not.toMatch(/Paiement échoué|n’a pas abouti|crédits ont été ajoutés/);
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+    expect(screen.queryByTestId('payment-result')).toBeNull();
+    expect(onConfirmed).not.toHaveBeenCalled();
+    expect(resendButton()).not.toBeNull();
+  });
+
+  it('« Relancer cette demande » renvoie exactement la même demande, avec la même clé', async () => {
+    const answers = [
+      { order: unanswered(), next: 'review', reused: false, message: SERVER_UNCONFIRMED },
+      { order: unanswered(), next: 'review', reused: true, message: SERVER_UNCONFIRMED },
+      { order: order(), next: 'await_confirmation', reused: true, message: null },
+    ];
+    edge({
+      options: () => options(),
+      create: () => answers.shift(),
+      status: () => ({ order: order(), verified: true, credited: false, message: null }),
+    });
+    renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    fireEvent.click(resendButton() as HTMLElement);
+    await waitFor(() => expect(calls('create')).toHaveLength(2));
+    await waitFor(() => expect((resendButton() as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByTestId('payment-review')).toBeTruthy();
+    fireEvent.click(resendButton() as HTMLElement);
+    // Le paiement est retrouvé : il n'attend plus que la validation sur le téléphone.
+    await waitFor(() => expect(screen.getByText('Paiement en attente de confirmation')).toBeTruthy());
+    expect(screen.queryByTestId('payment-review')).toBeNull();
+    const sent = bodies();
+    expect(sent).toHaveLength(3);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[2]).toEqual(sent[0]);
+    expect(String(sent[0].idempotency_key)).toMatch(/^vyora-/);
+  });
+
+  it('relance refusée par le serveur : message affiché, toujours « en vérification », aucune autre demande', async () => {
+    let n = 0;
+    edge({
+      options: () => options(),
+      create: () => {
+        n += 1;
+        if (n === 1) return { order: unanswered(), next: 'review', reused: false, message: SERVER_UNCONFIRMED };
+        throw new AppError('Une tentative est déjà en cours pour cette commande. Patientez quelques secondes puis vérifiez son statut.', 'PAYMENT_ALREADY_IN_PROGRESS');
+      },
+      status: () => ({ order: unanswered(), verified: false, credited: false, message: SERVER_UNCONFIRMED }),
+    });
+    renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    fireEvent.click(resendButton() as HTMLElement);
+    await waitFor(() => expect(screen.getByText(/Une tentative est déjà en cours/)).toBeTruthy());
+    expect(screen.getByTestId('payment-review')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Payer/ })).toBeNull();
+    expect(bodies()[1]).toEqual(bodies()[0]);
+  });
+
+  it('rapprochement manuel : plus de relance possible, le client est informé et ne peut pas repayer', async () => {
+    edge({
+      options: () => options(),
+      create: () => ({ order: inReview(), next: 'review', reused: true, message: SERVER_REVIEW }),
+      status: () => ({ order: inReview(), verified: false, credited: false, message: SERVER_REVIEW }),
+    });
+    renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    expect(screen.getByTestId('payment-review').getAttribute('data-retry')).toBe('no');
+    expect(resendButton()).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
+    const text = screen.getByTestId('payment-dialog').textContent ?? '';
+    expect(text).toContain('en cours de vérification par notre équipe');
+    expect(text).toContain('Notre équipe vérifie ce paiement auprès de SasPay');
+    expect(calls('create')).toHaveLength(1);
+  });
+
+  it('le suivi lit l’état sans rien relancer ; confirmé plus tard par le serveur → annoncé une seule fois', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const statuses = [unanswered(), unanswered(), order({ status: 'paid', state: 'confirmed' })];
+    edge({
+      options: () => options(),
+      create: () => ({ order: unanswered(), next: 'review', reused: false, message: SERVER_UNCONFIRMED }),
+      status: () => {
+        const next = statuses.shift() ?? order({ status: 'paid', state: 'confirmed' });
+        return { order: next, verified: next.state === 'confirmed', credited: next.state === 'confirmed', message: next.state === 'review' ? SERVER_UNCONFIRMED : null };
+      },
+    });
+    const { onConfirmed } = renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS); });
+    expect(screen.getByTestId('payment-review')).toBeTruthy();
+    expect(onConfirmed).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS); });
+    await waitFor(() => expect(screen.getByText('Paiement confirmé')).toBeTruthy());
+    expect(onConfirmed).toHaveBeenCalledTimes(1);
+    // Le suivi n'a fait que lire l'état : aucune nouvelle demande de paiement.
+    expect(calls('create')).toHaveLength(1);
+  });
+
+  it('clos sans encaissement par l’administrateur : « annulé », le client peut alors réessayer avec une nouvelle clé', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const created = [
+      { order: inReview(), next: 'review', reused: false, message: SERVER_REVIEW },
+      { order: order({ id: 'b7c1a2d3-0000-4000-8000-000000000001' }), next: 'await_confirmation', reused: false, message: null },
+    ];
+    edge({
+      options: () => options(),
+      create: () => created.shift(),
+      status: () => ({ order: order({ status: 'cancelled', state: 'cancelled', failure_code: 'unconfirmed_closed' }), verified: false, credited: false, message: null }),
+    });
+    renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS); });
+    await waitFor(() => expect(screen.getByTestId('payment-result').getAttribute('data-state')).toBe('cancelled'));
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    await pay();
+    await waitFor(() => expect(calls('create')).toHaveLength(2));
+    expect(bodies()[1].idempotency_key).not.toBe(bodies()[0].idempotency_key);
+  });
+
+  it('fenêtre fermée puis rouverte : la demande sans réponse n’est pas oubliée, aucune nouvelle commande', async () => {
+    const answers = [
+      { order: unanswered(), next: 'review', reused: false, message: SERVER_UNCONFIRMED },
+      { order: order(), next: 'await_confirmation', reused: true, message: null },
+    ];
+    edge({
+      options: () => options(),
+      create: () => answers.shift(),
+      status: () => ({ order: unanswered(), verified: false, credited: false, message: SERVER_UNCONFIRMED }),
+    });
+    const props = { product: 'studio' as const, item: { kind: 'pack' as const, pack_key: 'creator' }, title: 'Acheter', onClose: vi.fn() };
+    const view = render(<PaymentDialog open {...props} />);
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    view.rerender(<PaymentDialog open={false} {...props} />);
+    view.rerender(<PaymentDialog open {...props} />);
+    await waitFor(() => screen.getByTestId('payment-review'));
+    // Pas de formulaire vierge : impossible de lancer un autre paiement depuis cette fenêtre.
+    expect(screen.queryByRole('button', { name: /^Payer/ })).toBeNull();
+    expect(calls('options')).toHaveLength(1);
+    fireEvent.click(resendButton() as HTMLElement);
+    await waitFor(() => expect(screen.getByText('Paiement en attente de confirmation')).toBeTruthy());
+    expect(bodies()[1]).toEqual(bodies()[0]);
+  });
+
+  it('aucune réponse de notre serveur (coupure réseau) : pas « non lancé », pas de formulaire — seulement la même demande à relancer', async () => {
+    let n = 0;
+    edge({
+      options: () => options(),
+      create: () => {
+        n += 1;
+        // Le navigateur n'a rien reçu ; le serveur, lui, a peut-être envoyé la demande.
+        if (n <= 2) throw new AppError('Failed to send a request to the Edge Function', 'EDGE_ERROR');
+        return { order: order(), next: 'await_confirmation', reused: true, message: null };
+      },
+      status: () => ({ order: order(), verified: true, credited: false, message: null }),
+    });
+    const { onConfirmed } = renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-unanswered'));
+    const text = screen.getByTestId('payment-dialog').textContent ?? '';
+    expect(text).toContain('Ne payez pas une seconde fois');
+    expect(text).toContain('elle est peut-être partie quand même');
+    expect(text).not.toContain('Paiement non lancé');
+    expect(screen.queryByRole('button', { name: /^Payer/ })).toBeNull();
+    expect(screen.queryByPlaceholderText('8 chiffres')).toBeNull();
+    fireEvent.click(resendButton() as HTMLElement);
+    await waitFor(() => expect(calls('create')).toHaveLength(2));
+    await waitFor(() => expect((resendButton() as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.getByTestId('payment-unanswered')).toBeTruthy();
+    fireEvent.click(resendButton() as HTMLElement);
+    await waitFor(() => expect(screen.getByText('Paiement en attente de confirmation')).toBeTruthy());
+    const sent = bodies();
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[2]).toEqual(sent[0]);
+    expect(onConfirmed).not.toHaveBeenCalled();
+  });
+
+  it('aucune réponse, puis refus explicite du serveur à la relance : rien n’était parti, le formulaire revient', async () => {
+    let n = 0;
+    edge({
+      options: () => options(),
+      create: () => {
+        n += 1;
+        if (n === 1) throw new AppError('Failed to send a request to the Edge Function', 'EDGE_ERROR');
+        throw new AppError('Le paiement en ligne n’est pas encore activé.', 'PAYMENTS_DISABLED');
+      },
+    });
+    renderDialog();
+    await pay();
+    await waitFor(() => screen.getByTestId('payment-unanswered'));
+    fireEvent.click(resendButton() as HTMLElement);
+    await waitFor(() => expect(screen.getByText('Paiement non lancé')).toBeTruthy());
+    expect(screen.getByText(/n’est pas encore activé/)).toBeTruthy();
+    expect(screen.queryByTestId('payment-unanswered')).toBeNull();
+  });
+
+  it('page sécurisée : une coupure réseau avant la redirection reste une simple erreur (aucun débit possible sans le client)', async () => {
+    edge({ options: () => options(), create: () => { throw new AppError('Failed to send a request to the Edge Function', 'EDGE_ERROR'); } });
+    renderDialog();
+    await waitFor(() => screen.getByTestId('payment-price'));
+    fireEvent.click(screen.getByLabelText(/Page de paiement sécurisée/));
+    fireEvent.click(screen.getByRole('button', { name: 'Continuer vers le paiement' }));
+    await waitFor(() => expect(screen.getByText('Paiement non lancé')).toBeTruthy());
+    expect(screen.queryByTestId('payment-unanswered')).toBeNull();
+  });
+
+  it('autre achat pendant qu’un paiement est en vérification : refusé par le serveur, expliqué, rien n’est lancé', async () => {
+    edge({
+      options: () => options(),
+      create: () => { throw new AppError('Un de vos paiements est en cours de vérification. Aucun autre paiement ne peut être lancé tant qu’il n’est pas confirmé ou annulé.', 'PAYMENT_UNDER_REVIEW'); },
+    });
+    const { onConfirmed } = renderDialog({ item: { kind: 'pack', pack_key: 'pro_creator' } });
+    await pay();
+    await waitFor(() => expect(screen.getByText(/Aucun autre paiement ne peut être lancé/)).toBeTruthy());
+    expect(screen.getByText('Paiement non lancé')).toBeTruthy();
+    expect(screen.queryByText('Paiement en attente de confirmation')).toBeNull();
+    expect(onConfirmed).not.toHaveBeenCalled();
+  });
+});
+
+describe('paiement sans réponse — page de suivi', () => {
+  const renderReturn = () => render(
+    <MemoryRouter initialEntries={[`/app/paiement/retour?produit=studio&commande=${ORDER_ID}`]}>
+      <Routes><Route path="/app/paiement/retour" element={<PaymentReturn />} /></Routes>
+    </MemoryRouter>,
+  );
+
+  it('affiche « en vérification » et la consigne, jamais un succès ni un échec', async () => {
+    edge({ status: () => ({ order: inReview(), verified: false, credited: false, message: SERVER_REVIEW }) });
+    renderReturn();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    const page = screen.getByTestId('payment-return');
+    expect(page.getAttribute('data-state')).toBe('review');
+    const text = page.textContent ?? '';
+    expect(text).toContain('en cours de vérification par notre équipe');
+    expect(text).toContain('ni confirmé ni refusé');
+    expect(text).toContain('En vérification');
+    expect(text).toContain('VYS-ABC');
+    expect(text).not.toMatch(/Paiement confirmé|Paiement échoué|Paiement non effectué|crédits ont été ajoutés/);
+    expect(refreshQuota).not.toHaveBeenCalled();
+  });
+
+  it('continue de suivre : livré dès que le serveur confirme', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const statuses = [unanswered(), order({ status: 'paid', state: 'confirmed' })];
+    edge({ status: () => {
+      const next = statuses.shift() ?? order({ status: 'paid', state: 'confirmed' });
+      return { order: next, verified: true, credited: next.state === 'confirmed', message: next.state === 'review' ? SERVER_UNCONFIRMED : null };
+    } });
+    renderReturn();
+    await waitFor(() => screen.getByTestId('payment-review'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(RETURN_POLL_INTERVAL_MS); });
+    await waitFor(() => expect(screen.getByText('Paiement confirmé')).toBeTruthy());
+    expect(refreshQuota).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('paiement sans réponse — administration', () => {
+  const TX = '0b54c8c2-7a1e-4d2b-9a6f-3f1f0c1d2e3f';
+  const line = (extra: Record<string, unknown> = {}) => ({
+    product: 'studio', order_id: ORDER_ID, internal_reference: 'VYS-ABC', user_email: 'client@vyora.test', amount: 5000, currency: 'XOF',
+    network: 'orange_ml', payer_msisdn_masked: '+223••••••56', attempts: 2, first_attempt_at: '2026-11-13T09:00:00Z',
+    last_attempt_at: '2026-11-13T09:00:03Z', in_review: true, review_at: '2026-11-13T09:15:00Z', last_error: 'timeout',
+    candidates: [], last_search_at: '2026-11-13T09:20:00Z', ...extra,
+  });
+  const candidate = (extra: Record<string, unknown> = {}) => ({
+    id: TX, reference: 'TXN-1', status: 'SUCCESS', amount: '5000.00', currency: 'XOF', created_at: '2026-11-13T09:00:05Z',
+    source: 'webhook', msisdn_match: true, ...extra,
+  });
+  const alert = {
+    id: 'an-9', kind: 'initiation_unconfirmed', product: 'studio', order_id: ORDER_ID, internal_reference: 'VYS-ABC',
+    provider_payment_id: null, seen_count: 1, first_seen_at: '2026-11-13T09:15:00Z', last_seen_at: '2026-11-13T09:15:00Z',
+  };
+  const NOTE = /^Comment ce paiement a été identifié/;
+  const CHECKED = /^Ce qui a été vérifié/;
+  const panel = (health: () => unknown, extra: Record<string, unknown> = {}, edges: Record<string, (b: Record<string, unknown>) => unknown> = {}) => {
+    edge({ balances: () => ({ configured: false, mode: null, balances: [], message: null }), ...edges });
+    adminRpc({ vyora_admin_payments: [], vyora_admin_payment_health: health, ...extra });
+    render(<SasPayPanel />);
+  };
+
+  it('aucune demande sans réponse : dit en clair ; réponse d’une ancienne base sans la liste : pas d’erreur', async () => {
+    panel(() => HEALTH);
+    await waitFor(() => screen.getByTestId('saspay-unconfirmed'));
+    expect(screen.getByTestId('saspay-unconfirmed').textContent).toContain('Aucune demande de paiement n’est restée sans réponse.');
+    expect(screen.queryByTestId('saspay-unconfirmed-line')).toBeNull();
+  });
+
+  it('liste ce que l’on sait : client, montant, numéro masqué, envois, transactions ressemblantes — sans les présenter comme des preuves', async () => {
+    panel(() => ({ ...HEALTH, unconfirmed: [line({ candidates: [candidate(), candidate({ id: 'tx-autre-000001', source: 'search', msisdn_match: null, status: 'PENDING' })] })], anomalies: [alert] }));
+    await waitFor(() => screen.getByTestId('saspay-unconfirmed-line'));
+    const text = screen.getByTestId('saspay-unconfirmed').textContent ?? '';
+    expect(text).toContain('on ignore si le client a été débité');
+    expect(text).toContain('client@vyora.test');
+    expect(text).toContain('VYS-ABC');
+    expect(text).toContain('+223••••••56');
+    expect(text).toContain('2 envoi(s)');
+    expect(text).toContain('Décision attendue');
+    expect(screen.getAllByTestId('saspay-candidate')).toHaveLength(2);
+    expect(text).toContain('Transaction ressemblante');
+    expect(text).toContain('annoncée par SasPay');
+    expect(text).toContain('même numéro');
+    expect(text).toContain('trouvée par recherche sur le numéro');
+    // L'alerte correspondante ne se « classe » pas : elle renvoie à la décision.
+    const anomalyText = screen.getByTestId('saspay-anomaly').textContent ?? '';
+    expect(anomalyText).toContain('Demande de paiement restée sans réponse de SasPay');
+    expect(anomalyText).toContain('À trancher ci-dessus');
+    expect(screen.queryByRole('button', { name: 'Classer' })).toBeNull();
+  });
+
+  it('rattacher une transaction ressemblante : identifiant repris, note obligatoire, contrôle fait par le serveur', async () => {
+    let open = [line({ candidates: [candidate()] })];
+    panel(() => ({ ...HEALTH, unconfirmed: open }), {}, {
+      resolve_review: () => { open = []; return { order: order({ status: 'paid', state: 'confirmed' }), outcome: 'paid', credited: true }; },
+    });
+    await waitFor(() => screen.getByTestId('saspay-candidate'));
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôler et rattacher' }));
+    expect(screen.getByText('Une ressemblance n’est pas une preuve')).toBeTruthy();
+    const confirm = screen.getByRole('button', { name: 'Vérifier et rattacher' }) as HTMLButtonElement;
+    expect((screen.getByLabelText(/^Identifiant de la transaction SasPay/) as HTMLInputElement).value).toBe(TX);
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(NOTE), { target: { value: 'trop court' } });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText(NOTE), { target: { value: 'court' } });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(NOTE), { target: { value: 'Même numéro, même montant, 5 s après la demande' } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(calls('resolve_review')).toHaveLength(1));
+    expect(calls('resolve_review')[0][1]).toEqual({
+      action: 'resolve_review', product: 'studio', order_id: ORDER_ID, payment_id: TX, note: 'Même numéro, même montant, 5 s après la demande',
+    });
+    await waitFor(() => expect(screen.getByText(/confirmé par SasPay, achat livré/)).toBeTruthy());
+    await waitFor(() => expect(screen.queryByTestId('saspay-unconfirmed-line')).toBeNull());
+    // La liste des paiements est relue après la décision.
+    expect(rpcNamed('vyora_admin_payments').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('rattachement refusé par le serveur (montant différent) : message en clair, rien n’est annoncé comme fait', async () => {
+    panel(() => ({ ...HEALTH, unconfirmed: [line()] }), {}, {
+      resolve_review: () => { throw new AppError('Le montant de cette transaction ne correspond pas à la commande. Rien n’a été rattaché.', 'PAYMENT_REVIEW_MISMATCH'); },
+    });
+    await waitFor(() => screen.getByTestId('saspay-unconfirmed-line'));
+    fireEvent.click(screen.getByRole('button', { name: 'Rattacher un paiement' }));
+    const confirm = screen.getByRole('button', { name: 'Vérifier et rattacher' }) as HTMLButtonElement;
+    fireEvent.change(screen.getByLabelText(NOTE), { target: { value: 'Transaction vue au tableau de bord SasPay' } });
+    expect(confirm.disabled).toBe(true); // pas d'identifiant
+    fireEvent.change(screen.getByLabelText(/^Identifiant de la transaction SasPay/), { target: { value: 'abc' } });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/^Identifiant de la transaction SasPay/), { target: { value: TX } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.getByText(/Rien n’a été rattaché/)).toBeTruthy());
+    expect(screen.getByText('Rattachement refusé')).toBeTruthy();
+    expect(screen.queryByText(/achat livré/)).toBeNull();
+    expect(screen.getByTestId('saspay-unconfirmed-line')).toBeTruthy();
+  });
+
+  it('paiement rattaché mais pas encore confirmé par SasPay : annoncé comme non livré', async () => {
+    panel(() => ({ ...HEALTH, unconfirmed: [line()] }), {}, {
+      resolve_review: () => ({ order: order(), outcome: 'pending', credited: false }),
+    });
+    await waitFor(() => screen.getByTestId('saspay-unconfirmed-line'));
+    fireEvent.click(screen.getByRole('button', { name: 'Rattacher un paiement' }));
+    fireEvent.change(screen.getByLabelText(/^Identifiant de la transaction SasPay/), { target: { value: TX } });
+    fireEvent.change(screen.getByLabelText(NOTE), { target: { value: 'Transaction vue au tableau de bord SasPay' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Vérifier et rattacher' }));
+    await waitFor(() => expect(screen.getByText(/rien n’est livré, il sera revérifié automatiquement/)).toBeTruthy());
+  });
+
+  it('clore sans encaissement : attestation cochée et note obligatoires ; avertit s’il existe des transactions ressemblantes', async () => {
+    let open = [line({ candidates: [candidate()] })];
+    panel(() => ({ ...HEALTH, unconfirmed: open }), {
+      vyora_admin_close_unconfirmed: () => { open = []; return { status: 'cancelled' }; },
+    });
+    await waitFor(() => screen.getByTestId('saspay-unconfirmed-line'));
+    fireEvent.click(screen.getByRole('button', { name: 'Aucun encaissement' }));
+    const confirm = screen.getByRole('button', { name: 'Clore la commande' }) as HTMLButtonElement;
+    expect(screen.getByText('1 transaction(s) ressemblante(s) trouvée(s)')).toBeTruthy();
+    expect(screen.getByText(/il risque de payer deux fois/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(CHECKED), { target: { value: 'Aucune transaction de ce numéro le 13/11 au tableau de bord' } });
+    expect(confirm.disabled).toBe(true); // attestation non cochée
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(confirm.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText(CHECKED), { target: { value: 'rien vu' } });
+    expect(confirm.disabled).toBe(true); // note trop courte
+    fireEvent.change(screen.getByLabelText(CHECKED), { target: { value: 'Aucune transaction de ce numéro le 13/11 au tableau de bord' } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(rpcNamed('vyora_admin_close_unconfirmed')).toHaveLength(1));
+    expect(rpcNamed('vyora_admin_close_unconfirmed')[0][1]).toEqual({
+      p_product: 'studio', p_order_id: ORDER_ID, p_note: 'Aucune transaction de ce numéro le 13/11 au tableau de bord',
+    });
+    await waitFor(() => expect(screen.getByText(/close sans encaissement : le client peut de nouveau payer/)).toBeTruthy());
+    expect(calls('resolve_review')).toHaveLength(0);
+  });
+
+  it('encore dans la fenêtre de rejeu : la clôture n’est pas proposée, le rattachement oui', async () => {
+    panel(() => ({ ...HEALTH, unconfirmed: [line({ in_review: false, review_at: null })] }));
+    await waitFor(() => screen.getByTestId('saspay-unconfirmed-line'));
+    expect(screen.getByTestId('saspay-unconfirmed').textContent).toContain('Rejeu encore possible');
+    expect(screen.queryByRole('button', { name: 'Aucun encaissement' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Rattacher un paiement' })).toBeTruthy();
+  });
+
+  it('refus de la base à la clôture : message en clair, fenêtre conservée', async () => {
+    panel(() => ({ ...HEALTH, unconfirmed: [line()] }), {
+      vyora_admin_close_unconfirmed: () => { throw new Error('payment_not_under_review'); },
+    });
+    await waitFor(() => screen.getByTestId('saspay-unconfirmed-line'));
+    fireEvent.click(screen.getByRole('button', { name: 'Aucun encaissement' }));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText(CHECKED), { target: { value: 'Aucune transaction trouvée chez SasPay' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clore la commande' }));
+    await waitFor(() => expect(screen.getByText('Clôture refusée')).toBeTruthy());
+    expect(screen.getByText(/n’est pas \(ou plus\) en rapprochement manuel/)).toBeTruthy();
+    expect(screen.queryByText(/le client peut de nouveau payer/)).toBeNull();
+  });
+
+  it('liste des paiements : la commande est « en vérification », sans « Revérifier » ni « Rembourser »', async () => {
+    edge({ balances: () => ({ configured: false, mode: null, balances: [], message: null }) });
+    adminRpc({
+      vyora_admin_payments: [order({ status: 'pending', failure_code: 'manual_review', user_email: 'client@vyora.test', provider_payment_id: null, state: undefined })],
+      vyora_admin_payment_health: HEALTH,
+    });
+    render(<SasPayPanel />);
+    await waitFor(() => screen.getByTestId('saspay-order'));
+    const text = screen.getByTestId('saspay-order').textContent ?? '';
+    expect(text).toContain('En vérification');
+    expect(text).toContain('on ignore si le client a été débité');
+    expect(text).not.toContain('Motif : manual_review');
+    expect(screen.queryByRole('button', { name: 'Revérifier' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Rembourser' })).toBeNull();
   });
 });

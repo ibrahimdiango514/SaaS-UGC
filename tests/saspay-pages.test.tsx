@@ -116,6 +116,23 @@ describe('page Crédits Studio', () => {
     expect(follow).toHaveLength(1);
     expect(follow[0].getAttribute('href')).toBe('/app/paiement/retour?produit=studio&commande=a2');
   });
+
+  it('paiement resté sans réponse : « En vérification », suivi possible, consigne de ne pas repayer', async () => {
+    mockRpc({ vyora_my_payments: [
+      { product: 'studio', id: 'r1', status: 'pending', failure_code: 'initiation_unconfirmed', amount: '5000.00', currency: 'XOF', internal_reference: 'VYS-9', label: 'Pack Creator', created_at: '2026-11-12T10:00:00Z', has_payment: false },
+      { product: 'studio', id: 'r2', status: 'cancelled', failure_code: 'unconfirmed_closed', amount: '5000.00', currency: 'XOF', internal_reference: 'VYS-8', label: 'Pack Creator', created_at: '2026-11-11T10:00:00Z', has_payment: false },
+    ] });
+    invokeEdge.mockResolvedValue(studioOptions(false));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Paiements en ligne')).toBeTruthy());
+    expect(screen.getByText('En vérification')).toBeTruthy();
+    expect(screen.queryByText('À effectuer')).toBeNull();
+    expect(screen.getByText('Annulé')).toBeTruthy();
+    expect(screen.getByTestId('studio-review').textContent).toContain('ne payez pas une seconde fois');
+    const follow = screen.getAllByText('Suivre');
+    expect(follow).toHaveLength(1);
+    expect(follow[0].getAttribute('href')).toBe('/app/paiement/retour?produit=studio&commande=r1');
+  });
 });
 
 describe('page Tarifs Studio — remboursements', () => {

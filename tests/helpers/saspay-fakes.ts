@@ -379,10 +379,11 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       if (init && init.resolvedAt === null) { init.outcome = 'unknown'; init.lastError = error.slice(0, 80); }
     },
 
-    async unconfirmedOrders(limit) {
+    async unconfirmedOrders(limit, dueOnly) {
       const rows: UnconfirmedOrder[] = [];
       for (const init of initiations.values()) {
-        if (!uncertain(init)) continue;
+        // Comme en base : pour un webhook, toute tentative non soldée (appel en vol compris).
+        if (dueOnly ? !uncertain(init) : init.resolvedAt !== null) continue;
         const order = orders.get(init.orderId) as OrderRecord;
         rows.push({
           product: init.product, orderId: init.orderId, internalReference: order.internal_reference,

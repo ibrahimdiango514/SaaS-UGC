@@ -300,7 +300,11 @@ describe('réponse de création perdue — relances du client', () => {
   it('identifiant reçu mais impossible à enregistrer : même traitement qu’une réponse perdue', async () => {
     const ctx = setup();
     ctx.failAttach(1);
-    await expectError(ctx.service.create(alice, softpay('idem-att-0001')), 'PAYMENT_STORAGE_UNAVAILABLE', 503);
+    // Le client reçoit peut-être la demande sur son téléphone : pas d'« erreur », l'état réel.
+    const first = await ctx.service.create(alice, softpay('idem-att-0001'));
+    expect(first.next).toBe('review');
+    expect(first.order).toMatchObject({ state: 'review', retry_allowed: true });
+    expect(first.message).toMatch(/Ne payez pas une seconde fois/);
     expect(ctx.saspay.transactions.size).toBe(1);
     expect(ctx.only()).toMatchObject({ status: 'pending', provider_payment_id: null, failure_code: 'initiation_unconfirmed' });
     expect(ctx.initiations.get(ctx.only().id)).toMatchObject({ outcome: 'unknown', lastError: 'attach_failed' });
@@ -308,6 +312,35 @@ describe('réponse de création perdue — relances du client', () => {
     const retry = await ctx.service.create(alice, softpay('idem-att-0001'));
     expect(retry.next).toBe('await_confirmation');
     expect(ctx.saspay.transactions.size).toBe(1);
+  });
+
+  it('erreur imprévue pendant l’envoi (ni refus ni réponse) : issue inconnue, jamais « erreur, rien n’a été débité »', async () => {
+    const fake = createFakeStore({ admins: [boss.id] });
+    const saspay = createFakeSasPay();
+    const real = createSasPayClient({ secretKey: TEST_KEY, fetcher: saspay.fetcher });
+    let broken = true;
+    // La requête part réellement, puis le traitement de la réponse casse de façon imprévue.
+    const client = { ...real, softpay: async (...args: Parameters<typeof real.softpay>) => {
+      const result = await real.softpay(...args);
+      if (broken) throw new TypeError('lecture de la réponse impossible');
+      return result;
+    } };
+    const service = createPaymentService({
+      store: fake.store, client, webhookSecret: WEBHOOK_SECRET, now: () => fake.clock.now, log: () => undefined,
+      sleep: () => new Promise((resolve) => setTimeout(resolve, 0)),
+    });
+    const first = await service.create(alice, softpay('idem-bug-0001'));
+    expect(first.next).toBe('review');
+    expect(first.message).toMatch(/Ne payez pas une seconde fois/);
+    expect(saspay.transactions.size).toBe(1);
+    const row = [...fake.orders.values()][0] as OrderRecord;
+    expect(row).toMatchObject({ status: 'pending', provider_payment_id: null, failure_code: 'initiation_unconfirmed' });
+    expect(fake.initiations.get(row.id)).toMatchObject({ outcome: 'unknown', lastError: 'unexpected_error' });
+    await expect(service.create(alice, softpay('idem-bug-0002'))).rejects.toMatchObject({ code: 'PAYMENT_UNDER_REVIEW' });
+    broken = false;
+    const retry = await service.create(alice, softpay('idem-bug-0001'));
+    expect(retry.next).toBe('await_confirmation');
+    expect(saspay.transactions.size).toBe(1);
   });
 
   it('après une tentative sans réponse, un refus d’accès (401/403) ne prouve rien : la commande reste en vérification', async () => {
@@ -353,6 +386,41 @@ describe('réponse de création perdue — le client ne revient jamais', () => {
     expect(ctx.credits.studio.get(alice.id)).toBe(27);
     // Le client peut de nouveau acheter.
     expect((await ctx.service.create(alice, softpay('idem-next-0001'))).next).toBe('await_confirmation');
+  });
+
+  it('webhook reçu alors que l’appel de création est encore en vol : rattaché et livré une fois, la réponse tardive ne change rien', async () => {
+    const fake = createFakeStore({ admins: [boss.id] });
+    const saspay = createFakeSasPay();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    // SasPay crée le paiement tout de suite ; sa réponse, elle, traîne.
+    const fetcher: typeof fetch = async (input, init) => {
+      const response = await saspay.fetcher(input, init);
+      if (String(input).includes('/payments/softpay/')) await held;
+      return response;
+    };
+    const service = createPaymentService({
+      store: fake.store, client: createSasPayClient({ secretKey: TEST_KEY, fetcher }), webhookSecret: WEBHOOK_SECRET,
+      now: () => fake.clock.now, log: () => undefined, sleep: () => new Promise((resolve) => setTimeout(resolve, 0)),
+    });
+    const creating = service.create(alice, softpay('idem-fly-0001'));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const order = [...fake.orders.values()][0] as OrderRecord;
+    expect(order.provider_payment_id).toBeNull();
+    expect(fake.initiations.get(order.id)).toMatchObject({ outcome: 'started' });
+    const txId = [...saspay.transactions.keys()][0];
+    // Le client valide aussitôt sur son téléphone : le webhook devance notre propre réponse.
+    saspay.setTransaction(txId, { status: 'SUCCESS' });
+    const signed = await signedWebhook({ event: 'transaction.success', data: { id: txId, status: 'SUCCESS' } },
+      { timestamp: Math.floor(fake.clock.now / 1000) });
+    expect(await service.webhook(signed.raw, signed)).toMatchObject({ outcome: 'paid', credited: true });
+    expect(fake.credits.studio.get(alice.id)).toBe(27);
+    release();
+    const created = await creating;
+    expect(created.order.state).toBe('confirmed');
+    expect(fake.credits.studio.get(alice.id)).toBe(27);
+    expect(order).toMatchObject({ status: 'paid', provider_payment_id: txId });
+    expect(saspay.transactions.size).toBe(1);
   });
 
   it('SasPay ne restitue que les métadonnées : la référence y est reconnue aussi', async () => {
@@ -593,16 +661,18 @@ describe('réponse de création perdue — décision de l’administrateur', () 
     expect(ctx.calls).not.toContain('reviewAttached');
   });
 
-  it('refus : la transaction ne correspond pas (montant, devise, sens, autre commande, antérieure, inconnue)', async () => {
+  it('refus : la transaction ne correspond pas (montant, devise, sens, autre commande, antérieure, trop tardive, inconnue)', async () => {
     const ctx = setup();
     const { order } = await inReview(ctx);
     const cheap = ctx.saspay.addTransaction({ requested_amount: '500.00' });
     const euro = ctx.saspay.addTransaction({ requested_amount: '5000.00', currency: 'EUR' });
     const payout = ctx.saspay.addTransaction({ requested_amount: '5000.00', flow_direction: 'OUTBOUND' });
     const old = ctx.saspay.addTransaction({ requested_amount: '5000.00', created_at: new Date(NOW - 3_600_000).toISOString() });
+    // Créée bien après la fin de nos envois : elle ne peut pas venir de cette commande.
+    const late = ctx.saspay.addTransaction({ requested_amount: '5000.00', created_at: new Date(ctx.clock.now + 2 * 3_600_000).toISOString() });
     ctx.saspay.omitVerifyDescriptions(false);
     const foreign = ctx.saspay.addTransaction({ requested_amount: '5000.00', description: 'Pack — VYS-0000000000000000000000000000FFFF' });
-    for (const id of [cheap, euro, payout, old, foreign]) {
+    for (const id of [cheap, euro, payout, old, late, foreign]) {
       const error = await expectError(attach(ctx, order.id, id), 'PAYMENT_REVIEW_MISMATCH', 422);
       expect(error.message).toContain('Rien n’a été rattaché');
     }

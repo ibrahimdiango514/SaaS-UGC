@@ -13,7 +13,10 @@
 // La spécification ne décrit la RÉPONSE de `GET /transactions/` que par un
 // exemple, sans schéma : aucun champ n'y est garanti. Les paramètres de requête,
 // eux, sont spécifiés (`status`, `transaction_type`, `created_at__gte`,
-// `page_size` ≤ 200, `cursor`). Voir `listSuccessfulPayments`.
+// `page_size` ≤ 200, `cursor`, `search`). Voir `listSuccessfulPayments` et
+// `searchPayments` — cette dernière ne sert qu'à PROPOSER des transactions à un
+// administrateur (recherche par numéro du payeur) : SasPay n'offre aucune
+// recherche par référence marchande, un résultat n'est donc jamais une preuve.
 //
 // Aucun décaissement, aucun transfert, aucune « recharge » : ces routes ne sont
 // pas implémentées. La clé secrète n'apparaît jamais dans un message d'erreur.

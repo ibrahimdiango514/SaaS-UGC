@@ -233,6 +233,23 @@ assert.deepEqual(an.details.candidates, candidates);
 assert.equal((await init(a1)).search_count, 1);
 ok('liste de recherche cadencée ; les transactions candidates sont consignées dans l’alerte — rien n’est livré');
 
+// Appel encore en vol (moins de 60 s) : pas « incertain » pour la recherche, mais un webhook doit pouvoir le retrouver.
+const flyer = await customer('vol');
+const fly = await studio(flyer);
+assert.equal((await begin('studio', fly)).allowed, true);
+assert.equal((await init(fly)).outcome, 'started');
+assert.ok(!(await rpc(svc, 'vyora_payment_unconfirmed', { p_limit: 25, p_due_only: true })).some((x) => x.order_id === fly.id));
+const forHook = await rpc(svc, 'vyora_payment_unconfirmed', { p_limit: 200, p_due_only: false });
+assert.ok(forHook.some((x) => x.order_id === fly.id && x.internal_reference === fly.internal_reference));
+// Ancienne de plus de 30 jours : plus recherchée, mais toujours retrouvable par un webhook renvoyé à la main.
+await ageInit(a1, `first_attempt_at = now() - interval '45 days', last_attempt_at = now() - interval '45 days'`);
+assert.ok(!(await rpc(svc, 'vyora_payment_unconfirmed', { p_limit: 25, p_due_only: true })).some((x) => x.order_id === a1.id));
+assert.ok((await rpc(svc, 'vyora_payment_unconfirmed', { p_limit: 200, p_due_only: false })).some((x) => x.order_id === a1.id));
+await ageInit(a1, `first_attempt_at = now() - interval '20 minutes', last_attempt_at = now() - interval '15 minutes'`);
+assert.ok(!forHook.some((x) => x.order_id === idle.id));
+await settle('studio', fly, null, null, 'FAILED', 'provider_rejected');
+ok('webhook entrant : toute tentative non soldée est retrouvable (appel encore en vol, ou vieille de plus de 30 jours)');
+
 const batch = await rpc(svc, 'vyora_payment_reconcile_batch', { p_limit: 20 });
 assert.ok(batch.unconfirmed.some((x) => x.order_id === a1.id));
 assert.ok(!batch.due.some((x) => x.order_id === a1.id));

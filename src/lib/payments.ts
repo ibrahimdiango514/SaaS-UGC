@@ -15,8 +15,18 @@ export type PaymentFlow = 'softpay' | 'checkout';
  * États présentés à l'utilisateur. `unapplied` : paiement encaissé mais non
  * appliqué (Business Grow, abonnement incompatible au moment du paiement) —
  * rien n'a été livré, le support rembourse. État final.
+ * `review` : la demande Mobile Money est partie, mais SasPay n'a pas répondu —
+ * on ignore si le client a été sollicité ou débité. Ni payée, ni échouée :
+ * aucun autre paiement n'est possible tant que ce doute n'est pas levé.
  */
-export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled' | 'unapplied';
+export type PaymentState = 'todo' | 'pending' | 'review' | 'confirmed' | 'failed' | 'cancelled' | 'unapplied';
+
+/** Motifs posés par la base sur une commande dont l'issue de création est inconnue. */
+export const REVIEW_CODES: readonly string[] = ['initiation_unconfirmed', 'manual_review'];
+
+/** Message par défaut d'une commande en vérification (le serveur fournit le sien quand il répond). */
+export const REVIEW_MESSAGE = 'Le service de paiement n’a pas confirmé cette demande. Ne payez pas une seconde fois : '
+  + 'si vous avez été débité, votre achat sera livré ; sinon la commande sera annulée sans frais.';
 
 /** Motifs de refus d'activation d'un encaissement (posés par la base, définitifs). */
 export const UNAPPLIED_CODES: readonly string[] = ['business_plan_change_not_supported', 'business_subscription_managed_elsewhere'];
@@ -101,6 +111,8 @@ export interface PaymentOrder {
   charged_amount?: string | null;
   net_amount?: string | null;
   failure_code?: string | null;
+  /** Commande en vérification : la même demande peut-elle encore être relancée (sans nouveau paiement) ? */
+  retry_allowed?: boolean;
   created_at?: string;
   paid_at?: string | null;
   /** Listes lues en base : un paiement SasPay est-il rattaché à la commande ? */
@@ -135,8 +147,10 @@ export type RefundState = 'credits_recovered' | 'settled';
 
 export interface CreatePaymentResult {
   order: PaymentOrder;
-  next: 'await_confirmation' | 'redirect' | 'done' | 'failed';
+  /** `review` : SasPay n'a pas répondu — issue inconnue, voir `message`. */
+  next: 'await_confirmation' | 'redirect' | 'done' | 'failed' | 'review';
   reused: boolean;
+  message?: string | null;
 }
 
 export interface PaymentStatusResult {
@@ -275,7 +289,49 @@ export async function adminSettleRefund(product: PaymentProduct, orderId: string
 }
 
 export type AnomalyKind = 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found'
-  | 'subscription_conflict' | 'sweep_unreliable';
+  | 'subscription_conflict' | 'sweep_unreliable' | 'initiation_unconfirmed';
+
+/** Anomalies qui ne se « classent » pas : elles exigent une décision sur la commande elle-même. */
+export const DECISION_ANOMALIES: readonly string[] = ['initiation_unconfirmed'];
+
+/**
+ * Transaction SasPay qui RESSEMBLE à une commande sans réponse (montant, devise,
+ * date). Ce n'est pas une preuve : SasPay ne restitue aucune référence marchande
+ * recherchable. Seul l'administrateur peut la rattacher, après contrôle.
+ */
+export interface ReviewCandidate {
+  id: string;
+  reference?: string | null;
+  status?: string | null;
+  amount?: string | null;
+  currency?: string | null;
+  created_at?: string | null;
+  /** `webhook` : annoncée par SasPay ; `search` : trouvée par recherche sur le numéro du payeur. */
+  source?: 'webhook' | 'search' | string | null;
+  /** Le numéro annoncé par SasPay est celui saisi par le client. */
+  msisdn_match?: boolean | null;
+}
+
+/** Commande dont la création Mobile Money est restée sans réponse. */
+export interface UnconfirmedPayment {
+  product: PaymentProduct;
+  order_id: string;
+  internal_reference: string;
+  user_email: string | null;
+  amount: string | number;
+  currency: string;
+  network: string | null;
+  payer_msisdn_masked: string | null;
+  attempts: number;
+  first_attempt_at: string | null;
+  last_attempt_at: string | null;
+  /** Rapprochement manuel ouvert : plus aucun rejeu automatique, décision attendue. */
+  in_review: boolean;
+  review_at: string | null;
+  last_error: string | null;
+  candidates: ReviewCandidate[];
+  last_search_at: string | null;
+}
 
 export interface PaymentAnomaly {
   id: string;
@@ -318,13 +374,45 @@ export interface PaymentHealth {
   refunds_awaiting_settlement: number;
   runs: ReconcileRun[];
   anomalies: PaymentAnomaly[];
+  /** Créations Mobile Money sans réponse, non soldées. */
+  unconfirmed: UnconfirmedPayment[];
 }
 
 export async function adminPaymentHealth(): Promise<PaymentHealth | null> {
   const row = await rpc<PaymentHealth | null>('vyora_admin_payment_health');
   // Réponse inattendue : « inconnu », jamais un état sain inventé.
   if (!row || typeof row !== 'object' || Array.isArray(row) || !row.cron || !Array.isArray(row.runs)) return null;
-  return { ...row, anomalies: Array.isArray(row.anomalies) ? row.anomalies : [] };
+  const unconfirmed = (Array.isArray(row.unconfirmed) ? row.unconfirmed : [])
+    .map((line) => ({ ...line, candidates: Array.isArray(line.candidates) ? line.candidates : [] }));
+  return { ...row, anomalies: Array.isArray(row.anomalies) ? row.anomalies : [], unconfirmed };
+}
+
+export interface ReviewResolution {
+  order: PaymentOrder;
+  outcome: string;
+  credited: boolean;
+}
+
+/**
+ * Rattache une transaction SasPay à une commande en rapprochement manuel. Le
+ * serveur relit la transaction chez SasPay et refuse tout écart (montant,
+ * devise, sens, date, autre référence) : rien n'est livré sans `SUCCESS` vérifié.
+ */
+export function adminAttachReviewPayment(input: {
+  product: PaymentProduct; orderId: string; paymentId: string; note: string;
+}): Promise<ReviewResolution> {
+  return invokeEdge<ReviewResolution>(FUNCTION, {
+    action: 'resolve_review', product: input.product, order_id: input.orderId, payment_id: input.paymentId, note: input.note,
+  });
+}
+
+/**
+ * Clôt une commande en rapprochement manuel quand l'administrateur atteste
+ * qu'AUCUN encaissement n'existe chez SasPay. Le client peut alors repayer. Un
+ * encaissement vérifié plus tard rouvrirait et livrerait la commande.
+ */
+export function adminCloseUnconfirmed(product: PaymentProduct, orderId: string, note: string): Promise<unknown> {
+  return rpc<unknown>('vyora_admin_close_unconfirmed', { p_product: product, p_order_id: orderId, p_note: note });
 }
 
 export function adminResolveAnomaly(anomalyId: string, note: string): Promise<PaymentAnomaly> {
@@ -339,6 +427,7 @@ export const ANOMALY_LABELS: Record<string, string> = {
   payment_not_found: 'Paiement introuvable chez SasPay',
   subscription_conflict: 'Paiement encaissé mais non appliqué à l’abonnement',
   sweep_unreliable: 'Rattrapage des paiements incomplet',
+  initiation_unconfirmed: 'Demande de paiement restée sans réponse de SasPay',
 };
 
 /** Ce qu'il faut faire, en clair, face à chaque anomalie. */
@@ -349,6 +438,7 @@ export const ANOMALY_ADVICE: Record<string, string> = {
   amount_mismatch: 'Rien n’a été livré. Rendez le montant encaissé au client ou demandez-lui de repasser commande.',
   payment_not_found: 'SasPay ne connaît pas cette transaction. La commande est close après 24 h ; un succès tardif la rouvrirait.',
   subscription_conflict: 'Le client a payé, mais son abonnement en cours ne permettait pas d’appliquer ce paiement : rien n’a été livré ni modifié. Remboursez-le intégralement depuis la liste des paiements Business Grow (« Rembourser »), rendez l’argent, puis attestez le versement : l’anomalie se classera seule.',
+  initiation_unconfirmed: 'La demande Mobile Money est partie, mais SasPay n’a jamais répondu : on ignore si le client a été débité. Rien n’a été livré et le client ne peut lancer aucun autre paiement. Cherchez la transaction dans le tableau de bord SasPay (numéro, montant, heure), puis tranchez dans « Paiements sans réponse » : rattachez-la, ou attestez qu’aucun encaissement n’existe.',
   sweep_unreliable: 'La liste des transactions SasPay n’a pas permis de rechercher les paiements dont la réponse s’est perdue (libellé absent, ou trop de transactions à lire). Les paiements rattachés à une commande restent revérifiés un par un. Comparez les encaissements récents du tableau de bord SasPay avec la liste des paiements.',
 };
 
@@ -397,10 +487,13 @@ export function paymentStateOf(order: {
   status?: string | null; state?: string | null; has_payment?: boolean | null;
   provider_payment_id?: string | null; provider_session_id?: string | null; failure_code?: string | null;
 }): PaymentState {
-  if (order.state === 'todo' || order.state === 'pending' || order.state === 'confirmed'
+  if (order.state === 'todo' || order.state === 'pending' || order.state === 'review' || order.state === 'confirmed'
     || order.state === 'failed' || order.state === 'cancelled' || order.state === 'unapplied') return order.state;
   if (order.status !== 'paid' && order.status !== 'refunded'
     && typeof order.failure_code === 'string' && UNAPPLIED_CODES.includes(order.failure_code)) return 'unapplied';
+  // Création sans réponse : ni « à effectuer » (le client a peut-être payé), ni échouée.
+  if ((order.status === 'pending' || order.status === 'processing')
+    && typeof order.failure_code === 'string' && REVIEW_CODES.includes(order.failure_code)) return 'review';
   switch (order.status) {
     case 'paid': case 'refunded': return 'confirmed';
     case 'failed': return 'failed';
@@ -417,6 +510,7 @@ function withState(order: PaymentOrder): PaymentOrder {
 export const PAYMENT_STATE_LABELS: Record<PaymentState, string> = {
   todo: 'À effectuer',
   pending: 'En attente',
+  review: 'En vérification',
   confirmed: 'Confirmé',
   failed: 'Échoué',
   cancelled: 'Annulé',
@@ -424,10 +518,10 @@ export const PAYMENT_STATE_LABELS: Record<PaymentState, string> = {
 };
 
 export const PAYMENT_STATE_TONES: Record<PaymentState, string> = {
-  todo: 'neutral', pending: 'warning', confirmed: 'success', failed: 'danger', cancelled: 'danger', unapplied: 'warning',
+  todo: 'neutral', pending: 'warning', review: 'warning', confirmed: 'success', failed: 'danger', cancelled: 'danger', unapplied: 'warning',
 };
 
-/** Un paiement terminé n'a plus besoin d'être interrogé. */
+/** Un paiement terminé n'a plus besoin d'être interrogé. (`review` n'est PAS final : il peut encore être payé.) */
 export function isFinalState(state: PaymentState): boolean {
   return state === 'confirmed' || state === 'failed' || state === 'cancelled' || state === 'unapplied';
 }

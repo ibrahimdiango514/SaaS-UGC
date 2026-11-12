@@ -13,7 +13,7 @@ import { Banner, Button, Card } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
 import {
-  PAYMENT_STATE_LABELS, UNAPPLIED_MESSAGE, formatAmount, getPaymentStatus, isFinalState, isOrderId, isPaymentProduct,
+  PAYMENT_STATE_LABELS, REVIEW_MESSAGE, UNAPPLIED_MESSAGE, formatAmount, getPaymentStatus, isFinalState, isOrderId, isPaymentProduct,
   type PaymentOrder,
 } from '../lib/payments';
 
@@ -153,6 +153,19 @@ export default function PaymentReturn() {
               </>
             )}
 
+            {order && state === 'review' && (
+              <>
+                <p className="flex items-center gap-2 text-base font-semibold text-amber-100" data-testid="payment-review">
+                  <Clock size={17} /> Paiement en cours de vérification
+                </p>
+                <p className="text-sm leading-relaxed text-slate-300">{notice || REVIEW_MESSAGE}</p>
+                <p className="text-[12px] text-slate-400">
+                  Ce paiement n’est ni confirmé ni refusé. Ne payez pas une seconde fois : aucun autre paiement ne peut être
+                  lancé tant que celui-ci n’est pas confirmé ou annulé. Conservez la référence ci-dessous.
+                </p>
+              </>
+            )}
+
             {order && (state === 'pending' || state === 'todo') && (
               <>
                 <p className="flex items-center gap-2 text-base font-semibold text-amber-100">
@@ -174,7 +187,7 @@ export default function PaymentReturn() {
               </dl>
             )}
 
-            {notice && !isFinalState(state ?? 'pending') && <p className="text-[12px] text-amber-200">{notice}</p>}
+            {notice && state !== 'review' && !isFinalState(state ?? 'pending') && <p className="text-[12px] text-amber-200">{notice}</p>}
 
             {timedOut && (
               <Banner tone="info" title="Toujours en attente">

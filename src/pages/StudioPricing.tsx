@@ -356,8 +356,13 @@ export default function StudioPricing() {
                 {refundBadge(row)
                   ? <Badge tone={refundBadge(row)?.tone}>{refundBadge(row)?.label}{row.refund_amount ? ` · ${formatAmount(row.refund_amount, row.currency)}` : ''}</Badge>
                   : <Badge tone={PAYMENT_STATE_TONES[row.state]}>{PAYMENT_STATE_LABELS[row.state]}</Badge>}
-                {(row.state === 'pending' || row.state === 'todo') && (
+                {(row.state === 'pending' || row.state === 'todo' || row.state === 'review') && (
                   <Link to={`/app/paiement/retour?produit=studio&commande=${row.id}`} className="text-cyan-300 hover:text-white">Suivre</Link>
+                )}
+                {row.state === 'review' && (
+                  <p className="w-full text-[11px] text-amber-200" data-testid="studio-review">
+                    Paiement en cours de vérification : ne payez pas une seconde fois. Aucun autre paiement ne peut être lancé d’ici là.
+                  </p>
                 )}
               </li>
             ))}

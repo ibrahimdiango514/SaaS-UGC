@@ -151,7 +151,10 @@ export interface PaymentStore {
   beginInitiation(product: Product, orderId: string, request: SoftpayRequest): Promise<InitiationTicket>;
   /** L'appel s'est terminé sans issue certaine. */
   initiationUnknown(product: Product, orderId: string, error: string): Promise<void>;
-  /** Commandes incertaines ; `dueOnly` : seulement celles dont la recherche SasPay est due. */
+  /**
+   * `dueOnly` : commandes incertaines dont la recherche SasPay est due.
+   * Sinon : toutes les tentatives non soldées, appel encore en vol compris.
+   */
   unconfirmedOrders(limit: number, dueOnly: boolean): Promise<UnconfirmedOrder[]>;
   noteCandidates(product: Product, orderId: string, candidates: PaymentCandidate[]): Promise<void>;
   /** Ajoute une transaction annoncée par un webhook aux candidates d'une commande incertaine. */
@@ -754,8 +757,11 @@ export function createPaymentService(deps: PaymentServiceDeps) {
   }
 
   /** Vue renvoyée au client pour une commande dont la création softpay est sans réponse. */
-  async function unconfirmedView(order: OrderRecord, reused: boolean) {
-    const current = await store.getOrder(order.product, order.id).catch(() => null) ?? order;
+  async function unconfirmedView(order: OrderRecord, reused: boolean, sent = false) {
+    // `sent` : la demande est partie vers SasPay. Si la commande ne peut pas être
+    // relue, elle est présentée « en vérification » — jamais « à effectuer ».
+    const current = await store.getOrder(order.product, order.id).catch(() => null)
+      ?? (sent ? { ...order, failure_code: 'initiation_unconfirmed' } : order);
     const state = paymentState(current);
     const message = state !== 'review' ? null
       : current.failure_code === 'initiation_unconfirmed' ? UNCONFIRMED_MESSAGE : REVIEW_MESSAGE;
@@ -813,8 +819,14 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         result = await sasPay.softpay(ticket.request, order.internal_reference);
       } catch (error) {
         if (!(error instanceof SasPayError)) {
+          // Erreur imprévue pendant l'appel : la requête est peut-être partie.
+          // Répondre « erreur, rien n'a été débité » serait une affirmation gratuite.
           await store.initiationUnknown(product, order.id, 'unexpected_error').catch(() => undefined);
-          throw error;
+          log('saspay_initiation_failed', {
+            product, order: order.id, flow: 'softpay', code: 'unexpected_error', call: call + 1, certain: false,
+            message: error instanceof Error ? error.message.slice(0, 120) : 'unknown',
+          });
+          return unconfirmedView(order, order.reused, true);
         }
         failure = error;
         const blind = (afterUnknown || sawUncertain) && (error.kind === 'unauthorized' || error.kind === 'forbidden');
@@ -839,10 +851,13 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         return { order: publicOrder(attached), next: nextStep(attached), reused: order.reused, message: null };
       } catch (error) {
         // Le paiement existe chez SasPay mais son identifiant n'a pas pu être
-        // enregistré : même situation qu'une réponse perdue.
+        // enregistré : même situation qu'une réponse perdue. Le client reçoit
+        // peut-être la demande sur son téléphone : on ne lui dit pas « erreur ».
         await store.initiationUnknown(product, order.id, 'attach_failed').catch(() => undefined);
-        log('saspay_attach_failed', { product, order: order.id });
-        throw error;
+        log('saspay_attach_failed', {
+          product, order: order.id, code: error instanceof PaymentError ? error.code : 'unexpected_error',
+        });
+        return unconfirmedView(order, order.reused, true);
       }
     }
 
@@ -859,7 +874,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     // relancer la MÊME demande pendant la fenêtre de rejeu ; ensuite, un
     // administrateur rapproche.
     await store.initiationUnknown(product, order.id, error.code).catch(() => undefined);
-    return unconfirmedView(order, order.reused);
+    return unconfirmedView(order, order.reused, true);
   }
 
   /** Statut d'une commande, revérifié auprès de SasPay si elle n'est pas réglée. */
@@ -1007,7 +1022,9 @@ export function createPaymentService(deps: PaymentServiceDeps) {
   ): Promise<{ product: Product; orderId: string } | null> {
     const sasPay = client;
     if (!sasPay) return null;
-    const open = await store.unconfirmedOrders(25, false);
+    // Toutes les tentatives non soldées, y compris celle dont l'appel de création
+    // est encore en vol : le client peut valider avant que la réponse n'arrive.
+    const open = await store.unconfirmedOrders(200, false);
     if (open.length === 0) return null;
     const tx = await sasPay.verifyPayment(paymentId);
     const reference = provenReference(tx);
@@ -1150,6 +1167,14 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     const orderedAt = Date.parse(String(order.created_at ?? ''));
     if (Number.isFinite(createdAt) && Number.isFinite(orderedAt) && createdAt < orderedAt - 5 * 60_000) {
       throw refuse('Cette transaction est antérieure à la commande.');
+    }
+    // Une transaction créée bien après notre DERNIER envoi ne peut pas venir de
+    // cette commande (elle peut venir d'un autre produit du même compte marchand).
+    const attempt = (await store.unconfirmedOrders(200, false).catch(() => []))
+      .find((o) => o.product === order.product && o.orderId === order.id);
+    const lastSent = attempt ? Date.parse(attempt.lastAttemptAt) : NaN;
+    if (Number.isFinite(createdAt) && Number.isFinite(lastSent) && createdAt > lastSent + 60 * 60_000) {
+      throw refuse('Cette transaction a été créée plus d’une heure après le dernier envoi de la demande : elle ne peut pas en provenir.');
     }
 
     const result = await sync(order, 'verify', paymentId);

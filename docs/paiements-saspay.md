@@ -68,8 +68,10 @@ Un webhook peut se perdre, un client peut fermer sa page. Une tâche pg_cron
 (`vyora-payments-reconcile`, toutes les 5 minutes) appelle
 `public.vyora_payments_reconcile_dispatch()` :
 
-1. **Entretien SQL, sans réseau** : clôt les commandes jamais parvenues à SasPay
-   (expirées depuis 15 min) ; fait expirer les abonnements Business Grow échus
+1. **Entretien SQL, sans réseau** : clôt les commandes pour lesquelles **aucune
+   demande n'est jamais partie** vers SasPay (expirées depuis 15 min) ; fait
+   passer en rapprochement manuel les demandes Mobile Money restées sans
+   réponse (voir § 2 ter — elles ne sont **jamais** closes d'office) ; fait expirer les abonnements Business Grow échus
    depuis plus d'une heure et ramène leur quota à la valeur par défaut (hors
    abonnement).
 2. **S'il n'y a rien à vérifier, elle s'arrête là** : aucun appel sortant.
@@ -82,12 +84,15 @@ Un webhook peut se perdre, un client peut fermer sa page. Une tâche pg_cron
    - au plus une fois par quart d'heure, **balaie les encaissements réussis** des
      72 dernières heures (`GET /transactions/`, 5 pages de 200 au plus) et
      retrouve la commande par sa référence interne (`VYS-…`/`VYB-…`), que VYORA
-     place dans le libellé de chaque paiement. C'est ce qui rattrape une réponse
-     de création perdue. **Ce filet dépend d'un champ que la spécification SasPay
+     place dans le libellé de chaque paiement. C'est l'un des moyens de rattraper
+     une réponse de création perdue (§ 2 ter). **Ce filet dépend d'un champ que la spécification SasPay
      ne garantit pas** (`description` n'apparaît que dans un exemple de réponse) :
      si la liste arrive sans libellé, ou si elle dépasse 1 000 lignes, le passage
      est marqué « partiel », une anomalie `sweep_unreliable` est levée et
-     l'administration l'affiche — le filet ne se déclare jamais sain à tort.
+     l'administration l'affiche — le filet ne se déclare jamais sain à tort ;
+   - pour chaque demande Mobile Money restée sans réponse, **cherche chez SasPay
+     par le numéro du payeur** (`GET /transactions/?search=…`, lecture seule) —
+     voir § 2 ter.
 
 Une seule exécution peut être « en cours » à la fois (index unique en base).
 
@@ -107,6 +112,66 @@ l'administration (onglet SasPay) et notifié une fois aux administrateurs :
 | `order_stuck` | Commande toujours en attente après 24 h | Continue de la revérifier |
 | `subscription_conflict` | Paiement Business Grow encaissé mais inapplicable à l'abonnement en cours | Ne livre rien ; à rembourser intégralement (l'anomalie se classe à l'attestation du versement) |
 | `sweep_unreliable` | Liste SasPay sans libellé, ou tronquée | Passage « partiel » ; les commandes rattachées restent revérifiées une à une |
+| `initiation_unconfirmed` | Demande Mobile Money partie, jamais de réponse, fenêtre de rejeu dépassée | Ne livre rien, ne clôt rien, bloque tout autre paiement du client ; **ne se classe pas** : à trancher (§ 2 ter) |
+
+## 2 ter. Demande Mobile Money restée sans réponse
+
+**Le cas.** VYORA envoie `POST /payments/softpay/` ; SasPay crée peut-être le
+paiement et sollicite le téléphone du client, mais la réponse n'arrive jamais
+(délai dépassé, coupure, 5xx, 409, réponse illisible, identifiant impossible à
+enregistrer). VYORA n'a alors **aucun identifiant de transaction**, et le client
+a peut-être été débité.
+
+**Ce que SasPay permet, d'après sa documentation** (relue en novembre 2026 ;
+aucun essai réel) :
+
+- le **seul** moyen garanti de retrouver ce paiement est de **renvoyer la même
+  requête avec la même `Idempotency-Key`** : SasPay renvoie alors le paiement
+  déjà créé. La durée de conservation de la clé n'est pas documentée ; un corps
+  différent sous la même clé est refusé (409) ; et si la première requête n'a
+  jamais atteint SasPay, ce rejeu **crée** le paiement ;
+- il n'existe **aucune recherche par référence marchande** : ni `search`, ni les
+  filtres de `GET /transactions/` ne portent sur le libellé ou les métadonnées ;
+- le webhook `transaction.success` porte l'identifiant, le montant et le numéro,
+  pas notre référence ; `GET /payments/{id}/verify/` *peut* restituer le libellé
+  ou les métadonnées (présents dans un exemple, dans aucun schéma).
+
+**Ce que fait VYORA.**
+
+| Moment | Comportement |
+| --- | --- |
+| Avant l'envoi | La tentative est enregistrée en base **avec le corps exact** de la requête (`vyora_payment_initiations`). La clé d'idempotence SasPay est la référence interne de la commande. |
+| Pas de réponse | **Un** rejeu immédiat (2 s plus tard), à l'identique. S'il reste sans réponse : la commande passe « **en vérification** » — ni payée, ni échouée. Réponse HTTP 200, `next: "review"`, message « Ne payez pas une seconde fois ». |
+| Refus certain (400, 404, 422, 429 ; 401/403 s'il n'y a pas eu de tentative incertaine avant) | Aucun paiement n'existe : commande « échouée », le client peut recommencer. |
+| Tant que l'issue est inconnue | **Tout nouveau paiement du même utilisateur est refusé** (409 `PAYMENT_UNDER_REVIEW`), Studio et Business Grow confondus, Mobile Money comme page hébergée. Tenu par la base (trigger), pas seulement par le service. |
+| Le client relance | La **même** demande repart (même clé, corps d'origine — même s'il a changé de numéro à l'écran), au plus **4 envois** sur **10 minutes**. Deux clics simultanés n'envoient qu'une requête. |
+| Fenêtre dépassée | Plus aucun envoi. La commande passe en **rapprochement manuel** : alerte `initiation_unconfirmed`, notification aux administrateurs, message au client. Elle n'expire pas. |
+| Le client ne revient jamais | Trois voies, toutes sans son concours : (1) le **webhook** de la transaction inconnue — VYORA la relit chez SasPay et ne la rattache que si SasPay restitue **notre** référence ; (2) le **balayage** des encaissements (même condition) ; (3) la **recherche par numéro** — qui ne fait que proposer. |
+| Transaction qui ressemble (même montant, même devise, bonne période) sans référence restituée | **Jamais rattachée automatiquement.** Consignée comme « candidate » (origine, « même numéro » ou non) pour l'administrateur. Rien n'est livré. |
+
+**Décision de l'administrateur** (Admin → SasPay → « Paiements sans réponse ») :
+
+- **Rattacher un paiement** : il saisit l'identifiant de la transaction SasPay
+  (ou choisit une candidate) et une note. Le serveur relit la transaction chez
+  SasPay et refuse tout écart (montant, devise, sens, transaction antérieure à
+  la commande ou créée plus d'une heure après notre dernier envoi, référence
+  d'une autre commande,
+  transaction déjà rattachée). L'achat n'est livré que si SasPay la déclare
+  `SUCCESS`, par le règlement idempotent habituel.
+- **Aucun encaissement** : possible seulement en rapprochement manuel, avec une
+  attestation cochée et une note. La commande est annulée et le client peut
+  repayer. Si SasPay confirme plus tard un encaissement pour cette commande, elle
+  est **rouverte et livrée**.
+
+Les deux décisions sont tracées dans le journal d'audit. L'alerte ne peut pas
+être « classée » à la main tant que la commande n'est pas tranchée.
+
+**Côté navigateur.** Si c'est la réponse de *notre* serveur qui se perd (coupure
+côté client), la fenêtre de paiement n'affiche pas « paiement non lancé » et ne
+rend pas le formulaire : elle propose seulement de relancer la même demande,
+avec la même clé. Fermer puis rouvrir la fenêtre ne l'oublie pas (tant que la
+page n'est pas rechargée ; après rechargement, c'est le blocage serveur qui
+protège).
 
 ## 2 bis. Remboursements
 
@@ -175,6 +240,10 @@ un webhook de paiement rejoué ne relivre rien.
 | Un webhook arrivé trop tôt reste rejouable | Edge (événement non marqué « traité » tant que SasPay ne confirme pas) |
 | La clé SasPay n'est jamais envoyée ailleurs qu'à SasPay | Edge (curseur de pagination restreint à l'API configurée) |
 | Clé SasPay propre à VYORA | Edge (`VYORA_SASPAY_SECRET_KEY` seule ; aucun repli sur `SASPAY_SECRET_KEY`) |
+| Demande sans réponse : jamais close « non payée » par un automate, jamais « payée » sans `verify` `SUCCESS` | Base (`housekeeping`, `vyora_payment_open_review`) + Edge (règlement inchangé) |
+| Demande sans réponse : aucun second paiement du même client | Base (trigger `vyora_payment_block_unconfirmed`, `begin_initiation` sous verrou par utilisateur) |
+| Rejeu à l'identique seulement (même clé, corps enregistré), borné dans le temps | Base (`vyora_payment_begin_initiation`) + Edge |
+| Une transaction ressemblante n'est jamais rattachée sans preuve ou décision humaine | Edge (`matchUnconfirmed`, `searchUnconfirmed`, `resolveReview`) |
 
 ## 4. Fichiers
 
@@ -190,7 +259,8 @@ un webhook de paiement rejoué ne relivre rien.
 | `src/lib/payments.ts`, `src/components/PaymentDialog.tsx` | Fenêtre de paiement commune |
 | `src/pages/PaymentReturn.tsx` | `/app/paiement/retour` — suivi après la page hébergée |
 | `src/pages/admin/SasPayPanel.tsx` | Admin : soldes (lecture seule) et paiements |
-| `supabase/tests/saspay/` | Banc PostgreSQL local (voir son `README.md`) ; `audit.mjs` = audit de concurrence avant mise en production |
+| `supabase/tests/saspay/` | Banc PostgreSQL local (voir son `README.md`) ; `audit.mjs` = audit de concurrence avant mise en production ; `unconfirmed.mjs` = demandes sans réponse |
+| `tests/saspay-unconfirmed.test.ts` | Demandes sans réponse : service, webhook, tâche planifiée, décision de l'administrateur |
 | `tests/saspay-*.test.ts(x)` | Tests unitaires et d'interface |
 
 ## 5. Mise en service (à faire par un humain, dans cet ordre)
@@ -260,21 +330,26 @@ une hypothèse que les tests locaux n'ont pu que simuler.
 | 10 | Après les achats précédents, attendre un quart d'heure puis ouvrir Admin → SasPay | Aucune alerte « Rattrapage des paiements incomplet », aucune anomalie `sweep_unreliable` ; aucune alerte « sans jeton » ni « Appel HTTP indisponible » | **`GET /transactions/` renvoie bien le libellé** ; scope de la clé suffisant pour lister ; Vault et pg_net en place |
 | 11 | Business Grow (si activé) : ouvrir deux onglets, lancer le paiement de deux formules différentes | Le second est refusé avec un message clair ; un seul paiement créé chez SasPay | Verrou par utilisateur |
 | 12 | Business Grow : payer deux fois la même formule | Fin de période repoussée de 60 jours au total | Prolongation |
+| 13 | Ouvrir la transaction de l'achat n° 1 avec `GET /payments/{id}/verify/` (ou regarder le journal de la fonction) | La réponse contient `description` (`VYS-…`) ou `metadata.internal_reference` | **`verify` restitue notre référence** : condition du rattachement automatique par webhook (§ 2 ter) |
+| 14 | Appeler deux fois `POST /payments/softpay/` avec la même `Idempotency-Key` et le même corps, à 5 min d'intervalle | Même `id` de transaction, une seule demande sur le téléphone | Idempotence réelle de SasPay et durée de conservation au moins égale à la fenêtre de rejeu (10 min) |
+| 15 | `GET /transactions/?search=<numéro du payeur>` avec la clé de VYORA | La transaction de l'achat n° 1 est listée | Scope de la clé suffisant et recherche par numéro effective (sinon : aucune candidate par recherche, seules restent celles du webhook) |
 
-**Si la ligne 10 affiche « Rattrapage des paiements incomplet », ne pas passer en
-production sans décision** : le rattrapage d'une réponse de création perdue ne
-fonctionne pas avec ce compte SasPay. Les autres filets restent actifs (webhook,
-page de retour, revérification ciblée des commandes rattachées, rejeu de la même
-intention avec la clé d'idempotence SasPay), mais un cas resterait sans filet :
-un paiement Mobile Money dont la réponse de création se perd, que le client
-valide tout de même sur son téléphone, sans jamais relancer l'achat ni rouvrir
-la page. L'argent serait encaissé et la commande close « non payée ». (Une
-session hébergée n'a pas ce risque : sans réponse, le client ne reçoit jamais le
-lien de paiement.)
+**Si la ligne 10 affiche « Rattrapage des paiements incomplet », ou si la
+ligne 13 échoue** : aucun rattachement automatique n'est possible pour un
+paiement Mobile Money dont la réponse de création se perd et que le client
+valide sans jamais relancer l'achat. Ce cas n'est plus sans filet — la commande
+reste « en vérification », bloque tout autre paiement et attend la décision d'un
+administrateur (§ 2 ter) — mais **chaque occurrence demandera une intervention
+humaine**. À décider avant la production : accepter cette charge, ou n'ouvrir
+que la page hébergée (qui n'a pas ce risque : sans réponse, le client ne reçoit
+jamais le lien de paiement).
 
-Si la ligne 2 échoue (libellé absent ou tronqué), le balayage ne retrouvera pas
-les paiements dont la réponse de création s'est perdue ; la revérification
-ciblée (ligne 3) reste, elle, indépendante du libellé.
+Si la ligne 2 échoue (libellé absent ou tronqué), même conséquence ; la
+revérification ciblée (ligne 3) reste, elle, indépendante du libellé.
+
+Si la ligne 14 échoue (deux transactions créées), **ne pas activer le Mobile
+Money direct** : le rejeu à l'identique, sur lequel repose toute la reprise,
+provoquerait lui-même un double débit.
 
 Origine supplémentaire (domaine personnalisé) : secret
 `VYORA_PAYMENTS_ALLOWED_ORIGINS`, origines exactes séparées par des virgules.
@@ -309,6 +384,36 @@ recrée).
   passage (5 × 200) sur 72 h, sans reprise au-delà. Dans les deux cas (libellé
   absent, limite atteinte) le passage est « partiel » et signalé — voir la
   ligne 10 de la recette.
+- **Demande Mobile Money sans réponse** (§ 2 ter) : rien, dans la documentation
+  SasPay, ne permet de retrouver *à coup sûr* un paiement sans son identifiant.
+  Le rejeu à l'identique n'est garanti que tant que SasPay conserve la clé
+  d'idempotence (durée non documentée) ; au-delà de 10 minutes VYORA n'en envoie
+  plus, pour ne pas risquer de créer un paiement que le client n'attend plus.
+  Le rattachement automatique dépend de champs que SasPay ne garantit pas
+  (`description`, `metadata`). Quand ils manquent, la commande attend une
+  décision humaine, et le client reste bloqué jusque-là : c'est voulu (un second
+  paiement serait pire), mais cela suppose qu'un administrateur consulte les
+  alertes. Aucun délai n'est imposé à cette décision.
+- **Webhook d'une transaction inconnue** : il est comparé aux 200 tentatives non
+  soldées les plus récentes (appel encore en vol compris). Au-delà — situation
+  qui supposerait une panne SasPay prolongée — les plus anciennes ne seraient
+  retrouvées que par le balayage, la recherche ou l'administrateur. Chaque
+  webhook inconnu coûte alors une lecture `verify` chez SasPay, y compris ceux
+  d'un autre produit partageant le compte marchand.
+- **Rattachement par l'administrateur** : VYORA contrôle montant, devise, sens,
+  période et absence d'autre référence, mais ne peut pas prouver que la
+  transaction choisie est bien celle *de ce client* si SasPay ne restitue ni
+  libellé ni numéro. Deux clients payant le même montant au même moment se
+  distinguent par le numéro du payeur, à vérifier dans le tableau de bord SasPay.
+- **Clôture « aucun encaissement »** : repose sur l'attestation de
+  l'administrateur. S'il se trompe, le client peut payer une seconde fois ; le
+  premier encaissement, s'il est confirmé plus tard, rouvre et livre la première
+  commande (le client aurait alors deux achats, dont un à rembourser).
+- **Réponse perdue entre notre serveur et le navigateur** : couverte tant que la
+  page n'est pas rechargée. Si le paiement a bien été créé et rattaché côté
+  serveur, il suit le parcours normal (webhook, tâche planifiée) ; le client qui
+  recharge la page puis repaye un *autre* article n'est pas bloqué, comme pour
+  tout paiement en attente ordinaire.
 - **Page hébergée, webhook sans commande connue** : la transaction d'une session
   hébergée n'est connue qu'après paiement ; le webhook la cherche parmi les 10
   sessions ouvertes les plus récentes. Au-delà, il est ignoré et c'est la tâche
@@ -329,8 +434,9 @@ recrée).
 - **Renouvellement Business Grow** : manuel. À l'échéance, l'abonnement expire
   (tâche planifiée, une heure de tolérance) et le quota revient à la valeur par
   défaut. Le changement de formule en cours de période est refusé.
-- **Commandes abandonnées** : closes par la tâche planifiée (jamais parvenues à
-  SasPay : après expiration ; inconnues de SasPay : après 24 h). Une commande
+- **Commandes abandonnées** : closes par la tâche planifiée (aucune demande
+  jamais envoyée à SasPay : après expiration ; inconnues de SasPay : après 24 h).
+  Une demande envoyée et restée sans réponse n'est jamais close d'office. Une commande
   réellement en attente chez SasPay reste ouverte et revérifiée 30 jours.
 - **Tâche planifiée** : dépend de `pg_cron`, `pg_net` et Vault (présents en
   production). Si la tâche est absente ou désactivée, l'administration l'affiche
@@ -368,3 +474,23 @@ Points vérifiés sans défaut : crédit Studio unique sous rafales (webhooks re
 (solde jamais négatif, grand livre équilibré), attestation unique, cloisonnement
 Studio / Business Grow (même utilisateur, même clé d'intention), pannes réseau
 (réponse de création perdue, SasPay injoignable pendant un webhook).
+
+## 8. Demande de paiement dont la réponse se perd (novembre 2026)
+
+Mission menée après l'audit, sur la question laissée ouverte par la ligne 10 de
+la recette. **Aucun essai SasPay réel, rien de déployé, aucune écriture en
+production.** Le fonctionnement est décrit au § 2 ter.
+
+Défaut corrigé : une demande Mobile Money sans réponse laissait une commande
+« à effectuer », sans trace de l'envoi. L'entretien la fermait « non payée » au
+bout de 15 minutes après expiration ; entre-temps rien n'empêchait le client de
+payer une seconde fois avec une autre intention. Le seul rattrapage était le
+balayage par libellé, que SasPay ne garantit pas.
+
+Preuves locales : `supabase/tests/saspay/unconfirmed.mjs` (base réelle, dont deux
+connexions simultanées), section H de `e2e.mjs` (vraies Edge Functions : client
+jamais revenu, SasPay sans libellé, requête jamais reçue, Business Grow),
+`tests/saspay-unconfirmed.test.ts`, et les tests d'interface
+(`tests/saspay-ui.test.tsx`).
+
+Reste à vérifier avec une clé de test réelle : lignes 13, 14 et 15 de la recette.

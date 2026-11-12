@@ -21,7 +21,8 @@ npm test         # Node ≥ 22.6
 | `legacy.mjs` | Anciennes RPC du navigateur (`ugc_create_recharge_order`, `reelora_admin_confirm_recharge`) face aux gardes. |
 | `refunds.mjs` | Remboursements Studio et Business Grow, attestation, forges en table, concurrence, entretien, sélection de réconciliation, anomalies, tâche planifiée (`net.http_post` remplacé par un enregistreur). |
 | `audit.mjs` | Audit avant mise en production, avec des connexions réellement simultanées : Business Grow (deux formules, paiements tardifs, encaissement non applicable et son remboursement intégral), remboursements (fuseaux, jours entamés, concurrence avec un renouvellement ou une dépense, attestation), réconciliation (exécution unique, anomalies, prérequis). Rejouable sans réinitialiser la base. |
-| `e2e.mjs` | Bout en bout : vraies Edge Functions + base réelle + faux SasPay, dont la réconciliation planifiée (webhook perdu, réponse de création perdue, double encaissement, montant différent) et l'audit (rafales de webhooks rejoués, pannes réseau, liste SasPay sans libellé, parcours Studio et Business Grow d'un même utilisateur). |
+| `unconfirmed.mjs` | Demande Mobile Money restée sans réponse : tentative enregistrée avec son corps, rejeu borné (4 envois, 10 min), blocage de tout autre paiement du client (y compris par deux connexions simultanées et par insertion directe), passage en rapprochement manuel au lieu de l'expiration, candidates, rattachement, clôture attestée, réouverture sur encaissement tardif, Business Grow, droits. Rejouable sans réinitialiser la base. |
+| `e2e.mjs` | Bout en bout : vraies Edge Functions + base réelle + faux SasPay, dont la réconciliation planifiée (webhook perdu, réponse de création perdue, double encaissement, montant différent), l'audit (rafales de webhooks rejoués, pannes réseau, liste SasPay sans libellé, parcours Studio et Business Grow d'un même utilisateur) et la réponse de création perdue quand le client ne revient jamais (webhook d'une transaction inconnue, SasPay sans libellé, recherche par numéro, décision de l'administrateur, requête jamais reçue). Demande une base neuve (`base.mjs` puis `mig.mjs`). |
 
 ## Limites à connaître
 
@@ -39,6 +40,9 @@ npm test         # Node ≥ 22.6
   la tâche est planifiée une seule fois, que le jeton est créé une seule fois et
   que l'appel sortant porte les bons en-têtes — pas que pg_cron l'exécute
   réellement toutes les 5 minutes, ni que Vault chiffre le jeton.
+- Le faux SasPay de `e2e.mjs` applique l'idempotence de `softpay` et la recherche
+  par numéro **telles que la documentation les décrit**. Ni l'une ni l'autre n'a
+  été observée sur le vrai service (recette, lignes 13 à 15).
 - Ce banc ne remplace pas un essai avec une clé SasPay de test réelle (recette :
   `docs/paiements-saspay.md`).
 

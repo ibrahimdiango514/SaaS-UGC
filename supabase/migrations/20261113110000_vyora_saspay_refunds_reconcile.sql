@@ -1421,7 +1421,10 @@ revoke all on function saas_ugc.vyora_payment_block_unconfirmed() from public, a
 
 -- Commandes incertaines à rechercher chez SasPay (lecture seule) : toutes les
 -- 4 min la première heure, 30 min le premier jour, 6 h ensuite (30 jours).
--- `p_due_only = false` : toutes les commandes incertaines (webhook entrant).
+-- `p_due_only = false` (webhook entrant) : TOUTES les tentatives non soldées,
+-- y compris celles dont l'appel est encore en vol (le client peut valider sur
+-- son téléphone avant que la réponse de création ne nous parvienne) et sans
+-- limite d'âge (un webhook peut être renvoyé à la main des semaines plus tard).
 create or replace function public.vyora_payment_unconfirmed(p_limit integer default 10, p_due_only boolean default true)
 returns jsonb
 language plpgsql
@@ -1429,6 +1432,8 @@ stable
 security definer
 set search_path = ''
 as $$
+declare
+  v_due boolean := coalesce(p_due_only, true);
 begin
   perform ugc_private.vyora_assert_service_or_cron();
   return coalesce((
@@ -1437,18 +1442,23 @@ begin
              'phone', x.request->'customer'->>'phone', 'amount', x.amount, 'currency', x.currency,
              'first_attempt_at', x.first_attempt_at, 'last_attempt_at', x.last_attempt_at,
              'in_review', x.review_at is not null)
-           order by coalesce(x.last_search_at, '-infinity'::timestamptz), x.first_attempt_at)
+           order by x.pos)
       from (
-        select i.* from saas_ugc.vyora_payment_initiations i
-         where ugc_private.vyora_payment_initiation_uncertain(i)
-           and i.first_attempt_at > now() - interval '30 days'
-           and (not coalesce(p_due_only, true)
-                or coalesce(i.last_search_at, '-infinity'::timestamptz) < now() - case
-                     when i.first_attempt_at > now() - interval '1 hour' then interval '4 minutes'
-                     when i.first_attempt_at > now() - interval '24 hours' then interval '30 minutes'
-                     else interval '6 hours' end)
-         order by coalesce(i.last_search_at, '-infinity'::timestamptz), i.first_attempt_at
-         limit least(greatest(coalesce(p_limit, 10), 1), 25)
+        select i.*, row_number() over (
+                 order by case when v_due then coalesce(i.last_search_at, '-infinity'::timestamptz) end,
+                          case when not v_due then i.last_attempt_at end desc,
+                          i.first_attempt_at, i.order_id) as pos
+          from saas_ugc.vyora_payment_initiations i
+         where i.resolved_at is null
+           and (not v_due or (
+                 ugc_private.vyora_payment_initiation_uncertain(i)
+                 and i.first_attempt_at > now() - interval '30 days'
+                 and coalesce(i.last_search_at, '-infinity'::timestamptz) < now() - case
+                       when i.first_attempt_at > now() - interval '1 hour' then interval '4 minutes'
+                       when i.first_attempt_at > now() - interval '24 hours' then interval '30 minutes'
+                       else interval '6 hours' end))
+         order by pos
+         limit least(greatest(coalesce(p_limit, 10), 1), case when v_due then 25 else 200 end)
       ) x), '[]'::jsonb);
 end $$;
 
