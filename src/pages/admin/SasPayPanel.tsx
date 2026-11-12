@@ -22,6 +22,7 @@ import {
   type SasPayBalances,
 } from '../../lib/payments';
 import { PaymentHealthCard, RefundDialog, SettleRefundDialog } from './SasPayOperations';
+import SasPayFinance from './SasPayFinance';
 
 const MODE_LABELS: Record<string, string> = { test: 'Mode test', live: 'Production', unknown: 'Mode inconnu' };
 
@@ -40,6 +41,8 @@ export default function SasPayPanel() {
   const [healthBusy, setHealthBusy] = useState(false);
   const [refunding, setRefunding] = useState<PaymentOrder | null>(null);
   const [settling, setSettling] = useState<PaymentOrder | null>(null);
+  /** Vue affichée : exploitation des paiements, ou prix / frais / marge. */
+  const [view, setView] = useState<'payments' | 'finance'>('payments');
 
   const loadBalances = useCallback(async () => {
     setBalanceBusy(true); setBalanceError('');
@@ -96,6 +99,13 @@ export default function SasPayPanel() {
 
   return (
     <div className="space-y-5" data-testid="saspay-panel">
+      <Tabs
+        active={view}
+        onChange={(id) => setView(id === 'finance' ? 'finance' : 'payments')}
+        tabs={[{ id: 'payments', label: 'Paiements et surveillance' }, { id: 'finance', label: 'Prix, frais et marge' }]}
+      />
+      {view === 'finance' && <SasPayFinance />}
+      {view === 'payments' && (<>
       <Card>
         <CardHeader
           title="Soldes marchands SasPay"
@@ -238,6 +248,7 @@ export default function SasPayPanel() {
       </Card>
       {refunding && <RefundDialog order={refunding} onClose={() => setRefunding(null)} onDone={afterRefund} />}
       {settling && <SettleRefundDialog order={settling} onClose={() => setSettling(null)} onDone={afterRefund} />}
+      </>)}
     </div>
   );
 }

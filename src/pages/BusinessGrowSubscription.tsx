@@ -7,7 +7,7 @@ import { asAppError } from '../lib/errors';
 import { formatDate } from '../lib/format';
 import PaymentDialog from '../components/PaymentDialog';
 import {
-  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, formatAmount, getBusinessSubscription, getPaymentOptions, listMyPayments, refundBadge,
+  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, catalogPrice, formatAmount, getBusinessSubscription, getPaymentOptions, listMyPayments, refundBadge,
   type BusinessSubscription, type PaymentOptions, type PaymentOrder,
 } from '../lib/payments';
 
@@ -154,7 +154,11 @@ export default function BusinessGrowSubscription() {
       {!loading && !error && plans.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {plans.map((plan) => {
-            const shown = price(plan);
+            // Prix montré = prix réellement payé (final, tout compris) quand le serveur de paiement le fournit.
+            const final = billingEnabled && typeof plan.monthly_price_minor === 'number' && plan.monthly_price_minor > 0
+              && (plan.currency || 'XOF') === 'XOF'
+              ? catalogPrice(payment, plan.plan_key, plan.monthly_price_minor) : null;
+            const shown = final ? `${final.from ? 'À partir de ' : ''}${final.label}` : price(plan);
             const features = Array.isArray(plan.features) ? plan.features : [];
             return (
               <Card key={plan.plan_key} className="flex flex-col">

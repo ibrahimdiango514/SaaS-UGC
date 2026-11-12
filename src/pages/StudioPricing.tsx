@@ -29,8 +29,8 @@ import { formatDate } from '../lib/format';
 import { rpc } from '../lib/api';
 import PaymentDialog from '../components/PaymentDialog';
 import {
-  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, formatAmount, getPaymentOptions, listMyPayments, refundBadge,
-  type PaymentItem, type PaymentOrder,
+  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, catalogPrice, formatAmount, getPaymentOptions, listMyPayments, refundBadge,
+  type PaymentItem, type PaymentOptions, type PaymentOrder,
 } from '../lib/payments';
 
 interface StudioPack {
@@ -87,6 +87,8 @@ export default function StudioPricing() {
   /** Vrai seulement si le serveur annonce le paiement en ligne disponible pour ce compte. */
   const [online, setOnline] = useState(false);
   const [onlineMode, setOnlineMode] = useState<'test' | 'live' | null>(null);
+  /** Réponse du serveur de paiement : porte les prix finals (tout compris) du catalogue. */
+  const [payOptions, setPayOptions] = useState<PaymentOptions | null>(null);
   const [payments, setPayments] = useState<PaymentOrder[]>([]);
   const [checkout, setCheckout] = useState<{ item: PaymentItem; title: string } | null>(null);
 
@@ -104,6 +106,7 @@ export default function StudioPricing() {
         listMyPayments('studio', 20).catch(() => [] as PaymentOrder[]),
       ]);
       setOnline(optionsResult?.available === true);
+      setPayOptions(optionsResult);
       setOnlineMode(optionsResult?.available === true ? optionsResult.mode : null);
       setPayments(paymentRows);
       const raw = (gridResult ?? {}) as Partial<CreditGrid>;
@@ -135,14 +138,17 @@ export default function StudioPricing() {
 
   const packs = useMemo(() => {
     if (!grid) return [];
-    return grid.packs.map((pack) => {
-      const unit = pack.credits > 0 ? pack.price_xof / pack.credits : 0;
-      const saving = grid.packs.length
-        ? Math.max(0, Math.round((1 - unit / Math.max(...grid.packs.map((p) => p.price_xof / Math.max(p.credits, 1)))) * 100))
-        : 0;
-      return { ...pack, unit, saving };
+    // Prix montré = prix réellement payé (final, tout compris, fourni par le
+    // serveur). Le prix par crédit et l'économie en découlent, pour rester cohérents.
+    const shown = grid.packs.map((pack) => ({ pack, price: catalogPrice(payOptions, pack.pack_key, pack.price_xof) }));
+    const worst = Math.max(0, ...shown.map(({ pack, price }) => price.amount / Math.max(pack.credits, 1)));
+    return shown.map(({ pack, price }) => {
+      const unit = pack.credits > 0 ? price.amount / pack.credits : 0;
+      const saving = worst > 0 ? Math.max(0, Math.round((1 - unit / worst) * 100)) : 0;
+      return { ...pack, unit, saving, shownPrice: price.label, fromPrice: price.from };
     });
-  }, [grid]);
+  }, [grid, payOptions]);
+  const allInclusive = online && payOptions?.all_inclusive === true;
 
   const onBuyPack = async (pack: StudioPack) => {
     if (online) {
@@ -252,7 +258,10 @@ export default function StudioPricing() {
                 </span>
               )}
               <h2 className="text-sm font-semibold text-white">{pack.label}</h2>
-              <p className="mt-2 text-2xl font-bold tracking-tight text-white">{formatXof(pack.price_xof)}</p>
+              <p className="mt-2 text-2xl font-bold tracking-tight text-white" data-testid={`pack-price-${pack.pack_key}`}>
+                {pack.fromPrice && <span className="mr-1 text-xs font-medium text-slate-400">à partir de</span>}
+                {pack.shownPrice}
+              </p>
               <p className="mt-1 text-sm font-semibold text-cyan-200">{pack.credits} crédits</p>
               <p className="mt-1 text-[11px] text-slate-500">
                 {formatXof(pack.unit)} par crédit
@@ -274,6 +283,7 @@ export default function StudioPricing() {
           {online
             ? 'Paiement Mobile Money via SasPay. Les crédits sont ajoutés dès que le paiement est confirmé par SasPay.'
             : 'Crédits accordés après confirmation du paiement par un administrateur.'}
+          {allInclusive ? ' Prix finals, frais de paiement inclus : rien ne s’ajoute au moment de payer.' : ''}
           {' '}Aucun prélèvement automatique, aucun débit récurrent.
           {online && onlineMode === 'test' ? ' Mode test : aucun débit réel.' : ''}
         </p>
@@ -284,12 +294,13 @@ export default function StudioPricing() {
         <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4" aria-label="Recharge personnalisée">
           <h2 className="text-sm font-semibold text-white">Recharge personnalisée</h2>
           <p className="mt-1 text-[11.5px] text-slate-500">
-            Choisissez librement votre montant entre {formatXof(grid.custom_recharge.min_xof)} et{' '}
+            {allInclusive ? 'Choisissez librement la valeur de votre recharge, entre ' : 'Choisissez librement votre montant entre '}
+            {formatXof(grid.custom_recharge.min_xof)} et{' '}
             {formatXof(grid.custom_recharge.max_xof)}.
           </p>
           <form onSubmit={(e) => void onCustomRecharge(e)} className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex-1 min-w-[200px] text-[11px] text-slate-400">
-              Montant (FCFA)
+              {allInclusive ? 'Valeur de la recharge (FCFA)' : 'Montant (FCFA)'}
               <input
                 type="number"
                 min={grid.custom_recharge.min_xof}
@@ -313,7 +324,9 @@ export default function StudioPricing() {
           </form>
           <p className="mt-2 text-[10.5px] text-slate-600">
             {online
-              ? 'Le nombre exact de crédits et les frais sont calculés par le serveur et affichés avant tout paiement.'
+              ? allInclusive
+                ? 'Le nombre exact de crédits et le prix final à payer, frais de paiement inclus, sont calculés par le serveur et affichés avant tout paiement.'
+                : 'Le nombre exact de crédits et les frais sont calculés par le serveur et affichés avant tout paiement.'
               : 'Le montant exact en crédits est recalculé et enregistré côté serveur au moment de la commande.'}
           </p>
         </section>

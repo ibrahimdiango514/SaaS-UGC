@@ -17,7 +17,7 @@ import { CheckCircle2, ExternalLink, Loader2, ShieldAlert, ShieldCheck, Smartpho
 import { Banner, Button, Modal, cn } from './ui';
 import { asAppError } from '../lib/errors';
 import {
-  PAYMENT_STATE_LABELS, REVIEW_MESSAGE, UNAPPLIED_MESSAGE, createIntentKeeper, createPayment, describeFee, formatAmount, getPaymentOptions,
+  PAYMENT_STATE_LABELS, REVIEW_MESSAGE, UNAPPLIED_MESSAGE, createIntentKeeper, createPayment, describeFee, finalPrice, formatAmount, getPaymentOptions,
   getPaymentStatus, isFinalState, isPlausiblePhone, isSafeCheckoutUrl,
   type CreatePaymentInput, type CreatePaymentResult, type PaymentFlow, type PaymentItem, type PaymentOptions,
   type PaymentOrder, type PaymentProduct,
@@ -269,7 +269,11 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
   };
 
   const price = options?.price ?? null;
-  const fee = flow === 'softpay' ? selectedNetwork?.fee ?? null : null;
+  // Prix tout compris : le client paie exactement le montant affiché ; aucune
+  // ligne de frais n'apparaît et rien ne s'ajoute au moment de payer.
+  const allInclusive = options?.all_inclusive === true;
+  const fee = !allInclusive && flow === 'softpay' ? selectedNetwork?.fee ?? null : null;
+  const amountDue = finalPrice(options, country) ?? price?.amount ?? null;
 
   return (
     <Modal open={open} onClose={onClose} title={title} description={price?.label ?? undefined} size="md">
@@ -297,8 +301,8 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
           <form onSubmit={(e) => void submit(e)} className="space-y-4" noValidate>
             <dl className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-sm">
               <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-slate-400">Prix</dt>
-                <dd className="text-lg font-bold text-white" data-testid="payment-price">{formatAmount(price.amount, currency)}</dd>
+                <dt className="text-slate-400">{allInclusive ? 'Prix à payer' : 'Prix'}</dt>
+                <dd className="text-lg font-bold text-white" data-testid="payment-price">{formatAmount(amountDue, currency)}</dd>
               </div>
               {typeof price.credits === 'number' && (
                 <div className="mt-1 flex items-baseline justify-between gap-3 text-[12px]">
@@ -386,8 +390,8 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
             )}
 
             <p className="text-[11.5px] leading-relaxed text-slate-400" data-testid="payment-fee">
-              {flow === 'softpay'
-                ? describeFee(fee, currency)
+              {allInclusive || flow === 'softpay'
+                ? describeFee(fee, currency, allInclusive)
                 : 'Les frais éventuels sont affichés sur la page de paiement avant validation.'}
             </p>
 
@@ -403,7 +407,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
                 disabled={step === 'submitting' || (flow === 'softpay' && (!selectedNetwork || !phoneValid))}
               >
                 {flow === 'softpay'
-                  ? `Payer ${formatAmount(fee?.total ?? price.amount, currency)}`
+                  ? `Payer ${formatAmount(fee?.total ?? amountDue, currency)}`
                   : 'Continuer vers le paiement'}
               </Button>
             </div>

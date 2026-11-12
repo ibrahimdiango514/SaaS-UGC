@@ -252,9 +252,12 @@ un webhook de paiement rejoué ne relivre rien.
 | `supabase/migrations/20261113100000_vyora_saspay_payments.sql` | Migration additive et idempotente |
 | `supabase/migrations/20261113110000_vyora_saspay_refunds_reconcile.sql` | Remboursements, réconciliation, anomalies, tâche planifiée (additive, idempotente) |
 | `supabase/functions/vyora-payments-reconcile/` | Appelée par pg_cron uniquement (jeton Vault) |
+| `supabase/migrations/20261113120000_vyora_pricing_margin.sql` | Prix tout compris : politique de provision, barème des frais, devis figés, rapprochement, rapport financier (additive, idempotente) — voir § 9 |
+| `supabase/functions/_shared/saspay/pricing.ts` | Moteur de calcul du prix (miroir exact de la base, qui fait foi) |
+| `src/pages/admin/SasPayFinance.tsx` | Admin : politique de prix, barème, simulateur, chiffre d'affaires / frais / marge |
 | `src/pages/admin/SasPayOperations.tsx` | Admin : remboursement, attestation, surveillance, anomalies |
 | `supabase/functions/_shared/saspay/*.ts` | Montants exacts, client SasPay, signature, service de paiement, accès base, HTTP |
-| `supabase/functions/vyora-payments/` | Appelée par le navigateur (JWT exigé) : `options`, `create`, `status`, `balances` |
+| `supabase/functions/vyora-payments/` | Appelée par le navigateur (JWT exigé) : `options`, `create`, `status`, `balances`, `resolve_review`, `sync_rates` (administrateur) |
 | `supabase/functions/vyora-saspay-webhook/` | Appelée par SasPay (signature exigée) |
 | `src/lib/payments.ts`, `src/components/PaymentDialog.tsx` | Fenêtre de paiement commune |
 | `src/pages/PaymentReturn.tsx` | `/app/paiement/retour` — suivi après la page hébergée |
@@ -273,9 +276,10 @@ Rien de ce qui suit n'a été fait.
    n'a besoin d'aucun droit de décaissement : un scope `PAYIN` devrait suffire —
    à confirmer en recette pour la lecture des transactions et des soldes). Sans ce
    secret, tout paiement répond « service non configuré ».
-2. **Appliquer les deux migrations, dans l'ordre** :
-   `20261113100000_vyora_saspay_payments.sql` puis
-   `20261113110000_vyora_saspay_refunds_reconcile.sql`. La seconde crée le jeton
+2. **Appliquer les migrations, dans l'ordre** :
+   `20261113100000_vyora_saspay_payments.sql`,
+   `20261113110000_vyora_saspay_refunds_reconcile.sql`, puis
+   `20261113120000_vyora_pricing_margin.sql` (prix tout compris, § 9). La seconde crée le jeton
    dans Vault et la tâche pg_cron ; tant qu'aucune commande SasPay n'existe, la
    tâche ne fait aucun appel sortant.
 3. **Déployer les trois Edge Functions.** Elles importent `../_shared/saspay/*.ts` :
@@ -494,3 +498,140 @@ jamais revenu, SasPay sans libellé, requête jamais reçue, Business Grow),
 (`tests/saspay-ui.test.tsx`).
 
 Reste à vérifier avec une clé de test réelle : lignes 13, 14 et 15 de la recette.
+
+## 9. Prix tout compris, frais SasPay et marge (novembre 2026)
+
+**Aucun essai SasPay réel, rien de déployé, aucune écriture en production, aucun
+tarif SasPay supposé.** Migration : `20261113120000_vyora_pricing_margin.sql`
+(additive, idempotente, à appliquer après les deux précédentes).
+
+### Règle de prix
+
+Le client paie un **prix final unique**. Il ne voit ni prix de base, ni
+provision, ni frais, ni net.
+
+```
+prix final = plus petit montant P, arrondi au pas de la devise (1 FCFA), tel que
+             P ≥ prix de base + provision            (provision : 1 000 FCFA)
+        et   P − frais SasPay(P) ≥ prix de base      (seulement si un tarif est confirmé)
+```
+
+- Sans tarif confirmé au barème : `P = base + provision` (5 000 → 6 000 FCFA).
+- Avec un tarif confirmé qui dépasse la provision, le prix est relevé juste
+  assez pour que VYORA reçoive au moins le prix de base (stratégie
+  `cover_fees`). La stratégie `provision_only` ne relève jamais le prix.
+- Un même prix pour tous les opérateurs d'un pays (le tarif le plus cher fait
+  référence) : le prix affiché ne change pas quand le client change d'opérateur.
+- Les **crédits Studio et la durée d'abonnement restent calculés sur le prix de
+  base** : la provision n'achète rien.
+- VYORA demande à SasPay le mode de frais **« déduits »** (`fee_charge_mode:
+  "DEDUCTED"`) : le client est débité exactement du prix affiché, SasPay prélève
+  ses frais sur ce montant.
+- Unités internes : montants en centièmes entiers, taux en millièmes de pour cent
+  (2,5 % = 2500). Aucun calcul en virgule flottante, ni en base ni en TypeScript.
+- Le devis (base, provision, prix final, frais estimés, tarif utilisé) est
+  **figé sur la commande** (`pricing_quote`, immuable). Changer la politique ou le
+  barème ne modifie aucune commande existante.
+
+Exemples vérifiés à l'identique en SQL et en TypeScript
+(`supabase/tests/saspay/pricing-vectors.json`) :
+
+| Prix de base | Tarif confirmé | Prix final | Frais estimés | Net attendu |
+| ---: | --- | ---: | ---: | ---: |
+| 5 000 | aucun | 6 000 | inconnus | inconnu |
+| 39 000 | 2,5 % | 40 000 | 1 000 | 39 000 |
+| 100 000 | 2,5 % | 102 565 | 2 564,13 | 100 000,87 |
+| 100 000 | 2 % | 102 041 | 2 040,82 | 100 000,18 |
+| 5 000 | 1 500 fixes | 6 500 | 1 500 | 5 000 |
+| 100 000 | 2,5 %, `provision_only` | 101 000 | 2 525 | 98 475 (déficit) |
+
+### Barème : rien n'est supposé
+
+La table `saas_ugc.vyora_fee_schedule` est livrée **vide**. La documentation
+publique de SasPay ne contient aucune grille tarifaire ; les tarifs réels sont
+propres à chaque compte. Deux façons de la remplir, depuis l'administration
+(SasPay → « Prix, frais et marge ») :
+
+1. **Importer les tarifs du compte** : lit `GET /pricing/my-rates/` avec la clé
+   installée côté serveur (lecture seule, aucun paiement). Rejouable : les lignes
+   identiques sont conservées, les lignes disparues sont closes.
+2. **Saisir une ligne** d'après un document de SasPay ou du propriétaire ;
+   l'origine et sa référence sont obligatoires, un tarif nul doit être confirmé
+   explicitement.
+
+Une ligne ne se modifie ni ne se supprime : on la clôt et on en ajoute une. Tant
+qu'aucun tarif n'est confirmé pour un pays et un opérateur, les frais estimés
+sont « non confirmés » (jamais zéro) et l'administration le signale.
+
+### Rapprochement après paiement
+
+À chaque paiement confirmé, une ligne immuable est écrite dans
+`saas_ugc.vyora_payment_reconciliations` : montant débité au client, frais réels
+(`débité − net`), net reçu, marge (`net − prix de base`), écart avec les frais
+estimés. Les montants viennent de la vérification SasPay
+(`GET /payments/{id}/verify/`), jamais du navigateur ni du webhook.
+
+Alertes (une par commande et par genre, visibles dans « Surveillance ») :
+
+| Alerte | Signification | Le client est-il livré ? |
+| --- | --- | --- |
+| `fee_exceeds_provision` | Frais réels supérieurs à ce que le prix prévoyait pour les absorber (prix final − prix de base) | Oui |
+| `net_below_base` | VYORA a reçu moins que le prix de base | Oui |
+| `fee_mode_unexpected` | SasPay a ajouté les frais au client au lieu de les déduire : le client a payé plus que le prix affiché | Oui |
+| `reconciliation_failed` | La ligne de rapprochement n'a pas pu être écrite | Oui (un échec comptable ne bloque jamais une livraison) |
+
+Un prix relevé au devis pour couvrir un tarif connu n'est **pas** une alerte : les
+frais dépassent alors 1 000 FCFA, mais le prix les couvre.
+
+Le tableau « Chiffre d'affaires, frais et marge » agrège ces lignes par pays,
+opérateur et produit, avec filtres de période. Les paiements dont SasPay n'a pas
+restitué le net sont comptés à part : ils n'entrent ni dans les frais, ni dans le
+net, ni dans la marge.
+
+### Mise en service
+
+1. Appliquer la migration `20261113120000_vyora_pricing_margin.sql`. **Dès cet
+   instant, la provision de 1 000 FCFA s'applique aux nouvelles commandes** (la
+   politique est créée active). Pour l'appliquer plus tard, la désactiver dans
+   l'administration juste après la migration.
+2. Redéployer `vyora-payments`, `vyora-saspay-webhook` et
+   `vyora-payments-reconcile` (elles partagent `_shared/saspay/*.ts`).
+3. Dans le tableau de bord SasPay, **Paramètres → Frais** : activer
+   « Autoriser le choix du mode de frais par l'API », ou choisir le mode
+   « Déduits » par défaut. Sans cela, SasPay ignore silencieusement le mode
+   demandé et **ajoute** ses frais au client. VYORA le détecte après coup (alerte
+   `fee_mode_unexpected`) mais ne peut pas l'empêcher.
+4. Administration → SasPay → « Prix, frais et marge » → « Importer les tarifs du
+   compte ».
+5. « Reprendre l'historique » si des paiements ont été confirmés avant la
+   migration.
+
+### Corrections faites au passage
+
+- **Frais réels en mode « déduits »** : ils étaient calculés « débité − demandé »,
+  donc toujours 0 dans ce mode. Ils valent désormais « débité − net ».
+- **Taux à trois décimales** : SasPay publie ses taux sous la forme « 2.500 ».
+  L'estimation de frais de l'ancien parcours n'acceptait que deux décimales et
+  renonçait à estimer. Corrigé (`parsePercentMilli`).
+
+### Limites
+
+- Les tarifs réels du compte ne sont pas connus : aucun appel SasPay n'a été
+  fait. Tant que le barème est vide, la marge n'est connue qu'après chaque
+  paiement.
+- Avec la page de paiement hébergée, l'opérateur n'est connu qu'après le
+  paiement : le prix est calculé sur le tarif le plus cher du pays.
+- Décaissements (payouts) : seule une **estimation** de frais existe (simulateur),
+  sans provision. VYORA n'exécute aucun décaissement.
+- Les événements `settlement.*` de SasPay ne sont pas traités : leur contenu n'est
+  pas documenté.
+- Plusieurs devises : la politique accepte une provision par devise, mais seule
+  la devise XOF est paramétrée et proposée dans l'écran.
+
+### Preuves locales
+
+`supabase/tests/saspay/pricing.mjs` (65 vérifications sur PostgreSQL réel),
+section « prix tout compris » de `e2e.mjs` (vraies Edge Functions),
+`tests/saspay-pricing.test.ts` (moteur de calcul, mêmes vecteurs que la base),
+`tests/saspay-pricing-service.test.ts` (parcours de paiement),
+`tests/saspay-pricing-ui.test.tsx` (écrans client et administrateur).
