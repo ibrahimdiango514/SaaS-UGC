@@ -318,7 +318,7 @@ cd SaaS-UGC
 git checkout arena/323bad30-saas-ugc
 npm ci
 npm run dev          # http://localhost:5173 (bind 0.0.0.0)
-npm test             # 43 fichiers / 457 tests
+npm test             # 46 fichiers / 494 tests
 npm run typecheck    # tsc -b
 npm run build        # tsc -b && vite build
 npm run check:edge-imports
@@ -332,6 +332,24 @@ ils restent dans Supabase. Ne les mettez jamais dans `.env.local` côté client.
 
 ## 6. Synthèse en une phrase
 
-Tout le travail récent est sur **`arena/323bad30-saas-ugc` (`ff49e4e`)**, `main` (`1a572be`)
+Tout le travail récent est sur **`arena/323bad30-saas-ugc` (`f78fb81`)**, `main` (`1a572be`)
 s'arrête à la PR #5, et la PR #6 reste ouverte : travailler sur la branche, jamais sur `main`,
 tant que la fusion n'est pas décidée.
+
+### Capacités média (commit `20b1533`)
+
+Video→Video et Lip Sync sont câblés de bout en bout dans le code : import de la
+vidéo/audio source, signature côté passerelle, transmission au devis puis au corps
+MuAPI uniquement si le modèle déclare le champ. Deep link `?mode=video-source` /
+`?mode=audio-source`. **Le runtime déployé n'a pas été mis à jour** : `reelora-video`
+en production est encore la v10, donc ces deux capacités sont inactives en prod
+tant que la fonction n'est pas redéployée.
+
+### Abonnement Business Grow (commit `20b1533`)
+
+`saas_business.plans` enrichi (prix, devise, quota, avantages, ordre) et
+`saas_business.commercial_config` créée — **périmètre `saas_business` uniquement**.
+Trois formules (Essentiel, Croissance, Scale) existent avec `active = false` et
+`monthly_price_minor = NULL` : aucun prix inventé n'est exposé. Page
+`/app/business/abonnement`, alimentée par `public.business_grow_catalog()`.
+Aucune table de crédits Studio n'est lue ni modifiée par cette page.
