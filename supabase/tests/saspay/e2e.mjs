@@ -23,6 +23,15 @@ const searches = [];
 const shown = (t, hide = false) => { const { _phone, description, ...rest } = t; return hide || noDescriptionAnywhere ? rest : { ...rest, description }; };
 const J = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+// Partage des frais par le faux SasPay : 2 % ; ajoutés au client (réglage du
+// compte) sauf si la requête demande « DEDUCTED » et que le compte l'autorise.
+const softpayBodies = []; let honourFeeMode = true;
+const feeSplit = (body, amount) => {
+  const fee = Math.ceil(Number(amount) * 0.02);
+  return body.fee_charge_mode === 'DEDUCTED' && honourFeeMode
+    ? { fee_charge_mode: 'DEDUCTED', client_fee: fee.toFixed(2), debited_amount: Number(amount).toFixed(2), net_amount: (Number(amount) - fee).toFixed(2) }
+    : { fee_charge_mode: 'ADD_ON', client_fee: fee.toFixed(2), debited_amount: (Number(amount) + fee).toFixed(2), net_amount: Number(amount).toFixed(2) };
+};
 const fetcher = async (input, init = {}) => {
   const url = new URL(String(input)); const headers = new Headers(init.headers);
   const body = init.body ? JSON.parse(init.body) : null;
@@ -39,14 +48,15 @@ const fetcher = async (input, init = {}) => {
   }
   assert.equal(url.host, 'api.saspay.me'); assert.equal(headers.get('authorization'), `Bearer ${KEY}`);
   const path = url.pathname.replace('/api/v1', '');
-  if (path === '/pricing/my-rates/') return J({ success: true, data: [{ country_code: 'ML', network_code: 'orange_ml', payin: { available: true, otp_required: false, tiers: [{ min_amount: '0.00', max_amount: null, percent: '2.00', fixed: '0.00', fee_charge_mode: 'ADD_ON' }] } }] });
+  if (path === '/pricing/my-rates/') return J({ success: true, data: [{ country_code: 'ML', currency: 'XOF', network_code: 'orange_ml', network_name: 'Orange Money', payin: { available: true, is_custom: false, otp_required: false, tiers: [{ min_amount: '0.00', max_amount: null, currency: 'XOF', percent: '2.000', fixed: '0.00', floor_amount: null, cap_amount: null, fee_charge_mode: 'ADD_ON' }] }, payout: { available: false, tiers: [] } }] });
   if (path === '/payments/softpay/') {
     softpayCalls += 1;
     if (softpayFailure) return J({ success: false, error: softpayFailure.error, code: softpayFailure.status }, softpayFailure.status);
     if (dropSoftpayRequest) throw new TypeError('fetch failed'); // la requête n'atteint jamais SasPay
     const k = headers.get('idempotency-key'); if (idem.has(k)) { if (loseSoftpayResponse) throw new TypeError('fetch failed'); return J({ success: true, data: idem.get(k) }, 201); }
     const id = `tx-${String(++seq).padStart(8, '0')}`; const amount = body.amount;
-    tx.set(id, { id, _phone: body.customer.phone, description: body.description, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date().toISOString(), reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: body.currency, fee_charge_mode: 'ADD_ON', client_fee: (Number(amount) * 0.02).toFixed(2), debited_amount: (Number(amount) * 1.02).toFixed(2), net_amount: amount });
+    tx.set(id, { id, _phone: body.customer.phone, description: body.description, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date().toISOString(), reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: body.currency, ...feeSplit(body, amount) });
+    softpayBodies.push(body);
     const data = { id, status: 'PENDING', checkout_url: '' }; idem.set(k, data);
     if (loseSoftpayResponse) throw new TypeError('fetch failed'); // paiement créé chez SasPay, réponse jamais reçue
     return J({ success: true, data }, 201);
@@ -195,7 +205,9 @@ const t3 = `tx-${String(++seq).padStart(8, '0')}`; tx.set(t3, { id: t3, referenc
 Object.assign(sessions.get(csId), { status: 'PAID', transaction_id: t3 }); clock += 5000;
 r = await hook({ event: 'transaction.success', data: { id: t3, status: 'SUCCESS' } });
 assert.equal(r.body.credited, true); assert.equal(await wallet(bob), 126);
-row = await dbOrder(coId); assert.equal(row.provider_payment_id, t3); assert.equal(Number(row.net_amount), 19400); assert.equal(Number(row.fee_amount), 0);
+row = await dbOrder(coId); assert.equal(row.provider_payment_id, t3); assert.equal(Number(row.net_amount), 19400);
+// Frais déduits : frais réels = débité − net (600), et non « débité − demandé » (0).
+assert.equal(Number(row.fee_amount), 600);
 ok('page hébergée : 20 000 XOF → 126 crédits (palier Pro Creator) après webhook vérifié, frais déduits enregistrés');
 
 console.log('Bout en bout — administration et lectures');
@@ -689,6 +701,92 @@ assert.ok(health.runs.length >= 1); assert.ok(health.anomalies.some((a) => a.kin
 assert.ok(!JSON.stringify(health).includes(cronToken));
 await assert.rejects(asAlice.query(`select public.vyora_admin_payment_health()`));
 ok('exécutions journalisées ; vue d’exploitation lisible par l’administrateur seul, sans le jeton');
+
+// ───────────────────────── Prix tout compris : provision, frais déduits, rapprochement ─────────────────────────
+console.log('Bout en bout — prix tout compris (provision de 1 000 FCFA)');
+const setPolicy = (enabled) => admin.query(
+  `update saas_ugc.ugc_app_settings set setting_value = setting_value || $1::jsonb where setting_key = 'vyora_pricing_policy'`, [JSON.stringify({ enabled })]);
+const ledgerOf = async (id) => (await admin.query(`select * from saas_ugc.vyora_payment_reconciliations where order_id = $1 order by revision`, [id])).rows;
+const alertsOf = async (id) => (await admin.query(`select kind from saas_ugc.vyora_payment_anomalies where order_id = $1 order by kind`, [id])).rows.map((x) => x.kind);
+await setPolicy(true);
+try {
+  const zoe = await user('e2e-zoe@test.local'); const Z = 'Bearer e2e-zoe@test.local';
+  // 1. Le client voit le prix final, sans détail.
+  r = await call(Z, { action: 'options', product: 'studio', item: { kind: 'pack', pack_key: 'creator' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.price.amount, '6000.00'); assert.equal(r.body.all_inclusive, true);
+  assert.equal(r.body.countries[0].price.amount, '6000.00');
+  assert.ok(r.body.countries[0].networks.every((nw) => nw.fee === null));
+  assert.doesNotMatch(JSON.stringify(r.body), /provision|base_cents|estimated_fee|expected_net/);
+  r = await call(Z, { action: 'options', product: 'studio' });
+  assert.equal(r.body.catalog.creator.amount, '6000.00');
+  ok('options : pack à 5 000 FCFA annoncé 6 000 FCFA, tout compris, sans frais par opérateur ni détail interne');
+
+  // 2. SasPay reçoit le prix final et le mode « déduits ».
+  softpayBodies.length = 0;
+  r = await call(Z, softpay('e2e-price-000001'));
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.order.amount, '6000.00');
+  for (const hidden of ['quoted_fee_amount', 'net_amount', 'fee_amount', 'pricing_quote']) assert.equal(hidden in r.body.order, false, hidden);
+  assert.equal(softpayBodies.length, 1);
+  assert.equal(softpayBodies[0].amount, '6000.00'); assert.equal(softpayBodies[0].fee_charge_mode, 'DEDUCTED');
+  const zId = r.body.order.id; let zRow = await dbOrder(zId); const zTx = zRow.provider_payment_id;
+  assert.equal(Number(zRow.amount_minor), 600000); assert.equal(Number(zRow.credits_to_grant), 27);
+  assert.deepEqual([zRow.pricing_quote.base_cents, zRow.pricing_quote.provision_cents, zRow.pricing_quote.final_cents], [500000, 100000, 600000]);
+  ok('création : 6 000 FCFA demandés à SasPay en frais déduits ; devis figé (base 5 000 + provision 1 000) ; rien d’interne renvoyé au client');
+
+  // 3. Confirmation : crédits sur le prix de base, rapprochement exact, rejeu sans effet.
+  const zBefore = await wallet(zoe);
+  tx.get(zTx).status = 'SUCCESS'; clock += 5000;
+  r = await hook({ event: 'transaction.success', data: { id: zTx, status: 'SUCCESS' } });
+  assert.equal(r.body.credited, true, JSON.stringify(r.body));
+  r = await hook({ event: 'transaction.success', data: { id: zTx, status: 'SUCCESS' } });
+  assert.notEqual(r.body.credited, true);
+  assert.equal(await wallet(zoe), zBefore + 27);
+  zRow = await dbOrder(zId);
+  assert.deepEqual([Number(zRow.charged_amount), Number(zRow.fee_amount), Number(zRow.net_amount), zRow.fee_charge_mode], [6000, 120, 5880, 'DEDUCTED']);
+  let zLedger = await ledgerOf(zId);
+  assert.equal(zLedger.length, 1);
+  assert.deepEqual([Number(zLedger[0].charged_cents), Number(zLedger[0].actual_fee_cents), Number(zLedger[0].actual_net_cents), Number(zLedger[0].margin_cents), zLedger[0].provision_covers_fee],
+    [600000, 12000, 588000, 88000, true]);
+  assert.deepEqual(await alertsOf(zId), []);
+  r = await call(Z, { action: 'status', product: 'studio', order_id: zId });
+  assert.equal(r.body.order.state, 'confirmed'); assert.equal(r.body.order.charged_amount, '6000.00');
+  for (const hidden of ['net_amount', 'fee_amount', 'quoted_fee_amount', 'pricing_quote']) assert.equal(hidden in r.body.order, false, hidden);
+  ok('confirmation : 27 crédits (prix de base), encaissé 6 000, frais 120, net 5 880, marge 880 ; webhook rejoué sans second crédit ; le client ne voit que le prix payé');
+
+  // 4. Le compte SasPay ignore le mode demandé : frais ajoutés au client → alerte.
+  honourFeeMode = false;
+  r = await call(Z, softpay('e2e-price-000002'));
+  const yId = r.body.order.id; const yTx = (await dbOrder(yId)).provider_payment_id;
+  tx.get(yTx).status = 'SUCCESS'; clock += 5000;
+  r = await hook({ event: 'transaction.success', data: { id: yTx, status: 'SUCCESS' } });
+  honourFeeMode = true;
+  assert.equal(r.body.credited, true, JSON.stringify(r.body));
+  zLedger = await ledgerOf(yId);
+  assert.deepEqual([Number(zLedger[0].charged_cents), Number(zLedger[0].actual_net_cents)], [612000, 600000]);
+  assert.deepEqual(await alertsOf(yId), ['fee_mode_unexpected']);
+  ok('mode « déduits » ignoré par le compte SasPay : client livré, débit de 6 120 au lieu de 6 000 détecté, administrateur alerté');
+
+  // 5. Import des tarifs du compte : administrateur seul, lecture seule chez SasPay.
+  r = await call(Z, { action: 'sync_rates' });
+  assert.equal(r.status, 403);
+  assert.equal(Number((await one(`select count(*) n from saas_ugc.vyora_fee_schedule`)).n), 0);
+  r = await call(BOSS, { action: 'sync_rates' });
+  assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.inserted, 1);
+  const rate = await one(`select * from saas_ugc.vyora_fee_schedule`);
+  assert.deepEqual([rate.source, rate.country_code, rate.network_code, rate.percent_milli, rate.account_fee_mode], ['saspay_account_rates', 'ML', 'orange_ml', 2000, 'ADD_ON']);
+  r = await call(BOSS, { action: 'sync_rates' });
+  assert.deepEqual([r.body.inserted, r.body.unchanged], [0, 1]);
+  // Tarif désormais connu : 2 % de 6 000 = 120 FCFA estimés, toujours sous la provision → même prix.
+  r = await call(Z, softpay('e2e-price-000003'));
+  assert.equal(r.body.order.amount, '6000.00');
+  assert.equal((await dbOrder(r.body.order.id)).pricing_quote.estimated_fee_cents, 12000);
+  ok('import des tarifs : refusé au client (403) ; administrateur → 1 ligne (2 %), rejouable ; frais désormais estimés (120 FCFA) sans changer le prix');
+} finally {
+  await setPolicy(false);
+  await admin.query(`truncate saas_ugc.vyora_fee_schedule`);
+}
 
 summary();
 for (const c of [svc, asBoss, asAlice, admin]) await c.end();

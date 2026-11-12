@@ -37,6 +37,12 @@ const DB_ERRORS: Record<string, [code: string, status: number, message: string]>
   custom_amount_out_of_bounds: ['PAYMENT_AMOUNT_OUT_OF_BOUNDS', 422, 'Le montant saisi est hors des limites autorisées.'],
   custom_recharge_not_configured: ['PAYMENT_PRICING_ERROR', 503, 'La recharge personnalisée n’est pas configurée.'],
   studio_pricing_not_configured: ['PAYMENT_PRICING_ERROR', 503, 'La grille tarifaire Studio n’est pas configurée.'],
+  // Politique de prix : on ne vend pas à un prix que la politique ne sait pas calculer.
+  pricing_currency_not_configured: ['PAYMENT_PRICING_ERROR', 503, 'La tarification n’est pas paramétrée pour cette devise. Aucun paiement n’a été lancé.'],
+  pricing_not_convergent: ['PAYMENT_PRICING_ERROR', 503, 'Le prix n’a pas pu être calculé. Aucun paiement n’a été lancé.'],
+  pricing_invalid_base: ['PAYMENT_PRICING_ERROR', 503, 'Le prix n’a pas pu être calculé. Aucun paiement n’a été lancé.'],
+  pricing_quote_mismatch: ['PAYMENT_PRICING_ERROR', 503, 'Le prix n’a pas pu être calculé. Aucun paiement n’a été lancé.'],
+  rates_empty: ['PAYMENT_RATES_EMPTY', 502, 'SasPay n’a renvoyé aucun tarif exploitable. Le barème n’a pas été modifié.'],
   business_billing_disabled: ['BUSINESS_BILLING_DISABLED', 503, 'La facturation Business Grow n’est pas activée.'],
   business_plan_not_purchasable: ['BUSINESS_PLAN_NOT_PURCHASABLE', 422, 'Cette formule Business Grow n’est pas commercialisée.'],
   business_subscription_managed_elsewhere: ['BUSINESS_SUBSCRIPTION_MANAGED_ELSEWHERE', 409, 'Votre abonnement Business Grow est géré par un autre moyen de paiement. Contactez le support.'],
@@ -244,6 +250,11 @@ export function createSupabasePaymentStore(config: StoreConfig): PaymentStore {
       await rpc<null>('vyora_payment_review_attached', {
         p_admin: adminId, p_product: product, p_order_id: orderId, p_payment_id: paymentId, p_note: note,
       });
+    },
+
+    importRates(adminId, rates) {
+      return rpc<{ inserted: number; unchanged: number; closed: number; skipped: number }>(
+        'vyora_payment_import_rates', { p_actor: adminId, p_rates: rates });
     },
   };
 }

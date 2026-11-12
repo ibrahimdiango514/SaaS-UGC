@@ -45,6 +45,11 @@ export const HANDLED_WEBHOOK_EVENTS = ['transaction.success', 'transaction.faile
 export interface OrderRecord {
   product: Product;
   id: string;
+  /**
+   * Mode de frais à demander à SasPay, d'après le devis figé (`DEDUCTED` sous la
+   * politique de prix). Renvoyé par la création de commande uniquement.
+   */
+  requested_fee_mode?: string | null;
   user_id: string;
   status: OrderStatus;
   /** Chaîne décimale, figée à la création. */
@@ -85,6 +90,8 @@ export interface CountryConfig {
   dial_code?: string;
   national_number_length?: number;
   networks?: Array<{ code: string; label?: string }>;
+  /** Prix final de l'article dans ce pays (tout compris), calculé par la base. */
+  price?: { amount: string; currency: string };
 }
 
 export interface QuoteContext {
@@ -96,6 +103,10 @@ export interface QuoteContext {
   eligible: boolean;
   reason: string | null;
   price: ({ amount: string; currency: string; label: string } & Record<string, unknown>) | null;
+  /** Vrai sous la politique de prix : le prix affiché est final, aucun frais ne s'y ajoute. */
+  all_inclusive?: boolean;
+  /** Sans article : prix finals du catalogue (fourchette entre pays). */
+  catalog?: Record<string, { amount: string; max_amount: string; currency: string }> | null;
 }
 
 export type StudioItem = { kind: 'pack'; pack_key: string } | { kind: 'custom'; amount_xof: number };
@@ -161,6 +172,8 @@ export interface PaymentStore {
   addCandidate(product: Product, orderId: string, candidate: PaymentCandidate): Promise<void>;
   /** Trace la décision d'un administrateur de rattacher un paiement. */
   reviewAttached(adminId: string, product: Product, orderId: string, paymentId: string, note: string): Promise<void>;
+  /** Import des tarifs du compte dans le barème (contrôles et historisation faits en base). */
+  importRates(adminId: string, rates: unknown[]): Promise<{ inserted: number; unchanged: number; closed: number; skipped: number }>;
 }
 
 export type InitiationTicket =
@@ -397,6 +410,13 @@ const PUBLIC_FIELDS = [
 export function publicOrder(order: OrderRecord): Record<string, unknown> {
   const view: Record<string, unknown> = {};
   for (const field of PUBLIC_FIELDS) if (order[field] !== undefined) view[field] = order[field];
+  // Frais déduits : le client paie le prix affiché, point. Le montant des frais
+  // (estimé ou réel) et le net reçu par VYORA sont des données internes.
+  if (order.quoted_fee_mode === 'DEDUCTED' || order.fee_charge_mode === 'DEDUCTED') {
+    delete view.quoted_fee_amount;
+    delete view.fee_amount;
+    delete view.net_amount;
+  }
   view.state = paymentState(order);
   // En vérification : la MÊME demande peut être relancée tant que la fenêtre de
   // rejeu est ouverte (le serveur tranche à chaque relance).
@@ -552,6 +572,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     const reason = unavailableReason(ctx);
     const rows = reason ? null : await rates();
     const amount = ctx.price?.amount ?? null;
+    const allInclusive = ctx.all_inclusive === true;
     return {
       product,
       available: reason === null,
@@ -560,13 +581,22 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       mode: ctx.mode,
       flows: ctx.flows,
       price: ctx.price,
+      // Prix tout compris : ce qui est affiché est ce qui est débité.
+      all_inclusive: allInclusive,
+      catalog: ctx.catalog ?? null,
       countries: Object.entries(ctx.countries).map(([code, country]) => ({
         code,
         name: country.name ?? code,
         currency: country.currency ?? null,
         dial_code: country.dial_code ?? null,
         national_number_length: country.national_number_length ?? null,
-        networks: (country.networks ?? []).map((network) => networkOption(rows, code, network, amount)),
+        price: country.price ?? null,
+        networks: (country.networks ?? []).map((network) => {
+          const option = networkOption(rows, code, network, country.price?.amount ?? amount);
+          // Sous la politique de prix, aucun frais n'est annoncé en sus : les
+          // frais SasPay sont déduits de ce que VYORA reçoit.
+          return allInclusive ? { ...option, fee: null } : option;
+        }),
       })),
     };
   }
@@ -613,16 +643,33 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     }
     const requested = normalizeDecimal(tx.requested_amount);
     const charged = normalizeDecimal(tx.debited_amount);
-    // Frais réellement supportés par le payeur : montant débité − montant demandé.
+    const net = normalizeDecimal(tx.net_amount);
+    // Frais réellement prélevés par SasPay = montant débité au client − net
+    // reçu par VYORA. Vrai dans les deux modes : frais ajoutés (débité =
+    // demandé + frais, net = demandé) comme frais déduits (débité = demandé,
+    // net = demandé − frais). « Débité − demandé » vaudrait toujours zéro en
+    // frais déduits et masquerait le coût réel.
     let fee = normalizeDecimal(tx.client_fee);
     const requestedScaled = parseDecimal(requested);
     const chargedScaled = parseDecimal(charged);
-    if (requestedScaled !== null && chargedScaled !== null && chargedScaled >= requestedScaled) {
+    const netScaled = parseDecimal(net);
+    if (chargedScaled !== null && netScaled !== null && chargedScaled >= netScaled) {
+      fee = formatDecimal(chargedScaled - netScaled);
+    } else if (requestedScaled !== null && chargedScaled !== null && chargedScaled >= requestedScaled) {
       fee = formatDecimal(chargedScaled - requestedScaled);
+    }
+    // Le mode de frais demandé n'est appliqué par SasPay que si le compte
+    // l'autorise ; sinon il est ignoré sans erreur. On le signale : en frais
+    // ajoutés, le client paie plus que le prix affiché.
+    if (order.requested_fee_mode && tx.status === 'SUCCESS' && tx.fee_charge_mode
+      && tx.fee_charge_mode !== order.requested_fee_mode) {
+      log('payment_fee_mode_ignored', {
+        product: order.product, order_id: order.id, requested: order.requested_fee_mode, applied: tx.fee_charge_mode,
+      });
     }
     return store.settle(order.product, order.id, {
       paymentId, status: tx.status, requestedAmount: requested, currency: tx.currency,
-      fee, charged, net: normalizeDecimal(tx.net_amount), feeMode: tx.fee_charge_mode,
+      fee, charged, net, feeMode: tx.fee_charge_mode,
       reference: tx.reference, source,
     });
   }
@@ -705,12 +752,16 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     // SasPay. Si SasPay les restitue (sa spécification ne le garantit pas), ils
     // permettent de reconnaître un paiement dont l'identifiant s'est perdu.
     const description = `${order.label.slice(0, 80)} — ${order.internal_reference}`;
+    // Prix tout compris : on demande à SasPay de déduire ses frais du montant
+    // reversé (le client est débité exactement du prix affiché). Le mode vient
+    // du devis figé sur la commande : un rejeu envoie donc le même corps.
+    const feeMode = order.requested_fee_mode === 'DEDUCTED' ? { fee_charge_mode: 'DEDUCTED' as const } : {};
 
     if (flow === 'softpay') {
       return initiateSoftpay(order, {
         amount: order.amount, currency: order.currency, country: order.country, network: network as string,
         customer: { email: user.email, first_name: first, last_name: last, phone: msisdn as string },
-        description, metadata,
+        description, metadata, ...feeMode,
       });
     }
 
@@ -719,7 +770,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       const result = await sasPay.createCheckoutSession({
         amount: order.amount, currency: order.currency,
         customer_email: user.email, customer_name: `${first} ${last}`.trim(),
-        description, country: order.country, metadata,
+        description, country: order.country, metadata, ...feeMode,
         ...(msisdn ? { customer_phone: msisdn } : {}),
         ...(returnUrl ? { return_url: returnUrl } : {}),
       });
@@ -1206,6 +1257,31 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     }
   }
 
+  /**
+   * Importe dans le barème les tarifs du compte SasPay (`GET /pricing/my-rates/`,
+   * lecture seule chez SasPay). Réservé aux administrateurs, à leur demande.
+   */
+  async function syncRates(user: PaymentUser) {
+    if (!(await store.isAdmin(user.id))) {
+      throw new PaymentError('PAYMENT_FORBIDDEN', 403, 'Réservé aux administrateurs.');
+    }
+    if (!client) {
+      throw new PaymentError('PAYMENTS_NOT_CONFIGURED', 503, 'Aucune clé SasPay n’est installée côté serveur.');
+    }
+    let rows: unknown[];
+    try {
+      rows = await client.myRates();
+    } catch (error) {
+      if (!(error instanceof SasPayError)) throw error;
+      log('saspay_rates_unavailable', { status: error.status, code: error.code });
+      throw fromSasPayError(error);
+    }
+    const result = await store.importRates(user.id, rows);
+    ratesCache = null;
+    log('saspay_rates_imported', { ...result, mode: client.mode });
+    return { mode: client.mode, ...result };
+  }
+
   /** Vrai si le jeton présenté est celui de la tâche planifiée. */
   async function isCronToken(presented: string): Promise<boolean> {
     if (!/^[0-9a-f]{64}$/.test(presented)) return false;
@@ -1387,7 +1463,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     return { ran: true as const, status, ...counts };
   }
 
-  return { options, create, refresh, webhook, balances, reconcile, isCronToken, resolveReview };
+  return { options, create, refresh, webhook, balances, reconcile, isCronToken, resolveReview, syncRates };
 }
 
 export type PaymentService = ReturnType<typeof createPaymentService>;

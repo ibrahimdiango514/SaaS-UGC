@@ -194,6 +194,9 @@ export function createPaymentsHandler(deps: HandlerDeps) {
           return json(await service.resolveReview(user, {
             product: body.product, order_id: body.order_id, payment_id: body.payment_id, note: body.note,
           }), 200, cors);
+        // Administrateur : importer dans le barème les tarifs du compte SasPay.
+        case 'sync_rates':
+          return json(await service.syncRates(user), 200, cors);
         default:
           throw new PaymentError('PAYMENT_INVALID_REQUEST', 400, 'Action inconnue.');
       }

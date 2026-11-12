@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  decimalEquals, formatDecimal, normalizeDecimal, parseDecimal, quoteFee, selectTier,
+  decimalEquals, formatDecimal, normalizeDecimal, parseDecimal, parsePercentMilli, quoteFee, selectTier,
 } from '../supabase/functions/_shared/saspay/money';
 import {
   signWebhook, timingSafeEqualHex, verifyWebhookSignature,
@@ -73,6 +73,33 @@ describe('SasPay — montants décimaux exacts', () => {
     expect(quoteFee('5000.00', { percent: 'deux', fixed: '0.00', fee_charge_mode: 'ADD_ON' })).toBeNull();
     expect(quoteFee('abc', { percent: '2.00', fixed: '0.00', fee_charge_mode: 'ADD_ON' })).toBeNull();
     expect(quoteFee('10.00', { percent: '0.00', fixed: '50.00', fee_charge_mode: 'DEDUCTED' })).toBeNull();
+  });
+});
+
+describe('SasPay — taux publiés à trois décimales', () => {
+  it('lit le format documenté par SasPay (« 2.500 ») sans le rejeter', () => {
+    expect(parsePercentMilli('2.500')).toBe(2500n);
+    expect(parsePercentMilli('2.5')).toBe(2500n);
+    expect(parsePercentMilli('2')).toBe(2000n);
+    expect(parsePercentMilli('1.875')).toBe(1875n);
+    expect(parsePercentMilli('0.000')).toBe(0n);
+    expect(parsePercentMilli('100')).toBe(100_000n);
+    expect(parsePercentMilli(3)).toBe(3000n);
+  });
+
+  it('refuse ce qui n’est pas un taux exact', () => {
+    for (const bad of ['2.5001', '-1', '100.001', '1e2', 'deux', '', ' ', 2.5, null, undefined, '1,5']) {
+      expect(parsePercentMilli(bad)).toBeNull();
+    }
+  });
+
+  it('estime les frais d’un palier au format réel de GET /pricing/my-rates/', () => {
+    // Exemple de la documentation : Orange CI, 2,500 %, plancher 50.
+    const tier = { min_amount: '0.00', max_amount: '500000.00', currency: 'XOF', percent: '2.500', fixed: '0.00', floor_amount: '50.00', cap_amount: null, fee_charge_mode: 'ADD_ON' };
+    expect(quoteFee('5000.00', tier)).toEqual({ fee: '125.00', mode: 'ADD_ON', total: '5125.00', net: '5000.00' });
+    expect(quoteFee('1000.00', tier)?.fee).toBe('50.00');
+    expect(quoteFee('102565.00', { ...tier, floor_amount: null, fee_charge_mode: 'DEDUCTED' })).toEqual({ fee: '2564.13', mode: 'DEDUCTED', total: '102565.00', net: '100000.87' });
+    expect(quoteFee('333.33', { percent: '1.875', fixed: '0.00', fee_charge_mode: 'ADD_ON' })?.fee).toBe('6.25');
   });
 });
 

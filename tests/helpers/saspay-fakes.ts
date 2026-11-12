@@ -7,6 +7,10 @@ import {
 } from '../../supabase/functions/_shared/saspay/payments';
 import type { SoftpayRequest } from '../../supabase/functions/_shared/saspay/client';
 import { signWebhook } from '../../supabase/functions/_shared/saspay/webhook';
+import {
+  quotePrice, reconcile as reconcilePricing, type FeeLine, type PriceQuote, type PricingPolicy, type Reconciliation,
+} from '../../supabase/functions/_shared/saspay/pricing';
+import { formatDecimal, parseDecimal } from '../../supabase/functions/_shared/saspay/money';
 
 export const TEST_KEY = 'sk_test_unit_0123456789abcdef';
 export const LIVE_KEY = 'sk_live_unit_0123456789abcdef';
@@ -42,7 +46,18 @@ export interface FakeStoreOptions {
   replayWindowMs?: number;
   /** Relances permises au client pendant cette fenêtre (défaut 4, comme en base). */
   maxAttempts?: number;
+  /**
+   * Politique de prix (provision, barème). Absente : comportement d'origine,
+   * prix de base = prix payé — comme en base quand la politique est désactivée.
+   */
+  pricing?: { policy: PricingPolicy; lines?: FeeLine[] };
 }
+
+/** Politique livrée par la migration : provision de 1 000 FCFA, prix arrondi au franc. */
+export const DEFAULT_PRICING_POLICY: PricingPolicy = {
+  enabled: true, strategy: 'cover_fees',
+  currencies: { XOF: { provision_cents: 100_000n, rounding_step_cents: 100n } },
+};
 
 /** Tentative de création softpay, telle que la consigne `vyora_payment_initiations`. */
 export interface FakeInitiation {
@@ -77,6 +92,19 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
   const plans = options.businessPlans ?? { croissance: { price: 25000, label: 'Business Grow — Croissance' } };
   let sequence = 0;
   const anomalies: PaymentAnomaly[] = [];
+  /** Devis figés et lignes de rapprochement, comme `pricing_quote` et `vyora_payment_reconciliations`. */
+  const quotes = new Map<string, PriceQuote>();
+  const ledger = new Map<string, Reconciliation>();
+  const pricing = options.pricing ?? null;
+  const importedRates: unknown[][] = [];
+  /** Prix final d'un prix de base (chaîne décimale), d'après la politique ; `null` sans politique. */
+  function priced(baseAmount: string, country: string, network: string | null): PriceQuote | null {
+    if (!pricing) return null;
+    return quotePrice({
+      policy: pricing.policy, lines: pricing.lines ?? [], baseCents: parseDecimal(baseAmount) as bigint, currency: 'XOF',
+      country, network, networks: config.flows.includes('checkout') ? null : ML_COUNTRY.networks.map((n) => n.code), at: NOW,
+    });
+  }
   const runs: Array<{ id: string; source: string; status: string; counts?: ReconcileCounts & { detail?: Record<string, unknown> } }> = [];
   const reconcile = { sweep: true, due: null as Array<{ product: Product; orderId: string }> | null };
   /** Commandes dont la base refuserait l'activation (Business Grow : abonnement incompatible). */
@@ -150,9 +178,26 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       if (product === 'studio' && (options.admins ?? []).includes(userId)) { eligible = false; reason = 'not_vyora_customer'; }
       if (product === 'business' && options.businessEnabled === false) { eligible = false; reason = 'business_billing_disabled'; }
       const hasItem = 'kind' in raw || 'plan_key' in raw;
+      const base = eligible && hasItem ? price(product, raw) : null;
+      const quoted = base ? priced(base.amount, 'ML', null) : null;
+      const final = quoted ? formatDecimal(quoted.final_cents) : null;
+      const catalog: Record<string, { amount: string; max_amount: string; currency: string }> = {};
+      if (!hasItem) {
+        const items = product === 'studio'
+          ? Object.entries(PACKS).map(([key, pack]) => [key, pack.price] as const)
+          : Object.entries(plans).map(([key, plan]) => [key, plan.price] as const);
+        for (const [key, amount] of items) {
+          const q = priced(`${amount}.00`, 'ML', null);
+          const shown = q ? formatDecimal(q.final_cents) : `${amount}.00`;
+          catalog[key] = { amount: shown, max_amount: shown, currency: 'XOF' };
+        }
+      }
       return {
-        product, enabled: config.enabled, mode: config.mode, flows: config.flows, countries: { ML: ML_COUNTRY },
-        eligible, reason, price: eligible && hasItem ? price(product, raw) : null,
+        product, enabled: config.enabled, mode: config.mode, flows: config.flows,
+        countries: { ML: base && final ? { ...ML_COUNTRY, price: { amount: final, currency: 'XOF' } } : ML_COUNTRY },
+        eligible, reason, price: base && final ? { ...base, amount: final } : base,
+        all_inclusive: pricing?.policy.enabled === true,
+        catalog: hasItem ? null : catalog,
       };
     },
 
@@ -160,7 +205,12 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       calls.push('createOrder');
       const key = `${input.product}:${input.userId}:${input.idempotencyKey}`;
       const existing = byKey.get(key);
-      if (existing) return { ...(orders.get(existing) as OrderRecord), reused: true };
+      if (existing) {
+        return {
+          ...(orders.get(existing) as OrderRecord), reused: true,
+          requested_fee_mode: quotes.get(existing)?.fee_charge_mode ?? null,
+        };
+      }
       // Comme le déclencheur `vyora_payment_block_unconfirmed` : aucune nouvelle
       // commande tant qu'un paiement du client est incertain (tous produits).
       const open = [...initiations.values()].filter((i) => i.userId === input.userId && i.resolvedAt === null);
@@ -170,7 +220,11 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       if (open.length > 0) {
         throw new PaymentError('PAYMENT_ALREADY_IN_PROGRESS', 409, 'Un paiement est déjà en cours d’envoi. Patientez quelques secondes puis vérifiez son statut avant d’en lancer un autre.');
       }
-      const quoted = price(input.product, input.item as Record<string, unknown>);
+      const base = price(input.product, input.item as Record<string, unknown>);
+      // Comme en base : le montant de la commande est le prix FINAL du devis, figé.
+      const frozen = priced(base.amount, input.country, input.network);
+      const policyOn = frozen?.policy_enabled === true;
+      const quoted = frozen ? { ...base, amount: formatDecimal(frozen.final_cents) } : base;
       sequence += 1;
       const id = `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`;
       const order: OrderRecord = {
@@ -181,11 +235,15 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
         label: quoted.label, payment_flow: input.flow, network_code: input.network,
         provider_payment_id: null, provider_session_id: null, provider_status: null, checkout_url: null,
         last_verified_at: null, credits: 'credits' in quoted ? quoted.credits : undefined,
-        payer_msisdn_masked: input.msisdnMasked, quoted_fee_amount: input.quotedFee,
-        quoted_total_amount: input.quotedTotal, quoted_fee_mode: input.quotedFeeMode,
+        payer_msisdn_masked: input.msisdnMasked,
+        quoted_fee_amount: policyOn
+          ? (frozen.estimated_fee_cents === null ? null : formatDecimal(frozen.estimated_fee_cents)) : input.quotedFee,
+        quoted_total_amount: policyOn ? quoted.amount : input.quotedTotal,
+        quoted_fee_mode: policyOn ? 'DEDUCTED' : input.quotedFeeMode,
       };
       orders.set(id, order); byKey.set(key, id);
-      return { ...order, reused: false };
+      if (frozen) quotes.set(id, frozen);
+      return { ...order, reused: false, requested_fee_mode: frozen?.fee_charge_mode ?? null };
     },
 
     async getOrder(product, orderId) {
@@ -246,6 +304,25 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
         order.provider_payment_id ??= input.paymentId;
         order.provider_status = 'SUCCESS';
         order.fee_amount = input.fee; order.charged_amount = input.charged; order.net_amount = input.net;
+        order.fee_charge_mode = input.feeMode;
+        // Comme le déclencheur `vyora_payment_ledger` : une ligne de rapprochement
+        // par commande réglée, et une alerte par dépassement.
+        const frozen = quotes.get(order.id) ?? null;
+        const line = reconcilePricing(frozen, parseDecimal(order.amount) as bigint, {
+          chargedCents: input.charged === null ? null : parseDecimal(input.charged),
+          netCents: input.net === null ? null : parseDecimal(input.net), feeMode: input.feeMode,
+        });
+        ledger.set(order.id, line);
+        if (frozen?.policy_enabled) {
+          for (const flag of line.flags) {
+            if (flag === 'fee_exceeds_provision' || flag === 'net_below_base' || flag === 'fee_mode_unexpected') {
+              anomalies.push({
+                kind: flag, product, orderId: order.id, paymentId: order.provider_payment_id,
+                reference: order.internal_reference, details: {},
+              } as unknown as PaymentAnomaly);
+            }
+          }
+        }
         const wallet = credits[product];
         wallet.set(order.user_id, (wallet.get(order.user_id) ?? 0) + Number(order.credits ?? 1));
         return { ...order, outcome: 'paid', credited: true };
@@ -291,6 +368,14 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
 
     async isAdmin(userId) {
       return (options.admins ?? []).includes(userId);
+    },
+
+    async importRates(adminId, rates) {
+      calls.push('importRates');
+      if (!(options.admins ?? []).includes(adminId)) throw new PaymentError('PAYMENT_FORBIDDEN', 403, 'Réservé aux administrateurs.');
+      if (rates.length === 0) throw new PaymentError('PAYMENT_RATES_EMPTY', 502, 'SasPay n’a renvoyé aucun tarif exploitable. Le barème n’a pas été modifié.');
+      importedRates.push(rates);
+      return { inserted: rates.length, unchanged: 0, closed: 0, skipped: 0 };
     },
 
     async reconcileToken() {
@@ -439,6 +524,7 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
 
   return {
     store, orders, credits, webhooks, calls, config, anomalies, runs, reconcile, clock, initiations,
+    quotes, ledger, importedRates,
     /** Les `n` prochains rattachements échouent (base injoignable juste après la réponse SasPay). */
     failAttach(n = 1) { attachFailures = n; },
     /** Entretien planifié (`vyora_payment_housekeeping`) : rapprochements ouverts, commandes expirées. */
@@ -507,6 +593,19 @@ export function createFakeSasPay() {
   let droppedRequests = 0;
   let exposeMetadata = false;
   let verifyOmitsDescription = false;
+  /** Le compte accepte-t-il que l'API choisisse le mode de frais (option « ALLOW_CLIENT_OVERRIDE ») ? */
+  let allowFeeModeOverride = true;
+  /** Frais d'encaissement appliqués par le faux SasPay (centièmes), d'après le montant demandé. */
+  let feeOf: (amountCents: bigint) => bigint = () => 10_000n;
+  /** Montants d'une transaction selon le mode : qui paie les frais. */
+  const amounts = (amount: string, requestedMode: unknown, accountMode: 'ADD_ON' | 'DEDUCTED') => {
+    const mode = allowFeeModeOverride && (requestedMode === 'ADD_ON' || requestedMode === 'DEDUCTED') ? requestedMode : accountMode;
+    const cents = parseDecimal(amount) as bigint;
+    const fee = feeOf(cents);
+    return mode === 'ADD_ON'
+      ? { fee_charge_mode: 'ADD_ON', client_fee: formatDecimal(fee), debited_amount: formatDecimal(cents + fee), net_amount: formatDecimal(cents) }
+      : { fee_charge_mode: 'DEDUCTED', client_fee: formatDecimal(fee), debited_amount: formatDecimal(cents), net_amount: formatDecimal(cents - fee) };
+  };
   const idempotentBodies = new Map<string, string>();
   /** Vue d'une transaction telle que l'API la renvoie (champs non garantis masquables). */
   const shown = (row: Record<string, unknown>, omitDescription: boolean) => {
@@ -567,7 +666,7 @@ export function createFakeSasPay() {
       const amount = String(call.body?.amount);
       transactions.set(id, {
         id, reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: call.body?.currency,
-        fee_charge_mode: 'ADD_ON', client_fee: '100.00', debited_amount: (Number(amount) + 100).toFixed(2), net_amount: amount,
+        ...amounts(amount, call.body?.fee_charge_mode, 'ADD_ON'),
         description: call.body?.description ?? null, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
         created_at: new Date(NOW).toISOString(),
         metadata: call.body?.metadata ?? null,
@@ -682,6 +781,10 @@ export function createFakeSasPay() {
       Object.assign(session, { status: txStatus === 'SUCCESS' ? 'PAID' : 'PENDING', transaction_id: id, transaction_status: txStatus, transaction_reference: `SP-${id}` });
       return id;
     },
+    /** Le compte ignore le mode de frais envoyé par l'API (réglage par défaut du compte appliqué). */
+    ignoreFeeModeOverride() { allowFeeModeOverride = false; },
+    /** Frais d'encaissement du faux SasPay, en centièmes, d'après le montant demandé. */
+    setFee(fn: (amountCents: bigint) => bigint) { feeOf = fn; },
     count(method: string, pathPrefix: string) {
       return calls.filter((c) => c.method === method && c.path.startsWith(pathPrefix)).length;
     },

@@ -128,6 +128,12 @@ export interface SoftpayRequest {
   customer: SasPayCustomer;
   description?: string;
   metadata?: Record<string, string>;
+  /**
+   * Qui supporte les frais. Champ documenté ; SasPay ne l'applique que si le
+   * compte autorise ce choix par l'API, sinon il est ignoré sans erreur : le
+   * mode réellement appliqué se lit sur la transaction vérifiée.
+   */
+  fee_charge_mode?: 'ADD_ON' | 'DEDUCTED';
 }
 
 export interface CheckoutSessionRequest {
@@ -140,6 +146,7 @@ export interface CheckoutSessionRequest {
   customer_phone?: string;
   return_url?: string;
   metadata?: Record<string, string>;
+  fee_charge_mode?: 'ADD_ON' | 'DEDUCTED';
 }
 
 export const TRANSACTION_STATUSES = ['PENDING', 'SUCCESS', 'FAILED', 'CANCELLED'] as const;

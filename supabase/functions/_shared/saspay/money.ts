@@ -20,6 +20,24 @@ export function parseDecimal(value: unknown): bigint | null {
   return BigInt(whole) * MONEY_SCALE + BigInt(fraction.padEnd(2, '0'));
 }
 
+const PERCENT_RE = /^\d{1,3}(?:\.\d{1,3})?$/;
+
+/**
+ * Taux SasPay (« 2.500 », « 2.5 », « 2 ») → millièmes de pour cent (2500).
+ * SasPay publie ses taux avec trois décimales : `parseDecimal`, limité aux
+ * centièmes, les refuserait. `null` si invalide ou supérieur à 100 %.
+ */
+export function parsePercentMilli(value: unknown): bigint | null {
+  let text: string;
+  if (typeof value === 'string') text = value.trim();
+  else if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) text = String(value);
+  else return null;
+  if (!PERCENT_RE.test(text)) return null;
+  const [whole, fraction = ''] = text.split('.');
+  const milli = BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0'));
+  return milli > 100_000n ? null : milli;
+}
+
 /** Centièmes → chaîne décimale à deux décimales, format attendu par SasPay. */
 export function formatDecimal(scaled: bigint): string {
   if (scaled < 0n) throw new RangeError('negative_amount');
@@ -97,11 +115,11 @@ export function quoteFee(amount: string, tier: RateTier | null): FeeQuote | null
   if (value === null || !tier) return null;
   const mode = tier.fee_charge_mode === 'ADD_ON' || tier.fee_charge_mode === 'DEDUCTED' ? tier.fee_charge_mode : null;
   if (!mode) return null;
-  const percent = tier.percent === null || tier.percent === undefined ? 0n : parseDecimal(tier.percent);
+  const percent = tier.percent === null || tier.percent === undefined ? 0n : parsePercentMilli(tier.percent);
   const fixed = tier.fixed === null || tier.fixed === undefined ? 0n : parseDecimal(tier.fixed);
   if (percent === null || fixed === null) return null;
-  // percent est en centièmes de pour-cent : fee = amount × percent / 100 / 100.
-  let fee = ceilDiv(value * percent, 100n * MONEY_SCALE) + fixed;
+  // percent est en millièmes de pour-cent : fee = amount × percent / 1000 / 100.
+  let fee = ceilDiv(value * percent, 100_000n) + fixed;
   const floor = tier.floor_amount === null || tier.floor_amount === undefined ? null : parseDecimal(tier.floor_amount);
   const cap = tier.cap_amount === null || tier.cap_amount === undefined ? null : parseDecimal(tier.cap_amount);
   if (floor !== null && fee < floor) fee = floor;
