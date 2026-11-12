@@ -388,6 +388,9 @@ const defaultAllowedOrigins = [
   'https://vyora-ugc.netlify.app',
   'https://saas-ugc-growth.netlify.app',
   'https://deploy-preview-*--saas-ugc-growth.netlify.app',
+  // Aperçus de la branche de travail actuelle : leur nom porte le slug du
+  // site Netlify (`vyora`), absent des motifs ci-dessus.
+  'https://deploy-preview-*--vyora.netlify.app',
   'https://sbc-ai-agency-dashbord.netlify.app',
   'https://reelora.netlify.app',
   // Un aperçu de travail tourne sur un hôte `{port}-{sandbox}.e2b.app` dont
