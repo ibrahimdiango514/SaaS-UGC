@@ -387,6 +387,16 @@ begin
   if old.status = 'refunded' and new.status <> 'refunded' then
     raise exception 'paid_order_is_terminal';
   end if;
+  -- Refus d'activation (encaissement incompatible avec l'abonnement) : définitif.
+  -- La commande ne sera jamais activée ; elle garde son état et son motif
+  -- jusqu'à sa seule issue possible, le remboursement intégral (plus bas).
+  if old.failure_code in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere')
+     and old.provider_status = 'SUCCESS'
+     and (new.failure_code is distinct from old.failure_code
+          or new.provider_status is distinct from old.provider_status
+          or (new.status is distinct from old.status and new.status <> 'refunded')) then
+    raise exception 'subscription_conflict_is_final';
+  end if;
   if new.status = 'paid' and old.status <> 'paid' then
     if new.provider_payment_id is null or new.billing_event_id is null or not exists (
       select 1 from saas_business.billing_events e
@@ -408,8 +418,28 @@ begin
     return new;
   end if;
   if old.status <> 'refunded' then
-    if old.status <> 'paid'
-       or new.refund_state is distinct from 'credits_recovered'
+    -- Encaissement jamais livré (refus d'activation) : rien n'a été activé, donc
+    -- rien n'est à reprendre. Le remboursement est INTÉGRAL et ne touche à aucun
+    -- abonnement (aucun événement de facturation).
+    if old.status <> 'paid' then
+      if coalesce(old.failure_code, '') not in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere')
+         or old.provider_status is distinct from 'SUCCESS' or old.provider_payment_id is null
+         or old.subscription_id is not null or old.billing_event_id is not null
+         or new.subscription_id is not null or new.billing_event_id is not null
+         or new.refund_state is distinct from 'credits_recovered'
+         or new.refunded_at is null or new.refund_recorded_by is null
+         or nullif(trim(coalesce(new.refund_reason, '')), '') is null
+         or new.refund_amount_minor is distinct from new.amount_minor
+         or new.refund_days_recovered is distinct from 0
+         or new.refund_units_recovered is distinct from 0
+         or new.refund_subscription_status is not null
+         or new.refund_billing_event_id is not null
+         or new.refund_settled_at is not null or new.refund_external_reference is not null then
+        raise exception 'refund_requires_refund_service';
+      end if;
+      return new;
+    end if;
+    if new.refund_state is distinct from 'credits_recovered'
        or new.refunded_at is null or new.refund_recorded_by is null
        or nullif(trim(coalesce(new.refund_reason, '')), '') is null
        or new.refund_amount_minor is null or new.refund_amount_minor < 1
@@ -507,7 +537,10 @@ begin
     'period_start', p_period_start,
     'period_end', p_period_end
   ) || coalesce(p_extra, '{}'::jsonb);
-  v_event := saas_business.bg_receive_billing_event('saspay', p_event_key, p_event_type, md5(v_data::text), v_data, now());
+  -- Horodatage pris après les verrous de l'appelant, jamais antérieur à la
+  -- dernière écriture de l'abonnement (sinon l'événement serait jugé périmé).
+  v_event := saas_business.bg_receive_billing_event('saspay', p_event_key, p_event_type, md5(v_data::text), v_data,
+    greatest(clock_timestamp(), coalesce(p_sub.billing_updated_at, '-infinity'::timestamptz)));
   update saas_business.billing_events
      set processing_status = 'processing', lease_token = v_token,
          lease_until = now() + interval '60 seconds', attempt_count = attempt_count + 1
@@ -562,16 +595,31 @@ declare
   v_new_end timestamptz;
   v_cancel boolean := false;
   v_max bigint := 0;
+  v_other_plan boolean := false;
+  v_undelivered boolean := false;
   v_blocked text;
 begin
   select * into v_order from saas_business.payment_orders o where o.id = p_order_id;
   if not found then raise exception 'payment_order_not_found'; end if;
-  v_period := make_interval(days => v_order.period_days);
+  -- Encaissement constaté par SasPay mais jamais activé (abonnement incompatible
+  -- au moment du paiement) : le client n'a rien reçu, tout lui est dû.
+  v_undelivered := v_order.status not in ('paid', 'refunded')
+    and coalesce(v_order.failure_code, '') in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere')
+    and v_order.provider_status = 'SUCCESS' and v_order.provider_payment_id is not null
+    and v_order.subscription_id is null and v_order.billing_event_id is null;
+  -- Une « journée » vaut 24 h exactes (86 400 s), comptées à rebours depuis la
+  -- fin de période : le calcul ne dépend ni du fuseau horaire de la session ni
+  -- des changements d'heure, et ne s'appuie sur aucune date de calendrier.
+  v_period := make_interval(secs => v_order.period_days * 86400.0);
   if v_order.subscription_id is not null then
     select * into v_sub from saas_business.subscriptions s where s.id = v_order.subscription_id;
     v_has_sub := found;
   end if;
-  if v_has_sub and v_sub.status in ('trialing', 'active', 'past_due')
+  -- L'abonnement a changé de formule depuis cette commande (période terminée,
+  -- puis achat d'une autre formule) : la période payée ici est consommée, et le
+  -- temps restant appartient à une autre commande.
+  v_other_plan := v_has_sub and v_sub.plan_key is distinct from v_order.plan_key;
+  if v_has_sub and not v_other_plan and v_sub.status in ('trialing', 'active', 'past_due')
      and v_sub.billing_provider = 'saspay' and v_sub.current_period_end > now() then
     -- La période remboursée est la DERNIÈRE payée : ce qu'il en reste à courir,
     -- en jours entamés (une journée commencée reste due au client).
@@ -581,10 +629,15 @@ begin
     v_cancel := v_new_end <= now();
     v_max := floor(v_order.amount_minor::numeric * v_days / v_order.period_days);
   end if;
+  if v_undelivered then
+    v_days := 0; v_new_end := null; v_cancel := false; v_max := v_order.amount_minor;
+  end if;
   v_blocked := case
     when v_order.status = 'refunded' then 'already_refunded'
+    when v_undelivered then null
     when v_order.status <> 'paid' then 'refund_requires_paid_order'
     when not v_has_sub then 'refund_subscription_missing'
+    when v_other_plan then 'refund_subscription_plan_changed'
     when v_max < 1 then 'refund_nothing_recoverable'
     else null end;
   return jsonb_build_object(
@@ -603,6 +656,9 @@ begin
     -- Valeur au prorata du temps restant : plafond de ce qui peut être rendu.
     'max_refund_xof', v_max,
     'needs_partial', v_max < v_order.amount_minor,
+    -- Encaissement non livré : remboursement intégral, abonnement inchangé.
+    'undelivered', v_undelivered,
+    'failure_code', v_order.failure_code,
     'refundable', v_blocked is null,
     'blocked', v_blocked
   );
@@ -658,6 +714,24 @@ begin
   if p_refund_amount_xof is null or p_refund_amount_xof < 1
      or p_refund_amount_xof > (v_plan->>'max_refund_xof')::bigint then
     raise exception 'refund_amount_out_of_bounds';
+  end if;
+
+  if (v_plan->>'undelivered')::boolean then
+    -- Rien n'a été livré : le montant rendu est le montant encaissé, ni plus ni
+    -- moins, et l'abonnement en cours (payé par une autre commande) reste intact.
+    if p_refund_amount_xof <> v_order.amount_minor then raise exception 'refund_amount_out_of_bounds'; end if;
+    update saas_business.payment_orders
+       set status = 'refunded', refunded_at = now(), refund_state = 'credits_recovered',
+           refund_reason = v_reason, refund_amount_minor = p_refund_amount_xof,
+           refund_days_recovered = 0, refund_units_recovered = 0, refund_recorded_by = v_admin
+     where id = p_order_id returning * into v_order;
+    insert into saas_ugc.ugc_audit_logs(actor_user_id, action, target_type, target_id, details)
+    values (v_admin, 'saspay_refund_recorded', 'business_payment_order', p_order_id::text,
+      jsonb_build_object('actor', 'admin', 'product', 'business', 'customer', v_order.user_id, 'reason', v_reason,
+        'refund_amount_minor', p_refund_amount_xof, 'days_recovered', 0, 'units_recovered', 0,
+        'undelivered', true, 'failure_code', v_order.failure_code, 'partial', false));
+    return saas_business.vyora_payment_order_json(v_order) || saas_business.vyora_payment_refund_json(v_order)
+      || jsonb_build_object('outcome', 'refunded', 'undelivered', true);
   end if;
 
   v_cancel := (v_plan->>'will_cancel')::boolean;
@@ -766,6 +840,14 @@ begin
       values (v_admin, 'saspay_refund_settled', 'business_payment_order', p_order_id::text,
         jsonb_build_object('actor', 'admin', 'product', 'business', 'customer', v_bg.user_id,
           'external_reference', v_ref, 'refund_amount_minor', v_bg.refund_amount_minor));
+      -- L'argent d'un encaissement non activable est rendu : l'anomalie est close.
+      -- (La table des anomalies est créée plus bas dans cette migration ; elle
+      -- existe toujours au moment où cette fonction est appelée.)
+      update saas_ugc.vyora_payment_anomalies a
+         set resolved_at = now(), resolved_by = v_admin,
+             resolution_note = left('Remboursé au client — versement ' || v_ref, 500)
+       where a.kind = 'subscription_conflict' and a.product = 'business'
+         and a.order_id = p_order_id and a.resolved_at is null;
     end if;
     return saas_business.vyora_payment_order_json(v_bg) || saas_business.vyora_payment_refund_json(v_bg);
   end if;
@@ -879,12 +961,14 @@ create table if not exists saas_ugc.vyora_payment_reconcile_runs (
 );
 create index if not exists vyora_payment_reconcile_runs_started_idx
   on saas_ugc.vyora_payment_reconcile_runs(started_at desc);
+-- Une seule exécution « en cours » peut exister : garanti par la base elle-même.
+create unique index if not exists vyora_payment_reconcile_runs_single_running_idx
+  on saas_ugc.vyora_payment_reconcile_runs((true)) where status = 'running';
 
 create table if not exists saas_ugc.vyora_payment_anomalies (
   id uuid primary key default gen_random_uuid(),
   dedup_key text not null unique,
-  kind text not null check (kind in (
-    'order_stuck', 'duplicate_payment', 'payment_conflict', 'amount_mismatch', 'payment_not_found')),
+  kind text not null,
   product text check (product is null or product in ('studio', 'business')),
   order_id uuid,
   internal_reference text,
@@ -897,6 +981,18 @@ create table if not exists saas_ugc.vyora_payment_anomalies (
   resolved_by uuid,
   resolution_note text
 );
+-- Genres d'anomalie (contrainte nommée, rejouable) :
+--   order_stuck           commande sans issue depuis plus de 24 h
+--   duplicate_payment     second encaissement pour une commande déjà réglée
+--   payment_conflict      encaissement portant la référence d'une commande liée à un autre paiement
+--   amount_mismatch       montant ou devise encaissés différents de la commande
+--   payment_not_found     paiement inconnu de SasPay
+--   subscription_conflict encaissement Business Grow incompatible avec l'abonnement en cours (rien livré)
+--   sweep_unreliable      le balayage des transactions SasPay ne peut pas jouer son rôle de filet
+alter table saas_ugc.vyora_payment_anomalies drop constraint if exists vyora_payment_anomalies_kind_check;
+alter table saas_ugc.vyora_payment_anomalies add constraint vyora_payment_anomalies_kind_check
+  check (kind in ('order_stuck', 'duplicate_payment', 'payment_conflict', 'amount_mismatch', 'payment_not_found',
+                  'subscription_conflict', 'sweep_unreliable'));
 create index if not exists vyora_payment_anomalies_open_idx
   on saas_ugc.vyora_payment_anomalies(last_seen_at desc) where resolved_at is null;
 
@@ -925,6 +1021,8 @@ declare
     when 'duplicate_payment' then 'Double paiement SasPay détecté'
     when 'payment_conflict' then 'Paiement SasPay non rattachable'
     when 'amount_mismatch' then 'Montant SasPay différent de la commande'
+    when 'subscription_conflict' then 'Paiement Business Grow encaissé mais non activable'
+    when 'sweep_unreliable' then 'Filet de sécurité SasPay incomplet'
     else 'Paiement SasPay introuvable chez le prestataire' end;
 begin
   insert into saas_ugc.vyora_payment_anomalies(dedup_key, kind, product, order_id, internal_reference, provider_payment_id, details)
@@ -1099,7 +1197,9 @@ begin
           where d.product = 'studio' and o.id = d.order_id and o.status in ('pending', 'processing')
          union all
          select 1 from saas_business.payment_orders o
-          where d.product = 'business' and o.id = d.order_id and o.status in ('pending', 'processing'))
+          where d.product = 'business' and o.id = d.order_id and o.status in ('pending', 'processing')
+            -- Un refus d'activation a déjà sa propre anomalie (« non activable »).
+            and coalesce(o.failure_code, '') not in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere'))
   loop
     perform ugc_private.vyora_payment_flag_anomaly('order_stuck', v_stuck.product, v_stuck.order_id, null,
       v_stuck.internal_reference, jsonb_build_object('opened_at', v_stuck.opened_at));
@@ -1146,6 +1246,9 @@ declare
   v_id uuid;
 begin
   perform ugc_private.vyora_assert_service_role();
+  -- Deux démarrages simultanés passent l'un après l'autre : le second voit
+  -- l'exécution ouverte par le premier et renonce.
+  perform pg_advisory_xact_lock(hashtextextended('vyora-payments-reconcile-start', 0));
   -- Une exécution restée « en cours » plus de 10 min a été interrompue.
   update saas_ugc.vyora_payment_reconcile_runs
      set status = 'error', finished_at = now(), detail = detail || '{"error": "interrupted"}'::jsonb
@@ -1281,8 +1384,14 @@ as $$
 declare
   v_cfg jsonb := ugc_private.vyora_payment_config();
   v_cron jsonb := jsonb_build_object('available', false, 'scheduled', false);
+  v_token boolean := false;
 begin
   perform ugc_private.reelora_assert_admin();
+  -- Présence du jeton serveur dans Vault (jamais sa valeur).
+  if to_regclass('vault.secrets') is not null then
+    execute 'select exists (select 1 from vault.secrets s where s.name = $1)'
+      into v_token using 'vyora_payments_reconcile_token';
+  end if;
   if to_regclass('cron.job') is not null then
     execute 'select coalesce((select jsonb_build_object(''available'', true, ''scheduled'', true,
                ''schedule'', j.schedule, ''active'', j.active) from cron.job j where j.jobname = $1 limit 1),
@@ -1293,6 +1402,10 @@ begin
     'enabled', coalesce((v_cfg->>'enabled')::boolean, false),
     'mode', coalesce(v_cfg->>'mode', 'test'),
     'cron', v_cron,
+    -- Ce dont la tâche planifiée a besoin pour appeler l'Edge Function.
+    'dispatch', jsonb_build_object(
+      'token_present', v_token,
+      'http_available', to_regproc('net.http_post') is not null),
     'open_orders', jsonb_build_object(
       'studio', (select count(*) from saas_ugc.ugc_recharge_orders o
                   where o.provider = 'saspay' and o.status in ('pending', 'processing')),
@@ -1304,7 +1417,11 @@ begin
       + (select count(*) from saas_business.payment_orders o
           where o.status = 'refunded' and o.refund_state = 'credits_recovered'),
     'runs', coalesce((
-      select jsonb_agg(to_jsonb(r) - 'detail' order by r.started_at desc)
+      -- Du détail, seuls les indicateurs du balayage sont exposés.
+      select jsonb_agg((to_jsonb(r) - 'detail') || jsonb_build_object(
+               'sweep_truncated', coalesce((r.detail->>'sweep_truncated')::boolean, false),
+               'sweep_blind', coalesce((r.detail->>'sweep_blind')::boolean, false))
+             order by r.started_at desc)
         from (select * from saas_ugc.vyora_payment_reconcile_runs
                order by started_at desc limit 10) r), '[]'::jsonb),
     'anomalies', coalesce((

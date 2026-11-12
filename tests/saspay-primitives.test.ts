@@ -287,9 +287,36 @@ describe('SasPay — liste des encaissements (réconciliation)', () => {
     expect(first.init.body).toBeUndefined();
     expect(first.url.pathname).toBe('/api/v1/transactions/');
     expect(Object.fromEntries(first.url.searchParams)).toEqual({
-      status: 'SUCCESS', transaction_type: 'PAIEMENT', created_at__gte: '2026-11-10T10:00:00.000Z', page_size: '100',
+      // Uniquement des paramètres décrits par la spécification ; 200 = maximum documenté.
+      status: 'SUCCESS', transaction_type: 'PAIEMENT', created_at__gte: '2026-11-10T10:00:00.000Z', page_size: '200',
     });
     expect(second.url.searchParams.get('cursor')).toBe('abc');
+  });
+
+  it('ne dépasse jamais la taille de page documentée (200)', async () => {
+    const fetcher = vi.fn().mockResolvedValue(page([]));
+    const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: fetcher as unknown as typeof fetch });
+    await client.listSuccessfulPayments({ createdAfter: '2026-11-10T10:00:00.000Z', pageSize: 5000 });
+    expect(new URL(String(fetcher.mock.calls[0][0])).searchParams.get('page_size')).toBe('200');
+  });
+
+  it('compte les transactions dont la réponse porte un champ « description » (non garanti par la spécification)', async () => {
+    const bare = (id: string) => ({ id, status: 'SUCCESS', flow_direction: 'INBOUND', transaction_type: 'PAIEMENT', reference: `SP-${id}` });
+    const list = async (rows: unknown[]) => {
+      const fetcher = vi.fn().mockResolvedValue(page(rows));
+      return createSasPayClient({ secretKey: TEST_KEY, fetcher: fetcher as unknown as typeof fetch })
+        .listSuccessfulPayments({ createdAfter: '2026-11-10T10:00:00.000Z' });
+    };
+    // Champ absent partout : le libellé n'est pas exposé, la liste est inexploitable pour le rapprochement.
+    let listing = await list([bare('tx-00000001'), bare('tx-00000002')]);
+    expect(listing).toMatchObject({ described: 0, truncated: false });
+    expect(listing.transactions.map((tx) => tx.description)).toEqual([null, null]);
+    // Champ présent mais vide ou nul : l'API l'expose, la transaction n'a simplement pas de libellé.
+    listing = await list([{ ...bare('tx-00000001'), description: null }, { ...bare('tx-00000002'), description: '' }, row('tx-00000003')]);
+    expect(listing.described).toBe(3);
+    expect(listing.transactions.map((tx) => tx.description)).toEqual([null, null, `Pack — VYS-${'A'.repeat(32)}`]);
+    // Liste vide : rien à dire.
+    expect(await list([])).toMatchObject({ described: 0, transactions: [] });
   });
 
   it('n’envoie jamais la clé secrète vers une adresse de page suivante étrangère à SasPay', async () => {

@@ -10,6 +10,8 @@ const steps = [
   ['legacy.mjs', []],
   // Remboursements, entretien, sélection de réconciliation, anomalies, planification.
   ['refunds.mjs', []],
+  // Audit : concurrence Business Grow, remboursements sous charge, fuseaux, exécutions.
+  ['audit.mjs', []],
   // Les Edge Functions sont du TypeScript : Node ≥ 22.6 sait en retirer les types.
   ['e2e.mjs', ['--experimental-strip-types', '--no-warnings']],
 ];

@@ -8,6 +8,12 @@
 //   GET  /payments/{payment_id}/verify/
 //   GET  /pricing/my-rates/
 //   GET  /merchant-balances/                (lecture seule)
+//   GET  /transactions/                     (lecture seule, pagination par curseur)
+//
+// La spécification ne décrit la RÉPONSE de `GET /transactions/` que par un
+// exemple, sans schéma : aucun champ n'y est garanti. Les paramètres de requête,
+// eux, sont spécifiés (`status`, `transaction_type`, `created_at__gte`,
+// `page_size` ≤ 200, `cursor`). Voir `listSuccessfulPayments`.
 //
 // Aucun décaissement, aucun transfert, aucune « recharge » : ces routes ne sont
 // pas implémentées. La clé secrète n'apparaît jamais dans un message d'erreur.
@@ -180,6 +186,13 @@ export interface TransactionListing {
   transactions: ListedTransaction[];
   /** Vrai si SasPay avait encore des pages au-delà de la limite demandée. */
   truncated: boolean;
+  /**
+   * Nombre de transactions listées dont la réponse portait un champ
+   * `description`. La spécification OpenAPI ne garantit pas ce champ (il
+   * n'apparaît que dans un exemple) : s'il vaut 0 alors que des transactions
+   * sont listées, le rapprochement par référence est AVEUGLE.
+   */
+  described: number;
 }
 
 export interface SasPayClientOptions {
@@ -379,12 +392,13 @@ export function createSasPayClient(options: SasPayClientOptions): SasPayClient {
       return balances;
     },
 
-    async listSuccessfulPayments({ createdAfter, maxPages = 3, pageSize = 100 }) {
+    async listSuccessfulPayments({ createdAfter, maxPages = 5, pageSize = 200 }) {
       const query = new URLSearchParams({
         status: 'SUCCESS', transaction_type: 'PAIEMENT', created_at__gte: createdAfter,
         page_size: String(Math.min(Math.max(Math.trunc(pageSize), 1), 200)),
       });
       const transactions: ListedTransaction[] = [];
+      let described = 0;
       let path: string | null = `/transactions/?${query.toString()}`;
       for (let page = 0; path && page < Math.max(maxPages, 1); page += 1) {
         const data = await request('GET', path);
@@ -399,6 +413,8 @@ export function createSasPayClient(options: SasPayClientOptions): SasPayClient {
           if ((text(row.status) ?? '').toUpperCase() !== 'SUCCESS') continue;
           const direction = (text(row.flow_direction) ?? 'INBOUND').toUpperCase();
           if (direction !== 'INBOUND') continue;
+          // Champ PRÉSENT dans la réponse (même vide) : l'API expose bien le libellé.
+          if (Object.prototype.hasOwnProperty.call(row, 'description')) described += 1;
           transactions.push({
             id,
             description: text(row.description)?.slice(0, 300) ?? null,
@@ -408,7 +424,7 @@ export function createSasPayClient(options: SasPayClientOptions): SasPayClient {
         }
         path = nextPagePath(isRecord(data) ? data.next : null, baseUrl);
       }
-      return { transactions, truncated: path !== null };
+      return { transactions, truncated: path !== null, described };
     },
   };
 }

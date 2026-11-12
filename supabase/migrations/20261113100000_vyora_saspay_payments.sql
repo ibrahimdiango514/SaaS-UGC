@@ -903,9 +903,10 @@ begin
     raise exception 'payment_currency_not_supported';
   end if;
   v_network := case when p_flow = 'softpay' then p_network end;
-  v_block := saas_business.vyora_subscription_block(p_user_id, p_plan_key);
-  if v_block is not null then raise exception '%', v_block; end if;
 
+  -- Verrou par utilisateur, partagé avec le règlement (`vyora_payment_bg_settle`) :
+  -- tout ce qui suit voit un état que ni une autre création ni un règlement du
+  -- même utilisateur ne peut modifier avant la fin de cette transaction.
   perform pg_advisory_xact_lock(hashtextextended('vyora-pay-business:' || p_user_id::text, 0));
 
   select * into v_order from saas_business.payment_orders o
@@ -920,7 +921,24 @@ begin
     return saas_business.vyora_payment_order_json(v_order) || jsonb_build_object('reused', true);
   end if;
 
+  -- Contrôle d'abonnement SOUS le verrou (il était fait avant : deux créations
+  -- simultanées pouvaient toutes deux le franchir).
+  v_block := saas_business.vyora_subscription_block(p_user_id, p_plan_key);
+  if v_block is not null then raise exception '%', v_block; end if;
+
   v_ttl := greatest(coalesce((v_cfg->>'order_ttl_minutes')::integer, 30), 5);
+  -- Un paiement encore ouvert pour une AUTRE formule : on n'en ouvre pas un
+  -- second, sinon le client pourrait régler deux formules dont une seule est
+  -- activable. Il termine le premier, ou attend son expiration.
+  if exists (
+    select 1 from saas_business.payment_orders o
+     where o.user_id = p_user_id and o.status in ('pending', 'processing')
+       and o.plan_key <> p_plan_key
+       and o.failure_code is null
+       and o.created_at > now() - make_interval(mins => v_ttl)
+  ) then
+    raise exception 'business_other_plan_payment_in_progress';
+  end if;
   select count(*) into v_open from saas_business.payment_orders o
    where o.user_id = p_user_id and o.status in ('pending', 'processing')
      and o.created_at > now() - make_interval(mins => v_ttl);
@@ -1019,13 +1037,26 @@ declare
   v_token uuid := gen_random_uuid();
   v_before integer;
   v_after integer;
+  v_user uuid;
+  v_block text;
+  -- Durée payée, en jours de 24 h exactes : le résultat ne dépend pas du fuseau
+  -- horaire de la session (aucun effet des changements d'heure).
+  v_period interval;
 begin
   perform ugc_private.vyora_assert_service_role();
   if v_status not in ('PENDING', 'SUCCESS', 'FAILED', 'CANCELLED') then
     raise exception 'unknown_provider_status';
   end if;
+  -- Ordre des verrous : utilisateur → commande → abonnement. Le verrou par
+  -- utilisateur est celui de la création de commande : deux règlements du même
+  -- utilisateur (commandes différentes) passent l'un après l'autre, y compris
+  -- quand aucun abonnement n'existe encore (aucune ligne à verrouiller).
+  select o.user_id into v_user from saas_business.payment_orders o where o.id = p_order_id;
+  if not found then raise exception 'payment_order_not_found'; end if;
+  perform pg_advisory_xact_lock(hashtextextended('vyora-pay-business:' || v_user::text, 0));
   select * into v_order from saas_business.payment_orders o where o.id = p_order_id for update;
   if not found then raise exception 'payment_order_not_found'; end if;
+  v_period := make_interval(secs => v_order.period_days * 86400.0);
   if v_order.provider_payment_id is not null and v_payment is not null
      and v_order.provider_payment_id <> v_payment then
     raise exception 'provider_reference_conflict';
@@ -1041,7 +1072,20 @@ begin
       || jsonb_build_object('outcome', 'already_paid', 'credited', false);
   end if;
 
+  -- Refus d'activation déjà prononcé sur un encaissement constaté : il est
+  -- définitif (voir plus bas). Quel que soit l'état rapporté ensuite, la
+  -- commande ne change plus ; seule issue : son remboursement intégral.
+  if v_order.failure_code in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere')
+     and v_order.provider_status = 'SUCCESS' then
+    update saas_business.payment_orders
+       set last_verified_at = now(), verify_count = verify_count + 1
+     where id = p_order_id returning * into v_order;
+    return saas_business.vyora_payment_order_json(v_order)
+      || jsonb_build_object('outcome', 'subscription_conflict', 'credited', false);
+  end if;
+
   if v_status = 'SUCCESS' then
+
     if p_requested_amount is null or p_requested_amount <> v_order.amount_minor::numeric
        or upper(coalesce(trim(p_currency), '')) <> v_order.currency then
       update saas_business.payment_orders
@@ -1059,10 +1103,30 @@ begin
     select * into v_sub from saas_business.subscriptions s
      where s.user_id = v_order.user_id and s.status in ('trialing', 'active', 'past_due')
      for update;
-    if found then
-      if v_sub.billing_provider is distinct from 'saspay' then
-        raise exception 'business_subscription_managed_elsewhere';
-      end if;
+
+    -- L'encaissement est-il encore compatible avec l'abonnement ? Le contrôle
+    -- fait à la création ne suffit pas : une commande peut être payée longtemps
+    -- après (paiement tardif, relance) alors qu'une autre formule a été activée
+    -- entre-temps. Dans ce cas RIEN n'est livré — la formule en cours n'est ni
+    -- remplacée ni raccourcie — et le refus est définitif : l'argent encaissé
+    -- est à rendre par l'exploitant (anomalie « subscription_conflict »).
+    v_block := saas_business.vyora_subscription_block(v_order.user_id, v_order.plan_key);
+    if v_block is not null then
+      update saas_business.payment_orders
+         set provider_payment_id = coalesce(provider_payment_id, v_payment),
+             provider_status = v_status, failure_code = v_block,
+             status = case when status = 'pending' then 'processing' else status end,
+             fee_charge_mode = case when p_fee_mode in ('ADD_ON', 'DEDUCTED') then p_fee_mode else fee_charge_mode end,
+             fee_amount = coalesce(p_fee, fee_amount),
+             charged_amount = coalesce(p_charged, charged_amount),
+             net_amount = coalesce(p_net, net_amount),
+             last_verified_at = now(), verify_count = verify_count + 1
+       where id = p_order_id returning * into v_order;
+      return saas_business.vyora_payment_order_json(v_order)
+        || jsonb_build_object('outcome', 'subscription_conflict', 'credited', false);
+    end if;
+
+    if v_sub.id is not null then
       v_sub_id := v_sub.id;
       v_customer := v_sub.external_customer_id;
       v_external := v_sub.external_subscription_id;
@@ -1070,17 +1134,18 @@ begin
          and v_sub.current_period_end is not null and v_sub.current_period_end > now() then
         -- Même formule encore en cours : la période payée s'ajoute à la suite.
         v_start := coalesce(v_sub.current_period_start, now());
-        v_end := v_sub.current_period_end + make_interval(days => v_order.period_days);
+        v_end := v_sub.current_period_end + v_period;
       else
+        -- Période terminée (même formule ou autre) : nouvelle période dès maintenant.
         v_start := now();
-        v_end := now() + make_interval(days => v_order.period_days);
+        v_end := now() + v_period;
       end if;
     else
       v_sub_id := v_order.id;
       v_customer := v_order.user_id::text;
       v_external := v_order.internal_reference;
       v_start := now();
-      v_end := now() + make_interval(days => v_order.period_days);
+      v_end := now() + v_period;
     end if;
 
     v_data := jsonb_build_object(
@@ -1094,9 +1159,13 @@ begin
       'period_end', v_end,
       'payment_order_id', v_order.id
     );
+    -- Horodatage de l'événement pris APRÈS les verrous (`now()` est l'heure de
+    -- début de transaction : une transaction qui a attendu son tour porterait une
+    -- heure antérieure à l'écriture précédente et serait rejetée comme périmée).
     v_event := saas_business.bg_receive_billing_event(
       'saspay', 'saspay:success:' || v_payment, 'transaction.success',
-      md5(v_data::text), v_data, now()
+      md5(v_data::text), v_data,
+      greatest(clock_timestamp(), coalesce(v_sub.billing_updated_at, '-infinity'::timestamptz))
     );
     update saas_business.billing_events
        set processing_status = 'processing', lease_token = v_token,
@@ -1140,12 +1209,24 @@ begin
 
   if v_status in ('FAILED', 'CANCELLED') then
     update saas_business.payment_orders
-       set status = case when status in ('pending', 'processing')
-                         then (case when v_status = 'FAILED' then 'failed' else 'cancelled' end)
-                         else status end,
+       set status = case
+             -- Encaissement constaté puis refusé à l'activation : la commande reste
+             -- en l'état jusqu'à son remboursement (seule issue possible).
+             when failure_code in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere')
+               then status
+             when status in ('pending', 'processing')
+               then (case when v_status = 'FAILED' then 'failed' else 'cancelled' end)
+             else status end,
            provider_payment_id = coalesce(provider_payment_id, v_payment),
-           provider_status = v_status,
-           failure_code = coalesce(nullif(p_failure_code, ''), lower(v_status)),
+           provider_status = case
+             when failure_code in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere')
+               then provider_status
+             else v_status end,
+           -- Un refus d'activation déjà prononcé reste inscrit (il est définitif).
+           failure_code = case
+             when failure_code in ('business_plan_change_not_supported', 'business_subscription_managed_elsewhere')
+               then failure_code
+             else coalesce(nullif(p_failure_code, ''), lower(v_status)) end,
            last_verified_at = now(), verify_count = verify_count + 1
      where id = p_order_id returning * into v_order;
     return saas_business.vyora_payment_order_json(v_order)

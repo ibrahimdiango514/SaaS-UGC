@@ -39,6 +39,7 @@ const DB_ERRORS: Record<string, [code: string, status: number, message: string]>
   business_plan_not_purchasable: ['BUSINESS_PLAN_NOT_PURCHASABLE', 422, 'Cette formule Business Grow n’est pas commercialisée.'],
   business_subscription_managed_elsewhere: ['BUSINESS_SUBSCRIPTION_MANAGED_ELSEWHERE', 409, 'Votre abonnement Business Grow est géré par un autre moyen de paiement. Contactez le support.'],
   business_plan_change_not_supported: ['BUSINESS_PLAN_CHANGE_NOT_SUPPORTED', 409, 'Une autre formule est déjà en cours. Vous pourrez changer de formule à la fin de la période, ou contactez le support.'],
+  business_other_plan_payment_in_progress: ['BUSINESS_OTHER_PLAN_PAYMENT_IN_PROGRESS', 409, 'Un paiement est déjà en cours pour une autre formule. Terminez-le, ou attendez son expiration (30 minutes) avant de changer de formule.'],
   payment_order_not_found: ['PAYMENT_NOT_FOUND', 404, 'Commande introuvable.'],
   provider_reference_conflict: ['PAYMENT_REFERENCE_CONFLICT', 409, 'Ce paiement est déjà rattaché à une autre commande.'],
 };

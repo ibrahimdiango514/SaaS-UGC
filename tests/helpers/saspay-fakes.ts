@@ -56,6 +56,8 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
   const anomalies: PaymentAnomaly[] = [];
   const runs: Array<{ id: string; source: string; status: string; counts?: ReconcileCounts & { detail?: Record<string, unknown> } }> = [];
   const reconcile = { sweep: true, due: null as Array<{ product: Product; orderId: string }> | null };
+  /** Commandes dont la base refuserait l'activation (Business Grow : abonnement incompatible). */
+  const activationBlocks = new Map<string, string>();
 
   function price(product: Product, item: Record<string, unknown>) {
     if (product === 'studio') {
@@ -148,11 +150,25 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       if (order.status === 'paid') return { ...order, outcome: 'already_paid', credited: false };
       // Comme en base : une commande remboursée ne se relivre jamais.
       if (order.status === 'refunded') return { ...order, outcome: 'already_paid', credited: false };
+      // Comme en base : un refus d'activation prononcé sur un encaissement est figé.
+      if (order.provider_status === 'SUCCESS' && typeof order.failure_code === 'string'
+        && ['business_plan_change_not_supported', 'business_subscription_managed_elsewhere'].includes(order.failure_code)) {
+        return { ...order, outcome: 'subscription_conflict', credited: false };
+      }
       if (input.status === 'SUCCESS') {
         if (!input.paymentId) throw new Error('payment_id_required');
         if (input.requestedAmount !== order.amount || input.currency !== order.currency) {
           order.failure_code = 'amount_mismatch';
           return { ...order, outcome: 'amount_mismatch', credited: false };
+        }
+        // Comme en base : refus d'activation définitif, rien n'est livré.
+        const block = activationBlocks.get(order.id);
+        if (block) {
+          order.failure_code = block;
+          order.provider_payment_id ??= input.paymentId;
+          order.provider_status = 'SUCCESS';
+          if (order.status === 'pending') order.status = 'processing';
+          return { ...order, outcome: 'subscription_conflict', credited: false };
         }
         order.status = 'paid';
         order.provider_payment_id ??= input.paymentId;
@@ -242,7 +258,11 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
     },
   };
 
-  return { store, orders, credits, webhooks, calls, config, anomalies, runs, reconcile };
+  return {
+    store, orders, credits, webhooks, calls, config, anomalies, runs, reconcile,
+    /** La base refusera d'activer cette commande une fois payée (autre formule en cours…). */
+    blockActivation(orderId: string, code = 'business_plan_change_not_supported') { activationBlocks.set(orderId, code); },
+  };
 }
 
 export interface SasPayCall {
@@ -267,6 +287,7 @@ export function createFakeSasPay() {
   let override: Responder | null = null;
   let sequence = 0;
   let listingHonoursFilters = true;
+  let listingOmitsDescription = false;
   let nextOverride: string | null = null;
   let rates: unknown[] = [{
     country_code: 'ML', currency: 'XOF', network_code: 'orange_ml', network_name: 'Orange Money Mali',
@@ -345,7 +366,12 @@ export function createFakeSasPay() {
           && (Date.parse(String(tx.created_at ?? new Date(NOW).toISOString())) >= since))));
       query.set('cursor', String(offset + size));
       const next = offset + size < rows.length ? `${url.origin}/api/v1/transactions/?${query.toString()}` : null;
-      return jsonResponse({ success: true, code: 200, data: { next: nextOverride ?? next, previous: null, results: rows.slice(offset, offset + size) } });
+      const page = rows.slice(offset, offset + size).map((row) => {
+        if (!listingOmitsDescription) return row;
+        const { description: _omitted, ...rest } = row;
+        return rest;
+      });
+      return jsonResponse({ success: true, code: 200, data: { next: nextOverride ?? next, previous: null, results: page } });
     }
     if (call.method === 'GET' && call.path === '/pricing/my-rates/') return jsonResponse({ success: true, data: rates, code: 200 });
     if (call.method === 'GET' && call.path.startsWith('/merchant-balances/')) {
@@ -364,6 +390,11 @@ export function createFakeSasPay() {
     setRates(next: unknown[]) { rates = next; },
     /** Simule une API qui ignorerait les filtres de la liste des transactions. */
     ignoreListFilters() { listingHonoursFilters = false; },
+    /**
+     * Simule une liste de transactions SANS champ `description` : la
+     * spécification OpenAPI ne le garantit pas (il n'apparaît que dans un exemple).
+     */
+    omitListDescriptions(omit = true) { listingOmitsDescription = omit; },
     /** Force l'adresse de page suivante renvoyée par la liste (curseur hostile). */
     setNextPage(next: string | null) { nextOverride = next; },
     /** Paiement encaissé chez SasPay sans que VYORA en ait eu connaissance. */
@@ -372,6 +403,8 @@ export function createFakeSasPay() {
       const id = String(patch.id ?? `tx-${String(sequence).padStart(8, '0')}`);
       transactions.set(id, {
         id, reference: `SP-${id}`, status: 'SUCCESS', currency: 'XOF', fee_charge_mode: 'ADD_ON', client_fee: '0.00',
+        // Comme dans l'exemple documenté : le champ existe, même sans libellé.
+        description: null,
         transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date(NOW).toISOString(), ...patch,
       });
       return id;

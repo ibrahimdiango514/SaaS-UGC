@@ -21,8 +21,16 @@ export type Product = 'studio' | 'business';
 export type PaymentFlow = 'softpay' | 'checkout';
 export type OrderStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'cancelled' | 'refunded';
 /** États présentés à l'utilisateur. */
-export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled';
-export type SettleOutcome = 'paid' | 'already_paid' | 'pending' | 'failed' | 'cancelled' | 'amount_mismatch';
+/**
+ * États présentés à l'utilisateur. `unapplied` : paiement ENCAISSÉ mais que la
+ * base a refusé d'activer (Business Grow, abonnement incompatible) — rien n'a
+ * été livré, l'argent est à rendre par le support. État final.
+ */
+export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled' | 'unapplied';
+export type SettleOutcome =
+  | 'paid' | 'already_paid' | 'pending' | 'failed' | 'cancelled' | 'amount_mismatch'
+  /** Business Grow : encaissement incompatible avec l'abonnement en cours — rien n'est livré, définitivement. */
+  | 'subscription_conflict';
 
 export const PRODUCTS: readonly Product[] = ['studio', 'business'];
 export const HANDLED_WEBHOOK_EVENTS = ['transaction.success', 'transaction.failed', 'transaction.cancelled'] as const;
@@ -145,7 +153,9 @@ export interface ReconcileCounts {
   sweep_done: boolean;
 }
 
-export type AnomalyKind = 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found';
+export type AnomalyKind =
+  | 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found'
+  | 'subscription_conflict' | 'sweep_unreliable';
 
 export interface PaymentAnomaly {
   kind: AnomalyKind;
@@ -214,6 +224,15 @@ const PROVIDER_CODE_MESSAGES: Record<string, string> = {
   api_key_scope_forbidden: 'Le compte de paiement n’est pas autorisé à encaisser.',
 };
 
+/** Motifs de refus d'activation d'un encaissement Business Grow (posés par la base, définitifs). */
+export const SUBSCRIPTION_CONFLICT_CODES: readonly string[] = [
+  'business_plan_change_not_supported', 'business_subscription_managed_elsewhere',
+];
+
+export const SUBSCRIPTION_CONFLICT_MESSAGE = 'Votre paiement a bien été reçu, mais il n’a pas pu être appliqué '
+  + 'à votre abonnement en cours. Rien n’a été modifié sur votre abonnement. '
+  + 'Le support a été alerté et vous remboursera intégralement.';
+
 /** Motifs d'inéligibilité renvoyés par la base → (code, message). */
 const INELIGIBLE_REASONS: Record<string, [code: string, message: string]> = {
   business_billing_disabled: ['BUSINESS_BILLING_DISABLED', 'La facturation Business Grow n’est pas activée.'],
@@ -257,8 +276,13 @@ export function fromSasPayError(error: SasPayError, details: Record<string, unkn
 }
 
 /** État utilisateur d'une commande. */
-export function paymentState(order: Pick<OrderRecord, 'status' | 'provider_payment_id' | 'provider_session_id'>): PaymentState {
+export function paymentState(
+  order: Pick<OrderRecord, 'status' | 'provider_payment_id' | 'provider_session_id'> & { failure_code?: string | null },
+): PaymentState {
   if (order.status === 'paid' || order.status === 'refunded') return 'confirmed';
+  // Encaissé mais non activable : ni « en attente » (plus rien à attendre), ni
+  // « échoué » (le client a bien été débité).
+  if (order.failure_code && SUBSCRIPTION_CONFLICT_CODES.includes(order.failure_code)) return 'unapplied';
   if (order.status === 'failed') return 'failed';
   if (order.status === 'cancelled') return 'cancelled';
   if (order.status === 'processing' || order.provider_payment_id || order.provider_session_id) return 'pending';
@@ -448,6 +472,19 @@ export function createPaymentService(deps: PaymentServiceDeps) {
   }
 
   /** Interroge SasPay puis règle la commande selon le statut VÉRIFIÉ. */
+  /**
+   * Encaissement Business Grow que la base a refusé d'activer : signalé tout de
+   * suite (une seule ligne par commande), quel que soit le chemin qui l'a vu.
+   */
+  async function flagSubscriptionConflict(order: OrderRecord): Promise<void> {
+    log('saspay_subscription_conflict', { product: order.product, order: order.id, code: order.failure_code });
+    await store.reportAnomaly({
+      kind: 'subscription_conflict', product: order.product, orderId: order.id,
+      paymentId: order.provider_payment_id, reference: order.internal_reference,
+      details: { reason: order.failure_code, plan_key: order.plan_key ?? null, amount: order.amount, currency: order.currency },
+    }).catch(() => undefined);
+  }
+
   async function sync(
     order: OrderRecord, source: SettleInput['source'], knownPaymentId: string | null = null,
   ): Promise<SettleResult> {
@@ -492,7 +529,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
 
   function nextStep(order: OrderRecord): 'redirect' | 'await_confirmation' | 'done' | 'retry' {
     const state = paymentState(order);
-    if (state === 'confirmed' || state === 'failed' || state === 'cancelled') return 'done';
+    if (state === 'confirmed' || state === 'failed' || state === 'cancelled' || state === 'unapplied') return 'done';
     if (state === 'todo') return 'retry';
     return order.checkout_url ? 'redirect' : 'await_confirmation';
   }
@@ -632,6 +669,8 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     }
     const untouched = { order: publicOrder(order), verified: false, credited: false, message: null as string | null };
     if (order.status === 'paid' || order.status === 'refunded') return { ...untouched, verified: true };
+    // Refus d'activation déjà prononcé : état final, inutile d'interroger SasPay.
+    if (paymentState(order) === 'unapplied') return { ...untouched, verified: true, message: SUBSCRIPTION_CONFLICT_MESSAGE };
     if (!order.provider_payment_id && !order.provider_session_id) return untouched;
     const lastVerified = order.last_verified_at ? Date.parse(order.last_verified_at) : 0;
     if (Number.isFinite(lastVerified) && deps.now() - lastVerified < minVerifyIntervalMs) return untouched;
@@ -640,7 +679,8 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       const result = await sync(order, 'verify');
       const message = result.outcome === 'amount_mismatch'
         ? 'Le montant reçu ne correspond pas à la commande. Le support a été alerté ; aucun crédit n’a été accordé.'
-        : null;
+        : result.outcome === 'subscription_conflict' ? SUBSCRIPTION_CONFLICT_MESSAGE : null;
+      if (result.outcome === 'subscription_conflict') await flagSubscriptionConflict(result);
       return { order: publicOrder(result), verified: true, credited: result.credited, message };
     } catch (error) {
       if (!(error instanceof SasPayError)) throw error;
@@ -708,7 +748,14 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       const order = await store.getOrder(match.product, match.orderId);
       if (!order) throw new PaymentError('PAYMENT_NOT_FOUND', 404, 'Commande introuvable.');
       const result = await sync(order, 'webhook', paymentId);
-      await store.finishWebhook(match.product, eventKey, true);
+      if (result.outcome === 'subscription_conflict') await flagSubscriptionConflict(result);
+      // L'événement n'est « traité » que si la vérification auprès de SasPay a
+      // abouti à une issue. Si SasPay répond encore « en attente » (le webhook
+      // a devancé son propre état), l'événement reste REJOUABLE : sa prochaine
+      // livraison — relance automatique ou renvoi manuel depuis le tableau de
+      // bord — revérifiera au lieu d'être écartée comme un doublon.
+      const conclusive = result.outcome !== 'pending';
+      await store.finishWebhook(match.product, eventKey, conclusive, conclusive ? undefined : 'not_confirmed_yet');
       log('saspay_webhook_processed', { product: match.product, order: match.orderId, outcome: result.outcome });
       return { received: true, outcome: result.outcome, credited: result.credited };
     } catch (error) {
@@ -790,6 +837,12 @@ export function createPaymentService(deps: PaymentServiceDeps) {
             paymentId: result.provider_payment_id ?? knownPaymentId, reference: order.internal_reference,
             details: { expected: order.amount, currency: order.currency },
           });
+        } else if (result.outcome === 'subscription_conflict') {
+          await flag({
+            kind: 'subscription_conflict', product: order.product, orderId: order.id,
+            paymentId: result.provider_payment_id ?? knownPaymentId, reference: order.internal_reference,
+            details: { reason: result.failure_code, plan_key: order.plan_key ?? null, amount: order.amount, currency: order.currency },
+          });
         }
       } catch (error) {
         counts.errors += 1;
@@ -821,8 +874,24 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       }
 
       if (batch.sweep && !outOfTime()) {
-        const listing = await sasPay.listSuccessfulPayments({ createdAfter: batch.sweepSince, maxPages: 3, pageSize: 100 });
+        // 5 pages de 200 (maximum documenté) : jusqu'à 1 000 encaissements par passage.
+        const listing = await sasPay.listSuccessfulPayments({ createdAfter: batch.sweepSince, maxPages: 5, pageSize: 200 });
+        detail.sweep_listed = listing.transactions.length;
+        // Le filet a deux angles morts, signalés au lieu d'être tus :
+        //  * la liste dépasse ce qu'un passage peut lire (ordre des pages non spécifié) ;
+        //  * SasPay ne renvoie pas le libellé (`description`), que sa spécification
+        //    ne garantit pas : aucune référence VYORA n'est alors lisible.
         if (listing.truncated) detail.sweep_truncated = true;
+        if (listing.transactions.length > 0 && listing.described === 0) detail.sweep_blind = true;
+        if (detail.sweep_truncated || detail.sweep_blind) {
+          await flag({
+            kind: 'sweep_unreliable', product: null, orderId: null, paymentId: null, reference: null,
+            details: {
+              reason: detail.sweep_blind ? 'description_missing' : 'truncated',
+              listed: listing.transactions.length, described: listing.described,
+            },
+          });
+        }
         for (const tx of listing.transactions) {
           if (outOfTime()) { detail.stopped = 'time_budget'; break; }
           const reference = orderReferenceIn(tx.description);
@@ -852,7 +921,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         }
         counts.sweep_done = detail.stopped !== 'time_budget';
       }
-      if (counts.errors > 0 || detail.stopped) status = 'partial';
+      if (counts.errors > 0 || detail.stopped || detail.sweep_truncated || detail.sweep_blind) status = 'partial';
     } catch (error) {
       status = counts.checked > 0 ? 'partial' : 'error';
       detail.error = error instanceof SasPayError || error instanceof PaymentError ? error.code : 'unexpected_error';

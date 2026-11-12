@@ -20,7 +20,8 @@ npm test         # Node ≥ 22.6
 | `scenario.mjs` | Intégrité SQL : prix, idempotence, concurrence, gardes, droits, cloisonnement Studio / Business Grow. |
 | `legacy.mjs` | Anciennes RPC du navigateur (`ugc_create_recharge_order`, `reelora_admin_confirm_recharge`) face aux gardes. |
 | `refunds.mjs` | Remboursements Studio et Business Grow, attestation, forges en table, concurrence, entretien, sélection de réconciliation, anomalies, tâche planifiée (`net.http_post` remplacé par un enregistreur). |
-| `e2e.mjs` | Bout en bout : vraies Edge Functions + base réelle + faux SasPay, dont la réconciliation planifiée (webhook perdu, réponse de création perdue, double encaissement, montant différent). |
+| `audit.mjs` | Audit avant mise en production, avec des connexions réellement simultanées : Business Grow (deux formules, paiements tardifs, encaissement non applicable et son remboursement intégral), remboursements (fuseaux, jours entamés, concurrence avec un renouvellement ou une dépense, attestation), réconciliation (exécution unique, anomalies, prérequis). Rejouable sans réinitialiser la base. |
+| `e2e.mjs` | Bout en bout : vraies Edge Functions + base réelle + faux SasPay, dont la réconciliation planifiée (webhook perdu, réponse de création perdue, double encaissement, montant différent) et l'audit (rafales de webhooks rejoués, pannes réseau, liste SasPay sans libellé, parcours Studio et Business Grow d'un même utilisateur). |
 
 ## Limites à connaître
 
@@ -40,5 +41,8 @@ npm test         # Node ≥ 22.6
   réellement toutes les 5 minutes, ni que Vault chiffre le jeton.
 - Ce banc ne remplace pas un essai avec une clé SasPay de test réelle (recette :
   `docs/paiements-saspay.md`).
+
+Lancer une seule étape : `node base.mjs && node mig.mjs && node audit.mjs`
+(`base.mjs` repart d'une base neuve et laisse le serveur démarré).
 
 Variables : `VYORA_PGTEST_PORT` (54329), `VYORA_PGTEST_DIR`, `VYORA_PGTEST_BIN`.

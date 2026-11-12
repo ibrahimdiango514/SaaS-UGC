@@ -14,6 +14,8 @@ const KEY = 'sk_test_e2e_0123456789', WH = 'whsec_e2e';
 const ORIGIN = 'https://vyora-ugc.netlify.app';
 const tokens = new Map();
 const tx = new Map(), sessions = new Map(), idem = new Map(); let seq = 0; let softpayFailure = null;
+// Pannes simulées : vérification SasPay injoignable, réponse de création perdue, liste sans libellé.
+let verifyDown = false, loseSoftpayResponse = false, listWithoutDescription = false;
 const J = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 const fetcher = async (input, init = {}) => {
@@ -35,18 +37,22 @@ const fetcher = async (input, init = {}) => {
   if (path === '/pricing/my-rates/') return J({ success: true, data: [{ country_code: 'ML', network_code: 'orange_ml', payin: { available: true, otp_required: false, tiers: [{ min_amount: '0.00', max_amount: null, percent: '2.00', fixed: '0.00', fee_charge_mode: 'ADD_ON' }] } }] });
   if (path === '/payments/softpay/') {
     if (softpayFailure) return J({ success: false, error: softpayFailure.error, code: softpayFailure.status }, softpayFailure.status);
-    const k = headers.get('idempotency-key'); if (idem.has(k)) return J({ success: true, data: idem.get(k) }, 201);
+    const k = headers.get('idempotency-key'); if (idem.has(k)) { if (loseSoftpayResponse) throw new TypeError('fetch failed'); return J({ success: true, data: idem.get(k) }, 201); }
     const id = `tx-${String(++seq).padStart(8, '0')}`; const amount = body.amount;
     tx.set(id, { id, description: body.description, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date().toISOString(), reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: body.currency, fee_charge_mode: 'ADD_ON', client_fee: (Number(amount) * 0.02).toFixed(2), debited_amount: (Number(amount) * 1.02).toFixed(2), net_amount: amount });
-    const data = { id, status: 'PENDING', checkout_url: '' }; idem.set(k, data); return J({ success: true, data }, 201);
+    const data = { id, status: 'PENDING', checkout_url: '' }; idem.set(k, data);
+    if (loseSoftpayResponse) throw new TypeError('fetch failed'); // paiement créé chez SasPay, réponse jamais reçue
+    return J({ success: true, data }, 201);
   }
   if (path === '/checkout-sessions/') { const id = `cs-${String(++seq).padStart(8, '0')}`; sessions.set(id, { id, status: 'PENDING', transaction_id: null, amount: body.amount, currency: body.currency }); return J({ id, status: 'PENDING', checkout_url: `https://pay.saspay.me/c/${id}` }, 201); }
   let m = path.match(/^\/checkout-sessions\/(.+)\/status\/$/); if (m) return sessions.has(m[1]) ? J({ success: true, data: sessions.get(m[1]) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
-  m = path.match(/^\/payments\/(.+)\/verify\/$/); if (m) return tx.has(m[1]) ? J({ success: true, data: tx.get(m[1]) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
+  m = path.match(/^\/payments\/(.+)\/verify\/$/); if (m && verifyDown) throw new TypeError('fetch failed');
+  if (m) return tx.has(m[1]) ? J({ success: true, data: tx.get(m[1]) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
   if (path === '/transactions/') {
     assert.equal(init.method ?? 'GET', 'GET');
     listings.push(Object.fromEntries(url.searchParams));
-    return J({ success: true, data: { next: null, previous: null, results: [...tx.values()].filter((t) => t.status === 'SUCCESS') } });
+    const rows = [...tx.values()].filter((t) => t.status === 'SUCCESS').map((t) => { if (!listWithoutDescription) return t; const { description, ...rest } = t; return rest; });
+    return J({ success: true, data: { next: null, previous: null, results: rows } });
   }
   if (path.startsWith('/merchant-balances/')) return J({ success: true, data: { count: 1, next: null, results: [{ id: 'b1', country: 'ML', currency: 'XOF', available_amount: '42000.00', pending_amount: '0.00', is_frozen: false }] } });
   return J({ error: { code: 'not_found', message: 'x' } }, 404);
@@ -308,6 +314,187 @@ assert.notEqual((await dbOrder(cheapId)).status, 'paid'); assert.equal(await wal
 assert.equal(Number((await one(`select count(*) n from saas_ugc.vyora_payment_anomalies where kind = 'amount_mismatch' and order_id = $1`, [cheapId])).n), 1);
 ok('100 FCFA encaissés pour une commande de 5 000 FCFA → rien n’est livré, anomalie « montant »');
 tx.delete('tx-cheap-0001');
+
+// ───────────────────────── Audit : rejeux, pannes, conflits, séparation des produits ─────────────────────────
+console.log('Bout en bout — audit avant mise en production');
+const bgOrder = (id) => one(`select * from saas_business.payment_orders where id = $1`, [id]);
+const subOf = (u) => one(`select plan_key, status, billing_provider, current_period_start s, current_period_end e from saas_business.subscriptions where user_id = $1 and status in ('active', 'trialing', 'past_due')`, [u]);
+const usage = async (u) => (await one(`select count(*) n from saas_business.billing_events where user_id = $1`, [u])).n;
+const bgPlan = (plan, key, extra = {}) => ({ ...bg(key), item: { plan_key: plan }, ...extra });
+await admin.query(`update saas_business.plans set active = true, billing_enabled = true, monthly_price_minor = 10000, monthly_credit_units = 150 where plan_key = 'essentiel'`);
+
+// A. Rafale de webhooks rejoués sur un paiement Business Grow déjà activé.
+const carolBefore = await subOf(carol); const carolEvents = await usage(carol);
+const bgReplays = await Promise.all(Array.from({ length: 8 }, (_, i) => (i % 2
+  ? hook({ event: 'transaction.success', data: { id: bgTx, status: 'SUCCESS' } })
+  : call(C, { action: 'status', product: 'business', order_id: bgId }))));
+assert.ok(bgReplays.every((x) => x.status === 200), JSON.stringify(bgReplays.map((x) => x.status)));
+assert.ok(bgReplays.every((x) => x.body.credited !== true));
+assert.deepEqual(await subOf(carol), carolBefore); assert.equal(await usage(carol), carolEvents);
+ok('Business Grow : 4 webhooks rejoués + 4 vérifications simultanés sur un paiement déjà activé → aucune période ajoutée');
+
+// B. Renouvellement : deux webhooks et deux vérifications arrivent en même temps pour le MÊME paiement.
+r = await call(C, bgPlan('croissance', 'e2e-key-bg0002')); assert.equal(r.status, 200, JSON.stringify(r.body));
+const renewId = r.body.order.id; const renewTx = (await bgOrder(renewId)).provider_payment_id;
+tx.get(renewTx).status = 'SUCCESS'; clock += 5000;
+const renew = await Promise.all([
+  hook({ event: 'transaction.success', data: { id: renewTx, status: 'SUCCESS' } }),
+  hook({ event: 'transaction.success', data: { id: renewTx, status: 'SUCCESS' } }),
+  call(C, { action: 'status', product: 'business', order_id: renewId }),
+  call(C, { action: 'status', product: 'business', order_id: renewId }),
+]);
+assert.ok(renew.every((x) => x.status === 200), JSON.stringify(renew));
+assert.equal(renew.filter((x) => x.body.credited === true).length, 1, JSON.stringify(renew.map((x) => x.body)));
+const carolRenewed = await subOf(carol);
+assert.equal(Math.round((new Date(carolRenewed.e) - new Date(carolBefore.e)) / 3600000), 720);
+assert.equal(carolRenewed.plan_key, 'croissance');
+ok('Business Grow : renouvellement confirmé par 2 webhooks + 2 vérifications simultanés → exactement 30 jours ajoutés, une seule livraison');
+
+// C. Autre formule : refusée dès la création ; rien n'est demandé à SasPay.
+const txCount = tx.size;
+r = await call(C, bgPlan('essentiel', 'e2e-key-bg0003'));
+assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.error.code, 'BUSINESS_PLAN_CHANGE_NOT_SUPPORTED');
+assert.equal(tx.size, txCount);
+ok('Business Grow : payer une autre formule pendant un abonnement actif → 409, aucun paiement créé chez SasPay');
+
+// D. Deux formules payées par deux onglets : la seconde commande est refusée tant que la première est ouverte.
+const dave = await user('e2e-dave@test.local', { customer: false }); const D = 'Bearer e2e-dave@test.local';
+r = await call(D, bgPlan('croissance', 'e2e-key-bg0010')); assert.equal(r.status, 200, JSON.stringify(r.body));
+const daveFirst = r.body.order.id; const daveFirstTx = (await bgOrder(daveFirst)).provider_payment_id;
+r = await call(D, bgPlan('essentiel', 'e2e-key-bg0011'));
+assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.error.code, 'BUSINESS_OTHER_PLAN_PAYMENT_IN_PROGRESS');
+ok('Business Grow : seconde formule tant qu’un paiement est en cours → 409 BUSINESS_OTHER_PLAN_PAYMENT_IN_PROGRESS');
+
+// E. Encaissement devenu inapplicable : entre la commande et le paiement, l'abonnement est passé sur une autre
+//    formule (ici posé directement en base, comme le ferait un paiement tardif d'une ancienne commande).
+await admin.query(`insert into saas_business.subscriptions(user_id, plan_key, status, billing_provider, external_customer_id, external_subscription_id, current_period_start, current_period_end, billing_updated_at)
+  values ($1, 'essentiel', 'active', 'saspay', 'cus_e2e_dave', 'sub_e2e_dave', now(), now() + interval '30 days', now())`, [dave]);
+const daveSub = await subOf(dave);
+tx.get(daveFirstTx).status = 'SUCCESS'; clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: daveFirstTx, status: 'SUCCESS' } });
+assert.equal(r.status, 200, JSON.stringify(r.body));
+assert.equal(r.body.outcome, 'subscription_conflict'); assert.equal(r.body.credited, false);
+assert.deepEqual(await subOf(dave), daveSub);
+let conflict = await bgOrder(daveFirst);
+assert.equal(conflict.status, 'processing'); assert.equal(conflict.failure_code, 'business_plan_change_not_supported');
+const flagged = await one(`select kind, product, order_id, provider_payment_id, seen_count, resolved_at from saas_ugc.vyora_payment_anomalies where kind = 'subscription_conflict'`);
+assert.deepEqual(flagged, { kind: 'subscription_conflict', product: 'business', order_id: daveFirst, provider_payment_id: daveFirstTx, seen_count: 1, resolved_at: null });
+r = await call(D, { action: 'status', product: 'business', order_id: daveFirst });
+assert.equal(r.status, 200); assert.equal(r.body.credited, false); assert.match(r.body.message, /bien été reçu/); assert.match(r.body.message, /rembours/);
+assert.equal(r.body.order.state, 'unapplied');
+// Rejeux du webhook, vérifications, tâche planifiée : toujours rien de livré, toujours une seule anomalie.
+clock += 5000;
+await Promise.all([hook({ event: 'transaction.success', data: { id: daveFirstTx, status: 'SUCCESS' } }), call(D, { action: 'status', product: 'business', order_id: daveFirst })]);
+await admin.query(`alter table saas_business.payment_orders disable trigger user`);
+await admin.query(`update saas_business.payment_orders set created_at = now() - interval '10 minutes', last_verified_at = null where id = $1`, [daveFirst]);
+await admin.query(`alter table saas_business.payment_orders enable trigger user`);
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+r = await cron(); assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.settled, 0);
+assert.deepEqual(await subOf(dave), daveSub);
+assert.equal(Number((await one(`select count(*) n from saas_ugc.vyora_payment_anomalies where kind = 'subscription_conflict'`)).n), 1);
+conflict = await bgOrder(daveFirst); assert.equal(conflict.status, 'processing'); assert.equal(conflict.failure_code, 'business_plan_change_not_supported');
+ok('Business Grow : encaissement inapplicable → webhook acquitté, rien livré, abonnement intact, une anomalie « non activable », message de remboursement au client');
+
+// Le support rend l'argent : remboursement INTÉGRAL uniquement, abonnement intact, puis attestation.
+const plan = (await asBoss.query(`select public.vyora_admin_refund_preview('business', $1) r`, [daveFirst])).rows[0].r;
+assert.equal(plan.refundable, true, JSON.stringify(plan)); assert.equal(plan.undelivered, true);
+assert.equal(Number(plan.max_refund_xof), 25000); assert.equal(plan.needs_partial, false); assert.equal(plan.will_cancel, false);
+const refundBg = (amount) => asBoss.query(`select public.vyora_admin_refund_business($1, $2, $3, $4) r`, [daveFirst, 'Encaissement non activable, rendu au client', amount, true]);
+await assert.rejects(refundBg(24999), /refund_amount_out_of_bounds/);
+await assert.rejects(refundBg(25001), /refund_amount_out_of_bounds/);
+const refundedConflict = (await refundBg(25000)).rows[0].r;
+assert.equal(refundedConflict.status, 'refunded'); assert.equal(refundedConflict.refund_amount, '25000.00'); assert.equal(refundedConflict.refund_state, 'credits_recovered');
+assert.deepEqual(await subOf(dave), daveSub);
+assert.equal(Number((await one(`select count(*) n from saas_business.billing_events where user_id = $1 and external_event_id like 'saspay:refund:%'`, [dave])).n), 0);
+// Rejeu du remboursement, webhook tardif, tâche planifiée : plus aucun effet.
+assert.equal((await refundBg(25000)).rows[0].r.outcome, 'already_refunded');
+clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: daveFirstTx, status: 'SUCCESS' } }); assert.equal(r.status, 200); assert.notEqual(r.body.credited, true);
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+r = await cron(); assert.equal(r.status, 200); assert.equal(r.body.settled, 0);
+assert.equal((await bgOrder(daveFirst)).status, 'refunded'); assert.deepEqual(await subOf(dave), daveSub);
+assert.equal((await one(`select resolved_at from saas_ugc.vyora_payment_anomalies where kind = 'subscription_conflict' and order_id = $1`, [daveFirst])).resolved_at, null);
+// L'attestation du versement clôt l'anomalie.
+await asBoss.query(`select public.vyora_admin_refund_settle('business', $1, $2)`, [daveFirst, 'SASPAY-PAYOUT-E2E-1']);
+const closed = await one(`select resolved_at is not null done, resolution_note from saas_ugc.vyora_payment_anomalies where kind = 'subscription_conflict' and order_id = $1`, [daveFirst]);
+assert.equal(closed.done, true); assert.match(closed.resolution_note, /SASPAY-PAYOUT-E2E-1/);
+// La première formule peut ensuite être renouvelée normalement.
+r = await call(D, bgPlan('essentiel', 'e2e-key-bg0012')); assert.equal(r.status, 200, JSON.stringify(r.body));
+ok('Business Grow : encaissement non activable → remboursement intégral seulement (25 000 FCFA), abonnement intact, anomalie close à l’attestation');
+
+// F. Pannes réseau.
+//  F1. SasPay injoignable pendant la vérification d'un webhook : erreur renvoyée → SasPay retente, rien n'est livré.
+r = await call(A, softpay('e2e-key-net0001')); assert.equal(r.status, 200, JSON.stringify(r.body));
+const netId = r.body.order.id; const netTx = (await dbOrder(netId)).provider_payment_id; const netBefore = await wallet(alice);
+tx.get(netTx).status = 'SUCCESS'; clock += 5000; verifyDown = true;
+r = await hook({ event: 'transaction.success', data: { id: netTx, status: 'SUCCESS' } });
+assert.ok(r.status >= 500, `webhook pendant une panne : ${r.status} ${JSON.stringify(r.body)}`);
+assert.equal(await wallet(alice), netBefore);
+const netStatus = await call(A, { action: 'status', product: 'studio', order_id: netId });
+assert.equal(netStatus.status, 200); assert.equal(netStatus.body.verified, false); assert.equal(netStatus.body.credited, false);
+assert.equal(await wallet(alice), netBefore);
+verifyDown = false; clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: netTx, status: 'SUCCESS' } });
+assert.equal(r.status, 200); assert.equal(r.body.credited, true, JSON.stringify(r.body)); assert.equal(await wallet(alice), netBefore + 27);
+ok('panne SasPay pendant un webhook → 5xx (SasPay retentera), aucun crédit ; nouvelle tentative → 27 crédits, une seule fois');
+
+//  F2. Réponse de création perdue (délai dépassé) : le client relance la même intention, aucun second paiement.
+const txBeforeLoss = tx.size; loseSoftpayResponse = true;
+r = await call(A, softpay('e2e-key-net0002'));
+assert.equal(r.status, 503, JSON.stringify(r.body)); assert.equal(tx.size, txBeforeLoss + 1);
+const lossId = r.body.error.order_id; assert.equal((await dbOrder(lossId)).provider_payment_id, null);
+r = await call(A, softpay('e2e-key-net0002')); assert.equal(r.status, 503); assert.equal(tx.size, txBeforeLoss + 1);
+loseSoftpayResponse = false;
+r = await call(A, softpay('e2e-key-net0002')); assert.equal(r.status, 200, JSON.stringify(r.body));
+assert.equal(r.body.order.id, lossId); assert.equal(tx.size, txBeforeLoss + 1);
+const lossTx = (await dbOrder(lossId)).provider_payment_id; assert.ok(tx.has(lossTx));
+ok('réponse de création perdue, 2 relances de la même intention → une seule commande, un seul paiement SasPay, rattaché');
+
+//  F3. La liste SasPay ne renvoie pas de libellé : le filet de sécurité est aveugle, et il le dit.
+tx.get(lossTx).status = 'SUCCESS';
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+await admin.query(`delete from saas_ugc.vyora_payment_anomalies where kind = 'sweep_unreliable'`);
+listWithoutDescription = true; await ageOrder(lossId, '1 minute');
+const aliceBlind = await wallet(alice);
+r = await cron(); assert.equal(r.status, 200, JSON.stringify(r.body));
+assert.equal(r.body.status, 'partial'); assert.equal(r.body.swept, 0);
+const blind = await one(`select kind, order_id, seen_count, details from saas_ugc.vyora_payment_anomalies where kind = 'sweep_unreliable'`);
+assert.equal(blind.order_id, null); assert.equal(blind.details.reason, 'description_missing');
+let healthBlind = (await asBoss.query(`select public.vyora_admin_payment_health() r`)).rows[0].r;
+assert.equal(healthBlind.runs[0].sweep_blind, true); assert.equal(healthBlind.runs[0].status, 'partial');
+listWithoutDescription = false;
+ok(`liste SasPay sans libellé → passage « partiel », anomalie « filet incomplet », visible dans la vue d’exploitation`);
+// La commande, rattachée par son identifiant de paiement, est livrée par la revérification ciblée, sans dépendre du libellé.
+await ageOrder(lossId, '3 minutes');
+await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`);
+listWithoutDescription = true;
+r = await cron(); assert.equal(r.body.settled, 1, JSON.stringify(r.body)); assert.equal(await wallet(alice), aliceBlind + 27);
+listWithoutDescription = false;
+ok('même sans libellé, une commande rattachée à son paiement est livrée par la revérification ciblée');
+
+// G. Séparation Studio / Business Grow : même utilisateur, même clé d'intention, deux produits.
+const erin = await user('e2e-erin@test.local'); const E = 'Bearer e2e-erin@test.local';
+r = await call(E, softpay('e2e-key-shared01')); assert.equal(r.status, 200, JSON.stringify(r.body)); const erinStudio = r.body.order.id;
+r = await call(E, bgPlan('essentiel', 'e2e-key-shared01')); assert.equal(r.status, 200, JSON.stringify(r.body)); const erinBg = r.body.order.id;
+assert.notEqual(erinStudio, erinBg);
+const erinStudioTx = (await dbOrder(erinStudio)).provider_payment_id, erinBgTx = (await bgOrder(erinBg)).provider_payment_id;
+assert.notEqual(erinStudioTx, erinBgTx);
+assert.equal(tx.get(erinStudioTx).requested_amount, '5000.00'); assert.equal(tx.get(erinBgTx).requested_amount, '10000.00');
+// Seul le paiement Business Grow aboutit.
+tx.get(erinBgTx).status = 'SUCCESS'; clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: erinBgTx, status: 'SUCCESS' } }); assert.equal(r.body.outcome, 'paid');
+assert.equal(await wallet(erin), 0); assert.notEqual((await dbOrder(erinStudio)).status, 'paid');
+assert.equal((await subOf(erin)).plan_key, 'essentiel');
+// Un webhook annonce le paiement Studio comme réussi alors que SasPay le dit en attente : rien.
+r = await hook({ event: 'transaction.success', data: { id: erinStudioTx, status: 'SUCCESS' } }); assert.equal(r.body.credited, false);
+assert.equal(await wallet(erin), 0);
+// Puis le paiement Studio aboutit : crédits Studio, abonnement inchangé.
+const erinSub = await subOf(erin); tx.get(erinStudioTx).status = 'SUCCESS'; clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: erinStudioTx, status: 'SUCCESS' } }); assert.equal(r.body.credited, true, JSON.stringify(r.body));
+assert.equal(await wallet(erin), 27); assert.deepEqual(await subOf(erin), erinSub);
+r = await call(E, { action: 'status', product: 'studio', order_id: erinBg }); assert.equal(r.status, 404);
+r = await call(E, { action: 'status', product: 'business', order_id: erinStudio }); assert.equal(r.status, 404);
+ok('même utilisateur, même clé d’intention, deux produits → deux commandes, deux paiements ; chaque encaissement ne livre que son produit');
 
 // 5. Journal et vue d'exploitation.
 const lastRun = await one(`select status, trigger_source, finished_at is not null done from saas_ugc.vyora_payment_reconcile_runs order by started_at desc limit 1`);

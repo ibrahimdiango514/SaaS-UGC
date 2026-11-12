@@ -531,6 +531,27 @@ describe('paiement SasPay — webhook', () => {
     expect(ctx.webhooks.size).toBe(0);
   });
 
+  it('webhook « success » arrivé avant que SasPay ne confirme : il reste rejouable, sa relance livre (une seule fois)', async () => {
+    const ctx = setup();
+    const order = await paidOrder(ctx, 'PENDING', 'idem-key-0410');
+    // 1re livraison : SasPay vérifie encore « en attente » → rien n'est crédité.
+    let signed = await signedWebhook(event(order.txId));
+    expect(await ctx.service.webhook(signed.raw, signed)).toMatchObject({ received: true, outcome: 'pending', credited: false });
+    expect(ctx.credits.studio.size).toBe(0);
+    expect(ctx.webhooks.get(`transaction.success:${order.txId}`)).toBe('failed');
+    // SasPay confirme ensuite ; le MÊME événement est relivré : il est revérifié, pas écarté comme doublon.
+    ctx.saspay.setTransaction(order.txId, { status: 'SUCCESS' });
+    signed = await signedWebhook(event(order.txId));
+    expect(await ctx.service.webhook(signed.raw, signed)).toMatchObject({ received: true, outcome: 'paid', credited: true });
+    expect(ctx.credits.studio.get(alice.id)).toBe(27);
+    // Livraisons suivantes : doublon acquitté, aucun second crédit.
+    for (let i = 0; i < 3; i += 1) {
+      signed = await signedWebhook(event(order.txId));
+      expect(await ctx.service.webhook(signed.raw, signed)).toMatchObject({ received: true, duplicate: true });
+    }
+    expect(ctx.credits.studio.get(alice.id)).toBe(27);
+  });
+
   it('sans secret de webhook configuré, tout est refusé', async () => {
     const ctx = setup({ webhookSecret: null });
     const signed = await signedWebhook(event('tx-1'));
@@ -663,6 +684,90 @@ describe('paiement SasPay — séparation Studio / Business Grow', () => {
     await expectError(ctx.service.create(alice, { ...business('idem-key-0504'), item: { plan_key: 'inexistante' } }), 'BUSINESS_PLAN_NOT_PURCHASABLE', 422);
     await expectError(ctx.service.create(alice, { ...business('idem-key-0505'), item: { kind: 'pack', pack_key: 'creator' } }), 'PAYMENT_INVALID_REQUEST', 400);
     await expectError(ctx.service.create(alice, softpay('idem-key-0506', { item: { plan_key: 'croissance' } })), 'PAYMENT_INVALID_REQUEST', 400);
+  });
+});
+
+describe('paiement SasPay — Business Grow : encaissement incompatible avec l’abonnement', () => {
+  const business = (key: string) => ({
+    product: 'business', item: { plan_key: 'croissance' }, country: 'ML', flow: 'softpay',
+    network: 'orange_ml', phone: '70123456', idempotency_key: key,
+  });
+  async function paidButBlocked(code?: string) {
+    const ctx = setup();
+    const created = await ctx.service.create(alice, business('idem-conflict-01'));
+    const order = [...ctx.orders.values()][0];
+    ctx.blockActivation(order.id, code);
+    ctx.saspay.setTransaction(order.provider_payment_id as string, { status: 'SUCCESS' });
+    return { ...ctx, order, orderId: String(created.order.id) };
+  }
+  const hookFor = async (paymentId: string) => {
+    const signed = await signedWebhook({ event: 'transaction.success', data: { id: paymentId, status: 'SUCCESS' } });
+    return { raw: signed.raw, headers: { signature: signed.signature, timestamp: signed.timestamp } };
+  };
+
+  it('webhook : rien n’est livré, le webhook est acquitté, l’anomalie est signalée tout de suite', async () => {
+    const ctx = await paidButBlocked();
+    const hook = await hookFor(ctx.order.provider_payment_id as string);
+    const result = await ctx.service.webhook(hook.raw, hook.headers);
+    expect(result).toMatchObject({ received: true, outcome: 'subscription_conflict', credited: false });
+    expect(ctx.credits.business.get(alice.id)).toBeUndefined();
+    expect(ctx.order).toMatchObject({ status: 'processing', failure_code: 'business_plan_change_not_supported' });
+    expect(ctx.anomalies).toEqual([expect.objectContaining({
+      kind: 'subscription_conflict', product: 'business', orderId: ctx.order.id, paymentId: ctx.order.provider_payment_id,
+      details: expect.objectContaining({ reason: 'business_plan_change_not_supported', amount: '25000.00' }),
+    })]);
+    // Rejeu du même webhook (retentative SasPay) : déjà traité, aucun nouvel effet.
+    const again = await ctx.service.webhook(hook.raw, hook.headers);
+    expect(again).toMatchObject({ received: true, duplicate: true });
+    expect(ctx.credits.business.get(alice.id)).toBeUndefined();
+  });
+
+  it('retour du client : message clair (paiement reçu, non appliqué, remboursement par le support)', async () => {
+    const ctx = await paidButBlocked();
+    const status = await ctx.service.refresh(alice, { product: 'business', order_id: ctx.orderId });
+    expect(status).toMatchObject({ verified: true, credited: false });
+    expect(status.message).toMatch(/bien été reçu/);
+    expect(status.message).toMatch(/remboursera/);
+    expect(status.order.failure_code).toBe('business_plan_change_not_supported');
+    // État à part : ni « en attente » (plus rien à attendre) ni « échoué » (le client a été débité).
+    expect(status.order.state).toBe('unapplied');
+    expect(ctx.credits.business.get(alice.id)).toBeUndefined();
+    expect(ctx.anomalies.map((a) => a.kind)).toEqual(['subscription_conflict']);
+    // Consultations suivantes : même réponse, sans réinterroger SasPay ni re-signaler.
+    const verifications = ctx.saspay.count('GET', `/payments/${ctx.order.provider_payment_id}/verify/`);
+    for (let i = 0; i < 3; i += 1) {
+      const again = await ctx.service.refresh(alice, { product: 'business', order_id: ctx.orderId });
+      expect(again).toMatchObject({ verified: true, credited: false, order: { state: 'unapplied' } });
+      expect(again.message).toMatch(/remboursera intégralement/);
+    }
+    expect(ctx.saspay.count('GET', `/payments/${ctx.order.provider_payment_id}/verify/`)).toBe(verifications);
+    expect(ctx.anomalies).toHaveLength(1);
+    // Relancer la même intention ne recrée ni commande ni paiement : la commande est rendue telle quelle.
+    const payments = ctx.saspay.transactions.size;
+    const retry = await ctx.service.create(alice, business('idem-conflict-01'));
+    expect(retry).toMatchObject({ reused: true, next: 'done', order: { state: 'unapplied' } });
+    expect(ctx.saspay.transactions.size).toBe(payments);
+  });
+
+  it('états publics : un refus d’activation prime sur « en attente » et « échoué », pas sur « payé » ni « remboursé »', () => {
+    for (const code of ['business_plan_change_not_supported', 'business_subscription_managed_elsewhere']) {
+      expect(paymentState({ status: 'processing', provider_payment_id: 'tx', provider_session_id: null, failure_code: code })).toBe('unapplied');
+      expect(paymentState({ status: 'failed', provider_payment_id: 'tx', provider_session_id: null, failure_code: code })).toBe('unapplied');
+      expect(paymentState({ status: 'refunded', provider_payment_id: 'tx', provider_session_id: null, failure_code: code })).toBe('confirmed');
+      expect(paymentState({ status: 'paid', provider_payment_id: 'tx', provider_session_id: null, failure_code: code })).toBe('confirmed');
+    }
+    expect(paymentState({ status: 'processing', provider_payment_id: 'tx', provider_session_id: null, failure_code: 'amount_mismatch' })).toBe('pending');
+  });
+
+  it('tâche planifiée : signalé à chaque passage, jamais livré, jamais clos en silence', async () => {
+    const ctx = await paidButBlocked('business_subscription_managed_elsewhere');
+    for (let i = 0; i < 3; i += 1) {
+      const result = await ctx.service.reconcile();
+      expect(result).toMatchObject({ ran: true, settled: 0, anomalies: 1 });
+    }
+    expect(ctx.credits.business.get(alice.id)).toBeUndefined();
+    expect(ctx.order.status).toBe('processing');
+    expect(new Set(ctx.anomalies.map((a) => `${a.kind}:${a.orderId}:${a.paymentId}`)).size).toBe(1);
   });
 });
 
@@ -931,6 +1036,86 @@ describe('réconciliation SasPay — tâche planifiée', () => {
     expect(saspay.calls.length).toBeGreaterThan(0);
     expect(saspay.calls.every((c) => c.method === 'GET')).toBe(true);
     expect(saspay.calls.every((c) => /^\/(payments\/[^/]+\/verify\/|transactions\/|checkout-sessions\/[^/]+\/status\/)/.test(c.path))).toBe(true);
+  });
+
+  it('liste SasPay sans libellé (champ non garanti par la spécification) : filet aveugle signalé, rien n’est livré à l’aveugle', async () => {
+    const { service, saspay, credits, orders, anomalies, runs } = setup();
+    saspay.respondWith((call) => (call.path === '/payments/softpay/' ? jsonResponse({ detail: 'timeout' }, 504) : undefined));
+    await service.create(alice, softpay('idem-recon-0101')).catch(() => undefined);
+    saspay.respondWith(null);
+    const order = first(orders);
+    saspay.addTransaction({
+      requested_amount: '5000.00', debited_amount: '5100.00', net_amount: '5000.00',
+      description: `Pack Creator — ${order.internal_reference}`,
+    });
+    saspay.omitListDescriptions();
+    const result = await service.reconcile();
+    // Le passage n'est PAS déclaré sain : il est partiel, et un humain est prévenu.
+    expect(result).toMatchObject({ ran: true, status: 'partial', swept: 0, settled: 0, anomalies: 1 });
+    expect(runs[0].counts?.detail).toMatchObject({ sweep_blind: true, sweep_listed: 1 });
+    expect(anomalies).toEqual([expect.objectContaining({
+      kind: 'sweep_unreliable', orderId: null, details: expect.objectContaining({ reason: 'description_missing', listed: 1, described: 0 }),
+    })]);
+    expect(order.status).toBe('pending');
+    expect(credits.studio.get(alice.id)).toBeUndefined();
+  });
+
+  it('réponse de création perdue ET liste sans libellé : le rejeu de la même intention retrouve le paiement (clé d’idempotence SasPay)', async () => {
+    const { saspay } = setup();
+    // SasPay crée bien le paiement, mais sa réponse n'arrive jamais.
+    let lose = true;
+    const real = saspay.fetcher;
+    const lossy = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await real(input, init);
+      if (lose && String(input).endsWith('/payments/softpay/')) throw new DOMException('timeout', 'TimeoutError');
+      return response;
+    }) as typeof fetch;
+    const fake = createFakeStore({ admins: [boss.id] });
+    const lossyService = createPaymentService({
+      store: fake.store, client: createSasPayClient({ secretKey: TEST_KEY, fetcher: lossy }),
+      webhookSecret: WEBHOOK_SECRET, now: () => NOW, log: () => undefined,
+    });
+    await expectError(lossyService.create(alice, softpay('idem-recon-0102')), 'PAYMENT_PROVIDER_UNAVAILABLE', 503);
+    const order = first(fake.orders);
+    expect(order).toMatchObject({ status: 'pending', provider_payment_id: null });
+    expect(saspay.transactions.size).toBe(1);
+    const txId = [...saspay.transactions.keys()][0];
+    saspay.setTransaction(txId, { status: 'SUCCESS' });
+
+    // Le balayage ne voit aucun libellé : il ne peut rien rapprocher, et le dit.
+    saspay.omitListDescriptions();
+    expect(await lossyService.reconcile()).toMatchObject({ status: 'partial', settled: 0 });
+    expect(fake.credits.studio.get(alice.id)).toBeUndefined();
+
+    // Le client relance le même achat : même clé d'idempotence → SasPay renvoie le paiement d'origine.
+    lose = false;
+    const retry = await lossyService.create(alice, softpay('idem-recon-0102'));
+    expect(saspay.transactions.size).toBe(1);
+    expect(order.provider_payment_id).toBe(txId);
+    expect(retry.order.id).toBe(order.id);
+    // Et la vérification (ou la tâche planifiée) livre, une seule fois.
+    expect(await lossyService.reconcile()).toMatchObject({ settled: 1 });
+    expect(await lossyService.reconcile()).toMatchObject({ settled: 0 });
+    expect(fake.credits.studio.get(alice.id)).toBe(27);
+  });
+
+  it('liste SasPay avec libellés vides (autres produits du compte) : aucun signalement abusif', async () => {
+    const { service, saspay, anomalies } = setup();
+    saspay.addTransaction({ requested_amount: '9000.00', description: null });
+    saspay.addTransaction({ requested_amount: '9000.00', description: '' });
+    const result = await service.reconcile();
+    expect(result).toMatchObject({ ran: true, status: 'ok', swept: 0, anomalies: 0, sweep_done: true });
+    expect(anomalies).toHaveLength(0);
+  });
+
+  it('plus d’encaissements que ce qu’un passage peut lire (1 000) : passage partiel, signalé une fois par exécution', async () => {
+    const { service, saspay, anomalies, runs } = setup();
+    for (let i = 0; i < 1001; i += 1) saspay.addTransaction({ requested_amount: '100.00', description: 'Autre produit' });
+    const result = await service.reconcile();
+    expect(result).toMatchObject({ ran: true, status: 'partial', anomalies: 1 });
+    expect(runs[0].counts?.detail).toMatchObject({ sweep_truncated: true, sweep_listed: 1000 });
+    expect(saspay.count('GET', '/transactions/')).toBe(5);
+    expect(anomalies).toEqual([expect.objectContaining({ kind: 'sweep_unreliable', details: expect.objectContaining({ reason: 'truncated' }) })]);
   });
 
   it('session hébergée payée sans webhook : la transaction est retrouvée par la session puis livrée', async () => {
