@@ -7,6 +7,7 @@ import { formatDate, formatMoney, statusLabel, truncate } from '../lib/format';
 import ProviderBudgetSettings from './admin/ProviderBudgetSettings';
 import ProviderBalanceCard from './admin/ProviderBalanceCard';
 import CreditManager from './admin/CreditManager';
+import SasPayPanel from './admin/SasPayPanel';
 import {
   GrowthActivitySection, KpiSection, ModelsSection, ProvidersSection, RevenueSection, StudioActivitySection, money,
 } from './admin/AdminSections';
@@ -239,6 +240,7 @@ export default function Admin() {
         { id: 'kpis', label: 'KPI & MRR', icon: <TrendingUp size={14} /> },
         { id: 'users', label: `Utilisateurs (${users.length})`, icon: <Users size={14} /> },
         { id: 'recharges', label: 'Recharges', icon: <CreditCard size={14} /> },
+        { id: 'saspay', label: 'Paiements SasPay', icon: <Coins size={14} /> },
         { id: 'services', label: 'Services', icon: <Zap size={14} /> },
         { id: 'models', label: 'Modèles vidéo', icon: <Video size={14} /> },
         { id: 'providers', label: 'Fournisseurs IA', icon: <Bot size={14} /> },
@@ -330,7 +332,9 @@ export default function Admin() {
                   <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
                     <div><p className="text-sm font-semibold text-white">{formatMoney(r.amount_minor, r.currency)} → {r.credits_to_grant} crédits</p><p className="text-[11px] text-slate-500">{formatDate(r.created_at, true)} · {r.country_code} · {r.provider}</p></div>
                     <div className="flex items-center gap-2"><Badge status={r.status}>{statusLabel(r.status)}</Badge>
-                      {['pending', 'processing'].includes(r.status) && <Button size="sm" variant="outline" loading={busy === `confirm-${r.id}`} onClick={() => void run(`confirm-${r.id}`, () => adminConfirmRecharge(r.id, `Manuel ${new Date().toISOString()}`), 'Recharge confirmée.')}>Confirmer</Button>}
+                      {/* Une commande SasPay n'est jamais validée à la main : seule une vérification SasPay la règle. */}
+                      {r.provider === 'saspay' && ['pending', 'processing'].includes(r.status) && <span className="text-[11px] text-slate-500">Vérification SasPay</span>}
+                      {r.provider !== 'saspay' && ['pending', 'processing'].includes(r.status) && <Button size="sm" variant="outline" loading={busy === `confirm-${r.id}`} onClick={() => void run(`confirm-${r.id}`, () => adminConfirmRecharge(r.id, `Manuel ${new Date().toISOString()}`), 'Recharge confirmée.')}>Confirmer</Button>}
                     </div>
                   </div>
                 ))}</div>
@@ -346,6 +350,8 @@ export default function Admin() {
           </div>
         </>
       )}
+
+      {tab === 'saspay' && <SasPayPanel />}
 
       {tab === 'services' && (
         <Card><CardHeader title="Catalogue des services" description="Coût en crédits et disponibilité de chaque opération." />

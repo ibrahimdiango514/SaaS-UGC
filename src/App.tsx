@@ -36,6 +36,7 @@ const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioP
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
 const BusinessGrowSubscription = lazy(() => import('./pages/BusinessGrowSubscription'));
+const PaymentReturn = lazy(() => import('./pages/PaymentReturn'));
 
 export default function App() {
   return (
@@ -80,6 +81,7 @@ export default function App() {
                       <Route path="historique" element={<StudioGenerations />} />
                       <Route path="abonnement" element={<Subscription />} />
                       <Route path="credits" element={<StudioPricing />} />
+                      <Route path="paiement/retour" element={<PaymentReturn />} />
                       <Route path="parametres" element={<Settings />} />
                     </Route>
                     <Route element={<AdminRoute />}>

@@ -40,6 +40,7 @@ export const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Annulé', archived: 'Archivé', approved: 'Approuvé', superseded: 'Remplacé',
   active: 'Actif', inactive: 'Inactif', suspended: 'Suspendu', pending: 'En attente',
   pending_payment: 'Paiement en attente', paid: 'Payé', ready: 'Prêt',
+  todo: 'À effectuer', confirmed: 'Confirmé', refunded: 'Remboursé',
 };
 
 export const STATUS_TONES: Record<string, string> = {
@@ -48,6 +49,7 @@ export const STATUS_TONES: Record<string, string> = {
   pending_payment: 'warning', completed: 'success', succeeded: 'success', approved: 'success',
   paid: 'success', active: 'success', ready: 'success',
   failed: 'danger', cancelled: 'danger', suspended: 'danger',
+  todo: 'neutral', confirmed: 'success', refunded: 'neutral',
 };
 
 export function statusLabel(status: string | null | undefined): string {

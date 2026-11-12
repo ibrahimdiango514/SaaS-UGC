@@ -35,7 +35,7 @@ export async function rpc<T>(name: string, args: Record<string, unknown> = {}): 
   return unwrap<T>((supabase.rpc as any)(name, args));
 }
 
-async function invokeEdge<T>(name: string, body: Record<string, unknown>): Promise<T> {
+export async function invokeEdge<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) {
     let payload: { error?: { code?: string; message?: string } } | null = null;

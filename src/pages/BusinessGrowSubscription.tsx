@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Brain, Check, Coins, Info, RefreshCw, Sparkles } from 'lucide-react';
-import { Banner, Button, Card, ErrorState, LoadingState } from '../components/ui';
+import { Badge, Banner, Button, Card, ErrorState, LoadingState } from '../components/ui';
 import { rpc } from '../lib/api';
 import { asAppError } from '../lib/errors';
+import { formatDate } from '../lib/format';
+import PaymentDialog from '../components/PaymentDialog';
+import {
+  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, formatAmount, getBusinessSubscription, getPaymentOptions, listMyPayments,
+  type BusinessSubscription, type PaymentOptions, type PaymentOrder,
+} from '../lib/payments';
 
 /**
  * Abonnement Business Grow — catalogue PROPRE au produit Business Grow.
@@ -12,8 +18,12 @@ import { asAppError } from '../lib/errors';
  * - elle n'affiche aucun crédit, pack ou portefeuille VYORA Studio ;
  * - elle ne montre aucun prix non fixé : une formule sans prix n'est jamais
  *   présentée comme achetable ;
- * - elle ne prétend pas encaisser un paiement : `billing_enabled = false` tant
- *   qu'aucun prestataire de paiement n'est configuré côté serveur.
+ * - elle ne prétend pas encaisser un paiement : le bouton de souscription n'est
+ *   actif que si le SERVEUR annonce le paiement disponible (facturation Business
+ *   Grow activée, prestataire configuré, formule active avec un prix fixé).
+ *   Sinon il reste « Souscription indisponible ».
+ * - elle n'active jamais un abonnement elle-même : seul un paiement vérifié
+ *   auprès de SasPay par le serveur le fait.
  *
  * Source de vérité : `public.business_grow_catalog()` (schéma `saas_business`).
  */
@@ -46,13 +56,28 @@ export default function BusinessGrowSubscription() {
   const [catalog, setCatalog] = useState<BusinessCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [payment, setPayment] = useState<PaymentOptions | null>(null);
+  const [subscription, setSubscription] = useState<BusinessSubscription | null>(null);
+  const [payments, setPayments] = useState<PaymentOrder[]>([]);
+  const [checkout, setCheckout] = useState<BusinessPlan | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError('');
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    setError('');
     try {
-      setCatalog(await rpc<BusinessCatalog>('business_grow_catalog'));
+      const [catalogResult, optionsResult, subscriptionResult, paymentRows] = await Promise.all([
+        rpc<BusinessCatalog>('business_grow_catalog'),
+        // Service de paiement absent ou désactivé : la souscription reste indisponible.
+        getPaymentOptions('business').catch(() => null),
+        getBusinessSubscription().catch(() => null),
+        listMyPayments('business', 20).catch(() => [] as PaymentOrder[]),
+      ]);
+      setCatalog(catalogResult);
+      setPayment(optionsResult);
+      setSubscription(subscriptionResult);
+      setPayments(paymentRows);
     } catch (err) {
-      setError(asAppError(err, 'Impossible de charger les formules Business Grow.').message);
+      if (!silent) setError(asAppError(err, 'Impossible de charger les formules Business Grow.').message);
     } finally { setLoading(false); }
   }, []);
 
@@ -60,6 +85,16 @@ export default function BusinessGrowSubscription() {
 
   const plans = catalog?.plans ?? [];
   const billingEnabled = catalog?.billing_enabled === true;
+  /** Le serveur de paiement fait foi : sans son accord explicite, rien n'est achetable. */
+  const paymentAvailable = billingEnabled && payment?.available === true;
+  const canSubscribe = (plan: BusinessPlan) => paymentAvailable && plan.active
+    && typeof plan.monthly_price_minor === 'number' && plan.monthly_price_minor > 0
+    && typeof plan.monthly_credit_units === 'number'
+    // Changement de formule en cours de période : non pris en charge.
+    && (!subscription?.is_current || subscription.plan_key === plan.plan_key);
+  const unavailableHint = !billingEnabled
+    ? 'La facturation Business Grow n’est pas activée'
+    : payment?.message || 'Le paiement en ligne n’est pas disponible pour le moment';
 
   return (
     <div className="mx-auto w-full max-w-[1100px] space-y-4 animate-fadeUp">
@@ -85,6 +120,19 @@ export default function BusinessGrowSubscription() {
           Les formules ci-dessous décrivent l’offre prévue. Aucun prix n’est affiché tant qu’il
           n’a pas été fixé côté serveur, et aucun paiement ne peut être déclenché : la
           facturation reste désactivée. Rien n’est simulé.
+        </Banner>
+      )}
+
+      {billingEnabled && !paymentAvailable && !loading && (
+        <Banner tone="warning" title="Souscription en ligne indisponible">
+          {unavailableHint}. Aucun paiement ne peut être déclenché.
+        </Banner>
+      )}
+
+      {subscription?.is_current && (
+        <Banner tone="success" title={`Abonnement actif : ${subscription.plan_label ?? subscription.plan_key}`}>
+          Valable jusqu’au {formatDate(subscription.current_period_end)}. Aucun renouvellement automatique :
+          vous prolongez vous-même votre formule quand vous le souhaitez.
         </Banner>
       )}
 
@@ -131,20 +179,47 @@ export default function BusinessGrowSubscription() {
                     </ul>
                   )}
                   <div className="mt-4 flex-1" />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    disabled
-                    title="Aucun prestataire de paiement Business Grow n’est configuré"
-                  >
-                    <Coins size={13} /> Souscription indisponible
-                  </Button>
+                  {canSubscribe(plan) ? (
+                    <Button size="sm" className="w-full" onClick={() => setCheckout(plan)}>
+                      <Coins size={13} /> {subscription?.is_current ? 'Prolonger de 30 jours' : 'Souscrire'}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      disabled
+                      title={subscription?.is_current && subscription.plan_key !== plan.plan_key
+                        ? 'Le changement de formule en cours de période n’est pas encore possible'
+                        : unavailableHint}
+                    >
+                      <Coins size={13} /> Souscription indisponible
+                    </Button>
+                  )}
                 </div>
               </Card>
             );
           })}
         </div>
+      )}
+
+      {payments.length > 0 && (
+        <section aria-label="Paiements Business Grow">
+          <h2 className="text-sm font-semibold text-white">Paiements Business Grow</h2>
+          <ul className="mt-2 divide-y divide-white/[0.05] rounded-2xl border border-white/[0.08] bg-white/[0.02] px-3">
+            {payments.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11.5px]">
+                <span className="min-w-0 flex-1 truncate text-slate-300">{row.label ?? 'Abonnement Business Grow'}</span>
+                <span className="text-slate-500">{formatDate(row.created_at, true)}</span>
+                <span className="text-slate-300">{formatAmount(row.amount, row.currency)}</span>
+                <Badge tone={PAYMENT_STATE_TONES[row.state]}>{PAYMENT_STATE_LABELS[row.state]}</Badge>
+                {(row.state === 'pending' || row.state === 'todo') && (
+                  <Link to={`/app/paiement/retour?produit=business&commande=${row.id}`} className="text-violet-300 hover:text-white">Suivre</Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {catalog?.config && (
@@ -164,6 +239,15 @@ export default function BusinessGrowSubscription() {
           <Sparkles size={11} /> Crédits VYORA Studio (produit distinct)
         </Link>
       </div>
+
+      <PaymentDialog
+        open={checkout !== null}
+        product="business"
+        item={checkout ? { plan_key: checkout.plan_key } : null}
+        title={checkout ? `Business Grow — ${checkout.display_name}` : 'Paiement'}
+        onClose={() => { setCheckout(null); void load(true); }}
+        onConfirmed={() => void load(true)}
+      />
     </div>
   );
 }

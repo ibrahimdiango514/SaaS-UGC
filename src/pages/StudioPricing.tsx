@@ -8,6 +8,11 @@
  *    `reelora-video` (coût fournisseur × change × marge ÷ valeur du crédit).
  *    Le navigateur ne fait aucun calcul de facturation.
  *
+ * Paiement : lorsque le paiement en ligne SasPay est activé côté serveur, l'achat
+ * passe par `PaymentDialog` (prix, frais et confirmation fournis par le serveur).
+ * Sinon, le parcours historique est conservé : commande validée par un
+ * administrateur.
+ *
  * Périmètre : Studio uniquement. Business Grow a ses propres abonnements.
  */
 
@@ -16,12 +21,17 @@ import { Link } from 'react-router-dom';
 import {
   AlertCircle, Check, Coins, CreditCard, History, Loader2, Sparkles, Star, Wand2,
 } from 'lucide-react';
-import { Button, LoadingState, ErrorState, Banner, cn } from '../components/ui';
+import { Badge, Button, LoadingState, ErrorState, Banner, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
 import { formatDate } from '../lib/format';
 import { rpc } from '../lib/api';
+import PaymentDialog from '../components/PaymentDialog';
+import {
+  PAYMENT_STATE_LABELS, PAYMENT_STATE_TONES, formatAmount, getPaymentOptions, listMyPayments,
+  type PaymentItem, type PaymentOrder,
+} from '../lib/payments';
 
 interface StudioPack {
   pack_key: string;
@@ -74,16 +84,28 @@ export default function StudioPricing() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState<number | null>(null);
+  /** Vrai seulement si le serveur annonce le paiement en ligne disponible pour ce compte. */
+  const [online, setOnline] = useState(false);
+  const [onlineMode, setOnlineMode] = useState<'test' | 'live' | null>(null);
+  const [payments, setPayments] = useState<PaymentOrder[]>([]);
+  const [checkout, setCheckout] = useState<{ item: PaymentItem; title: string } | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    // Rafraîchissement silencieux : la page reste montée (fenêtre de paiement comprise).
+    if (!silent) setLoading(true);
     setError('');
     try {
-      const [gridResult, historyResult] = await Promise.all([
+      const [gridResult, historyResult, optionsResult, paymentRows] = await Promise.all([
         rpc<Partial<CreditGrid>>('studio_credit_grid'),
         rpc<{ purchases?: PurchaseRow[]; ledger?: LedgerRow[] }>('studio_credit_history', { p_limit: 40 })
           .catch(() => ({ purchases: [], ledger: [] })),
+        // Service de paiement absent, désactivé ou en panne : on garde le parcours historique.
+        getPaymentOptions('studio').catch(() => null),
+        listMyPayments('studio', 20).catch(() => [] as PaymentOrder[]),
       ]);
+      setOnline(optionsResult?.available === true);
+      setOnlineMode(optionsResult?.available === true ? optionsResult.mode : null);
+      setPayments(paymentRows);
       const raw = (gridResult ?? {}) as Partial<CreditGrid>;
       setGrid({
         credit_value_xof: Number(raw.credit_value_xof ?? 0),
@@ -97,7 +119,7 @@ export default function StudioPricing() {
       setPurchases(Array.isArray(history.purchases) ? history.purchases : []);
       setLedger(Array.isArray(history.ledger) ? history.ledger : []);
     } catch (err) {
-      setError(asAppError(err).message);
+      if (!silent) setError(asAppError(err).message);
     } finally {
       setLoading(false);
     }
@@ -123,6 +145,11 @@ export default function StudioPricing() {
   }, [grid]);
 
   const onBuyPack = async (pack: StudioPack) => {
+    if (online) {
+      // Seule la clé du pack part au serveur, qui relit prix et crédits dans sa grille.
+      setCheckout({ item: { kind: 'pack', pack_key: pack.pack_key }, title: `Acheter « ${pack.label} »` });
+      return;
+    }
     setBusy(pack.pack_key);
     try {
       // Aucun prix n'est transmis : le serveur relit la grille et calcule.
@@ -147,6 +174,10 @@ export default function StudioPricing() {
   const onCustomRecharge = async (event: FormEvent) => {
     event.preventDefault();
     if (!grid?.custom_recharge || customAmount === null) return;
+    if (online) {
+      setCheckout({ item: { kind: 'custom', amount_xof: Math.round(customAmount) }, title: 'Recharge personnalisée' });
+      return;
+    }
     setBusy('custom');
     try {
       await rpc('ugc_create_recharge_order', {
@@ -168,9 +199,15 @@ export default function StudioPricing() {
   if (loading) return <LoadingState label="Chargement de la grille de crédits Studio…" />;
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
 
-  const creditsForCustom = grid?.custom_recharge && customAmount !== null && grid.credit_value_xof > 0
+  // En ligne, le serveur convertit selon ses paliers : on n'affiche aucune estimation locale.
+  const creditsForCustom = !online && grid?.custom_recharge && customAmount !== null && grid.credit_value_xof > 0
     ? Math.floor(customAmount / grid.credit_value_xof)
     : null;
+
+  const onPaymentConfirmed = () => {
+    void load(true);
+    void refreshQuota();
+  };
 
   return (
     <div className="animate-fadeUp space-y-6">
@@ -234,8 +271,11 @@ export default function StudioPricing() {
           ))}
         </div>
         <p className="mt-2 text-[10.5px] text-slate-600">
-          Crédits accordés après confirmation du paiement par un administrateur. Aucun prélèvement automatique,
-          aucun débit récurrent.
+          {online
+            ? 'Paiement Mobile Money via SasPay. Les crédits sont ajoutés dès que le paiement est confirmé par SasPay.'
+            : 'Crédits accordés après confirmation du paiement par un administrateur.'}
+          {' '}Aucun prélèvement automatique, aucun débit récurrent.
+          {online && onlineMode === 'test' ? ' Mode test : aucun débit réel.' : ''}
         </p>
       </section>
 
@@ -261,16 +301,20 @@ export default function StudioPricing() {
                 aria-label="Montant de la recharge en FCFA"
               />
             </label>
-            <div className="text-[11px] text-slate-400">
-              <p className="text-slate-500">Crédits estimés</p>
-              <p className="text-base font-bold text-cyan-200">{creditsForCustom ?? '—'}</p>
-            </div>
+            {!online && (
+              <div className="text-[11px] text-slate-400">
+                <p className="text-slate-500">Crédits estimés</p>
+                <p className="text-base font-bold text-cyan-200">{creditsForCustom ?? '—'}</p>
+              </div>
+            )}
             <Button type="submit" loading={busy === 'custom'} icon={<CreditCard size={14} />}>
-              Créer la commande
+              {online ? 'Voir le prix et payer' : 'Créer la commande'}
             </Button>
           </form>
           <p className="mt-2 text-[10.5px] text-slate-600">
-            Le montant exact en crédits est recalculé et enregistré côté serveur au moment de la commande.
+            {online
+              ? 'Le nombre exact de crédits et les frais sont calculés par le serveur et affichés avant tout paiement.'
+              : 'Le montant exact en crédits est recalculé et enregistré côté serveur au moment de la commande.'}
           </p>
         </section>
       )}
@@ -296,6 +340,26 @@ export default function StudioPricing() {
             Ordres de grandeur observés. Le montant exact dépend du modèle, de la durée, de la résolution
             et du coût fournisseur du moment : il est toujours affiché avant de lancer la génération.
           </p>
+        </section>
+      )}
+
+      {/* Paiements en ligne */}
+      {payments.length > 0 && (
+        <section aria-label="Paiements en ligne">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-white"><CreditCard size={13} className="text-cyan-300" /> Paiements en ligne</h2>
+          <ul className="mt-2 divide-y divide-white/[0.05] rounded-2xl border border-white/[0.08] bg-white/[0.02] px-3">
+            {payments.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11.5px]">
+                <span className="min-w-0 flex-1 truncate text-slate-300">{row.label ?? 'Achat de crédits'}</span>
+                <span className="text-slate-500">{formatDate(row.created_at, true)}</span>
+                <span className="text-slate-300">{formatAmount(row.amount, row.currency)}</span>
+                <Badge tone={PAYMENT_STATE_TONES[row.state]}>{PAYMENT_STATE_LABELS[row.state]}</Badge>
+                {(row.state === 'pending' || row.state === 'todo') && (
+                  <Link to={`/app/paiement/retour?produit=studio&commande=${row.id}`} className="text-cyan-300 hover:text-white">Suivre</Link>
+                )}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -360,6 +424,15 @@ export default function StudioPricing() {
         Grille administrable{grid?.updated_at ? ` · mise à jour le ${formatDate(grid.updated_at, true)}` : ''}.
         <Check size={10} className="text-emerald-400/60" /> Aucun paiement n’est simulé.
       </p>
+
+      <PaymentDialog
+        open={checkout !== null}
+        product="studio"
+        item={checkout?.item ?? null}
+        title={checkout?.title ?? 'Paiement'}
+        onClose={() => { setCheckout(null); void load(true); }}
+        onConfirmed={onPaymentConfirmed}
+      />
     </div>
   );
 }
