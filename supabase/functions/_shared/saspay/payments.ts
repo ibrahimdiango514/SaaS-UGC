@@ -12,7 +12,8 @@
 
 import {
   SasPayError, redactSecrets,
-  type SasPayClient, type TransactionStatus, type VerifiedPayment,
+  type FoundTransaction, type SasPayClient, type SoftpayRequest, type SoftpayResult,
+  type TransactionStatus, type VerifiedPayment,
 } from './client.ts';
 import { normalizeDecimal, parseDecimal, formatDecimal, quoteFee, selectTier, type FeeQuote, type RateTier } from './money.ts';
 import { verifyWebhookSignature } from './webhook.ts';
@@ -26,7 +27,13 @@ export type OrderStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'cancel
  * base a refusé d'activer (Business Grow, abonnement incompatible) — rien n'a
  * été livré, l'argent est à rendre par le support. État final.
  */
-export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled' | 'unapplied';
+export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled' | 'unapplied'
+  /**
+   * `review` : une demande softpay est partie chez SasPay sans que sa réponse
+   * ne revienne. On ignore si le client a été débité : la commande n'est NI
+   * payée NI non payée tant qu'une preuve (ou un administrateur) n'a pas tranché.
+   */
+  | 'review';
 export type SettleOutcome =
   | 'paid' | 'already_paid' | 'pending' | 'failed' | 'cancelled' | 'amount_mismatch'
   /** Business Grow : encaissement incompatible avec l'abonnement en cours — rien n'est livré, définitivement. */
@@ -133,6 +140,64 @@ export interface PaymentStore {
   reconcileFinish(runId: string, status: 'ok' | 'partial' | 'error', counts: ReconcileCounts & { detail?: Record<string, unknown> }): Promise<void>;
   findOrderByReference(reference: string): Promise<{ product: Product; orderId: string } | null>;
   reportAnomaly(anomaly: PaymentAnomaly): Promise<boolean>;
+
+  // Création softpay restée sans réponse.
+  /**
+   * Enregistre une tentative AVANT l'appel SasPay et renvoie le corps à
+   * envoyer (celui de la première tentative, à l'identique). Refuse hors
+   * fenêtre de rejeu, en rapprochement manuel, ou si un autre paiement du même
+   * client est incertain.
+   */
+  beginInitiation(product: Product, orderId: string, request: SoftpayRequest): Promise<InitiationTicket>;
+  /** L'appel s'est terminé sans issue certaine. */
+  initiationUnknown(product: Product, orderId: string, error: string): Promise<void>;
+  /** Commandes incertaines ; `dueOnly` : seulement celles dont la recherche SasPay est due. */
+  unconfirmedOrders(limit: number, dueOnly: boolean): Promise<UnconfirmedOrder[]>;
+  noteCandidates(product: Product, orderId: string, candidates: PaymentCandidate[]): Promise<void>;
+  /** Ajoute une transaction annoncée par un webhook aux candidates d'une commande incertaine. */
+  addCandidate(product: Product, orderId: string, candidate: PaymentCandidate): Promise<void>;
+  /** Trace la décision d'un administrateur de rattacher un paiement. */
+  reviewAttached(adminId: string, product: Product, orderId: string, paymentId: string, note: string): Promise<void>;
+}
+
+export type InitiationTicket =
+  | { allowed: true; attempt: number; request: SoftpayRequest; replayUntil: string | null }
+  | {
+    allowed: false;
+    /**
+     * `attempt_in_progress` : un appel est en vol pour CETTE commande ;
+     * `other_payment_*` : une autre commande du client n'est pas soldée.
+     */
+    reason: 'not_pending' | 'under_review' | 'attempt_in_progress' | 'other_payment_unconfirmed' | 'other_payment_in_progress';
+  };
+
+export interface UnconfirmedOrder {
+  product: Product;
+  orderId: string;
+  internalReference: string;
+  /** Numéro complet du payeur (jamais journalisé, jamais renvoyé au navigateur). */
+  phone: string | null;
+  amount: string | null;
+  currency: string | null;
+  firstAttemptAt: string;
+  lastAttemptAt: string;
+  inReview: boolean;
+}
+
+/** Transaction SasPay qui POURRAIT être celle d'une commande incertaine. */
+export interface PaymentCandidate {
+  id: string;
+  reference: string | null;
+  status: string | null;
+  amount: string | null;
+  currency: string | null;
+  created_at: string | null;
+  /** Vrai si SasPay a restitué un libellé pour cette transaction (sans notre référence). */
+  described: boolean;
+  /** D'où vient la piste : recherche par numéro, ou webhook d'une transaction inconnue. */
+  source?: 'search' | 'webhook';
+  /** Webhook seulement : le numéro débité annoncé est-il celui de la commande ? */
+  msisdn_match?: boolean | null;
 }
 
 export interface ReconcileBatch {
@@ -141,6 +206,8 @@ export interface ReconcileBatch {
   sweep: boolean;
   /** Borne basse du balayage (ISO 8601). */
   sweepSince: string;
+  /** Créations softpay restées sans réponse, à rechercher chez SasPay par numéro. */
+  unconfirmed: UnconfirmedOrder[];
 }
 
 export interface ReconcileCounts {
@@ -155,7 +222,7 @@ export interface ReconcileCounts {
 
 export type AnomalyKind =
   | 'order_stuck' | 'duplicate_payment' | 'payment_conflict' | 'amount_mismatch' | 'payment_not_found'
-  | 'subscription_conflict' | 'sweep_unreliable';
+  | 'subscription_conflict' | 'sweep_unreliable' | 'initiation_unconfirmed';
 
 export interface PaymentAnomaly {
   kind: AnomalyKind;
@@ -209,6 +276,9 @@ export interface PaymentServiceDeps {
   log?: (event: string, details: Record<string, unknown>) => void;
   ratesTtlMs?: number;
   minVerifyIntervalMs?: number;
+  /** Pause avant le rejeu immédiat d'une création softpay sans réponse (défaut 2 s). */
+  replayDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const NO_DELIVERY = 'Aucun crédit n’est accordé tant que le paiement n’est pas confirmé.';
@@ -232,6 +302,25 @@ export const SUBSCRIPTION_CONFLICT_CODES: readonly string[] = [
 export const SUBSCRIPTION_CONFLICT_MESSAGE = 'Votre paiement a bien été reçu, mais il n’a pas pu être appliqué '
   + 'à votre abonnement en cours. Rien n’a été modifié sur votre abonnement. '
   + 'Le support a été alerté et vous remboursera intégralement.';
+
+/**
+ * Marqueurs d'une commande softpay dont l'appel de création n'a pas rendu de
+ * réponse exploitable. `initiation_unconfirmed` : la même demande peut encore
+ * être rejouée (même clé d'idempotence). `manual_review` : fenêtre de rejeu
+ * close, un administrateur doit rapprocher.
+ */
+export const UNCONFIRMED_CODES: readonly string[] = ['initiation_unconfirmed', 'manual_review'];
+
+export const UNCONFIRMED_MESSAGE = 'Le service de paiement n’a pas confirmé cette demande : elle a peut-être '
+  + 'été envoyée sur votre téléphone. Ne payez pas une seconde fois. Vous pouvez relancer cette même demande '
+  + '— ce n’est pas un nouveau paiement. ' + NO_DELIVERY;
+
+export const REVIEW_MESSAGE = 'Votre paiement est en cours de vérification par notre équipe. '
+  + 'Ne payez pas une seconde fois. Si vous avez été débité, votre achat sera livré ; '
+  + 'sinon la commande sera annulée sans frais.';
+
+export const OTHER_UNCONFIRMED_MESSAGE = 'Un de vos paiements est en cours de vérification. '
+  + 'Aucun autre paiement ne peut être lancé tant qu’il n’est pas confirmé ou annulé.';
 
 /** Motifs d'inéligibilité renvoyés par la base → (code, message). */
 const INELIGIBLE_REASONS: Record<string, [code: string, message: string]> = {
@@ -286,6 +375,9 @@ export function paymentState(
   if (order.status === 'failed') return 'failed';
   if (order.status === 'cancelled') return 'cancelled';
   if (order.status === 'processing' || order.provider_payment_id || order.provider_session_id) return 'pending';
+  // Demande partie chez SasPay sans réponse : ni « à effectuer » (elle a pu
+  // aboutir), ni « en attente » (aucun paiement identifié à suivre).
+  if (order.failure_code && UNCONFIRMED_CODES.includes(order.failure_code)) return 'review';
   return 'todo';
 }
 
@@ -303,6 +395,9 @@ export function publicOrder(order: OrderRecord): Record<string, unknown> {
   const view: Record<string, unknown> = {};
   for (const field of PUBLIC_FIELDS) if (order[field] !== undefined) view[field] = order[field];
   view.state = paymentState(order);
+  // En vérification : la MÊME demande peut être relancée tant que la fenêtre de
+  // rejeu est ouverte (le serveur tranche à chaque relance).
+  if (view.state === 'review') view.retry_allowed = order.failure_code === 'initiation_unconfirmed';
   return view;
 }
 
@@ -380,6 +475,8 @@ export function createPaymentService(deps: PaymentServiceDeps) {
   const log = deps.log ?? (() => undefined);
   const ratesTtlMs = deps.ratesTtlMs ?? 5 * 60_000;
   const minVerifyIntervalMs = deps.minVerifyIntervalMs ?? 3_000;
+  const replayDelayMs = deps.replayDelayMs ?? 2_000;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let ratesCache: { at: number; rows: RateRow[] } | null = null;
 
   /** Tarifs du compte marchand. Lecture seule, mise en cache, jamais bloquante. */
@@ -527,9 +624,10 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     });
   }
 
-  function nextStep(order: OrderRecord): 'redirect' | 'await_confirmation' | 'done' | 'retry' {
+  function nextStep(order: OrderRecord): 'redirect' | 'await_confirmation' | 'done' | 'retry' | 'review' {
     const state = paymentState(order);
     if (state === 'confirmed' || state === 'failed' || state === 'cancelled' || state === 'unapplied') return 'done';
+    if (state === 'review') return 'review';
     if (state === 'todo') return 'retry';
     return order.checkout_url ? 'redirect' : 'await_confirmation';
   }
@@ -595,66 +693,173 @@ export function createPaymentService(deps: PaymentServiceDeps) {
 
     // Rejeu de la même intention : aucun second paiement n'est initié.
     if (order.status !== 'pending' || order.provider_payment_id || order.provider_session_id) {
-      return { order: publicOrder(order), next: nextStep(order), reused: true };
+      return { order: publicOrder(order), next: nextStep(order), reused: true, message: null as string | null };
     }
 
     const { first, last } = splitName(user.name, user.email);
     const metadata = { order_reference: order.internal_reference, product };
-    // La référence interne figure dans le libellé transmis à SasPay : c'est elle
-    // qui permet à la réconciliation de retrouver une commande dont la réponse
-    // de création ou le webhook se serait perdu.
+    // La référence interne figure dans le libellé et les métadonnées transmis à
+    // SasPay. Si SasPay les restitue (sa spécification ne le garantit pas), ils
+    // permettent de reconnaître un paiement dont l'identifiant s'est perdu.
     const description = `${order.label.slice(0, 80)} — ${order.internal_reference}`;
+
+    if (flow === 'softpay') {
+      return initiateSoftpay(order, {
+        amount: order.amount, currency: order.currency, country: order.country, network: network as string,
+        customer: { email: user.email, first_name: first, last_name: last, phone: msisdn as string },
+        description, metadata,
+      });
+    }
+
     try {
+      const returnUrl = context.returnUrl?.(order) ?? null;
+      const result = await sasPay.createCheckoutSession({
+        amount: order.amount, currency: order.currency,
+        customer_email: user.email, customer_name: `${first} ${last}`.trim(),
+        description, country: order.country, metadata,
+        ...(msisdn ? { customer_phone: msisdn } : {}),
+        ...(returnUrl ? { return_url: returnUrl } : {}),
+      });
       let attached: OrderRecord;
-      if (flow === 'softpay') {
-        // `Idempotency-Key` = référence interne : un rejeu réseau renvoie le paiement d'origine.
-        const result = await sasPay.softpay({
-          amount: order.amount, currency: order.currency, country: order.country, network: network as string,
-          customer: { email: user.email, first_name: first, last_name: last, phone: msisdn as string },
-          description, metadata,
-        }, order.internal_reference);
+      try {
         attached = await store.attach(product, order.id, {
-          paymentId: result.id, sessionId: null, checkoutUrl: result.checkout_url, providerStatus: result.status,
+          paymentId: null, sessionId: result.id, checkoutUrl: result.checkout_url, providerStatus: result.status,
         });
-      } else {
-        const returnUrl = context.returnUrl?.(order) ?? null;
-        const result = await sasPay.createCheckoutSession({
-          amount: order.amount, currency: order.currency,
-          customer_email: user.email, customer_name: `${first} ${last}`.trim(),
-          description, country: order.country, metadata,
-          ...(msisdn ? { customer_phone: msisdn } : {}),
-          ...(returnUrl ? { return_url: returnUrl } : {}),
-        });
-        try {
-          attached = await store.attach(product, order.id, {
-            paymentId: null, sessionId: result.id, checkoutUrl: result.checkout_url, providerStatus: result.status,
-          });
-        } catch (error) {
-          // SasPay n'offre pas d'idempotence sur les sessions : deux requêtes
-          // simultanées créent deux sessions. La première rattachée fait foi ;
-          // l'autre n'est jamais communiquée au client (donc jamais payée).
-          if (!(error instanceof PaymentError) || error.code !== 'PAYMENT_REFERENCE_CONFLICT') throw error;
-          const current = await store.getOrder(product, order.id);
-          if (!current) throw error;
-          log('saspay_checkout_session_discarded', { product, order: order.id });
-          return { order: publicOrder(current), next: nextStep(current), reused: true };
-        }
+      } catch (error) {
+        // SasPay n'offre pas d'idempotence sur les sessions : deux requêtes
+        // simultanées créent deux sessions. La première rattachée fait foi ;
+        // l'autre n'est jamais communiquée au client (donc jamais payée).
+        if (!(error instanceof PaymentError) || error.code !== 'PAYMENT_REFERENCE_CONFLICT') throw error;
+        const current = await store.getOrder(product, order.id);
+        if (!current) throw error;
+        log('saspay_checkout_session_discarded', { product, order: order.id });
+        return { order: publicOrder(current), next: nextStep(current), reused: true, message: null as string | null };
       }
       log('saspay_payment_initiated', { product, order: order.id, flow, network });
-      return { order: publicOrder(attached), next: nextStep(attached), reused: order.reused };
+      return { order: publicOrder(attached), next: nextStep(attached), reused: order.reused, message: null as string | null };
     } catch (error) {
       if (!(error instanceof SasPayError)) throw error;
       log('saspay_initiation_failed', { product, order: order.id, flow, status: error.status, code: error.code });
       if (error.definitive) {
-        // Refus certain : aucun paiement n'existe chez SasPay, la commande est close.
+        // Refus certain : aucune session n'existe chez SasPay, la commande est close.
         await store.settle(product, order.id, {
           paymentId: null, status: 'FAILED', requestedAmount: null, currency: null, fee: null, charged: null,
           net: null, feeMode: null, reference: null, source: 'initiate', failureCode: error.code,
         });
       }
-      // Sinon la commande reste « à effectuer » : la même intention peut être rejouée.
+      // Sinon la commande reste « à effectuer ». Une session dont la réponse
+      // s'est perdue n'a jamais été montrée au client : elle ne peut pas être payée.
       throw fromSasPayError(error, { order_id: order.id, retryable: error.retryable });
     }
+  }
+
+  /** Vue renvoyée au client pour une commande dont la création softpay est sans réponse. */
+  async function unconfirmedView(order: OrderRecord, reused: boolean) {
+    const current = await store.getOrder(order.product, order.id).catch(() => null) ?? order;
+    const state = paymentState(current);
+    const message = state !== 'review' ? null
+      : current.failure_code === 'initiation_unconfirmed' ? UNCONFIRMED_MESSAGE : REVIEW_MESSAGE;
+    return { order: publicOrder(current), next: nextStep(current), reused, message };
+  }
+
+  /**
+   * Pousse la demande softpay. La tentative est enregistrée AVANT l'appel, avec
+   * le corps exact : tout rejeu (immédiat ici, ou relance du client) renvoie ce
+   * même corps avec la même `Idempotency-Key`, seule garantie documentée par
+   * SasPay de retrouver un paiement dont la réponse s'est perdue.
+   */
+  async function initiateSoftpay(order: OrderRecord & { reused: boolean }, body: SoftpayRequest) {
+    const sasPay = client as SasPayClient;
+    const product = order.product;
+    const ticket = await store.beginInitiation(product, order.id, body);
+    if (!ticket.allowed) {
+      log('saspay_initiation_not_allowed', { product, order: order.id, reason: ticket.reason });
+      if (ticket.reason === 'other_payment_unconfirmed') {
+        throw new PaymentError('PAYMENT_UNDER_REVIEW', 409, OTHER_UNCONFIRMED_MESSAGE, { order_id: order.id });
+      }
+      if (ticket.reason === 'other_payment_in_progress') {
+        throw new PaymentError('PAYMENT_ALREADY_IN_PROGRESS', 409,
+          'Un autre paiement est en cours d’envoi. Patientez quelques secondes puis vérifiez son statut.',
+          { order_id: order.id });
+      }
+      if (ticket.reason === 'attempt_in_progress') {
+        // Double clic : la même demande est déjà en vol. On attend son issue
+        // (quelques secondes) au lieu d'en envoyer une seconde.
+        for (let wait = 0; wait < 4; wait += 1) {
+          await sleep(replayDelayMs);
+          const current = await store.getOrder(product, order.id).catch(() => null);
+          if (current && paymentState(current) !== 'review') {
+            return { order: publicOrder(current), next: nextStep(current), reused: true, message: null };
+          }
+        }
+      }
+      // Rapprochement manuel, issue encore inconnue, ou commande rattachée
+      // entre-temps : aucun appel SasPay, l'état est dit tel quel.
+      return unconfirmedView(order, true);
+    }
+
+    // Une tentative antérieure est restée sans réponse : un refus d'accès reçu
+    // maintenant (clé changée, compte suspendu) ne dit rien de la première.
+    const afterUnknown = ticket.attempt > 1;
+    let result: SoftpayResult | null = null;
+    let failure: SasPayError | null = null;
+    let certain = false;
+    let sawUncertain = false;
+    // Un appel, puis UN rejeu immédiat si l'issue est inconnue : le client est
+    // encore devant son écran, la demande reste celle qu'il attend.
+    for (let call = 0; call < 2 && !result; call += 1) {
+      if (call > 0) await sleep(replayDelayMs);
+      try {
+        result = await sasPay.softpay(ticket.request, order.internal_reference);
+      } catch (error) {
+        if (!(error instanceof SasPayError)) {
+          await store.initiationUnknown(product, order.id, 'unexpected_error').catch(() => undefined);
+          throw error;
+        }
+        failure = error;
+        const blind = (afterUnknown || sawUncertain) && (error.kind === 'unauthorized' || error.kind === 'forbidden');
+        // Limite de débit : SasPay a écarté la requête sans la traiter. Si aucune
+        // tentative antérieure n'est incertaine, aucun paiement ne peut exister.
+        const throttled = error.kind === 'rate_limited' && !afterUnknown && !sawUncertain;
+        certain = (error.definitive && !blind) || throttled;
+        if (!certain) sawUncertain = true;
+        log('saspay_initiation_failed', {
+          product, order: order.id, flow: 'softpay', status: error.status, code: error.code, call: call + 1, certain,
+        });
+        if (certain) break;
+      }
+    }
+
+    if (result) {
+      try {
+        const attached = await store.attach(product, order.id, {
+          paymentId: result.id, sessionId: null, checkoutUrl: result.checkout_url, providerStatus: result.status,
+        });
+        log('saspay_payment_initiated', { product, order: order.id, flow: 'softpay', network: order.network_code, attempt: ticket.attempt });
+        return { order: publicOrder(attached), next: nextStep(attached), reused: order.reused, message: null };
+      } catch (error) {
+        // Le paiement existe chez SasPay mais son identifiant n'a pas pu être
+        // enregistré : même situation qu'une réponse perdue.
+        await store.initiationUnknown(product, order.id, 'attach_failed').catch(() => undefined);
+        log('saspay_attach_failed', { product, order: order.id });
+        throw error;
+      }
+    }
+
+    const error = failure as SasPayError;
+    if (certain) {
+      // Refus certain : aucun paiement n'existe chez SasPay, la commande est close.
+      await store.settle(product, order.id, {
+        paymentId: null, status: 'FAILED', requestedAmount: null, currency: null, fee: null, charged: null,
+        net: null, feeMode: null, reference: null, source: 'initiate', failureCode: error.code,
+      });
+      throw fromSasPayError(error, { order_id: order.id, retryable: error.retryable });
+    }
+    // Issue inconnue : la commande n'est ni payée ni non payée. Le client peut
+    // relancer la MÊME demande pendant la fenêtre de rejeu ; ensuite, un
+    // administrateur rapproche.
+    await store.initiationUnknown(product, order.id, error.code).catch(() => undefined);
+    return unconfirmedView(order, order.reused);
   }
 
   /** Statut d'une commande, revérifié auprès de SasPay si elle n'est pas réglée. */
@@ -671,6 +876,11 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     if (order.status === 'paid' || order.status === 'refunded') return { ...untouched, verified: true };
     // Refus d'activation déjà prononcé : état final, inutile d'interroger SasPay.
     if (paymentState(order) === 'unapplied') return { ...untouched, verified: true, message: SUBSCRIPTION_CONFLICT_MESSAGE };
+    // Création softpay sans réponse : aucun paiement identifié à interroger.
+    // L'état est dit tel quel — ni payé, ni non payé.
+    if (paymentState(order) === 'review') {
+      return { ...untouched, message: order.failure_code === 'initiation_unconfirmed' ? UNCONFIRMED_MESSAGE : REVIEW_MESSAGE };
+    }
     if (!order.provider_payment_id && !order.provider_session_id) return untouched;
     const lastVerified = order.last_verified_at ? Date.parse(order.last_verified_at) : 0;
     if (Number.isFinite(lastVerified) && deps.now() - lastVerified < minVerifyIntervalMs) return untouched;
@@ -733,6 +943,22 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         } catch { /* session illisible : candidat suivant */ }
       }
     }
+    if (!match) {
+      // Dernière piste : une commande dont la création softpay est restée sans
+      // réponse. Le webhook ne porte ni libellé ni métadonnées ; la transaction
+      // est donc relue chez SasPay, et n'est rattachée que si SasPay restitue
+      // NOTRE référence de commande (preuve), jamais sur une ressemblance.
+      try {
+        match = await matchUnconfirmed(paymentId, typeof data.msisdn === 'string' ? data.msisdn : null);
+      } catch (error) {
+        // SasPay injoignable alors qu'une commande incertaine attend : le
+        // webhook est refusé (503) pour que SasPay le représente plus tard.
+        if (!(error instanceof SasPayError) || !error.definitive) {
+          log('saspay_webhook_failed', { code: error instanceof SasPayError ? error.code : 'unexpected_error', stage: 'unconfirmed' });
+          throw new PaymentError('WEBHOOK_PROCESSING_FAILED', 503, 'Traitement du webhook momentanément impossible.');
+        }
+      }
+    }
     // Le compte marchand peut servir d'autres produits : transaction inconnue = ignorée.
     if (!match) return { received: true, ignored: true, reason: 'unknown_transaction' };
 
@@ -765,6 +991,176 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       // 503 : SasPay retentera ; le traitement est idempotent.
       throw new PaymentError('WEBHOOK_PROCESSING_FAILED', 503, 'Traitement du webhook momentanément impossible.');
     }
+  }
+
+  /** Référence de commande VYORA restituée par SasPay pour une transaction (libellé ou métadonnées). */
+  function provenReference(tx: { description: string | null; metadata_reference: string | null }): string | null {
+    return orderReferenceIn(tx.description) ?? orderReferenceIn(tx.metadata_reference);
+  }
+
+  /**
+   * Transaction inconnue : appartient-elle à une commande incertaine ? Vrai
+   * seulement si SasPay restitue la référence de cette commande.
+   */
+  async function matchUnconfirmed(
+    paymentId: string, announcedMsisdn: string | null,
+  ): Promise<{ product: Product; orderId: string } | null> {
+    const sasPay = client;
+    if (!sasPay) return null;
+    const open = await store.unconfirmedOrders(25, false);
+    if (open.length === 0) return null;
+    const tx = await sasPay.verifyPayment(paymentId);
+    const reference = provenReference(tx);
+    const found = reference ? open.find((o) => o.internalReference === reference) : undefined;
+    if (found) {
+      log('saspay_unconfirmed_matched', { product: found.product, order: found.orderId, via: 'webhook' });
+      return { product: found.product, orderId: found.orderId };
+    }
+    // Référence d'une autre commande, ou sens contraire : sans rapport.
+    if (reference || (tx.flow_direction && tx.flow_direction !== 'INBOUND')) return null;
+    // Aucune preuve. Si la transaction RESSEMBLE à une commande incertaine
+    // (montant, devise, date), elle est proposée à l'administrateur : le webhook
+    // n'est ainsi pas perdu, mais rien n'est rattaché ni livré.
+    const amount = parseDecimal(normalizeDecimal(tx.requested_amount));
+    const createdAt = tx.created_at ? Date.parse(tx.created_at) : NaN;
+    const announced = digitsOf(announcedMsisdn);
+    for (const order of open) {
+      const expected = parseDecimal(normalizeDecimal(order.amount));
+      if (amount === null || expected === null || amount !== expected) continue;
+      if (tx.currency && order.currency && tx.currency !== order.currency.toUpperCase()) continue;
+      const first = Date.parse(order.firstAttemptAt);
+      const last = Date.parse(order.lastAttemptAt);
+      if (Number.isFinite(createdAt) && Number.isFinite(first)
+        && (createdAt < first - 5 * 60_000 || createdAt > (Number.isFinite(last) ? last : first) + 30 * 60_000)) continue;
+      const expectedDigits = digitsOf(order.phone);
+      await store.addCandidate(order.product, order.orderId, {
+        id: tx.id, reference: tx.reference, status: tx.status, amount: tx.requested_amount, currency: tx.currency,
+        created_at: tx.created_at, described: tx.description !== null, source: 'webhook',
+        msisdn_match: announced.length >= 8 && expectedDigits.length >= 8
+          ? announced.slice(-8) === expectedDigits.slice(-8) : null,
+      }).catch(() => undefined);
+      log('saspay_unconfirmed_candidate', { product: order.product, order: order.orderId, via: 'webhook' });
+    }
+    return null;
+  }
+
+  /** Chiffres d'un numéro (la recherche SasPay ne documente pas son format). */
+  function digitsOf(phone: string | null): string {
+    return (phone ?? '').replace(/\D/g, '');
+  }
+
+  /**
+   * Cherche chez SasPay (lecture seule) les transactions du numéro du payeur
+   * autour de la tentative. Renvoie la transaction PROUVÉE (référence de la
+   * commande restituée par SasPay) et les simples candidates (même montant,
+   * même devise, même fenêtre) destinées à l'administrateur.
+   */
+  async function searchUnconfirmed(sasPay: SasPayClient, target: UnconfirmedOrder): Promise<{
+    proven: FoundTransaction | null; candidates: PaymentCandidate[];
+  }> {
+    const digits = digitsOf(target.phone);
+    if (digits.length < 8) return { proven: null, candidates: [] };
+    const first = Date.parse(target.firstAttemptAt);
+    const last = Date.parse(target.lastAttemptAt);
+    if (!Number.isFinite(first)) return { proven: null, candidates: [] };
+    // Fenêtre : 5 min avant la première tentative, 30 min après la dernière
+    // (horloges décalées, validation tardive sur le téléphone).
+    const from = first - 5 * 60_000;
+    const to = (Number.isFinite(last) ? last : first) + 30 * 60_000;
+    const seen = new Map<string, FoundTransaction>();
+    // Numéro international complet, puis numéro national (8 derniers chiffres).
+    for (const term of [...new Set([digits, digits.slice(-8)])]) {
+      const found = await sasPay.searchPayments({ search: term, createdAfter: new Date(from).toISOString() });
+      for (const tx of found.transactions) seen.set(tx.id, tx);
+      if (seen.size > 0) break;
+    }
+    const expected = parseDecimal(normalizeDecimal(target.amount));
+    let proven: FoundTransaction | null = null;
+    const candidates: PaymentCandidate[] = [];
+    for (const tx of seen.values()) {
+      if (provenReference(tx) === target.internalReference) { proven = tx; continue; }
+      // Portant la référence d'une AUTRE commande : ce n'est pas la nôtre.
+      if (provenReference(tx)) continue;
+      const createdAt = tx.created_at ? Date.parse(tx.created_at) : NaN;
+      if (Number.isFinite(createdAt) && (createdAt < from || createdAt > to)) continue;
+      const amount = parseDecimal(normalizeDecimal(tx.requested_amount));
+      if (expected !== null && amount !== null && amount !== expected) continue;
+      if (tx.currency && target.currency && tx.currency !== target.currency.toUpperCase()) continue;
+      // Déjà rattachée à une autre commande VYORA : écartée.
+      if (await store.findOrder({ paymentId: tx.id, sessionId: null })) continue;
+      candidates.push({
+        id: tx.id, reference: tx.reference, status: tx.status, amount: tx.requested_amount,
+        currency: tx.currency, created_at: tx.created_at, described: tx.description !== null, source: 'search',
+      });
+    }
+    return { proven, candidates: candidates.slice(0, 10) };
+  }
+
+  /**
+   * Décision d'un administrateur : « ce paiement SasPay est celui de cette
+   * commande ». Le paiement est relu chez SasPay AVANT tout rattachement (un
+   * rattachement est définitif) : sens, montant, devise, date, et absence
+   * d'autre commande liée. La livraison suit ensuite la voie ordinaire — seul
+   * un statut `SUCCESS` vérifié livre.
+   */
+  async function resolveReview(
+    user: PaymentUser, input: { product: unknown; order_id: unknown; payment_id: unknown; note?: unknown },
+  ) {
+    if (!(await store.isAdmin(user.id))) throw new PaymentError('PAYMENT_FORBIDDEN', 403, 'Réservé aux administrateurs.');
+    if (!isProduct(input.product) || typeof input.order_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(input.order_id)) {
+      throw new PaymentError('PAYMENT_INVALID_REQUEST', 400, 'Commande invalide.');
+    }
+    const paymentId = typeof input.payment_id === 'string' ? input.payment_id.trim() : '';
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(paymentId)) {
+      throw new PaymentError('PAYMENT_INVALID_REQUEST', 400, 'Identifiant de transaction SasPay invalide.');
+    }
+    const note = typeof input.note === 'string' ? input.note.trim().slice(0, 500) : '';
+    if (note.length < 10) {
+      throw new PaymentError('PAYMENT_INVALID_REQUEST', 400, 'Indiquez comment ce paiement a été identifié (10 caractères au moins).');
+    }
+    const sasPay = client;
+    if (!sasPay) throw new PaymentError('PAYMENTS_NOT_CONFIGURED', 503, 'Le service de paiement n’est pas configuré côté serveur.');
+    const order = await store.getOrder(input.product, input.order_id);
+    if (!order) throw new PaymentError('PAYMENT_NOT_FOUND', 404, 'Commande introuvable.');
+    if (paymentState(order) !== 'review') {
+      throw new PaymentError('PAYMENT_NOT_UNDER_REVIEW', 409, 'Cette commande n’est pas en cours de vérification.');
+    }
+    const other = await store.findOrder({ paymentId, sessionId: null });
+    if (other) throw new PaymentError('PAYMENT_REFERENCE_CONFLICT', 409, 'Ce paiement est déjà rattaché à une autre commande.');
+
+    let tx: VerifiedPayment;
+    try {
+      tx = await sasPay.verifyPayment(paymentId);
+    } catch (error) {
+      if (!(error instanceof SasPayError)) throw error;
+      throw fromSasPayError(error, { order_id: order.id });
+    }
+    const refuse = (message: string) => new PaymentError('PAYMENT_REVIEW_MISMATCH', 422, `${message} Rien n’a été rattaché.`);
+    if (tx.id !== paymentId) throw refuse('SasPay a renvoyé une autre transaction.');
+    if (tx.flow_direction && tx.flow_direction !== 'INBOUND') throw refuse('Cette transaction n’est pas un encaissement.');
+    const requested = parseDecimal(normalizeDecimal(tx.requested_amount));
+    if (requested === null || requested !== parseDecimal(order.amount) || (tx.currency ?? '') !== order.currency.toUpperCase()) {
+      throw refuse('Le montant ou la devise de cette transaction ne correspond pas à la commande.');
+    }
+    const reference = provenReference(tx);
+    if (reference && reference !== order.internal_reference) {
+      throw refuse('Cette transaction porte la référence d’une autre commande.');
+    }
+    const createdAt = tx.created_at ? Date.parse(tx.created_at) : NaN;
+    const orderedAt = Date.parse(String(order.created_at ?? ''));
+    if (Number.isFinite(createdAt) && Number.isFinite(orderedAt) && createdAt < orderedAt - 5 * 60_000) {
+      throw refuse('Cette transaction est antérieure à la commande.');
+    }
+
+    const result = await sync(order, 'verify', paymentId);
+    // Trace de la décision. Le rattachement est déjà fait : un échec d'écriture
+    // de la trace est journalisé, il n'annule rien.
+    await store.reviewAttached(user.id, order.product, order.id, paymentId, note).catch(() => {
+      log('saspay_review_audit_failed', { product: order.product, order: order.id, admin: user.id });
+    });
+    if (result.outcome === 'subscription_conflict') await flagSubscriptionConflict(result);
+    log('saspay_review_attached', { product: order.product, order: order.id, outcome: result.outcome });
+    return { order: publicOrder(result), outcome: result.outcome, credited: result.credited };
   }
 
   /** Soldes marchands SasPay — lecture seule, réservée aux administrateurs. */
@@ -921,6 +1317,40 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         }
         counts.sweep_done = detail.stopped !== 'time_budget';
       }
+
+      // Créations softpay restées sans réponse : recherche par numéro du payeur
+      // (seul critère stable que SasPay documente). Une transaction n'est
+      // rattachée que si SasPay restitue la référence de la commande ; sinon les
+      // candidates sont consignées pour l'administrateur et RIEN n'est livré.
+      let searched = 0;
+      let recovered = 0;
+      let withCandidates = 0;
+      for (const target of batch.unconfirmed ?? []) {
+        if (outOfTime()) { detail.stopped = 'time_budget'; break; }
+        const order = await store.getOrder(target.product, target.orderId);
+        if (!order || paymentState(order) !== 'review') continue;
+        try {
+          const found = await searchUnconfirmed(sasPay, target);
+          searched += 1;
+          if (found.proven) {
+            log('saspay_unconfirmed_matched', { product: order.product, order: order.id, via: 'search' });
+            await verifyOne(order, found.proven.id);
+            recovered += 1;
+            continue;
+          }
+          if (found.candidates.length > 0) withCandidates += 1;
+          await store.noteCandidates(target.product, target.orderId, found.candidates);
+        } catch (error) {
+          counts.errors += 1;
+          const code = error instanceof SasPayError || error instanceof PaymentError ? error.code : 'unexpected_error';
+          log('saspay_unconfirmed_search_failed', { product: target.product, order: target.orderId, code });
+        }
+      }
+      if (searched > 0) {
+        detail.unconfirmed_searched = searched;
+        detail.unconfirmed_recovered = recovered;
+        detail.unconfirmed_with_candidates = withCandidates;
+      }
       if (counts.errors > 0 || detail.stopped || detail.sweep_truncated || detail.sweep_blind) status = 'partial';
     } catch (error) {
       status = counts.checked > 0 ? 'partial' : 'error';
@@ -932,7 +1362,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     return { ran: true as const, status, ...counts };
   }
 
-  return { options, create, refresh, webhook, balances, reconcile, isCronToken };
+  return { options, create, refresh, webhook, balances, reconcile, isCronToken, resolveReview };
 }
 
 export type PaymentService = ReturnType<typeof createPaymentService>;

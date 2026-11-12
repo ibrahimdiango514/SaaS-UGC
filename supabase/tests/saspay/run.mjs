@@ -12,6 +12,8 @@ const steps = [
   ['refunds.mjs', []],
   // Audit : concurrence Business Grow, remboursements sous charge, fuseaux, exécutions.
   ['audit.mjs', []],
+  // Création softpay sans réponse : tentatives, blocage d'un second paiement, rapprochement manuel.
+  ['unconfirmed.mjs', []],
   // Les Edge Functions sont du TypeScript : Node ≥ 22.6 sait en retirer les types.
   ['e2e.mjs', ['--experimental-strip-types', '--no-warnings']],
 ];

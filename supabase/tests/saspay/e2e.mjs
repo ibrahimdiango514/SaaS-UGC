@@ -13,9 +13,14 @@ const svc = await connectAs('service_role');
 const KEY = 'sk_test_e2e_0123456789', WH = 'whsec_e2e';
 const ORIGIN = 'https://vyora-ugc.netlify.app';
 const tokens = new Map();
-const tx = new Map(), sessions = new Map(), idem = new Map(); let seq = 0; let softpayFailure = null;
+const tx = new Map(), sessions = new Map(), idem = new Map(); let seq = 0; let softpayFailure = null; let softpayCalls = 0;
 // Pannes simulées : vérification SasPay injoignable, réponse de création perdue, liste sans libellé.
 let verifyDown = false, loseSoftpayResponse = false, listWithoutDescription = false;
+// SasPay ne restitue aucun libellé (ni à la vérification, ni dans les listes) ; requête de création jamais reçue.
+let noDescriptionAnywhere = false, dropSoftpayRequest = false;
+const searches = [];
+/** Transaction telle que l'API la renvoie : le numéro du payeur n'y figure pas. */
+const shown = (t, hide = false) => { const { _phone, description, ...rest } = t; return hide || noDescriptionAnywhere ? rest : { ...rest, description }; };
 const J = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 const fetcher = async (input, init = {}) => {
@@ -36,10 +41,12 @@ const fetcher = async (input, init = {}) => {
   const path = url.pathname.replace('/api/v1', '');
   if (path === '/pricing/my-rates/') return J({ success: true, data: [{ country_code: 'ML', network_code: 'orange_ml', payin: { available: true, otp_required: false, tiers: [{ min_amount: '0.00', max_amount: null, percent: '2.00', fixed: '0.00', fee_charge_mode: 'ADD_ON' }] } }] });
   if (path === '/payments/softpay/') {
+    softpayCalls += 1;
     if (softpayFailure) return J({ success: false, error: softpayFailure.error, code: softpayFailure.status }, softpayFailure.status);
+    if (dropSoftpayRequest) throw new TypeError('fetch failed'); // la requête n'atteint jamais SasPay
     const k = headers.get('idempotency-key'); if (idem.has(k)) { if (loseSoftpayResponse) throw new TypeError('fetch failed'); return J({ success: true, data: idem.get(k) }, 201); }
     const id = `tx-${String(++seq).padStart(8, '0')}`; const amount = body.amount;
-    tx.set(id, { id, description: body.description, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date().toISOString(), reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: body.currency, fee_charge_mode: 'ADD_ON', client_fee: (Number(amount) * 0.02).toFixed(2), debited_amount: (Number(amount) * 1.02).toFixed(2), net_amount: amount });
+    tx.set(id, { id, _phone: body.customer.phone, description: body.description, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at: new Date().toISOString(), reference: `SP-${id}`, status: 'PENDING', requested_amount: amount, currency: body.currency, fee_charge_mode: 'ADD_ON', client_fee: (Number(amount) * 0.02).toFixed(2), debited_amount: (Number(amount) * 1.02).toFixed(2), net_amount: amount });
     const data = { id, status: 'PENDING', checkout_url: '' }; idem.set(k, data);
     if (loseSoftpayResponse) throw new TypeError('fetch failed'); // paiement créé chez SasPay, réponse jamais reçue
     return J({ success: true, data }, 201);
@@ -47,11 +54,19 @@ const fetcher = async (input, init = {}) => {
   if (path === '/checkout-sessions/') { const id = `cs-${String(++seq).padStart(8, '0')}`; sessions.set(id, { id, status: 'PENDING', transaction_id: null, amount: body.amount, currency: body.currency }); return J({ id, status: 'PENDING', checkout_url: `https://pay.saspay.me/c/${id}` }, 201); }
   let m = path.match(/^\/checkout-sessions\/(.+)\/status\/$/); if (m) return sessions.has(m[1]) ? J({ success: true, data: sessions.get(m[1]) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
   m = path.match(/^\/payments\/(.+)\/verify\/$/); if (m && verifyDown) throw new TypeError('fetch failed');
-  if (m) return tx.has(m[1]) ? J({ success: true, data: tx.get(m[1]) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
+  if (m) return tx.has(m[1]) ? J({ success: true, data: shown(tx.get(m[1])) }) : J({ error: { code: 'not_found', message: 'x' } }, 404);
   if (path === '/transactions/') {
     assert.equal(init.method ?? 'GET', 'GET');
+    const search = url.searchParams.get('search');
+    if (search !== null) {
+      // Recherche libre documentée : ici, par téléphone du client (tous statuts).
+      searches.push(Object.fromEntries(url.searchParams));
+      const digits = search.replace(/\D/g, '');
+      const hits = [...tx.values()].filter((t) => digits.length >= 6 && String(t._phone ?? '').replace(/\D/g, '').includes(digits));
+      return J({ success: true, data: { next: null, previous: null, results: hits.map((t) => shown(t, listWithoutDescription)) } });
+    }
     listings.push(Object.fromEntries(url.searchParams));
-    const rows = [...tx.values()].filter((t) => t.status === 'SUCCESS').map((t) => { if (!listWithoutDescription) return t; const { description, ...rest } = t; return rest; });
+    const rows = [...tx.values()].filter((t) => t.status === 'SUCCESS').map((t) => shown(t, listWithoutDescription));
     return J({ success: true, data: { next: null, previous: null, results: rows } });
   }
   if (path.startsWith('/merchant-balances/')) return J({ success: true, data: { count: 1, next: null, results: [{ id: 'b1', country: 'ML', currency: 'XOF', available_amount: '42000.00', pending_amount: '0.00', is_frozen: false }] } });
@@ -61,9 +76,11 @@ const fetcher = async (input, init = {}) => {
 const listings = [];
 let clock = Date.now();
 const env = { supabaseUrl: 'https://db.local', anonKey: 'anon', serviceRoleKey: 'service-key', sasPaySecretKey: KEY, webhookSecret: WH, extraOrigins: '' };
-const payments = createPaymentsHandler({ env, fetcher, now: () => clock });
-const webhook = createWebhookHandler({ env, fetcher, now: () => clock });
-const reconcileFn = createReconcileHandler({ env, fetcher, now: () => clock });
+// Le rejeu immédiat d'une création sans réponse attend 2 s en production : pas ici.
+const sleep = async () => {};
+const payments = createPaymentsHandler({ env, fetcher, now: () => clock, sleep });
+const webhook = createWebhookHandler({ env, fetcher, now: () => clock, sleep });
+const reconcileFn = createReconcileHandler({ env, fetcher, now: () => clock, sleep });
 const call = async (token, body) => { const r = await payments(new Request('https://edge/vyora-payments', { method: 'POST', headers: { origin: ORIGIN, authorization: token, 'content-type': 'application/json' }, body: JSON.stringify(body) })); return { status: r.status, body: await r.json() }; };
 const hook = async (body, { secret = WH, tamper = false } = {}) => {
   const raw = JSON.stringify(body); const ts = String(Math.floor(clock / 1000));
@@ -161,10 +178,13 @@ assert.equal((await dbOrder(r.body.error.order_id)).status, 'failed'); softpayFa
 ok('refus SasPay (422) → commande « échouée » en base, message utilisateur');
 softpayFailure = { status: 503, error: { code: 'unavailable', message: 'down' } };
 r = await call(B, softpay('e2e-key-000005'));
-assert.equal(r.status, 503); const retryId = r.body.error.order_id; assert.equal((await dbOrder(retryId)).status, 'pending'); softpayFailure = null;
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.next, 'review'); assert.equal(r.body.order.state, 'review');
+const retryId = r.body.order.id; row = await dbOrder(retryId);
+assert.equal(row.status, 'pending'); assert.equal(row.failure_code, 'initiation_unconfirmed'); softpayFailure = null;
 r = await call(B, softpay('e2e-key-000005'));
-assert.equal(r.status, 200); assert.equal(r.body.order.id, retryId); assert.equal((await dbOrder(retryId)).status, 'processing');
-ok('panne SasPay (503) → commande conservée, rejouée avec la même intention');
+assert.equal(r.status, 200); assert.equal(r.body.order.id, retryId); assert.equal(r.body.next, 'await_confirmation');
+row = await dbOrder(retryId); assert.equal(row.status, 'processing'); assert.equal(row.failure_code, null);
+ok('panne SasPay (503) → issue inconnue : commande « en vérification », puis la même demande rejouée aboutit');
 
 r = await call(B, { action: 'create', product: 'studio', item: { kind: 'custom', amount_xof: 20000 }, country: 'ML', flow: 'checkout', idempotency_key: 'e2e-key-000006' });
 assert.equal(r.body.next, 'redirect'); assert.match(r.body.order.checkout_url, /^https:\/\/pay\.saspay\.me\/c\/cs-/);
@@ -270,7 +290,8 @@ ok('nouveau passage puis webhook tardif → aucun second crédit');
 softpayFailure = { status: 503, error: { code: 'unavailable', message: 'down' } };
 r = await call(B, { action: 'create', product: 'studio', item: { kind: 'pack', pack_key: 'pro_creator' }, country: 'ML', flow: 'softpay', network: 'orange_ml', phone: '+22366112233', idempotency_key: 'e2e-key-recon02' });
 softpayFailure = null;
-const ghostId = r.body.error.order_id; const ghost = await dbOrder(ghostId);
+assert.equal(r.body.next, 'review', JSON.stringify(r.body));
+const ghostId = r.body.order.id; const ghost = await dbOrder(ghostId);
 assert.equal(ghost.provider_payment_id, null);
 tx.set('tx-ghost-0001', { id: 'tx-ghost-0001', reference: 'SP-ghost', status: 'SUCCESS', transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
   description: `Pack Pro Creator — ${ghost.internal_reference}`, requested_amount: '15000.00', currency: 'XOF', fee_charge_mode: 'ADD_ON',
@@ -304,7 +325,7 @@ tx.delete('tx-dup-0001');
 softpayFailure = { status: 503, error: { code: 'unavailable', message: 'down' } };
 r = await call(A, { action: 'create', product: 'studio', item: { kind: 'pack', pack_key: 'creator' }, country: 'ML', flow: 'softpay', network: 'orange_ml', phone: '+22366112233', idempotency_key: 'e2e-key-recon03' });
 softpayFailure = null;
-const cheapId = r.body.error.order_id; const cheap = await dbOrder(cheapId); const aliceBefore = await wallet(alice);
+const cheapId = r.body.order.id; const cheap = await dbOrder(cheapId); const aliceBefore = await wallet(alice);
 tx.set('tx-cheap-0001', { id: 'tx-cheap-0001', reference: 'SP-cheap', status: 'SUCCESS', transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
   description: `Pack Creator — ${cheap.internal_reference}`, requested_amount: '100.00', currency: 'XOF', fee_charge_mode: 'ADD_ON',
   client_fee: '0.00', debited_amount: '100.00', net_amount: '100.00', created_at: new Date().toISOString() });
@@ -441,9 +462,10 @@ ok('panne SasPay pendant un webhook → 5xx (SasPay retentera), aucun crédit ; 
 //  F2. Réponse de création perdue (délai dépassé) : le client relance la même intention, aucun second paiement.
 const txBeforeLoss = tx.size; loseSoftpayResponse = true;
 r = await call(A, softpay('e2e-key-net0002'));
-assert.equal(r.status, 503, JSON.stringify(r.body)); assert.equal(tx.size, txBeforeLoss + 1);
-const lossId = r.body.error.order_id; assert.equal((await dbOrder(lossId)).provider_payment_id, null);
-r = await call(A, softpay('e2e-key-net0002')); assert.equal(r.status, 503); assert.equal(tx.size, txBeforeLoss + 1);
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.next, 'review'); assert.equal(tx.size, txBeforeLoss + 1);
+assert.match(r.body.message, /Ne payez pas une seconde fois/); assert.equal(r.body.order.retry_allowed, true);
+const lossId = r.body.order.id; assert.equal((await dbOrder(lossId)).provider_payment_id, null);
+r = await call(A, softpay('e2e-key-net0002')); assert.equal(r.status, 200); assert.equal(r.body.next, 'review'); assert.equal(tx.size, txBeforeLoss + 1);
 loseSoftpayResponse = false;
 r = await call(A, softpay('e2e-key-net0002')); assert.equal(r.status, 200, JSON.stringify(r.body));
 assert.equal(r.body.order.id, lossId); assert.equal(tx.size, txBeforeLoss + 1);
@@ -495,6 +517,169 @@ assert.equal(await wallet(erin), 27); assert.deepEqual(await subOf(erin), erinSu
 r = await call(E, { action: 'status', product: 'studio', order_id: erinBg }); assert.equal(r.status, 404);
 r = await call(E, { action: 'status', product: 'business', order_id: erinStudio }); assert.equal(r.status, 404);
 ok('même utilisateur, même clé d’intention, deux produits → deux commandes, deux paiements ; chaque encaissement ne livre que son produit');
+
+// H. Création softpay dont la réponse s'est perdue ET client jamais revenu.
+console.log('Bout en bout — réponse de création perdue');
+const initiation = (id) => one(`select * from saas_ugc.vyora_payment_initiations where order_id = $1`, [id]);
+const unconfirmedAlert = (id) => one(`select * from saas_ugc.vyora_payment_anomalies where kind = 'initiation_unconfirmed' and order_id = $1`, [id]);
+const pastWindow = (id) => admin.query(`update saas_ugc.vyora_payment_initiations set first_attempt_at = now() - interval '11 minutes', last_attempt_at = now() - interval '9 minutes' where order_id = $1`, [id]);
+const dispatch = async () => (await one(`select public.vyora_payments_reconcile_dispatch() r`)).r;
+/** Tient le balayage général à l'écart : seule la recherche des commandes incertaines est observée. */
+const noSweep = async () => { await admin.query(`delete from saas_ugc.vyora_payment_reconcile_runs`); await admin.query(`insert into saas_ugc.vyora_payment_reconcile_runs(trigger_source, status, sweep_done, finished_at) values ('test', 'ok', true, now())`); };
+const lastTx = () => [...tx.keys()].at(-1);
+
+//  H1. Encaissé, réponse perdue, client jamais revenu — SasPay restitue le libellé.
+const fay = await user('e2e-fay@test.local'); const F = 'Bearer e2e-fay@test.local';
+let hTx = tx.size; let hSent = softpayCalls; loseSoftpayResponse = true;
+r = await call(F, softpay('e2e-key-lost0001', { phone: '70 00 11 22' }));
+loseSoftpayResponse = false;
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.next, 'review'); assert.equal(r.body.order.state, 'review');
+assert.equal(r.body.order.retry_allowed, true); assert.match(r.body.message, /Ne payez pas une seconde fois/);
+assert.equal(tx.size, hTx + 1); assert.equal(softpayCalls, hSent + 2);
+const fayOrder = r.body.order.id; const fayTx = lastTx();
+row = await dbOrder(fayOrder);
+assert.deepEqual([row.status, row.provider_payment_id, row.failure_code], ['pending', null, 'initiation_unconfirmed']);
+assert.equal(JSON.stringify(r.body).includes('70001122'), false);
+r = await call(F, { action: 'status', product: 'studio', order_id: fayOrder });
+assert.equal(r.body.order.state, 'review'); assert.equal(r.body.verified, false); assert.equal(r.body.credited, false);
+ok('paiement créé chez SasPay, réponse perdue (appel + rejeu immédiat) → commande « en vérification » : ni payée, ni échouée');
+
+hSent = softpayCalls;
+r = await call(F, softpay('e2e-key-lost0002', { phone: '70 00 11 22' }));
+assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.error.code, 'PAYMENT_UNDER_REVIEW');
+r = await call(F, softpay('e2e-key-lost0003', { item: { kind: 'pack', pack_key: 'pro_creator' }, phone: '66 99 88 77' }));
+assert.equal(r.status, 409); assert.equal(r.body.error.code, 'PAYMENT_UNDER_REVIEW');
+r = await call(F, { action: 'create', product: 'studio', item: { kind: 'pack', pack_key: 'creator' }, country: 'ML', flow: 'checkout', idempotency_key: 'e2e-key-lost0004' });
+assert.equal(r.status, 409); assert.equal(r.body.error.code, 'PAYMENT_UNDER_REVIEW');
+r = await call(F, bgPlan('essentiel', 'e2e-key-lost0005'));
+assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.error.code, 'PAYMENT_UNDER_REVIEW');
+assert.equal(softpayCalls, hSent); assert.equal(tx.size, hTx + 1);
+assert.equal(Number((await one(`select count(*) n from saas_ugc.ugc_recharge_orders where user_id = $1`, [fay])).n), 1);
+assert.equal(Number((await one(`select count(*) n from saas_business.payment_orders where user_id = $1`, [fay])).n), 0);
+ok('second paiement refusé (autre achat Studio, page hébergée, abonnement Business Grow) → 409, aucun appel SasPay');
+
+// Le client a validé sur son téléphone et n'est jamais revenu : seul le webhook arrive.
+tx.get(fayTx).status = 'SUCCESS'; clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: fayTx, status: 'SUCCESS', amount: '5000.00', msisdn: '+22370001122' } });
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.credited, true); assert.equal(await wallet(fay), 27);
+row = await dbOrder(fayOrder);
+assert.deepEqual([row.status, row.provider_payment_id, row.failure_code], ['paid', fayTx, null]);
+let ini = await initiation(fayOrder);
+assert.deepEqual([ini.outcome, ini.request, ini.resolved_at !== null], ['attached', null, true]);
+r = await hook({ event: 'transaction.success', data: { id: fayTx, status: 'SUCCESS' } }); assert.notEqual(r.body.credited, true);
+await noSweep(); r = await cron(); assert.equal(r.body.settled, 0); assert.equal(await wallet(fay), 27);
+r = await call(F, softpay('e2e-key-lost0006', { phone: '70 00 11 22' })); assert.equal(r.status, 200); assert.equal(r.body.next, 'await_confirmation');
+ok('client jamais revenu, webhook d’une transaction inconnue : SasPay restitue la référence → rattachée, vérifiée, 27 crédits une seule fois');
+
+//  H2. Même situation, mais SasPay ne restitue AUCUN libellé : rien n'est deviné.
+const gus = await user('e2e-gus@test.local'); const G = 'Bearer e2e-gus@test.local';
+hTx = tx.size; loseSoftpayResponse = true;
+r = await call(G, softpay('e2e-key-blind001', { phone: '70 33 44 55' }));
+loseSoftpayResponse = false;
+assert.equal(r.body.next, 'review', JSON.stringify(r.body)); const gusOrder = r.body.order.id; const gusTx = lastTx();
+noDescriptionAnywhere = true; tx.get(gusTx).status = 'SUCCESS'; clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: gusTx, status: 'SUCCESS', amount: '5000.00', msisdn: '+22370334455' } });
+assert.equal(r.status, 200); assert.equal(r.body.ignored, true); assert.equal(await wallet(gus), 0);
+ini = await initiation(gusOrder);
+assert.equal(ini.candidates.length, 1);
+assert.deepEqual([ini.candidates[0].id, ini.candidates[0].source, ini.candidates[0].msisdn_match, ini.candidates[0].status], [gusTx, 'webhook', true, 'SUCCESS']);
+row = await dbOrder(gusOrder); assert.deepEqual([row.status, row.provider_payment_id], ['pending', null]);
+ok('SasPay ne restitue aucun libellé : le webhook ne prouve rien → rien rattaché, rien livré ; la transaction est proposée à l’administrateur');
+
+searches.length = 0; await noSweep();
+r = await cron(); assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.settled, 0); assert.equal(await wallet(gus), 0);
+assert.ok(searches.length >= 1);
+assert.deepEqual([searches[0].search, searches[0].flow_direction, searches[0].transaction_type], ['22370334455', 'INBOUND', 'PAIEMENT']);
+ini = await initiation(gusOrder);
+assert.deepEqual(ini.candidates.map((c) => [c.id, c.source]), [[gusTx, 'search']]);
+assert.ok(ini.last_search_at); assert.equal(ini.review_at, null);
+ok('tâche planifiée : recherche SasPay par numéro du payeur (lecture seule) → candidate consignée, toujours rien de livré');
+
+// Fenêtre de rejeu dépassée : l'entretien fait entrer la commande en rapprochement manuel — elle n'expire pas.
+await pastWindow(gusOrder); await ageOrder(gusOrder, '3 hours');
+const hDispatch = await dispatch();
+assert.ok(hDispatch.housekeeping.opened_reviews >= 1, JSON.stringify(hDispatch));
+row = await dbOrder(gusOrder); assert.deepEqual([row.status, row.failure_code], ['pending', 'manual_review']);
+const gusAlert = await unconfirmedAlert(gusOrder);
+assert.equal(gusAlert.resolved_at, null); assert.equal(gusAlert.details.candidates[0].id, gusTx);
+assert.equal(JSON.stringify(gusAlert).includes('70334455'), false);
+hSent = softpayCalls;
+r = await call(G, softpay('e2e-key-blind001', { phone: '70 33 44 55' }));
+assert.equal(r.status, 200); assert.equal(r.body.next, 'review'); assert.equal(r.body.order.retry_allowed, false);
+assert.match(r.body.message, /en cours de vérification par notre équipe/); assert.equal(softpayCalls, hSent);
+r = await call(G, softpay('e2e-key-blind002', { phone: '70 33 44 55' })); assert.equal(r.status, 409); assert.equal(r.body.error.code, 'PAYMENT_UNDER_REVIEW');
+let healthReview = (await asBoss.query(`select public.vyora_admin_payment_health() r`)).rows[0].r;
+const gusLine = healthReview.unconfirmed.find((x) => x.order_id === gusOrder);
+assert.deepEqual([gusLine.in_review, gusLine.payer_msisdn_masked, gusLine.user_email, gusLine.candidates.length], [true, '+223••••••55', 'e2e-gus@test.local', 1]);
+assert.equal(JSON.stringify(healthReview).includes('70334455'), false);
+ok('fenêtre dépassée : rapprochement manuel (alerte, client prévenu), plus aucun rejeu ni nouveau paiement ; visible dans la vue d’exploitation, numéro masqué');
+
+// Décision de l'administrateur : rattacher le paiement SasPay.
+const resolve = (token, order, payment, note = 'Transaction retrouvée au tableau de bord SasPay') => call(token, { action: 'resolve_review', product: 'studio', order_id: order, payment_id: payment, note });
+r = await resolve(G, gusOrder, gusTx); assert.equal(r.status, 403);
+r = await resolve(BOSS, gusOrder, gusTx, 'court'); assert.equal(r.status, 400);
+r = await resolve(BOSS, gusOrder, fayTx); assert.equal(r.status, 409, JSON.stringify(r.body)); assert.equal(r.body.error.code, 'PAYMENT_REFERENCE_CONFLICT');
+tx.set('tx-wrong-0001', { id: 'tx-wrong-0001', reference: 'SP-wrong', status: 'SUCCESS', transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', requested_amount: '4000.00', currency: 'XOF', fee_charge_mode: 'ADD_ON', client_fee: '0.00', debited_amount: '4000.00', net_amount: '4000.00', created_at: new Date().toISOString() });
+r = await resolve(BOSS, gusOrder, 'tx-wrong-0001'); assert.equal(r.status, 422); assert.equal(r.body.error.code, 'PAYMENT_REVIEW_MISMATCH');
+tx.delete('tx-wrong-0001');
+assert.equal(await wallet(gus), 0); assert.equal((await dbOrder(gusOrder)).provider_payment_id, null);
+clock += 5000;
+r = await resolve(BOSS, gusOrder, gusTx);
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.credited, true); assert.equal(r.body.order.state, 'confirmed');
+assert.equal(await wallet(gus), 27);
+row = await dbOrder(gusOrder); assert.deepEqual([row.status, row.provider_payment_id, row.failure_code], ['paid', gusTx, null]);
+ini = await initiation(gusOrder); assert.deepEqual([ini.outcome, ini.request, ini.resolved_by], ['attached', null, boss]);
+const gusClosed = await unconfirmedAlert(gusOrder); assert.ok(gusClosed.resolved_at); assert.match(gusClosed.resolution_note, /rattaché par un administrateur/);
+assert.equal(Number((await one(`select count(*) n from saas_ugc.ugc_audit_logs where action = 'saspay_review_payment_attached' and target_id = $1 and actor_user_id = $2`, [gusOrder, boss])).n), 1);
+r = await resolve(BOSS, gusOrder, gusTx); assert.equal(r.status, 409); assert.equal(r.body.error.code, 'PAYMENT_NOT_UNDER_REVIEW');
+r = await hook({ event: 'transaction.success', data: { id: gusTx, status: 'SUCCESS' } }); assert.notEqual(r.body.credited, true);
+await noSweep(); await cron(); assert.equal(await wallet(gus), 27);
+noDescriptionAnywhere = false;
+r = await call(G, softpay('e2e-key-blind003', { phone: '70 33 44 55' })); assert.equal(r.status, 200); assert.equal(r.body.next, 'await_confirmation');
+ok('administrateur : rattachement refusé si le paiement ne correspond pas ; sinon relu chez SasPay, 27 crédits une seule fois, décision tracée');
+
+//  H3. La requête n'a jamais atteint SasPay, le client ne revient pas : clôture attestée.
+const hal = await user('e2e-hal@test.local'); const H = 'Bearer e2e-hal@test.local';
+hTx = tx.size; dropSoftpayRequest = true;
+r = await call(H, softpay('e2e-key-drop0001', { phone: '70 66 77 88' }));
+dropSoftpayRequest = false;
+assert.equal(r.body.next, 'review', JSON.stringify(r.body)); assert.equal(tx.size, hTx); const halOrder = r.body.order.id;
+await noSweep(); r = await cron(); assert.equal(r.body.settled, 0);
+assert.deepEqual((await initiation(halOrder)).candidates, []);
+const closeUnpaid = (c, order, note) => c.query(`select public.vyora_admin_close_unconfirmed('studio', $1, $2) r`, [order, note]);
+await assert.rejects(closeUnpaid(asBoss, halOrder, 'Aucune transaction au tableau de bord SasPay'), /payment_not_under_review/);
+await pastWindow(halOrder); await ageOrder(halOrder, '3 hours'); await dispatch();
+row = await dbOrder(halOrder); assert.deepEqual([row.status, row.failure_code], ['pending', 'manual_review']);
+await assert.rejects(closeUnpaid(asAlice, halOrder, 'Aucune transaction au tableau de bord SasPay'));
+await closeUnpaid(asBoss, halOrder, 'Aucune transaction au tableau de bord SasPay');
+row = await dbOrder(halOrder); assert.deepEqual([row.status, row.failure_code], ['cancelled', 'unconfirmed_closed']);
+assert.equal(await wallet(hal), 0);
+r = await call(H, { action: 'status', product: 'studio', order_id: halOrder }); assert.equal(r.body.order.state, 'cancelled');
+r = await call(H, softpay('e2e-key-drop0002', { phone: '70 66 77 88' }));
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.next, 'await_confirmation'); assert.equal(tx.size, hTx + 1);
+ok('requête jamais reçue par SasPay, client jamais revenu : jamais expirée d’office ; clôture attestée par l’administrateur → le client peut repayer');
+
+//  H4. Business Grow : même règle.
+const ivy = await user('e2e-ivy@test.local', { customer: false }); const I = 'Bearer e2e-ivy@test.local';
+loseSoftpayResponse = true;
+r = await call(I, bgPlan('essentiel', 'e2e-key-bglost01'));
+loseSoftpayResponse = false;
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.next, 'review'); const ivyOrder = r.body.order.id; const ivyTx = lastTx();
+r = await call(I, bgPlan('essentiel', 'e2e-key-bglost02')); assert.equal(r.status, 409); assert.equal(r.body.error.code, 'PAYMENT_UNDER_REVIEW');
+assert.equal(await subOf(ivy), undefined);
+await pastWindow(ivyOrder); await admin.query(`alter table saas_business.payment_orders disable trigger vyora_payment_order_guard`);
+await admin.query(`update saas_business.payment_orders set created_at = now() - interval '3 hours', expires_at = now() - interval '2 hours' where id = $1`, [ivyOrder]);
+await admin.query(`alter table saas_business.payment_orders enable trigger vyora_payment_order_guard`);
+await dispatch();
+let ivyRow = await bgOrder(ivyOrder); assert.deepEqual([ivyRow.status, ivyRow.failure_code], ['pending', 'manual_review']);
+assert.equal(await subOf(ivy), undefined);
+tx.get(ivyTx).status = 'SUCCESS'; clock += 5000;
+r = await hook({ event: 'transaction.success', data: { id: ivyTx, status: 'SUCCESS' } });
+assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.outcome, 'paid');
+assert.equal((await subOf(ivy)).plan_key, 'essentiel');
+ivyRow = await bgOrder(ivyOrder); assert.deepEqual([ivyRow.status, ivyRow.provider_payment_id, ivyRow.failure_code], ['paid', ivyTx, null]);
+assert.ok((await unconfirmedAlert(ivyOrder)).resolved_at);
+ok('Business Grow : abonnement jamais activé sans preuve, jamais expiré d’office ; activé dès que le paiement est prouvé puis vérifié');
 
 // 5. Journal et vue d'exploitation.
 const lastRun = await one(`select status, trigger_source, finished_at is not null done from saas_ugc.vyora_payment_reconcile_runs order by started_at desc limit 1`);

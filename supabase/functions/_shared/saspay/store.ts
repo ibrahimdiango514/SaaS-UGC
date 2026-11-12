@@ -7,8 +7,10 @@
 import {
   PaymentError,
   type CreateOrderInput, type OrderRecord, type PaymentItem, type PaymentStore, type Product,
-  type QuoteContext, type SettleInput, type SettleResult,
+  type InitiationTicket, type PaymentCandidate, type QuoteContext, type SettleInput, type SettleResult,
+  type UnconfirmedOrder,
 } from './payments.ts';
+import type { SoftpayRequest } from './client.ts';
 
 export interface StoreConfig {
   supabaseUrl: string;
@@ -42,6 +44,8 @@ const DB_ERRORS: Record<string, [code: string, status: number, message: string]>
   business_other_plan_payment_in_progress: ['BUSINESS_OTHER_PLAN_PAYMENT_IN_PROGRESS', 409, 'Un paiement est déjà en cours pour une autre formule. Terminez-le, ou attendez son expiration (30 minutes) avant de changer de formule.'],
   payment_order_not_found: ['PAYMENT_NOT_FOUND', 404, 'Commande introuvable.'],
   provider_reference_conflict: ['PAYMENT_REFERENCE_CONFLICT', 409, 'Ce paiement est déjà rattaché à une autre commande.'],
+  payment_under_review: ['PAYMENT_UNDER_REVIEW', 409, 'Un de vos paiements est en cours de vérification. Aucun autre paiement ne peut être lancé tant qu’il n’est pas confirmé ou annulé.'],
+  payment_attempt_in_progress: ['PAYMENT_ALREADY_IN_PROGRESS', 409, 'Un paiement est déjà en cours d’envoi. Patientez quelques secondes puis vérifiez son statut avant d’en lancer un autre.'],
 };
 
 type Json = Record<string, unknown>;
@@ -170,11 +174,13 @@ export function createSupabasePaymentStore(config: StoreConfig): PaymentStore {
     async reconcileBatch(limit) {
       const batch = await rpc<{
         due?: Array<{ product: Product; order_id: string }>; sweep?: boolean; sweep_since?: string;
+        unconfirmed?: unknown;
       } | null>('vyora_payment_reconcile_batch', { p_limit: limit });
       return {
         due: (batch?.due ?? []).map((row) => ({ product: row.product, orderId: row.order_id })),
         sweep: batch?.sweep === true,
         sweepSince: typeof batch?.sweep_since === 'string' ? batch.sweep_since : new Date(Date.now() - 72 * 3_600_000).toISOString(),
+        unconfirmed: unconfirmedRows(batch?.unconfirmed),
       };
     },
 
@@ -195,5 +201,68 @@ export function createSupabasePaymentStore(config: StoreConfig): PaymentStore {
         p_payment_id: anomaly.paymentId, p_reference: anomaly.reference, p_details: anomaly.details,
       })) === true;
     },
+
+    async beginInitiation(product, orderId, request): Promise<InitiationTicket> {
+      const ticket = await rpc<{
+        allowed?: boolean; reason?: string; attempt?: number; request?: SoftpayRequest; replay_until?: string;
+      } | null>('vyora_payment_begin_initiation', { p_product: product, p_order_id: orderId, p_request: request });
+      if (ticket?.allowed === true && ticket.request && typeof ticket.request === 'object') {
+        // Le corps renvoyé par la base fait foi, y compris à la première
+        // tentative : chaque envoi est ainsi identique octet pour octet.
+        return {
+          allowed: true, attempt: Number(ticket.attempt ?? 1), request: ticket.request,
+          replayUntil: typeof ticket.replay_until === 'string' ? ticket.replay_until : null,
+        };
+      }
+      const reason = ticket?.reason;
+      return {
+        allowed: false,
+        reason: reason === 'not_pending' || reason === 'attempt_in_progress' || reason === 'other_payment_unconfirmed'
+          || reason === 'other_payment_in_progress' ? reason : 'under_review',
+      };
+    },
+
+    async initiationUnknown(product, orderId, error) {
+      await rpc<null>('vyora_payment_initiation_unknown', { p_product: product, p_order_id: orderId, p_error: error });
+    },
+
+    async unconfirmedOrders(limit, dueOnly) {
+      return unconfirmedRows(await rpc<unknown>('vyora_payment_unconfirmed', { p_limit: limit, p_due_only: dueOnly }));
+    },
+
+    async noteCandidates(product, orderId, candidates: PaymentCandidate[]) {
+      await rpc<null>('vyora_payment_note_candidates', {
+        p_product: product, p_order_id: orderId, p_candidates: candidates,
+      });
+    },
+
+    async addCandidate(product, orderId, candidate: PaymentCandidate) {
+      await rpc<null>('vyora_payment_add_candidate', { p_product: product, p_order_id: orderId, p_candidate: candidate });
+    },
+
+    async reviewAttached(adminId, product, orderId, paymentId, note) {
+      await rpc<null>('vyora_payment_review_attached', {
+        p_admin: adminId, p_product: product, p_order_id: orderId, p_payment_id: paymentId, p_note: note,
+      });
+    },
   };
+}
+
+function unconfirmedRows(value: unknown): UnconfirmedOrder[] {
+  if (!Array.isArray(value)) return [];
+  const text = (v: unknown) => (typeof v === 'string' && v ? v : null);
+  const rows: UnconfirmedOrder[] = [];
+  for (const row of value as Json[]) {
+    const product = row?.product;
+    const orderId = text(row?.order_id);
+    const reference = text(row?.internal_reference);
+    const first = text(row?.first_attempt_at);
+    if ((product !== 'studio' && product !== 'business') || !orderId || !reference || !first) continue;
+    rows.push({
+      product, orderId, internalReference: reference, phone: text(row.phone), amount: text(row.amount),
+      currency: text(row.currency), firstAttemptAt: first, lastAttemptAt: text(row.last_attempt_at) ?? first,
+      inReview: row.in_review === true,
+    });
+  }
+  return rows;
 }

@@ -164,6 +164,16 @@ export interface VerifiedPayment {
   client_fee: string | null;
   debited_amount: string | null;
   net_amount: string | null;
+  /**
+   * Champs NON garantis par la spécification (présents seulement dans des
+   * exemples ou des pages de prose) : `null` s'ils sont absents. Ils ne servent
+   * qu'à reconnaître une commande, jamais à décider d'une livraison.
+   */
+  description: string | null;
+  /** `metadata.order_reference`, si SasPay restitue les métadonnées. */
+  metadata_reference: string | null;
+  flow_direction: string | null;
+  created_at: string | null;
 }
 export interface MerchantBalance {
   id: string;
@@ -181,6 +191,18 @@ export interface ListedTransaction {
   description: string | null;
   reference: string | null;
   created_at: string | null;
+}
+/** Transaction trouvée par `GET /transactions/?search=` — un INDICE, jamais une preuve. */
+export interface FoundTransaction extends ListedTransaction {
+  status: string | null;
+  requested_amount: string | null;
+  currency: string | null;
+  /** `metadata.order_reference`, si SasPay restitue les métadonnées. */
+  metadata_reference: string | null;
+}
+export interface TransactionSearch {
+  transactions: FoundTransaction[];
+  truncated: boolean;
 }
 export interface TransactionListing {
   transactions: ListedTransaction[];
@@ -212,6 +234,12 @@ export interface SasPayClient {
   merchantBalances(): Promise<MerchantBalance[]>;
   /** Encaissements réussis depuis une date (lecture seule, pagination par curseur). */
   listSuccessfulPayments(options: { createdAfter: string; maxPages?: number; pageSize?: number }): Promise<TransactionListing>;
+  /**
+   * Encaissements (tous statuts) correspondant à une recherche libre. SasPay
+   * documente la recherche sur : référence, référence du réseau, nom, e-mail,
+   * téléphone du client, slug de lien ou de session. Aucune référence marchande.
+   */
+  searchPayments(options: { search: string; createdAfter: string; createdBefore?: string; maxPages?: number }): Promise<TransactionSearch>;
 }
 
 function text(value: unknown): string | null {
@@ -355,6 +383,10 @@ export function createSasPayClient(options: SasPayClientOptions): SasPayClient {
         client_fee: text(data.client_fee),
         debited_amount: text(data.debited_amount),
         net_amount: text(data.net_amount),
+        description: text(data.description)?.slice(0, 300) ?? null,
+        metadata_reference: metadataReference(data.metadata),
+        flow_direction: text(data.flow_direction)?.toUpperCase() ?? null,
+        created_at: text(data.created_at),
       };
     },
 
@@ -426,7 +458,48 @@ export function createSasPayClient(options: SasPayClientOptions): SasPayClient {
       }
       return { transactions, truncated: path !== null, described };
     },
+
+    async searchPayments({ search, createdAfter, createdBefore, maxPages = 2 }) {
+      const query = new URLSearchParams({
+        search, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND', created_at__gte: createdAfter, page_size: '100',
+      });
+      if (createdBefore) query.set('created_at__lte', createdBefore);
+      const transactions: FoundTransaction[] = [];
+      let path: string | null = `/transactions/?${query.toString()}`;
+      for (let page = 0; path && page < Math.max(maxPages, 1); page += 1) {
+        const data = await request('GET', path);
+        const rows = Array.isArray(data) ? data : isRecord(data) && Array.isArray(data.results) ? data.results : null;
+        if (!rows) {
+          throw new SasPayError(200, 'invalid_response', 'invalid_response', 'Liste de transactions SasPay inattendue');
+        }
+        for (const row of rows.filter(isRecord)) {
+          const id = text(row.id);
+          if (!id || !/^[A-Za-z0-9-]{8,64}$/.test(id)) continue;
+          // Filtres réappliqués ici : on ne dépend pas de leur respect par l'API.
+          if ((text(row.flow_direction) ?? 'INBOUND').toUpperCase() !== 'INBOUND') continue;
+          transactions.push({
+            id,
+            description: text(row.description)?.slice(0, 300) ?? null,
+            reference: text(row.reference),
+            created_at: text(row.created_at),
+            status: text(row.status)?.toUpperCase() ?? null,
+            requested_amount: text(row.requested_amount),
+            currency: text(row.currency)?.toUpperCase() ?? null,
+            metadata_reference: metadataReference(row.metadata),
+          });
+        }
+        path = nextPagePath(isRecord(data) ? data.next : null, baseUrl);
+      }
+      return { transactions, truncated: path !== null };
+    },
   };
+}
+
+/** `metadata.order_reference` si SasPay restitue les métadonnées transmises à la création. */
+function metadataReference(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  const reference = value.order_reference;
+  return typeof reference === 'string' && reference.trim() ? reference.trim().slice(0, 80) : null;
 }
 
 /**

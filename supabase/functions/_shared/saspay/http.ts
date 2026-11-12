@@ -89,6 +89,8 @@ export interface HandlerDeps {
   now?: () => number;
   /** Injection de test : remplace le service construit à partir de l'environnement. */
   service?: PaymentService;
+  /** Injection de test : attente avant le rejeu immédiat d'une création softpay. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function buildService(deps: HandlerDeps): PaymentService {
@@ -102,6 +104,7 @@ function buildService(deps: HandlerDeps): PaymentService {
     webhookSecret: deps.env.webhookSecret || null,
     now: deps.now ?? Date.now,
     log,
+    ...(deps.sleep ? { sleep: deps.sleep } : {}),
   });
 }
 
@@ -185,6 +188,12 @@ export function createPaymentsHandler(deps: HandlerDeps) {
           return json(await service.refresh(user, { product: body.product, order_id: body.order_id }), 200, cors);
         case 'balances':
           return json(await service.balances(user), 200, cors);
+        // Administrateur : rattacher un paiement SasPay à une commande en
+        // rapprochement manuel (relu chez SasPay avant tout rattachement).
+        case 'resolve_review':
+          return json(await service.resolveReview(user, {
+            product: body.product, order_id: body.order_id, payment_id: body.payment_id, note: body.note,
+          }), 200, cors);
         default:
           throw new PaymentError('PAYMENT_INVALID_REQUEST', 400, 'Action inconnue.');
       }

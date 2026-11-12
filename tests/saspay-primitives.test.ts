@@ -261,7 +261,7 @@ describe('SasPay — client HTTP', () => {
   it('n’expose aucune opération de décaissement, de transfert ou de recharge', () => {
     const client = createSasPayClient({ secretKey: TEST_KEY, fetcher: vi.fn() as unknown as typeof fetch });
     expect(Object.keys(client).sort()).toEqual(
-      ['checkoutStatus', 'createCheckoutSession', 'listSuccessfulPayments', 'merchantBalances', 'mode', 'myRates', 'softpay', 'verifyPayment'],
+      ['checkoutStatus', 'createCheckoutSession', 'listSuccessfulPayments', 'merchantBalances', 'mode', 'myRates', 'searchPayments', 'softpay', 'verifyPayment'],
     );
   });
 });

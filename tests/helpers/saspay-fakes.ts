@@ -2,9 +2,10 @@
 // Le faux stockage reproduit les règles portées par la migration
 // `vyora_saspay_payments` (prix serveur, idempotence, crédit unique).
 import {
-  type CreateOrderInput, type OrderRecord, type PaymentAnomaly, type PaymentStore, type Product, type QuoteContext,
-  type ReconcileCounts, type SettleInput, type SettleResult, PaymentError,
+  type CreateOrderInput, type OrderRecord, type PaymentAnomaly, type PaymentCandidate, type PaymentStore, type Product,
+  type QuoteContext, type ReconcileCounts, type SettleInput, type SettleResult, type UnconfirmedOrder, PaymentError,
 } from '../../supabase/functions/_shared/saspay/payments';
+import type { SoftpayRequest } from '../../supabase/functions/_shared/saspay/client';
 import { signWebhook } from '../../supabase/functions/_shared/saspay/webhook';
 
 export const TEST_KEY = 'sk_test_unit_0123456789abcdef';
@@ -37,6 +38,28 @@ export interface FakeStoreOptions {
   businessPlans?: Record<string, { price: number; label: string }>;
   /** Jeton de la tâche planifiée (`null` : absent de Vault). */
   cronToken?: string | null;
+  /** Fenêtre de rejeu d'une création softpay sans réponse (défaut 10 min, comme en base). */
+  replayWindowMs?: number;
+  /** Relances permises au client pendant cette fenêtre (défaut 4, comme en base). */
+  maxAttempts?: number;
+}
+
+/** Tentative de création softpay, telle que la consigne `vyora_payment_initiations`. */
+export interface FakeInitiation {
+  product: Product;
+  orderId: string;
+  userId: string;
+  request: SoftpayRequest | null;
+  attempts: number;
+  outcome: 'started' | 'unknown' | 'attached' | 'refused' | 'closed';
+  lastError: string | null;
+  firstAttemptAt: number;
+  lastAttemptAt: number;
+  reviewAt: number | null;
+  resolvedAt: number | null;
+  candidates: PaymentCandidate[];
+  resolvedBy: string | null;
+  note: string | null;
 }
 
 export function createFakeStore(options: FakeStoreOptions = {}) {
@@ -58,6 +81,46 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
   const reconcile = { sweep: true, due: null as Array<{ product: Product; orderId: string }> | null };
   /** Commandes dont la base refuserait l'activation (Business Grow : abonnement incompatible). */
   const activationBlocks = new Map<string, string>();
+  /** Horloge de la base : avançable par les tests (fenêtre de rejeu, rapprochement). */
+  const clock = { now: NOW };
+  const initiations = new Map<string, FakeInitiation>();
+  const replayWindowMs = options.replayWindowMs ?? 10 * 60_000;
+  const maxAttempts = options.maxAttempts ?? 4;
+  let attachFailures = 0;
+
+  /** Comme en base : issue inconnue, ou appel lancé depuis plus de 60 s sans conclusion. */
+  const uncertain = (i: FakeInitiation) => i.resolvedAt === null
+    && (i.outcome === 'unknown' || (i.outcome === 'started' && i.lastAttemptAt < clock.now - 60_000));
+
+  /** Comme le déclencheur `vyora_payment_initiation_sync`. */
+  function syncInitiation(orderId: string): void {
+    const order = orders.get(orderId);
+    if (!order) return;
+    const identified = Boolean(order.provider_payment_id || order.provider_session_id);
+    if (!identified && order.status === 'pending') return;
+    if (order.failure_code === 'initiation_unconfirmed' || order.failure_code === 'manual_review') order.failure_code = null;
+    const init = initiations.get(orderId);
+    if (!init || init.resolvedAt !== null) return;
+    init.resolvedAt = clock.now;
+    init.request = null;
+    init.outcome = order.provider_payment_id ? 'attached' : order.status === 'failed' ? 'refused' : 'closed';
+  }
+
+  /** Comme `vyora_payment_open_review` : entrée en rapprochement manuel + anomalie. */
+  function openReview(orderId: string, reason: string): boolean {
+    const order = orders.get(orderId);
+    const init = initiations.get(orderId);
+    if (!order || !init || init.resolvedAt !== null || init.reviewAt !== null) return false;
+    if (order.status !== 'pending' || order.provider_payment_id || order.provider_session_id) return false;
+    init.reviewAt = clock.now;
+    init.outcome = 'unknown';
+    order.failure_code = 'manual_review';
+    anomalies.push({
+      kind: 'initiation_unconfirmed', product: order.product, orderId, paymentId: null,
+      reference: order.internal_reference, details: { reason, attempts: init.attempts },
+    });
+    return true;
+  }
 
   function price(product: Product, item: Record<string, unknown>) {
     if (product === 'studio') {
@@ -98,6 +161,15 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       const key = `${input.product}:${input.userId}:${input.idempotencyKey}`;
       const existing = byKey.get(key);
       if (existing) return { ...(orders.get(existing) as OrderRecord), reused: true };
+      // Comme le déclencheur `vyora_payment_block_unconfirmed` : aucune nouvelle
+      // commande tant qu'un paiement du client est incertain (tous produits).
+      const open = [...initiations.values()].filter((i) => i.userId === input.userId && i.resolvedAt === null);
+      if (open.some(uncertain)) {
+        throw new PaymentError('PAYMENT_UNDER_REVIEW', 409, 'Un de vos paiements est en cours de vérification. Aucun autre paiement ne peut être lancé tant qu’il n’est pas confirmé ou annulé.');
+      }
+      if (open.length > 0) {
+        throw new PaymentError('PAYMENT_ALREADY_IN_PROGRESS', 409, 'Un paiement est déjà en cours d’envoi. Patientez quelques secondes puis vérifiez son statut avant d’en lancer un autre.');
+      }
       const quoted = price(input.product, input.item as Record<string, unknown>);
       sequence += 1;
       const id = `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`;
@@ -238,7 +310,10 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
         .filter((o) => (o.provider_payment_id || o.provider_session_id)
           && ['pending', 'processing', 'failed', 'cancelled'].includes(o.status))
         .map((o) => ({ product: o.product, orderId: o.id }));
-      return { due: due.slice(0, limit), sweep: reconcile.sweep, sweepSince: new Date(NOW - 72 * 3_600_000).toISOString() };
+      return {
+        due: due.slice(0, limit), sweep: reconcile.sweep, sweepSince: new Date(NOW - 72 * 3_600_000).toISOString(),
+        unconfirmed: await store.unconfirmedOrders(10, true),
+      };
     },
 
     async reconcileFinish(runId, status, counts) {
@@ -256,10 +331,148 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       anomalies.push(anomaly);
       return true;
     },
+
+    async beginInitiation(product, orderId, request) {
+      calls.push('beginInitiation');
+      const order = orders.get(orderId);
+      if (!order || order.product !== product) throw new PaymentError('PAYMENT_NOT_FOUND', 404, 'Commande introuvable.');
+      if (order.status !== 'pending' || order.provider_payment_id || order.provider_session_id) {
+        return { allowed: false, reason: 'not_pending' };
+      }
+      const others = [...initiations.values()]
+        .filter((i) => i.userId === order.user_id && i.orderId !== orderId && i.resolvedAt === null);
+      if (others.length > 0) {
+        return { allowed: false, reason: others.some(uncertain) ? 'other_payment_unconfirmed' : 'other_payment_in_progress' };
+      }
+      let init = initiations.get(orderId);
+      if (init) {
+        if (init.resolvedAt !== null) return { allowed: false, reason: 'not_pending' };
+        if (init.reviewAt !== null) return { allowed: false, reason: 'under_review' };
+        if (init.attempts >= maxAttempts || clock.now > init.firstAttemptAt + replayWindowMs) {
+          openReview(orderId, init.attempts >= maxAttempts ? 'attempts_exhausted' : 'replay_window_elapsed');
+          return { allowed: false, reason: 'under_review' };
+        }
+        if (init.outcome === 'started' && init.lastAttemptAt > clock.now - 20_000) {
+          return { allowed: false, reason: 'attempt_in_progress' };
+        }
+        init.attempts += 1; init.lastAttemptAt = clock.now; init.outcome = 'started';
+      } else {
+        init = {
+          product, orderId, userId: order.user_id,
+          // Passage par JSON, comme un aller-retour en base.
+          request: JSON.parse(JSON.stringify(request)) as SoftpayRequest,
+          attempts: 1, outcome: 'started', lastError: null, firstAttemptAt: clock.now, lastAttemptAt: clock.now,
+          reviewAt: null, resolvedAt: null, candidates: [], resolvedBy: null, note: null,
+        };
+        initiations.set(orderId, init);
+      }
+      order.failure_code = 'initiation_unconfirmed';
+      return {
+        allowed: true, attempt: init.attempts, request: init.request as SoftpayRequest,
+        replayUntil: new Date(init.firstAttemptAt + replayWindowMs).toISOString(),
+      };
+    },
+
+    async initiationUnknown(_product, orderId, error) {
+      calls.push('initiationUnknown');
+      const init = initiations.get(orderId);
+      if (init && init.resolvedAt === null) { init.outcome = 'unknown'; init.lastError = error.slice(0, 80); }
+    },
+
+    async unconfirmedOrders(limit) {
+      const rows: UnconfirmedOrder[] = [];
+      for (const init of initiations.values()) {
+        if (!uncertain(init)) continue;
+        const order = orders.get(init.orderId) as OrderRecord;
+        rows.push({
+          product: init.product, orderId: init.orderId, internalReference: order.internal_reference,
+          phone: init.request?.customer.phone ?? null, amount: order.amount, currency: order.currency,
+          firstAttemptAt: new Date(init.firstAttemptAt).toISOString(),
+          lastAttemptAt: new Date(init.lastAttemptAt).toISOString(), inReview: init.reviewAt !== null,
+        });
+      }
+      return rows.slice(0, limit);
+    },
+
+    async noteCandidates(_product, orderId, candidates) {
+      calls.push('noteCandidates');
+      const init = initiations.get(orderId);
+      if (init && init.resolvedAt === null) {
+        // Comme en base : les pistes venues d'un webhook survivent à une recherche.
+        const kept = init.candidates.filter((c) => c.source === 'webhook' && !candidates.some((n) => n.id === c.id));
+        init.candidates = [...kept, ...candidates];
+      }
+    },
+
+    async addCandidate(_product, orderId, candidate) {
+      calls.push('addCandidate');
+      const init = initiations.get(orderId);
+      if (init && init.resolvedAt === null && !init.candidates.some((c) => c.id === candidate.id)) init.candidates.push(candidate);
+    },
+
+    async reviewAttached(adminId, _product, orderId, _paymentId, note) {
+      calls.push('reviewAttached');
+      const init = initiations.get(orderId);
+      if (init) { init.resolvedBy = adminId; init.note = note; }
+    },
+  };
+
+  // Comme en base : tout rattachement ou règlement passe par le déclencheur de
+  // suivi (marqueur levé, tentative soldée).
+  const rawAttach = store.attach.bind(store);
+  const rawSettle = store.settle.bind(store);
+  store.attach = async (product, orderId, refs) => {
+    if (attachFailures > 0) {
+      attachFailures -= 1;
+      throw new PaymentError('PAYMENT_STORAGE_UNAVAILABLE', 503, 'Le service est momentanément indisponible. Réessayez.');
+    }
+    await rawAttach(product, orderId, refs);
+    syncInitiation(orderId);
+    return { ...(orders.get(orderId) as OrderRecord) };
+  };
+  store.settle = async (product, orderId, input) => {
+    const result = await rawSettle(product, orderId, input);
+    syncInitiation(orderId);
+    return { ...(orders.get(orderId) as OrderRecord), outcome: result.outcome, credited: result.credited };
   };
 
   return {
-    store, orders, credits, webhooks, calls, config, anomalies, runs, reconcile,
+    store, orders, credits, webhooks, calls, config, anomalies, runs, reconcile, clock, initiations,
+    /** Les `n` prochains rattachements échouent (base injoignable juste après la réponse SasPay). */
+    failAttach(n = 1) { attachFailures = n; },
+    /** Entretien planifié (`vyora_payment_housekeeping`) : rapprochements ouverts, commandes expirées. */
+    housekeeping() {
+      let opened = 0;
+      let expired = 0;
+      for (const init of initiations.values()) {
+        if (init.resolvedAt !== null || init.reviewAt !== null || init.lastAttemptAt >= clock.now - 90_000) continue;
+        if (init.attempts >= maxAttempts || init.firstAttemptAt < clock.now - replayWindowMs) {
+          if (openReview(init.orderId, init.attempts >= maxAttempts ? 'attempts_exhausted' : 'replay_window_elapsed')) opened += 1;
+        }
+      }
+      for (const order of orders.values()) {
+        if (order.status !== 'pending' || order.provider_payment_id || order.provider_session_id) continue;
+        const init = initiations.get(order.id);
+        // Une tentative non soldée protège la commande de l'expiration.
+        if (init && init.resolvedAt === null) continue;
+        if (Date.parse(String(order.created_at)) < clock.now - 45 * 60_000) {
+          order.status = 'cancelled'; order.failure_code = 'expired_unpaid'; expired += 1;
+        }
+      }
+      return { opened, expired };
+    },
+    /** Décision d'un administrateur : aucun encaissement (`vyora_admin_close_unconfirmed`). */
+    closeUnpaid(orderId: string, adminId: string, note: string) {
+      const order = orders.get(orderId);
+      const init = initiations.get(orderId);
+      if (!order || !init || init.resolvedAt !== null || init.reviewAt === null
+        || order.status !== 'pending' || order.provider_payment_id) {
+        throw new Error('payment_not_under_review');
+      }
+      order.status = 'cancelled'; order.failure_code = 'unconfirmed_closed';
+      syncInitiation(orderId);
+      init.resolvedBy = adminId; init.note = note;
+    },
     /** La base refusera d'activer cette commande une fois payée (autre formule en cours…). */
     blockActivation(orderId: string, code = 'business_plan_change_not_supported') { activationBlocks.set(orderId, code); },
   };
@@ -289,6 +502,20 @@ export function createFakeSasPay() {
   let listingHonoursFilters = true;
   let listingOmitsDescription = false;
   let nextOverride: string | null = null;
+  let lostResponses = 0;
+  let droppedRequests = 0;
+  let exposeMetadata = false;
+  let verifyOmitsDescription = false;
+  const idempotentBodies = new Map<string, string>();
+  /** Vue d'une transaction telle que l'API la renvoie (champs non garantis masquables). */
+  const shown = (row: Record<string, unknown>, omitDescription: boolean) => {
+    const { _phone, _email, metadata, description, ...rest } = row;
+    return {
+      ...rest,
+      ...(omitDescription ? {} : { description }),
+      ...(exposeMetadata && metadata ? { metadata } : {}),
+    };
+  };
   let rates: unknown[] = [{
     country_code: 'ML', currency: 'XOF', network_code: 'orange_ml', network_name: 'Orange Money Mali',
     payin: { available: true, is_custom: false, otp_required: false, otp_instructions: null,
@@ -320,9 +547,20 @@ export function createFakeSasPay() {
     }
 
     if (call.method === 'POST' && call.path === '/payments/softpay/') {
+      // La requête n'atteint jamais SasPay (coupure à l'aller).
+      if (droppedRequests > 0) { droppedRequests -= 1; throw new TypeError('network down (request never sent)'); }
       const key = headers['idempotency-key'];
+      const rawBody = JSON.stringify(call.body);
       const replay = key ? idempotent.get(key) : undefined;
-      if (replay) return jsonResponse({ success: true, data: replay, code: 201 }, 201);
+      if (replay) {
+        // Comme documenté : même clé + corps différent → 409.
+        if (idempotentBodies.get(key) !== rawBody) {
+          return jsonResponse({ success: false, error: { code: 'idempotency_key_reused', message: 'Idempotency-Key déjà utilisée avec un corps différent' }, code: 409 }, 409);
+        }
+        // Le rejeu est bien servi par SasPay, mais sa réponse peut se perdre elle aussi.
+        if (lostResponses > 0) { lostResponses -= 1; throw new TypeError('network down (response lost)'); }
+        return jsonResponse({ success: true, data: replay, code: 201 }, 201);
+      }
       sequence += 1;
       const id = `tx-${String(sequence).padStart(8, '0')}`;
       const amount = String(call.body?.amount);
@@ -331,9 +569,14 @@ export function createFakeSasPay() {
         fee_charge_mode: 'ADD_ON', client_fee: '100.00', debited_amount: (Number(amount) + 100).toFixed(2), net_amount: amount,
         description: call.body?.description ?? null, transaction_type: 'PAIEMENT', flow_direction: 'INBOUND',
         created_at: new Date(NOW).toISOString(),
+        metadata: call.body?.metadata ?? null,
+        _phone: String((call.body?.customer as Record<string, unknown> | undefined)?.phone ?? ''),
+        _email: String((call.body?.customer as Record<string, unknown> | undefined)?.email ?? ''),
       });
       const data = { message: 'Payment initiated', id, status: 'PENDING', checkout_url: '' };
-      if (key) idempotent.set(key, data);
+      if (key) { idempotent.set(key, data); idempotentBodies.set(key, rawBody); }
+      // SasPay a bien créé le paiement, mais sa réponse ne revient pas.
+      if (lostResponses > 0) { lostResponses -= 1; throw new TypeError('network down (response lost)'); }
       return jsonResponse({ success: true, data, code: 201 }, 201);
     }
     if (call.method === 'POST' && call.path === '/checkout-sessions/') {
@@ -352,7 +595,7 @@ export function createFakeSasPay() {
     const verify = call.path.match(/^\/payments\/([^/]+)\/verify\/$/);
     if (call.method === 'GET' && verify) {
       const tx = transactions.get(verify[1]);
-      return tx ? jsonResponse({ success: true, data: tx, code: 200 })
+      return tx ? jsonResponse({ success: true, data: shown(tx, verifyOmitsDescription), code: 200 })
         : jsonResponse({ success: false, error: { code: 'not_found', message: 'Not found' }, code: 404 }, 404);
     }
     if (call.method === 'GET' && call.path.startsWith('/transactions/')) {
@@ -361,16 +604,19 @@ export function createFakeSasPay() {
       const size = Number(query.get('page_size') ?? 50);
       const offset = Number(query.get('cursor') ?? 0);
       const since = Date.parse(query.get('created_at__gte') ?? '') || 0;
-      const rows = [...transactions.values()].filter((tx) => (!listingHonoursFilters
+      // Recherche libre documentée : référence, nom, e-mail, téléphone du client.
+      const search = (query.get('search') ?? '').toLowerCase();
+      const digits = search.replace(/\D/g, '');
+      const matches = (tx: Record<string, unknown>) => !search
+        || String(tx.reference ?? '').toLowerCase().includes(search)
+        || String(tx._email ?? '').toLowerCase().includes(search)
+        || (digits.length >= 6 && String(tx._phone ?? '').replace(/\D/g, '').includes(digits));
+      const rows = [...transactions.values()].filter((tx) => matches(tx) && (!listingHonoursFilters
         || ((!query.get('status') || tx.status === query.get('status'))
           && (Date.parse(String(tx.created_at ?? new Date(NOW).toISOString())) >= since))));
       query.set('cursor', String(offset + size));
       const next = offset + size < rows.length ? `${url.origin}/api/v1/transactions/?${query.toString()}` : null;
-      const page = rows.slice(offset, offset + size).map((row) => {
-        if (!listingOmitsDescription) return row;
-        const { description: _omitted, ...rest } = row;
-        return rest;
-      });
+      const page = rows.slice(offset, offset + size).map((row) => shown(row, listingOmitsDescription));
       return jsonResponse({ success: true, code: 200, data: { next: nextOverride ?? next, previous: null, results: page } });
     }
     if (call.method === 'GET' && call.path === '/pricing/my-rates/') return jsonResponse({ success: true, data: rates, code: 200 });
@@ -395,6 +641,14 @@ export function createFakeSasPay() {
      * spécification OpenAPI ne le garantit pas (il n'apparaît que dans un exemple).
      */
     omitListDescriptions(omit = true) { listingOmitsDescription = omit; },
+    /** Même chose pour `GET /payments/{id}/verify/` : le libellé n'y est qu'un exemple. */
+    omitVerifyDescriptions(omit = true) { verifyOmitsDescription = omit; },
+    /** SasPay restitue (ou non) les `metadata` transmises : aucun schéma ne le garantit. */
+    exposeMetadata(expose = true) { exposeMetadata = expose; },
+    /** Les `n` prochaines créations softpay ABOUTISSENT chez SasPay mais leur réponse se perd. */
+    loseSoftpayResponses(n = 1) { lostResponses = n; },
+    /** Les `n` prochaines créations softpay n'atteignent jamais SasPay. */
+    dropSoftpayRequests(n = 1) { droppedRequests = n; },
     /** Force l'adresse de page suivante renvoyée par la liste (curseur hostile). */
     setNextPage(next: string | null) { nextOverride = next; },
     /** Paiement encaissé chez SasPay sans que VYORA en ait eu connaissance. */

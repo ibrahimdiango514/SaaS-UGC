@@ -989,10 +989,11 @@ create table if not exists saas_ugc.vyora_payment_anomalies (
 --   payment_not_found     paiement inconnu de SasPay
 --   subscription_conflict encaissement Business Grow incompatible avec l'abonnement en cours (rien livré)
 --   sweep_unreliable      le balayage des transactions SasPay ne peut pas jouer son rôle de filet
+--   initiation_unconfirmed  création softpay restée sans réponse : commande en rapprochement manuel
 alter table saas_ugc.vyora_payment_anomalies drop constraint if exists vyora_payment_anomalies_kind_check;
 alter table saas_ugc.vyora_payment_anomalies add constraint vyora_payment_anomalies_kind_check
   check (kind in ('order_stuck', 'duplicate_payment', 'payment_conflict', 'amount_mismatch', 'payment_not_found',
-                  'subscription_conflict', 'sweep_unreliable'));
+                  'subscription_conflict', 'sweep_unreliable', 'initiation_unconfirmed'));
 create index if not exists vyora_payment_anomalies_open_idx
   on saas_ugc.vyora_payment_anomalies(last_seen_at desc) where resolved_at is null;
 
@@ -1023,6 +1024,7 @@ declare
     when 'amount_mismatch' then 'Montant SasPay différent de la commande'
     when 'subscription_conflict' then 'Paiement Business Grow encaissé mais non activable'
     when 'sweep_unreliable' then 'Filet de sécurité SasPay incomplet'
+    when 'initiation_unconfirmed' then 'Paiement Mobile Money à rapprocher manuellement'
     else 'Paiement SasPay introuvable chez le prestataire' end;
 begin
   insert into saas_ugc.vyora_payment_anomalies(dedup_key, kind, product, order_id, internal_reference, provider_payment_id, details)
@@ -1054,6 +1056,553 @@ begin
   perform ugc_private.vyora_assert_service_role();
   if p_product is not null and p_product not in ('studio', 'business') then raise exception 'invalid_product'; end if;
   return ugc_private.vyora_payment_flag_anomaly(p_kind, p_product, p_order_id, p_payment_id, p_reference, p_details);
+end $$;
+
+-- =============================================================================
+-- 4 bis. CRÉATION SOFTPAY RESTÉE SANS RÉPONSE — tentatives et rapprochement manuel
+-- =============================================================================
+-- Le problème : `POST /payments/softpay/` peut aboutir chez SasPay (la demande
+-- est poussée sur le téléphone, le client valide, l'argent est encaissé) sans
+-- que sa réponse — donc l'identifiant du paiement — ne nous parvienne. Sans cet
+-- identifiant, ni `verify` ni un webhook ne permettent de relier l'encaissement
+-- à la commande.
+--
+-- Ce que la documentation SasPay garantit (lue le 2026-11-12) :
+--   * le rejeu de la MÊME requête avec la MÊME `Idempotency-Key` rend la réponse
+--     d'origine. Aucune durée de conservation de la clé n'est documentée : le
+--     rejeu n'est donc permis que pendant une fenêtre courte après la première
+--     tentative, avec le corps EXACT enregistré ici ;
+--   * aucune référence marchande n'est recherchable : `GET /transactions/?search=`
+--     ne porte que sur la référence SasPay, la référence du réseau, le nom,
+--     l'e-mail et le téléphone du client ;
+--   * le libellé (`description`) et `metadata` ne figurent dans aucun schéma de
+--     réponse — seulement dans des exemples. Ils servent de preuve QUAND ils
+--     sont renvoyés, jamais d'hypothèse.
+--
+-- La règle : une commande dont une tentative a été lancée sans issue connue
+-- n'est JAMAIS close comme « non payée » par un automate, et jamais « payée »
+-- sans vérification SasPay. Passé la fenêtre de rejeu, elle entre en
+-- rapprochement manuel : alerte administrateur, aucun nouveau paiement possible
+-- pour ce client tant qu'un humain (ou une preuve) n'a pas tranché.
+create table if not exists saas_ugc.vyora_payment_initiations (
+  product text not null check (product in ('studio', 'business')),
+  order_id uuid not null,
+  user_id uuid not null,
+  internal_reference text not null,
+  -- Corps EXACT envoyé à SasPay (rejeu à l'identique). Contient le numéro du
+  -- payeur : effacé dès que l'issue est connue.
+  request jsonb,
+  -- Montant et numéro masqué conservés pour le rapprochement une fois `request` effacé.
+  amount text,
+  currency text,
+  network_code text,
+  payer_msisdn_masked text,
+  attempts integer not null default 1,
+  -- started : appel en cours · unknown : issue inconnue · attached : paiement
+  -- identifié · refused : refus certain · closed : commande close.
+  outcome text not null default 'started'
+    check (outcome in ('started', 'unknown', 'attached', 'refused', 'closed')),
+  last_error text,
+  first_attempt_at timestamptz not null default now(),
+  last_attempt_at timestamptz not null default now(),
+  -- Entrée en rapprochement manuel (plus aucun rejeu possible).
+  review_at timestamptz,
+  -- Transactions SasPay candidates (même numéro, même montant, même fenêtre).
+  candidates jsonb not null default '[]'::jsonb,
+  last_search_at timestamptz,
+  search_count integer not null default 0,
+  resolved_at timestamptz,
+  resolved_by uuid,
+  resolution_note text,
+  primary key (product, order_id)
+);
+create index if not exists vyora_payment_initiations_open_idx
+  on saas_ugc.vyora_payment_initiations(user_id) where resolved_at is null;
+alter table saas_ugc.vyora_payment_initiations enable row level security;
+alter table saas_ugc.vyora_payment_initiations force row level security;
+revoke all on saas_ugc.vyora_payment_initiations from public, anon, authenticated, service_role;
+
+-- Une tentative « incertaine » : issue inconnue, ou appel lancé puis jamais
+-- conclu (fonction interrompue). Un appel lancé depuis moins de 60 s est
+-- simplement en cours.
+create or replace function ugc_private.vyora_payment_initiation_uncertain(i saas_ugc.vyora_payment_initiations)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select i.resolved_at is null
+     and (i.outcome = 'unknown' or (i.outcome = 'started' and i.last_attempt_at < now() - interval '60 seconds'));
+$$;
+revoke all on function ugc_private.vyora_payment_initiation_uncertain(saas_ugc.vyora_payment_initiations) from public, anon, authenticated;
+
+-- Fenêtre de rejeu (minutes) et nombre maximal de relances par le client.
+create or replace function ugc_private.vyora_payment_replay_window()
+returns interval
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select make_interval(mins => least(greatest(coalesce(
+    (ugc_private.vyora_payment_config()->>'initiation_replay_minutes')::integer, 10), 1), 30));
+$$;
+create or replace function ugc_private.vyora_payment_replay_attempts()
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select least(greatest(coalesce(
+    (ugc_private.vyora_payment_config()->>'initiation_max_attempts')::integer, 4), 1), 10);
+$$;
+revoke all on function ugc_private.vyora_payment_replay_window() from public, anon, authenticated;
+revoke all on function ugc_private.vyora_payment_replay_attempts() from public, anon, authenticated;
+
+-- Fait entrer une commande en rapprochement manuel. Ordre des verrous, partout :
+-- commande → tentative → anomalie.
+create or replace function ugc_private.vyora_payment_open_review(p_product text, p_order_id uuid, p_reason text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_row saas_ugc.vyora_payment_initiations%rowtype;
+  v_open boolean;
+begin
+  if p_product = 'studio' then
+    select true into v_open from saas_ugc.ugc_recharge_orders o
+     where o.id = p_order_id and o.provider = 'saspay' and o.status = 'pending'
+       and o.provider_payment_id is null and o.provider_session_id is null
+     for update;
+  else
+    select true into v_open from saas_business.payment_orders o
+     where o.id = p_order_id and o.status = 'pending'
+       and o.provider_payment_id is null and o.provider_session_id is null
+     for update;
+  end if;
+  if not coalesce(v_open, false) then return false; end if;
+
+  update saas_ugc.vyora_payment_initiations
+     set review_at = now(), outcome = 'unknown'
+   where product = p_product and order_id = p_order_id and resolved_at is null and review_at is null
+   returning * into v_row;
+  if not found then return false; end if;
+
+  if p_product = 'studio' then
+    update saas_ugc.ugc_recharge_orders set failure_code = 'manual_review' where id = p_order_id;
+    insert into saas_ugc.ugc_notifications(user_id, title, body, kind, href)
+    values (v_row.user_id, 'Paiement en cours de vérification',
+      'Nous n’avons pas pu confirmer votre paiement ' || v_row.internal_reference
+      || '. Notre équipe le vérifie : ne payez pas une seconde fois. Si vous avez été débité, vos crédits seront ajoutés.',
+      'info', '/app/credits');
+  else
+    update saas_business.payment_orders set failure_code = 'manual_review' where id = p_order_id;
+  end if;
+
+  perform ugc_private.vyora_payment_flag_anomaly('initiation_unconfirmed', p_product, p_order_id, null,
+    v_row.internal_reference, jsonb_build_object(
+      'reason', coalesce(p_reason, 'replay_window_elapsed'),
+      'amount', v_row.amount, 'currency', v_row.currency, 'network', v_row.network_code,
+      'payer_msisdn_masked', v_row.payer_msisdn_masked, 'attempts', v_row.attempts,
+      'first_attempt_at', v_row.first_attempt_at, 'last_attempt_at', v_row.last_attempt_at,
+      'last_error', v_row.last_error, 'candidates', v_row.candidates));
+  return true;
+end $$;
+revoke all on function ugc_private.vyora_payment_open_review(text, uuid, text) from public, anon, authenticated;
+
+-- Autorise (ou refuse) un appel `POST /payments/softpay/` et l'enregistre AVANT
+-- qu'il ne parte. Renvoie le corps à envoyer : celui de la première tentative,
+-- à l'identique — un rejeu ne peut donc ni changer de numéro ni être rejeté par
+-- SasPay pour « même clé, corps différent ».
+create or replace function public.vyora_payment_begin_initiation(p_product text, p_order_id uuid, p_request jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user uuid;
+  v_ref text;
+  v_status text;
+  v_payment text;
+  v_session text;
+  v_flow text;
+  v_network text;
+  v_masked text;
+  v_other boolean;
+  v_row saas_ugc.vyora_payment_initiations%rowtype;
+  v_window interval := ugc_private.vyora_payment_replay_window();
+  v_max integer := ugc_private.vyora_payment_replay_attempts();
+begin
+  perform ugc_private.vyora_assert_service_role();
+  if p_product = 'studio' then
+    select o.user_id into v_user from saas_ugc.ugc_recharge_orders o where o.id = p_order_id and o.provider = 'saspay';
+  elsif p_product = 'business' then
+    select o.user_id into v_user from saas_business.payment_orders o where o.id = p_order_id;
+  else
+    raise exception 'invalid_product';
+  end if;
+  if v_user is null then raise exception 'payment_order_not_found'; end if;
+
+  -- Un seul paiement incertain à la fois par client, tous produits confondus.
+  perform pg_advisory_xact_lock(hashtextextended('vyora-pay-init:' || v_user::text, 0));
+  if p_product = 'studio' then
+    select o.internal_reference, o.status, o.provider_payment_id, o.provider_session_id, o.payment_flow,
+           o.network_code, o.payer_msisdn_masked
+      into v_ref, v_status, v_payment, v_session, v_flow, v_network, v_masked
+      from saas_ugc.ugc_recharge_orders o where o.id = p_order_id for update;
+  else
+    select o.internal_reference, o.status, o.provider_payment_id, o.provider_session_id, o.payment_flow,
+           o.network_code, o.payer_msisdn_masked
+      into v_ref, v_status, v_payment, v_session, v_flow, v_network, v_masked
+      from saas_business.payment_orders o where o.id = p_order_id for update;
+  end if;
+  if v_flow is distinct from 'softpay' then raise exception 'initiation_requires_softpay'; end if;
+  if v_status <> 'pending' or v_payment is not null or v_session is not null then
+    return jsonb_build_object('allowed', false, 'reason', 'not_pending');
+  end if;
+
+  -- Toute AUTRE tentative non soldée du client bloque celle-ci : incertaine
+  -- (rapprochement à faire) ou simplement en vol (issue attendue sous peu).
+  -- (`bool_or` vaut NULL quand il n'y en a aucune.)
+  select bool_or(ugc_private.vyora_payment_initiation_uncertain(i)) into v_other
+    from saas_ugc.vyora_payment_initiations i
+   where i.user_id = v_user and i.resolved_at is null
+     and (i.product, i.order_id) is distinct from (p_product, p_order_id);
+  if v_other is not null then
+    return jsonb_build_object('allowed', false, 'reason',
+      case when v_other then 'other_payment_unconfirmed' else 'other_payment_in_progress' end);
+  end if;
+
+  select * into v_row from saas_ugc.vyora_payment_initiations i
+   where i.product = p_product and i.order_id = p_order_id for update;
+  if found then
+    if v_row.resolved_at is not null then
+      return jsonb_build_object('allowed', false, 'reason', 'not_pending');
+    end if;
+    if v_row.review_at is not null then
+      return jsonb_build_object('allowed', false, 'reason', 'under_review');
+    end if;
+    -- Hors fenêtre ou relances épuisées : plus aucun rejeu. La conservation de
+    -- la clé d'idempotence n'étant pas documentée, un rejeu tardif pourrait
+    -- pousser une SECONDE demande de paiement pour une commande déjà encaissée.
+    if v_row.attempts >= v_max or now() > v_row.first_attempt_at + v_window then
+      perform ugc_private.vyora_payment_open_review(p_product, p_order_id,
+        case when v_row.attempts >= v_max then 'attempts_exhausted' else 'replay_window_elapsed' end);
+      return jsonb_build_object('allowed', false, 'reason', 'under_review');
+    end if;
+    if v_row.outcome = 'started' and v_row.last_attempt_at > now() - interval '20 seconds' then
+      return jsonb_build_object('allowed', false, 'reason', 'attempt_in_progress');
+    end if;
+    update saas_ugc.vyora_payment_initiations
+       set attempts = attempts + 1, last_attempt_at = now(), outcome = 'started'
+     where product = p_product and order_id = p_order_id
+     returning * into v_row;
+  else
+    if p_request is null or jsonb_typeof(p_request) <> 'object'
+       or coalesce(p_request->>'amount', '') = '' or coalesce(p_request->'customer'->>'phone', '') = '' then
+      raise exception 'initiation_request_required';
+    end if;
+    insert into saas_ugc.vyora_payment_initiations(
+      product, order_id, user_id, internal_reference, request, amount, currency, network_code, payer_msisdn_masked)
+    values (p_product, p_order_id, v_user, v_ref, p_request, p_request->>'amount', p_request->>'currency',
+            v_network, v_masked)
+    returning * into v_row;
+  end if;
+
+  -- Dès que l'appel part, la commande est « à confirmer » : elle ne redevient
+  -- ordinaire que lorsqu'un identifiant SasPay lui est rattaché.
+  if p_product = 'studio' then
+    update saas_ugc.ugc_recharge_orders set failure_code = 'initiation_unconfirmed' where id = p_order_id;
+  else
+    update saas_business.payment_orders set failure_code = 'initiation_unconfirmed' where id = p_order_id;
+  end if;
+  return jsonb_build_object('allowed', true, 'attempt', v_row.attempts, 'request', v_row.request,
+    'replay_until', v_row.first_attempt_at + v_window);
+end $$;
+
+-- L'appel s'est terminé sans issue certaine (délai, coupure, erreur serveur).
+create or replace function public.vyora_payment_initiation_unknown(p_product text, p_order_id uuid, p_error text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform ugc_private.vyora_assert_service_role();
+  update saas_ugc.vyora_payment_initiations
+     set outcome = 'unknown', last_error = nullif(left(coalesce(p_error, ''), 80), '')
+   where product = p_product and order_id = p_order_id and resolved_at is null;
+end $$;
+
+-- Suit la commande : dès qu'un identifiant SasPay lui est rattaché ou qu'elle
+-- est close, la tentative est soldée, le corps de requête effacé et l'alerte
+-- levée. Ainsi aucun chemin (webhook, vérification, balayage, administrateur)
+-- ne peut laisser une commande réglée « en rapprochement ».
+create or replace function saas_ugc.vyora_payment_initiation_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_product text := tg_argv[0];
+  v_identified boolean := new.provider_payment_id is not null or new.provider_session_id is not null;
+begin
+  if v_product = 'studio' and new.provider is distinct from 'saspay' then return new; end if;
+  if not v_identified and new.status = 'pending' then return new; end if;
+  if old.failure_code in ('initiation_unconfirmed', 'manual_review')
+     and new.failure_code is not distinct from old.failure_code then
+    new.failure_code := null;
+  end if;
+  update saas_ugc.vyora_payment_initiations
+     set resolved_at = now(), request = null,
+         outcome = case when new.provider_payment_id is not null then 'attached'
+                        when new.status = 'failed' then 'refused' else 'closed' end
+   where product = v_product and order_id = new.id and resolved_at is null;
+  if found then
+    update saas_ugc.vyora_payment_anomalies
+       set resolved_at = now(),
+           resolution_note = case when new.provider_payment_id is not null
+             then 'Levée automatiquement : paiement SasPay identifié et vérifié.'
+             else 'Levée automatiquement : commande close.' end
+     where kind = 'initiation_unconfirmed' and order_id = new.id and resolved_at is null;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists vyora_recharge_initiation_sync on saas_ugc.ugc_recharge_orders;
+create trigger vyora_recharge_initiation_sync
+  before update on saas_ugc.ugc_recharge_orders
+  for each row execute function saas_ugc.vyora_payment_initiation_sync('studio');
+drop trigger if exists vyora_payment_initiation_sync on saas_business.payment_orders;
+create trigger vyora_payment_initiation_sync
+  before update on saas_business.payment_orders
+  for each row execute function saas_ugc.vyora_payment_initiation_sync('business');
+
+-- Tant qu'une tentative du client n'est pas soldée, aucune NOUVELLE commande
+-- SasPay ne peut naître (Studio comme Business Grow) : pas de second paiement
+-- possible pendant le rapprochement, ni pendant les secondes où l'appel est en
+-- vol (une fonction interrompue en plein appel ne laisse donc aucune fenêtre).
+-- La reprise de la même commande ne crée pas de ligne et n'est pas concernée.
+create or replace function saas_ugc.vyora_payment_block_unconfirmed()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uncertain boolean;
+begin
+  if tg_argv[0] = 'studio' and new.provider is distinct from 'saspay' then return new; end if;
+  perform pg_advisory_xact_lock(hashtextextended('vyora-pay-init:' || new.user_id::text, 0));
+  select bool_or(ugc_private.vyora_payment_initiation_uncertain(i)) into v_uncertain
+    from saas_ugc.vyora_payment_initiations i
+   where i.user_id = new.user_id and i.resolved_at is null;
+  if v_uncertain then raise exception 'payment_under_review'; end if;
+  if v_uncertain is not null then raise exception 'payment_attempt_in_progress'; end if;
+  return new;
+end $$;
+
+drop trigger if exists vyora_recharge_block_unconfirmed on saas_ugc.ugc_recharge_orders;
+create trigger vyora_recharge_block_unconfirmed
+  before insert on saas_ugc.ugc_recharge_orders
+  for each row execute function saas_ugc.vyora_payment_block_unconfirmed('studio');
+drop trigger if exists vyora_payment_block_unconfirmed on saas_business.payment_orders;
+create trigger vyora_payment_block_unconfirmed
+  before insert on saas_business.payment_orders
+  for each row execute function saas_ugc.vyora_payment_block_unconfirmed('business');
+
+revoke all on function saas_ugc.vyora_payment_initiation_sync() from public, anon, authenticated, service_role;
+revoke all on function saas_ugc.vyora_payment_block_unconfirmed() from public, anon, authenticated, service_role;
+
+-- Commandes incertaines à rechercher chez SasPay (lecture seule) : toutes les
+-- 4 min la première heure, 30 min le premier jour, 6 h ensuite (30 jours).
+-- `p_due_only = false` : toutes les commandes incertaines (webhook entrant).
+create or replace function public.vyora_payment_unconfirmed(p_limit integer default 10, p_due_only boolean default true)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  perform ugc_private.vyora_assert_service_or_cron();
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'product', x.product, 'order_id', x.order_id, 'internal_reference', x.internal_reference,
+             'phone', x.request->'customer'->>'phone', 'amount', x.amount, 'currency', x.currency,
+             'first_attempt_at', x.first_attempt_at, 'last_attempt_at', x.last_attempt_at,
+             'in_review', x.review_at is not null)
+           order by coalesce(x.last_search_at, '-infinity'::timestamptz), x.first_attempt_at)
+      from (
+        select i.* from saas_ugc.vyora_payment_initiations i
+         where ugc_private.vyora_payment_initiation_uncertain(i)
+           and i.first_attempt_at > now() - interval '30 days'
+           and (not coalesce(p_due_only, true)
+                or coalesce(i.last_search_at, '-infinity'::timestamptz) < now() - case
+                     when i.first_attempt_at > now() - interval '1 hour' then interval '4 minutes'
+                     when i.first_attempt_at > now() - interval '24 hours' then interval '30 minutes'
+                     else interval '6 hours' end)
+         order by coalesce(i.last_search_at, '-infinity'::timestamptz), i.first_attempt_at
+         limit least(greatest(coalesce(p_limit, 10), 1), 25)
+      ) x), '[]'::jsonb);
+end $$;
+
+-- Résultat d'une recherche SasPay pour une commande incertaine : les
+-- transactions candidates sont consignées pour l'administrateur. Rien n'est livré.
+create or replace function public.vyora_payment_note_candidates(p_product text, p_order_id uuid, p_candidates jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_list jsonb := case when jsonb_typeof(p_candidates) = 'array' then p_candidates else '[]'::jsonb end;
+begin
+  perform ugc_private.vyora_assert_service_role();
+  -- Le résultat d'une recherche remplace le précédent, mais conserve les
+  -- transactions annoncées par un webhook : la recherche peut ne pas les voir.
+  update saas_ugc.vyora_payment_initiations i
+     set candidates = coalesce((
+           select jsonb_agg(c) from jsonb_array_elements(i.candidates) c
+            where c->>'source' = 'webhook'
+              and not exists (select 1 from jsonb_array_elements(v_list) n where n->>'id' = c->>'id')), '[]'::jsonb) || v_list,
+         last_search_at = now(), search_count = search_count + 1
+   where i.product = p_product and i.order_id = p_order_id and i.resolved_at is null
+   returning i.candidates into v_list;
+  if found then
+    update saas_ugc.vyora_payment_anomalies
+       set details = details || jsonb_build_object('candidates', v_list, 'searched_at', now())
+     where kind = 'initiation_unconfirmed' and order_id = p_order_id and resolved_at is null;
+  end if;
+end $$;
+
+-- Un webhook signé annonce une transaction inconnue qui RESSEMBLE à la commande
+-- (montant, devise, date) sans que SasPay n'en restitue la référence : elle est
+-- proposée à l'administrateur. Rien n'est rattaché ni livré.
+create or replace function public.vyora_payment_add_candidate(p_product text, p_order_id uuid, p_candidate jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_list jsonb;
+begin
+  perform ugc_private.vyora_assert_service_role();
+  if p_candidate is null or jsonb_typeof(p_candidate) <> 'object' or coalesce(p_candidate->>'id', '') = '' then
+    raise exception 'candidate_required';
+  end if;
+  update saas_ugc.vyora_payment_initiations i
+     set candidates = i.candidates || jsonb_build_array(p_candidate)
+   where i.product = p_product and i.order_id = p_order_id and i.resolved_at is null
+     and jsonb_array_length(i.candidates) < 20
+     and not exists (select 1 from jsonb_array_elements(i.candidates) c where c->>'id' = p_candidate->>'id')
+   returning i.candidates into v_list;
+  if found then
+    update saas_ugc.vyora_payment_anomalies
+       set details = details || jsonb_build_object('candidates', v_list)
+     where kind = 'initiation_unconfirmed' and order_id = p_order_id and resolved_at is null;
+  end if;
+end $$;
+
+-- Trace de la décision « rattacher ce paiement » prise par un administrateur.
+-- Le rattachement lui-même passe par le règlement ordinaire (vérification SasPay).
+create or replace function public.vyora_payment_review_attached(
+  p_admin uuid, p_product text, p_order_id uuid, p_payment_id text, p_note text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_note text := nullif(left(trim(coalesce(p_note, '')), 500), '');
+begin
+  perform ugc_private.vyora_assert_service_role();
+  if not exists (select 1 from saas_ugc.ugc_user_roles r where r.user_id = p_admin and r.role = 'admin') then
+    raise exception 'admin_required';
+  end if;
+  update saas_ugc.vyora_payment_initiations
+     set resolved_by = p_admin, resolution_note = v_note
+   where product = p_product and order_id = p_order_id;
+  update saas_ugc.vyora_payment_anomalies
+     set resolved_by = p_admin,
+         resolution_note = 'Paiement ' || left(coalesce(p_payment_id, ''), 80) || ' rattaché par un administrateur. ' || coalesce(v_note, '')
+   where kind = 'initiation_unconfirmed' and order_id = p_order_id and resolved_at is not null and resolved_by is null;
+  insert into saas_ugc.ugc_audit_logs(actor_user_id, action, target_type, target_id, details)
+  values (p_admin, 'saspay_review_payment_attached', 'payment_order', p_order_id::text,
+    jsonb_build_object('actor', 'admin', 'product', p_product, 'payment_id', left(coalesce(p_payment_id, ''), 80), 'note', v_note));
+end $$;
+
+-- Décision « aucun encaissement » : l'administrateur atteste avoir vérifié,
+-- dans le tableau de bord SasPay, qu'aucune transaction ne correspond. La
+-- commande est close sans rien livrer et le client peut de nouveau payer. Si un
+-- encaissement apparaissait malgré tout, le règlement rouvrirait la commande.
+create or replace function public.vyora_admin_close_unconfirmed(p_product text, p_order_id uuid, p_note text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_admin uuid := (select auth.uid());
+  v_note text := nullif(trim(coalesce(p_note, '')), '');
+  v_row saas_ugc.vyora_payment_initiations%rowtype;
+  v_open boolean;
+begin
+  perform ugc_private.reelora_assert_admin();
+  if p_product not in ('studio', 'business') then raise exception 'invalid_product'; end if;
+  if v_note is null or char_length(v_note) < 10 or char_length(v_note) > 500 then
+    raise exception 'review_note_required';
+  end if;
+  if p_product = 'studio' then
+    select true into v_open from saas_ugc.ugc_recharge_orders o
+     where o.id = p_order_id and o.provider = 'saspay' and o.status = 'pending'
+       and o.provider_payment_id is null and o.provider_session_id is null
+     for update;
+  else
+    select true into v_open from saas_business.payment_orders o
+     where o.id = p_order_id and o.status = 'pending'
+       and o.provider_payment_id is null and o.provider_session_id is null
+     for update;
+  end if;
+  select * into v_row from saas_ugc.vyora_payment_initiations i
+   where i.product = p_product and i.order_id = p_order_id for update;
+  -- Seulement en rapprochement manuel : pendant la fenêtre de rejeu, le client
+  -- peut encore relancer la même demande et obtenir l'identifiant.
+  if not coalesce(v_open, false) or v_row.order_id is null or v_row.resolved_at is not null
+     or v_row.review_at is null then
+    raise exception 'payment_not_under_review';
+  end if;
+
+  update saas_ugc.vyora_payment_anomalies
+     set resolved_at = now(), resolved_by = v_admin,
+         resolution_note = 'Aucun encaissement constaté chez SasPay. ' || v_note
+   where kind = 'initiation_unconfirmed' and order_id = p_order_id and resolved_at is null;
+  if p_product = 'studio' then
+    update saas_ugc.ugc_recharge_orders
+       set status = 'cancelled', failure_code = 'unconfirmed_closed' where id = p_order_id;
+    insert into saas_ugc.ugc_notifications(user_id, title, body, kind, href)
+    values (v_row.user_id, 'Paiement non abouti',
+      'Après vérification, aucun encaissement n’a été trouvé pour votre commande ' || v_row.internal_reference
+      || '. Vous n’avez pas été débité par VYORA ; vous pouvez relancer un paiement.',
+      'info', '/app/credits');
+  else
+    update saas_business.payment_orders
+       set status = 'cancelled', failure_code = 'unconfirmed_closed' where id = p_order_id;
+  end if;
+  update saas_ugc.vyora_payment_initiations
+     set resolved_by = v_admin, resolution_note = v_note
+   where product = p_product and order_id = p_order_id;
+  insert into saas_ugc.ugc_audit_logs(actor_user_id, action, target_type, target_id, details)
+  values (v_admin, 'saspay_review_closed_unpaid', 'payment_order', p_order_id::text,
+    jsonb_build_object('actor', 'admin', 'product', p_product, 'reference', v_row.internal_reference, 'note', v_note));
+  return jsonb_build_object('product', p_product, 'order_id', p_order_id, 'outcome', 'closed_unpaid');
 end $$;
 
 -- =============================================================================
@@ -1137,23 +1686,49 @@ declare
   v_business integer;
   v_subs integer := 0;
   v_sub saas_business.subscriptions%rowtype;
+  v_reviews integer := 0;
+  v_init record;
+  v_window interval := ugc_private.vyora_payment_replay_window();
+  v_max integer := ugc_private.vyora_payment_replay_attempts();
 begin
   perform ugc_private.vyora_assert_service_or_cron();
 
-  -- Une commande sans identifiant SasPay n'a (à notre connaissance) jamais été
-  -- présentée au payeur. Si SasPay l'a pourtant encaissée, le balayage la
-  -- retrouve par sa référence et le règlement la rouvre.
-  update saas_ugc.ugc_recharge_orders
+  -- Création softpay restée sans réponse : passé la fenêtre de rejeu (ou les
+  -- relances épuisées), la commande entre en rapprochement manuel. Les lignes
+  -- sont lues sans verrou ; chaque passage reprend l'ordre commande → tentative.
+  for v_init in
+    select i.product, i.order_id, i.attempts from saas_ugc.vyora_payment_initiations i
+     where i.resolved_at is null and i.review_at is null
+       and i.last_attempt_at < now() - interval '90 seconds'
+       and (i.attempts >= v_max or i.first_attempt_at < now() - v_window)
+     order by i.first_attempt_at
+     limit 100
+  loop
+    if ugc_private.vyora_payment_open_review(v_init.product, v_init.order_id,
+         case when v_init.attempts >= v_max then 'attempts_exhausted' else 'replay_window_elapsed' end) then
+      v_reviews := v_reviews + 1;
+    end if;
+  end loop;
+
+  -- Une commande sans identifiant SasPay ET sans aucune tentative d'appel n'a
+  -- jamais été présentée au payeur : elle expire. Dès qu'un appel softpay est
+  -- parti sans issue connue, elle n'expire PLUS : la déclarer « non payée »
+  -- serait une affirmation sans preuve (voir section 4 bis).
+  update saas_ugc.ugc_recharge_orders o
      set status = 'cancelled', failure_code = 'expired_unpaid'
-   where provider = 'saspay' and status = 'pending'
-     and provider_payment_id is null and provider_session_id is null
-     and coalesce(expires_at, created_at + interval '30 minutes') < now() - interval '15 minutes';
+   where o.provider = 'saspay' and o.status = 'pending'
+     and o.provider_payment_id is null and o.provider_session_id is null
+     and coalesce(o.expires_at, o.created_at + interval '30 minutes') < now() - interval '15 minutes'
+     and not exists (select 1 from saas_ugc.vyora_payment_initiations i
+                      where i.product = 'studio' and i.order_id = o.id and i.resolved_at is null);
   get diagnostics v_studio = row_count;
-  update saas_business.payment_orders
+  update saas_business.payment_orders o
      set status = 'cancelled', failure_code = 'expired_unpaid'
-   where status = 'pending'
-     and provider_payment_id is null and provider_session_id is null
-     and coalesce(expires_at, created_at + interval '30 minutes') < now() - interval '15 minutes';
+   where o.status = 'pending'
+     and o.provider_payment_id is null and o.provider_session_id is null
+     and coalesce(o.expires_at, o.created_at + interval '30 minutes') < now() - interval '15 minutes'
+     and not exists (select 1 from saas_ugc.vyora_payment_initiations i
+                      where i.product = 'business' and i.order_id = o.id and i.resolved_at is null);
   get diagnostics v_business = row_count;
 
   for v_sub in
@@ -1174,7 +1749,7 @@ begin
   end loop;
 
   return jsonb_build_object('expired_studio_orders', v_studio, 'expired_business_orders', v_business,
-    'expired_subscriptions', v_subs);
+    'expired_subscriptions', v_subs, 'opened_reviews', v_reviews);
 end $$;
 
 -- Lot de travail d'une exécution. Signale au passage les commandes bloquées.
@@ -1209,7 +1784,9 @@ begin
       select jsonb_agg(jsonb_build_object('product', d.product, 'order_id', d.order_id, 'opened_at', d.opened_at))
         from ugc_private.vyora_payment_due(p_limit) d), '[]'::jsonb),
     'sweep', ugc_private.vyora_payment_sweep_due(),
-    'sweep_since', now() - interval '72 hours'
+    'sweep_since', now() - interval '72 hours',
+    -- Créations softpay sans réponse : à rechercher chez SasPay par numéro.
+    'unconfirmed', public.vyora_payment_unconfirmed(10, true)
   );
 end $$;
 
@@ -1336,6 +1913,7 @@ declare
   v_house jsonb;
   v_due integer;
   v_sweep boolean;
+  v_unconfirmed integer;
   v_token text;
   v_request bigint;
 begin
@@ -1346,7 +1924,8 @@ begin
   v_house := public.vyora_payment_housekeeping();
   select count(*) into v_due from ugc_private.vyora_payment_due(1);
   v_sweep := ugc_private.vyora_payment_sweep_due();
-  if v_due = 0 and not v_sweep then
+  v_unconfirmed := jsonb_array_length(public.vyora_payment_unconfirmed(1, true));
+  if v_due = 0 and not v_sweep and v_unconfirmed = 0 then
     return jsonb_build_object('dispatched', false, 'reason', 'nothing_to_reconcile', 'housekeeping', v_house);
   end if;
   v_token := public.vyora_payments_reconcile_token();
@@ -1360,7 +1939,7 @@ begin
             'x-vyora-cron', 'payments-reconcile'),
           jsonb_build_object('source', 'cron');
   return jsonb_build_object('dispatched', true, 'request_id', v_request, 'due', v_due, 'sweep', v_sweep,
-    'housekeeping', v_house);
+    'unconfirmed', v_unconfirmed, 'housekeeping', v_house);
 end $$;
 
 do $$
@@ -1411,6 +1990,20 @@ begin
                   where o.provider = 'saspay' and o.status in ('pending', 'processing')),
       'business', (select count(*) from saas_business.payment_orders o
                     where o.status in ('pending', 'processing'))),
+    -- Créations softpay sans réponse : en fenêtre de rejeu, puis en rapprochement manuel.
+    'unconfirmed', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'product', i.product, 'order_id', i.order_id, 'internal_reference', i.internal_reference,
+               'user_email', (select u.email from auth.users u where u.id = i.user_id),
+               'amount', i.amount, 'currency', i.currency, 'network', i.network_code,
+               'payer_msisdn_masked', i.payer_msisdn_masked, 'attempts', i.attempts,
+               'first_attempt_at', i.first_attempt_at, 'last_attempt_at', i.last_attempt_at,
+               'in_review', i.review_at is not null, 'review_at', i.review_at, 'last_error', i.last_error,
+               'candidates', i.candidates, 'last_search_at', i.last_search_at)
+             order by i.first_attempt_at)
+        from saas_ugc.vyora_payment_initiations i
+       where i.resolved_at is null and i.outcome in ('started', 'unknown')
+         and (i.outcome = 'unknown' or i.last_attempt_at < now() - interval '60 seconds')), '[]'::jsonb),
     'refunds_awaiting_settlement',
       (select count(*) from saas_ugc.ugc_recharge_orders o
         where o.provider = 'saspay' and o.status = 'refunded' and o.refund_state = 'credits_recovered')
@@ -1446,6 +2039,17 @@ begin
   if v_note is null or char_length(v_note) < 5 or char_length(v_note) > 500 then
     raise exception 'anomaly_note_required';
   end if;
+  -- Un paiement à l'issue inconnue ne se « classe » pas : il se tranche
+  -- (rattacher le paiement SasPay, ou attester qu'aucun encaissement n'existe).
+  -- L'alerte se lève alors d'elle-même ; la classer ici la ferait disparaître
+  -- en laissant le client bloqué.
+  if exists (
+    select 1 from saas_ugc.vyora_payment_anomalies a
+      join saas_ugc.vyora_payment_initiations i on i.order_id = a.order_id and i.resolved_at is null
+     where a.id = p_anomaly_id and a.kind = 'initiation_unconfirmed' and a.resolved_at is null
+  ) then
+    raise exception 'anomaly_requires_decision';
+  end if;
   update saas_ugc.vyora_payment_anomalies
      set resolved_at = now(), resolved_by = v_admin, resolution_note = v_note
    where id = p_anomaly_id and resolved_at is null
@@ -1472,7 +2076,13 @@ begin
     'public.vyora_payment_reconcile_start(text)',
     'public.vyora_payment_reconcile_finish(uuid, text, jsonb)',
     'public.vyora_payment_housekeeping()',
-    'public.vyora_payments_reconcile_token()'
+    'public.vyora_payments_reconcile_token()',
+    'public.vyora_payment_begin_initiation(text, uuid, jsonb)',
+    'public.vyora_payment_initiation_unknown(text, uuid, text)',
+    'public.vyora_payment_unconfirmed(integer, boolean)',
+    'public.vyora_payment_note_candidates(text, uuid, jsonb)',
+    'public.vyora_payment_add_candidate(text, uuid, jsonb)',
+    'public.vyora_payment_review_attached(uuid, text, uuid, text, text)'
   ] loop
     execute format('revoke all on function %s from public, anon, authenticated', v_fn);
     execute format('grant execute on function %s to service_role', v_fn);
@@ -1488,7 +2098,8 @@ begin
     'public.vyora_admin_refund_business(uuid, text, bigint, boolean)',
     'public.vyora_admin_refund_settle(text, uuid, text)',
     'public.vyora_admin_payment_health()',
-    'public.vyora_admin_resolve_anomaly(uuid, text)'
+    'public.vyora_admin_resolve_anomaly(uuid, text)',
+    'public.vyora_admin_close_unconfirmed(text, uuid, text)'
   ] loop
     execute format('revoke all on function %s from public, anon', v_fn);
     execute format('grant execute on function %s to authenticated', v_fn);

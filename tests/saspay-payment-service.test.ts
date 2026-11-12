@@ -17,17 +17,21 @@ const boss = { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', email: 'boss@example.
 function setup(options: FakeStoreOptions & { key?: string | null; webhookSecret?: string | null } = {}) {
   const fake = createFakeStore({ admins: [boss.id], ...options });
   const saspay = createFakeSasPay();
-  const clock = { now: NOW };
+  // Une seule horloge pour le service et pour la « base ».
+  const clock = fake.clock;
   const logs: Array<{ event: string; details: Record<string, unknown> }> = [];
   const key = options.key === undefined ? TEST_KEY : options.key;
+  /** Attentes demandées par le service (rejeu immédiat d'une création softpay). */
+  const sleeps: number[] = [];
   const service = createPaymentService({
     store: fake.store,
     client: key ? createSasPayClient({ secretKey: key, fetcher: saspay.fetcher }) : null,
     webhookSecret: options.webhookSecret === undefined ? WEBHOOK_SECRET : options.webhookSecret,
     now: () => clock.now,
     log: (event, details) => logs.push({ event, details }),
+    sleep: (ms) => { sleeps.push(ms); return new Promise((resolve) => setTimeout(resolve, 0)); },
   });
-  return { ...fake, saspay, service, clock, logs };
+  return { ...fake, saspay, service, clock, logs, sleeps };
 }
 
 const softpay = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -217,11 +221,9 @@ describe('paiement SasPay — erreurs du prestataire à la création', () => {
     [401, 'authentication_failed', 'PAYMENT_PROVIDER_UNAUTHORIZED', 503, 'failed'],
     [403, 'api_key_scope_forbidden', 'PAYMENT_PROVIDER_FORBIDDEN', 503, 'failed'],
     [404, 'not_found', 'PAYMENT_PROVIDER_NOT_FOUND', 404, 'failed'],
-    [409, 'idempotency_conflict', 'PAYMENT_ALREADY_IN_PROGRESS', 409, 'pending'],
     [422, 'no_route_available', 'PAYMENT_REJECTED', 422, 'failed'],
-    [429, 'throttled', 'PAYMENT_RATE_LIMITED', 429, 'pending'],
-    [500, 'server_error', 'PAYMENT_PROVIDER_UNAVAILABLE', 503, 'pending'],
-    [503, 'unavailable', 'PAYMENT_PROVIDER_UNAVAILABLE', 503, 'pending'],
+    // Limite de débit : requête écartée avant tout traitement, aucun paiement n'existe.
+    [429, 'throttled', 'PAYMENT_RATE_LIMITED', 429, 'failed'],
   ] as const;
 
   it.each(cases)('HTTP %i (%s) → %s, commande « %s »', async (status, providerCode, code, httpStatus, orderStatus) => {
@@ -235,34 +237,84 @@ describe('paiement SasPay — erreurs du prestataire à la création', () => {
     expect(JSON.stringify(error.details)).not.toContain('sk_');
     expect([...orders.values()][0].status).toBe(orderStatus);
     expect(credits.studio.size).toBe(0);
+    // Refus certain : un seul appel, aucun rejeu, et le client peut repayer.
+    expect(saspay.count('POST', '/payments/softpay/')).toBe(1);
+    saspay.respondWith(null);
+    expect((await service.create(alice, softpay('idem-key-0100b'))).order.state).toBe('pending');
   });
 
-  it('délai dépassé : la commande reste rejouable et le rejeu réutilise la même clé d’idempotence', async () => {
+  // Issue INCONNUE : SasPay a pu créer le paiement. Jamais « échoué », jamais « à refaire ».
+  it.each([
+    [409, 'idempotency_conflict'],
+    [500, 'server_error'],
+    [502, 'bad_gateway'],
+    [503, 'unavailable'],
+    [504, 'gateway_timeout'],
+  ] as const)('HTTP %i (%s) → issue inconnue : commande « en vérification », rien n’est affirmé', async (status, providerCode) => {
+    const { service, saspay, orders, credits, initiations, sleeps } = setup();
+    saspay.respondWith((call) => (call.path === '/payments/softpay/'
+      ? jsonResponse({ success: false, error: { code: providerCode, message: `raw provider text ${TEST_KEY}` }, code: status }, status) : undefined));
+    const result = await service.create(alice, softpay('idem-key-0110'));
+    expect(result.next).toBe('review');
+    expect(result.order).toMatchObject({ state: 'review', status: 'pending', retry_allowed: true });
+    expect(result.message).toContain('Ne payez pas une seconde fois');
+    expect(result.message).not.toContain('raw provider text');
+    expect(JSON.stringify(result)).not.toContain('sk_');
+    expect(JSON.stringify(result)).not.toContain('70123456');
+    const order = [...orders.values()][0];
+    expect(order).toMatchObject({ status: 'pending', provider_payment_id: null, failure_code: 'initiation_unconfirmed' });
+    expect(initiations.get(order.id)).toMatchObject({ outcome: 'unknown', attempts: 1, resolvedAt: null });
+    // Un appel, puis UN rejeu immédiat (même clé, même corps).
+    const sent = saspay.calls.filter((c) => c.path === '/payments/softpay/');
+    expect(sent).toHaveLength(2);
+    expect(sent[1].headers['idempotency-key']).toBe(sent[0].headers['idempotency-key']);
+    expect(sent[1].body).toEqual(sent[0].body);
+    expect(sleeps).toEqual([2000]);
+    expect(credits.studio.size).toBe(0);
+  });
+
+  it('délai dépassé : la même demande est rejouée avec la même clé d’idempotence et le même corps', async () => {
     const { service, saspay, orders } = setup();
     let fail = true;
     saspay.respondWith((call) => {
       if (call.path === '/payments/softpay/' && fail) throw new DOMException('timeout', 'TimeoutError');
       return undefined;
     });
-    const error = await expectError(service.create(alice, softpay('idem-key-0101')), 'PAYMENT_PROVIDER_UNAVAILABLE', 503);
-    expect(error.message).toContain('Aucun crédit');
-    expect(error.details.retryable).toBe(true);
-    expect([...orders.values()][0].status).toBe('pending');
+    const lost = await service.create(alice, softpay('idem-key-0101'));
+    expect(lost.next).toBe('review');
+    expect(lost.message).toContain('Aucun crédit');
+    expect([...orders.values()][0]).toMatchObject({ status: 'pending', failure_code: 'initiation_unconfirmed' });
 
     fail = false;
     const retry = await service.create(alice, softpay('idem-key-0101'));
     expect(retry.order.state).toBe('pending');
+    expect(retry.next).toBe('await_confirmation');
     expect(orders.size).toBe(1);
-    const keys = saspay.calls.filter((c) => c.path === '/payments/softpay/').map((c) => c.headers['idempotency-key']);
-    expect(keys).toHaveLength(2);
-    expect(new Set(keys).size).toBe(1);
+    expect([...orders.values()][0].failure_code ?? null).toBeNull();
+    const sent = saspay.calls.filter((c) => c.path === '/payments/softpay/');
+    expect(sent).toHaveLength(3);
+    expect(new Set(sent.map((c) => c.headers['idempotency-key'])).size).toBe(1);
+    expect(new Set(sent.map((c) => JSON.stringify(c.body))).size).toBe(1);
   });
 
-  it('réponse 201 illisible : aucun identifiant inventé, commande non rattachée', async () => {
+  it('réponse 201 illisible : aucun identifiant inventé, commande « en vérification »', async () => {
     const { service, saspay, orders } = setup();
     saspay.respondWith((call) => (call.path === '/payments/softpay/' ? new Response('<html>ok</html>', { status: 201 }) : undefined));
-    await expectError(service.create(alice, softpay('idem-key-0102')), 'PAYMENT_PROVIDER_UNAVAILABLE', 503);
-    expect([...orders.values()][0]).toMatchObject({ status: 'pending', provider_payment_id: null });
+    const result = await service.create(alice, softpay('idem-key-0102'));
+    expect(result.next).toBe('review');
+    expect([...orders.values()][0]).toMatchObject({ status: 'pending', provider_payment_id: null, failure_code: 'initiation_unconfirmed' });
+  });
+
+  it('issue inconnue au premier appel, réponse au rejeu immédiat : le client ne voit rien', async () => {
+    const { service, saspay, orders, initiations } = setup();
+    saspay.loseSoftpayResponses(1);
+    const result = await service.create(alice, softpay('idem-key-0103'));
+    expect(result.next).toBe('await_confirmation');
+    expect(result.order.state).toBe('pending');
+    expect(saspay.transactions.size).toBe(1);
+    const order = [...orders.values()][0];
+    expect(order.provider_payment_id).toBe([...saspay.transactions.keys()][0]);
+    expect(initiations.get(order.id)).toMatchObject({ outcome: 'attached', request: null });
   });
 });
 
@@ -1073,11 +1125,11 @@ describe('réconciliation SasPay — tâche planifiée', () => {
     const fake = createFakeStore({ admins: [boss.id] });
     const lossyService = createPaymentService({
       store: fake.store, client: createSasPayClient({ secretKey: TEST_KEY, fetcher: lossy }),
-      webhookSecret: WEBHOOK_SECRET, now: () => NOW, log: () => undefined,
+      webhookSecret: WEBHOOK_SECRET, now: () => NOW, log: () => undefined, sleep: async () => undefined,
     });
-    await expectError(lossyService.create(alice, softpay('idem-recon-0102')), 'PAYMENT_PROVIDER_UNAVAILABLE', 503);
+    expect((await lossyService.create(alice, softpay('idem-recon-0102'))).next).toBe('review');
     const order = first(fake.orders);
-    expect(order).toMatchObject({ status: 'pending', provider_payment_id: null });
+    expect(order).toMatchObject({ status: 'pending', provider_payment_id: null, failure_code: 'initiation_unconfirmed' });
     expect(saspay.transactions.size).toBe(1);
     const txId = [...saspay.transactions.keys()][0];
     saspay.setTransaction(txId, { status: 'SUCCESS' });
