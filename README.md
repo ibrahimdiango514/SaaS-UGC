@@ -10,12 +10,12 @@ SaaS francophone de création de contenus UGC et de croissance d'activité. Le S
 
 | Domaine | Implémentation |
 | --- | --- |
-| Pages publiques | Accueil avec formules **chargées depuis la base**, fonctionnalités, workflow, FAQ, confidentialité, conditions, 404 |
+| Pages publiques | Accueil avec **hero 3D** (react-three/fiber, lazy, repli image statique si WebGL absent ou mouvement réduit), formules **chargées depuis la base**, fonctionnalités, workflow, FAQ, confidentialité, conditions, 404 |
 | Authentification | Inscription, connexion, mot de passe oublié, callback Supabase, réinitialisation, déconnexion, session persistante |
 | Tableau de bord | Statistiques réelles, quotas, dernières générations, état des intégrations Groq / MuAPI / worker |
 | Projets | Création, recherche, filtre par statut, fiche détaillée, édition du brief, scripts, scènes, générations, suppression |
 | **UGC Studio MuAPI** | Catalogue et suivi présents. Une génération réelle n'est pas autorisée actuellement : le plafond est à 0 USD, la tarification est désactivée et la validité de la clé MuAPI n'a pas été confirmée par le fournisseur. Aucune génération payante n'a été lancée. |
-| **Business Grow** | `/app/business` : espace chat séparé, contexte conversationnel, attribution du fournisseur, mémoire métier et registre initial. Schéma et Edge Function présents en production ; disponibilité IA à confirmer après configuration des secrets et des modèles côté serveur. Aucun crédit du Studio n'est utilisé. |
+| **Business Grow** | `/app/business` : espace chat séparé, contexte conversationnel, **AI CORE multi-fournisseurs** (registre, routage par rôle, secours plafonné), **mémoire agent persistante** (déclarations explicites, consentement, effacement) et section **Contrôle IA** (routage, mémoire, activité). Administration : onglet **Contrôle IA** (budgets, registre, journal des appels). Aucun crédit du Studio n'est utilisé. |
 | Avatars | CRUD, **image de référence** uploadée dans `ugc-assets` pour les modèles MuAPI image → vidéo, avatar par défaut |
 | Scripts IA | Groq (accroche, script, CTA, angle, allégations à éviter, storyboard), accroches alternatives, enregistrement en base, approbation |
 | Prompts | CRUD de modèles, variables `{{...}}`, aperçu, favoris, modèles système, amélioration par Groq |

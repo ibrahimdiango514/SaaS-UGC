@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight, ArrowUpRight, BadgeCheck, Brain, Check, Clapperboard, Coins, Database,
@@ -89,6 +89,73 @@ const FAQ = [
 
 const TRUST = ['Un compte, deux espaces', 'Devis vérifié avant génération', 'Clés API côté serveur'];
 
+/* B3 — Hero 3D (react-three/fiber) : chargé en lazy (chunk three.js séparé),
+   avec repli systématique sur l'image statique si WebGL est absent, si le
+   mouvement est réduit (accessibilité), ou si la scène échoue. */
+const HeroScene = lazy(() => import('../components/HeroScene'));
+
+class HeroSceneBoundary extends Component<{
+  onFail: () => void;
+  fallback: ReactNode;
+  children: ReactNode;
+}, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onFail(); }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+
+const HERO_HEIGHT_CLASSES = 'h-[380px] w-full sm:h-[440px] lg:h-[560px]';
+
+function HeroVisual() {
+  const [webgl, setWebgl] = useState(true);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [sceneFailed, setSceneFailed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      setWebgl(Boolean(canvas.getContext('webgl2') ?? canvas.getContext('webgl')));
+    } catch {
+      setWebgl(false);
+    }
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReducedMotion(mq.matches);
+    const onChange = (event: MediaQueryListEvent) => setReducedMotion(event.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const staticImage = (
+    <img
+      src="/brand/vyora-hero.jpg"
+      alt="Direction artistique VYORA : lumière, matière et profondeur"
+      className={cn('object-cover object-center', HERO_HEIGHT_CLASSES)}
+    />
+  );
+
+  if (!webgl || reducedMotion || sceneFailed) return staticImage;
+
+  // L'image sert de fond pendant le chargement du chunk 3D et reste visible
+  // derrière la scène (canvas transparent) : l'aurora flotte sur la DA.
+  return (
+    <div className={`relative ${HERO_HEIGHT_CLASSES}`}>
+      <img
+        src="/brand/vyora-hero.jpg"
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full object-cover object-center"
+      />
+      <HeroSceneBoundary onFail={() => setSceneFailed(true)} fallback={staticImage}>
+        <Suspense fallback={null}>
+          <HeroScene />
+        </Suspense>
+      </HeroSceneBoundary>
+    </div>
+  );
+}
+
 export default function Landing() {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
@@ -151,11 +218,7 @@ export default function Landing() {
             <div className="relative mx-auto w-full max-w-xl lg:max-w-none">
               <div aria-hidden="true" className="absolute -inset-6 rounded-[2.5rem] bg-gradient-to-br from-cyan-400/15 via-transparent to-violet-500/20 blur-2xl" />
               <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#080d15] shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]">
-                <img
-                  src="/brand/vyora-hero.jpg"
-                  alt="Direction artistique VYORA : lumière, matière et profondeur"
-                  className="h-[380px] w-full object-cover object-center sm:h-[440px] lg:h-[560px]"
-                />
+                <HeroVisual />
                 <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,14,0.94),rgba(5,8,14,0.18)_58%,rgba(5,8,14,0.28))]" />
                 <span className="absolute right-4 top-4 rounded-full border border-white/15 bg-[#05080e]/75 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white backdrop-blur">
                   Créer · Développer
