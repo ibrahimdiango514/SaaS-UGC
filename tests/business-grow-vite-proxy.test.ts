@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer as createHttpServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 
@@ -8,6 +11,7 @@ describe('Business Grow Vite relay', () => {
   let upstream: Server;
   let vite: ViteDevServer;
   let baseUrl: string;
+  let viteCacheDir: string;
   let upstreamOpen = false;
   const previousUrl = process.env.VITE_SUPABASE_URL;
   const previousLocalFunction = process.env.VITE_BUSINESS_GROW_FUNCTION_URL;
@@ -39,8 +43,13 @@ describe('Business Grow Vite relay', () => {
     await new Promise<void>((resolve) => reservation.listen(0, '127.0.0.1', resolve));
     const vitePort = (reservation.address() as AddressInfo).port;
     await new Promise<void>((resolve) => reservation.close(() => resolve()));
+    // A test server must never share Vite's dependency cache with the live
+    // preview: closing/reoptimizing it can otherwise delete the preview's
+    // modules and make the browser render an empty page (504 Outdated Optimize Dep).
+    viteCacheDir = mkdtempSync(join(tmpdir(), 'vyora-vite-test-'));
     vite = await createViteServer({
       configFile: `${process.cwd()}/vite.config.ts`,
+      cacheDir: viteCacheDir,
       logLevel: 'silent',
       server: { host: '127.0.0.1', port: vitePort, strictPort: true },
     });
@@ -50,11 +59,17 @@ describe('Business Grow Vite relay', () => {
 
   afterAll(async () => {
     if (vite) await vite.close();
+    if (viteCacheDir) rmSync(viteCacheDir, { recursive: true, force: true });
     if (upstreamOpen) await new Promise<void>((resolve) => upstream.close(() => resolve()));
     if (previousUrl === undefined) delete process.env.VITE_SUPABASE_URL;
     else process.env.VITE_SUPABASE_URL = previousUrl;
     if (previousLocalFunction === undefined) delete process.env.VITE_BUSINESS_GROW_FUNCTION_URL;
     else process.env.VITE_BUSINESS_GROW_FUNCTION_URL = previousLocalFunction;
+  });
+
+  it('uses an isolated cache instead of the live preview dependency cache', () => {
+    expect(vite.config.cacheDir).toBe(viteCacheDir);
+    expect(vite.config.cacheDir).not.toBe(join(process.cwd(), 'node_modules', '.vite'));
   });
 
   it('forwards the JWT and public key only to the configured function, without cookies or Origin', async () => {
