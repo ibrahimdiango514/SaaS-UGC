@@ -1,0 +1,4 @@
+# Artefacts générés (regénérés à chaque exécution du banc)
+results/
+edge-bundle.cjs
+.state.json
