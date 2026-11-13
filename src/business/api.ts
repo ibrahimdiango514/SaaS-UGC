@@ -1,6 +1,5 @@
 import { supabase, SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from '../lib/supabase';
-
-const NETLIFY_PREVIEW_HOST_PATTERN = /^deploy-preview-\d+--[a-z0-9-]+\.netlify\.app$/i;
+import { DEFAULT_SUPABASE_URL, isLocalBusinessGrowFunctionUrl } from '../lib/public-config';
 
 function currentHostname(): string {
   return typeof window !== 'undefined' && typeof window.location?.hostname === 'string'
@@ -8,33 +7,17 @@ function currentHostname(): string {
     : '';
 }
 
-function isNetlifyDeployPreview(): boolean {
-  return NETLIFY_PREVIEW_HOST_PATTERN.test(currentHostname());
-}
-
 function isNetlifyHost(): boolean {
   return currentHostname().endsWith('.netlify.app');
 }
 
-function localFunctionUrl(): string | null {
-  if (!import.meta.env.DEV) return null;
+/** En développement, le serveur Vite, et non le navigateur, joint Supabase local. */
+function useLocalFunction(): boolean {
+  if (!import.meta.env.DEV) return false;
   const configured = (import.meta.env as Record<string, string | undefined>)
     .VITE_BUSINESS_GROW_FUNCTION_URL?.trim();
-  if (!configured) return null;
-  try {
-    const url = new URL(configured);
-    if (
-      url.protocol === 'http:'
-      && ['localhost', '127.0.0.1'].includes(url.hostname)
-      && url.port === '54321'
-      && url.pathname === '/functions/v1/business-grow'
-    ) return url.toString();
-  } catch {
-    throw new BusinessGrowApiError(
-      'VITE_BUSINESS_GROW_FUNCTION_URL doit cibler la fonction Supabase locale sur localhost:54321.',
-      'INVALID_LOCAL_FUNCTION_URL',
-    );
-  }
+  if (!configured) return false;
+  if (isLocalBusinessGrowFunctionUrl(configured)) return true;
   throw new BusinessGrowApiError(
     'VITE_BUSINESS_GROW_FUNCTION_URL doit cibler la fonction Supabase locale sur localhost:54321.',
     'INVALID_LOCAL_FUNCTION_URL',
@@ -181,11 +164,48 @@ export class BusinessGrowApiError extends Error {
   }
 }
 
-const NETLIFY_RELAY_ENDPOINTS = ['/api/business-grow', '/.netlify/functions/business-grow'];
+const RELAY_PATH = '/api/business-grow';
+const NETLIFY_FUNCTION_PATH = '/.netlify/functions/business-grow';
+type Transport = 'direct' | 'relay' | 'netlify-function';
+
+// Le canal qui a réellement répondu à une lecture est privilégié pour les
+// actions suivantes. Aucun jeton ou résultat utilisateur n'est mis en cache.
+const preferredTransport = new WeakMap<Window, Transport>();
+
+function currentWindow(): Window | null {
+  return typeof window === 'undefined' ? null : window;
+}
+
+function transportOrder(localOnly: boolean): Transport[] {
+  const defaults: Transport[] = localOnly
+    ? ['relay']
+    : isNetlifyHost()
+      // Les relais Netlify de ce dépôt ciblent le projet canonique en dur : ne
+      // jamais leur transmettre le JWT d'un autre projet configuré par Vite.
+      ? SUPABASE_URL.replace(/\/+$/, '') === DEFAULT_SUPABASE_URL
+        ? ['relay', 'netlify-function', 'direct']
+        : ['direct']
+      : ['direct', 'relay'];
+  const win = currentWindow();
+  const preferred = win ? preferredTransport.get(win) : undefined;
+  return preferred && defaults.includes(preferred)
+    ? [preferred, ...defaults.filter((item) => item !== preferred)]
+    : defaults;
+}
 
 /** URL de la fonction Edge, dérivée de la configuration Supabase publique. */
 function edgeFunctionUrl(): string {
   return `${SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/business-grow`;
+}
+
+const READ_ACTIONS = new Set([
+  'status', 'models.list', 'roles.list', 'routing.get', 'quota.status',
+  'requests.list', 'tools.list', 'integrations.list', 'conversations.list',
+  'messages.list', 'memory.get',
+]);
+
+function isReadOnly(action: string, values: Record<string, unknown>): boolean {
+  return READ_ACTIONS.has(action) || (action === 'modules.records' && values.op === 'list');
 }
 
 type TransportOutcome<T> =
@@ -194,33 +214,38 @@ type TransportOutcome<T> =
   | { kind: 'fatal'; error: BusinessGrowApiError };
 
 /**
- * Interprète une réponse HTTP de la fonction. Un 404 sur une *fonction* signifie
- * qu'aucun relais/point d'entrée n'est monté à cette adresse (repli légitime) ;
- * partout ailleurs c'est une vraie erreur applicative qu'il ne faut pas masquer.
+ * Un 404 métier structuré reste une erreur métier. Les erreurs de réseau, HTML
+ * et relais ne prouvent jamais que le backend est absent. Sur une écriture,
+ * une réponse perdue ou illisible ne permet pas de savoir si elle a été jouée.
  */
 async function readFunctionResponse<T>(response: Response): Promise<TransportOutcome<T>> {
-  const contentType = (response.headers?.get('Content-Type') ?? '').toLowerCase();
-  if (contentType.includes('text/html')) {
-    return { kind: 'retry', reason: `HTML ${response.status}` };
-  }
+  const contentType = (response.headers.get('Content-Type') ?? '').toLowerCase();
   let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    return { kind: 'retry', reason: `JSON invalide ${response.status}` };
-  }
-  if (response.status === 404) {
-    const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-    const error = body.error && typeof body.error === 'object'
-      ? body.error as Record<string, unknown>
-      : {};
-    // 404 métier renvoyé par la fonction (ex. MEMORY_ITEM_NOT_FOUND) : à propager.
-    if (typeof error.code === 'string' && error.code !== 'NOT_FOUND') {
-      return { kind: 'fatal', error: toApiError(payload, response.status) };
+  if (!contentType.includes('text/html')) {
+    try {
+      payload = await response.json();
+    } catch {
+      // La réponse est examinée ci-dessous, sans inventer un diagnostic de déploiement.
     }
-    return { kind: 'retry', reason: '404 sans fonction' };
+  }
+
+  const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const detail = body.error && typeof body.error === 'object'
+    ? body.error as Record<string, unknown>
+    : null;
+  if (response.status === 404 && typeof detail?.code !== 'string') {
+    return { kind: 'retry', reason: 'point d’entrée HTTP 404' };
+  }
+  if (payload === undefined) {
+    return { kind: 'retry', reason: `réponse illisible HTTP ${response.status}` };
   }
   if (response.status < 200 || response.status >= 300) {
+    const code = typeof detail?.code === 'string' ? detail.code : '';
+    if ([502, 504].includes(response.status) && [
+      'BUSINESS_GROW_UNAVAILABLE', 'BUSINESS_GROW_RELAY_UNAVAILABLE', 'BUSINESS_GROW_TIMEOUT',
+    ].includes(code)) {
+      return { kind: 'retry', reason: `relais HTTP ${response.status}` };
+    }
     return { kind: 'fatal', error: toApiError(payload, response.status) };
   }
   try {
@@ -239,67 +264,29 @@ function toApiError(payload: unknown, status: number): BusinessGrowApiError {
   const body = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const detail = body.error && typeof body.error === 'object'
     ? body.error as Record<string, unknown>
-    : {};
+    : body; // La passerelle Supabase renvoie aussi { code, message } à la racine.
+  const code = typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED';
+  if (status === 401 && /^(?:UNAUTHORIZED|INVALID_JWT)/i.test(code)) {
+    return new BusinessGrowApiError('Session VYORA invalide ou expirée. Reconnectez-vous.', 'UNAUTHENTICATED', status);
+  }
   return new BusinessGrowApiError(
     typeof detail.message === 'string' ? detail.message : 'La demande Business Grow a échoué.',
-    typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED',
+    code,
     status,
   );
 }
 
-/**
- * Relais same-origin (Netlify Edge/Function ou serveur de dev). Utilisé en premier
- * sur un aperçu Netlify — où l'appel direct à `*.supabase.co` peut être bloqué par
- * la politique réseau de l'environnement — puis comme repli sur toute autre origine.
- */
-async function invokeViaRelay<T>(
+async function attemptTransport<T>(
+  transport: Transport,
   action: string,
   values: Record<string, unknown>,
   accessToken: string,
 ): Promise<TransportOutcome<T>> {
-  const attempts: string[] = [];
-  for (const endpoint of NETLIFY_RELAY_ENDPOINTS) {
-    let response: Response;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_PUBLISHABLE_KEY,
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ action, ...values }),
-        signal: AbortSignal.timeout(45_000),
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'TimeoutError') {
-        return {
-          kind: 'fatal',
-          error: new BusinessGrowApiError(
-            'Le relais Business Grow ne répond pas dans le délai prévu.',
-            'BUSINESS_GROW_TIMEOUT',
-          ),
-        };
-      }
-      attempts.push(`${endpoint}: transport`);
-      continue;
-    }
-    const outcome = await readFunctionResponse<T>(response);
-    if (outcome.kind === 'retry') attempts.push(`${endpoint}: ${outcome.reason}`);
-    else return outcome;
-  }
-  return { kind: 'retry', reason: attempts.join(' | ') || 'relais absent' };
-}
-
-/** Appel direct à la fonction Edge Supabase, avec le JWT VYORA explicite. */
-async function invokeViaEdge<T>(
-  action: string,
-  values: Record<string, unknown>,
-  accessToken: string,
-): Promise<TransportOutcome<T>> {
+  const target = transport === 'direct' ? edgeFunctionUrl()
+    : transport === 'relay' ? RELAY_PATH : NETLIFY_FUNCTION_PATH;
   let response: Response;
   try {
-    response = await fetch(edgeFunctionUrl(), {
+    response = await fetch(target, {
       method: 'POST',
       headers: {
         apikey: SUPABASE_PUBLISHABLE_KEY,
@@ -307,21 +294,51 @@ async function invokeViaEdge<T>(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ action, ...values }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(isReadOnly(action, values) ? 15_000 : 45_000),
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'TimeoutError') {
-      return {
-        kind: 'fatal',
-        error: new BusinessGrowApiError(
-          'Le service Business Grow ne répond pas dans le délai prévu.',
-          'BUSINESS_GROW_TIMEOUT',
-        ),
-      };
-    }
-    return { kind: 'retry', reason: 'transport direct' };
+    const timeout = error instanceof DOMException && error.name === 'TimeoutError';
+    return {
+      kind: 'retry',
+      reason: timeout ? 'délai dépassé' : 'transport réseau',
+      // fetch ne distingue pas un échec avant l'envoi d'une réponse perdue après
+      // exécution : rejouer une mutation ici pourrait créer des doublons.
+    };
   }
-  return await readFunctionResponse<T>(response);
+  return readFunctionResponse<T>(response);
+}
+
+async function invokeWithFallback<T>(
+  action: string,
+  values: Record<string, unknown>,
+  accessToken: string,
+  localOnly: boolean,
+): Promise<T> {
+  const readOnly = isReadOnly(action, values);
+  const failures: string[] = [];
+  for (const transport of transportOrder(localOnly)) {
+    const outcome = await attemptTransport<T>(transport, action, values, accessToken);
+    if (outcome.kind === 'data') {
+      const win = currentWindow();
+      if (win) preferredTransport.set(win, transport);
+      return outcome.value;
+    }
+    if (outcome.kind === 'fatal') throw outcome.error;
+    failures.push(`${transport}: ${outcome.reason}`);
+    if (!readOnly) {
+      throw new BusinessGrowApiError(
+        'La réponse à cette action n’a pas pu être confirmée. Vérifiez son résultat avant de la relancer pour éviter un doublon.',
+        'BUSINESS_GROW_RESULT_UNKNOWN',
+      );
+    }
+  }
+
+  // Diagnostic sans JWT, contenu utilisateur ni affirmation sur l'état du déploiement.
+  console.warn('[business-grow] connexion impossible', { action, failures });
+  throw new BusinessGrowApiError(
+    'Impossible de joindre Business Grow depuis cet appareil. Vérifiez votre connexion puis réessayez.',
+    'BUSINESS_GROW_UNREACHABLE',
+  );
 }
 
 async function invoke<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
@@ -329,66 +346,14 @@ async function invoke<T>(action: string, values: Record<string, unknown> = {}): 
   if (sessionError) throw new BusinessGrowApiError(sessionError.message, 'SESSION_ERROR');
   if (!sessionData.session) throw new BusinessGrowApiError('Connectez-vous pour utiliser Business Grow.', 'UNAUTHENTICATED', 401);
 
-  const localUrl = localFunctionUrl();
-  if (localUrl) {
-    let response: Response;
-    try {
-      response = await fetch(localUrl, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_PUBLISHABLE_KEY,
-          Authorization: `Bearer ${sessionData.session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ action, ...values }),
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'TimeoutError') {
-        throw new BusinessGrowApiError(
-          'Le serveur local Business Grow ne répond pas dans le délai prévu.',
-          'BUSINESS_GROW_TIMEOUT',
-        );
-      }
-      throw new BusinessGrowApiError(
-        'Le serveur local Business Grow est injoignable. Vérifiez que la fonction Edge locale est démarrée.',
-        'BUSINESS_GROW_UNAVAILABLE',
-      );
-    }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new BusinessGrowApiError(
-        'Le serveur Business Grow a renvoyé une réponse invalide.',
-        'INVALID_RESPONSE',
-        response.status,
-      );
-    }
-    return parseResponse<T>(payload, response.status);
+  const localOnly = useLocalFunction();
+  const accessToken = sessionData.session.access_token;
+  if (!isReadOnly(action, values)) {
+    // Vérifier le canal par une lecture avant chaque écriture permet aussi de
+    // basculer si le réseau a changé depuis le dernier chargement de la page.
+    await invokeWithFallback('status', {}, accessToken, localOnly);
   }
-
-  const token = sessionData.session.access_token;
-  // Sur un aperçu Netlify, le relais same-origin est le chemin le plus sûr ;
-  // ailleurs on tente l'appel direct d'abord. Chaque chemin échoue vers l'autre :
-  // un blocage réseau d'un seul canal ne doit jamais faire croire à un backend absent.
-  const transports = isNetlifyDeployPreview() || isNetlifyHost()
-    ? [invokeViaRelay, invokeViaEdge]
-    : [invokeViaEdge, invokeViaRelay];
-
-  const failures: string[] = [];
-  for (const transport of transports) {
-    const outcome = await transport<T>(action, values, token);
-    if (outcome.kind === 'data') return outcome.value;
-    if (outcome.kind === 'fatal') throw outcome.error;
-    failures.push(outcome.reason);
-  }
-
-  throw new BusinessGrowApiError(
-    `Le service Business Grow est momentanément inaccessible depuis cet appareil (${failures.join(' ; ')}). Réessayez dans quelques instants.`,
-    'BUSINESS_GROW_UNREACHABLE',
-  );
+  return invokeWithFallback<T>(action, values, accessToken, localOnly);
 }
 
 function parseResponse<T>(payload: unknown, status: number): T {

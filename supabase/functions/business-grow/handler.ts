@@ -316,11 +316,19 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
       corsHeaders.set('Vary', 'Origin');
     }
 
+    if (request.method === 'OPTIONS') {
+      // Un préflight 403 est opaque dans le navigateur, même avec Allow-Origin.
+      // Autoriser uniquement la négociation CORS permet au POST de renvoyer un
+      // refus lisible ; aucune donnée ni action n'est exposée par OPTIONS.
+      if (origin && !originAllowed) {
+        corsHeaders.set('Access-Control-Allow-Origin', origin);
+        corsHeaders.set('Vary', 'Origin');
+      }
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
     if (origin && !originAllowed) {
-      // Le préflight et la requête refusés renvoient l'en-tête CORS de repli :
-      // sans lui, le navigateur transforme ce 403 explicite en erreur réseau
-      // (FunctionsFetchError), que le SaaS affichait à tort comme « backend
-      // absent ou non déployé ». Le refus reste un 403, il devient seulement lisible.
+      // Le POST est toujours refusé AVANT authentification et accès au store.
+      // L'en-tête CORS rend uniquement ce 403 lisible par l'origine refusée.
       return response(
         failure('ORIGIN_NOT_ALLOWED', 'Origine non autorisée.'),
         403,
@@ -329,7 +337,6 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
         { forceAllowOrigin: true },
       );
     }
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
     if (request.method !== 'POST') {
       return response(failure('METHOD_NOT_ALLOWED', 'Méthode non autorisée.'), 405, origin, dependencies.allowedOrigins);
     }

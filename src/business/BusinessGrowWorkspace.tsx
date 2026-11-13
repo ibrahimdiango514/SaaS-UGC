@@ -336,9 +336,10 @@ function providerStatus(provider: BusinessProviderStatus | undefined): {
   };
 }
 
-function ProviderStatusList({ statuses, compact = false }: {
+function ProviderStatusList({ statuses, compact = false, loading = false }: {
   statuses: BusinessProviderStatus[] | null;
   compact?: boolean;
+  loading?: boolean;
 }) {
   const providers = compact ? BUSINESS_PROVIDERS.filter((provider) => provider.id !== 'muapi').slice(0, 3) : BUSINESS_PROVIDERS;
   const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
@@ -349,13 +350,17 @@ function ProviderStatusList({ statuses, compact = false }: {
       <div className="min-w-0">
         <p className="text-sm font-medium text-slate-200">Assistant IA VYORA</p>
         <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-          {activeCount > 0
-            ? 'Les services IA sont disponibles.'
-            : 'Le contrôle de disponibilité est en cours.'}
+          {loading
+            ? 'Le contrôle de disponibilité est en cours.'
+            : statuses === null
+              ? 'Impossible de vérifier les services IA pour le moment.'
+              : activeCount > 0
+                ? 'Les services IA sont disponibles.'
+                : 'Aucun service IA vérifié pour le moment.'}
         </p>
       </div>
-      <Badge tone={activeCount > 0 ? 'success' : 'warning'}>
-        {activeCount > 0 ? 'Disponible' : 'Vérification…'}
+      <Badge tone={!loading && activeCount > 0 ? 'success' : 'warning'}>
+        {loading ? 'Vérification…' : statuses === null ? 'Statut inconnu' : activeCount > 0 ? 'Disponible' : 'Non vérifié'}
       </Badge>
     </div>
   );
@@ -369,6 +374,7 @@ function AssistantView({
   quota,
   tools,
   conversations,
+  conversationsLoaded,
   selectedConversationId,
   messages,
   loading,
@@ -401,6 +407,7 @@ function AssistantView({
   quota: BusinessQuotaStatus | null;
   tools: BusinessToolExecution[];
   conversations: BusinessConversation[];
+  conversationsLoaded: boolean;
   selectedConversationId: string | null;
   messages: BusinessMessage[];
   loading: boolean;
@@ -460,7 +467,13 @@ function AssistantView({
             <span className="grid h-10 w-10 place-items-center rounded-xl border border-violet-200/15 bg-violet-300/[0.08] text-violet-100"><Brain size={19} /></span>
             <div>
               <h2 className="font-display text-sm font-semibold text-white">VYORA Business</h2>
-              <p className="text-xs text-slate-500">AI Director · {availableProviders.length ? `${availableProviders.length} service(s) IA vérifié(s)` : 'aucun service IA vérifié'}</p>
+              <p className="text-xs text-slate-500">AI Director · {backendLoading
+                ? 'vérification des services IA…'
+                : providers === null
+                  ? 'statut des services IA indisponible'
+                  : availableProviders.length
+                    ? `${availableProviders.length} service(s) IA vérifié(s)`
+                    : 'aucun service IA vérifié'}</p>
             </div>
           </div>
           <Button
@@ -735,7 +748,7 @@ function AssistantView({
               })}
             </div>
           )}
-          {backendReady && !availableProviders.length && (
+          {backendReady && providers !== null && !availableProviders.length && (
             <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs leading-relaxed text-amber-100/80" role="status">
               Aucun service IA vérifié n’est actuellement disponible. Votre demande sera conservée dans l’historique, mais aucune réponse ne sera simulée.
             </div>
@@ -769,9 +782,9 @@ function AssistantView({
         <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-white">Conversations</h2>
-            <span className="text-[10px] text-slate-500">{conversations.length} enregistrée(s)</span>
+            <span className="text-[10px] text-slate-500">{conversationsLoaded ? `${conversations.length} enregistrée(s)` : '—'}</span>
           </div>
-          {conversations.length ? (
+          {conversationsLoaded && conversations.length ? (
             <div className="max-h-64 space-y-1 overflow-y-auto">
               {conversations.map((conversation) => (
                 <div
@@ -873,13 +886,11 @@ function AssistantView({
           ) : (
             <div className="rounded-xl border border-dashed border-white/[0.10] px-4 py-6 text-center">
               <MessageSquare size={18} className="mx-auto text-slate-600" />
-              <p className="mt-2 text-xs font-medium text-slate-400">Aucune conversation enregistrée</p>
+              <p className="mt-2 text-xs font-medium text-slate-400">
+                {conversationsLoaded ? 'Aucune conversation enregistrée' : backendLoading ? 'Chargement de vos conversations…' : 'Historique indisponible'}
+              </p>
               <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
-                {backendReady
-                  ? 'Créez une conversation pour commencer.'
-                  : backendLoading
-                    ? 'Chargement de vos conversations…'
-                    : 'Réessayez quand la connexion est rétablie.'}
+                {conversationsLoaded ? 'Créez une conversation pour commencer.' : backendLoading ? 'Connexion au service…' : 'Réessayez quand la connexion est rétablie.'}
               </p>
             </div>
           )}
@@ -890,11 +901,15 @@ function AssistantView({
             <Zap size={15} className="text-cyan-300" />
             <h2 className="text-sm font-semibold text-white">Services IA VYORA</h2>
           </div>
-          <ProviderStatusList statuses={providers} compact />
+          <ProviderStatusList statuses={providers} compact loading={backendLoading} />
           <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
-            {availableProviders.length === 0
-              ? 'Aucun service IA vérifié pour le moment. La vérification se relance automatiquement.'
-              : 'Disponibilité vérifiée côté serveur.'}
+            {backendLoading
+              ? 'Vérification en cours.'
+              : providers === null
+                ? 'Le statut des services IA n’a pas pu être chargé.'
+                : availableProviders.length === 0
+                  ? 'Aucun service IA vérifié pour le moment.'
+                  : 'Disponibilité vérifiée côté serveur.'}
           </p>
         </section>
 
@@ -1451,6 +1466,7 @@ export default function BusinessGrowWorkspace() {
   const [integrationBusyKey, setIntegrationBusyKey] = useState<string | null>(null);
   const [integrationNotice, setIntegrationNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
+  const [conversationsLoaded, setConversationsLoaded] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BusinessMessage[]>([]);
   const [memory, setMemory] = useState<BusinessMemory | null>(null);
@@ -1520,6 +1536,7 @@ export default function BusinessGrowWorkspace() {
     setIntegrations([]);
     setSavedRouting([]);
     setConversations([]);
+    setConversationsLoaded(false);
     setSelectedConversationId(null);
     setMessages([]);
     setMemory(null);
@@ -1537,22 +1554,33 @@ export default function BusinessGrowWorkspace() {
   const loadConversations = useCallback(async () => {
     const requestId = ++conversationLoadSequence.current;
     const requestScope = accountScope;
-    const result = await businessGrowApi.listConversations();
-    if (requestId !== conversationLoadSequence.current || accountScopeRef.current !== requestScope) return;
-    setConversations(result.conversations);
-    setSelectedConversationId((current) =>
-      current && result.conversations.some((conversation) => conversation.id === current)
-        ? current
-        : result.conversations[0]?.id ?? null,
-    );
+    try {
+      const result = await businessGrowApi.listConversations();
+      if (requestId !== conversationLoadSequence.current || accountScopeRef.current !== requestScope) return;
+      setConversations(result.conversations);
+      setConversationsLoaded(true);
+      setSelectedConversationId((current) =>
+        current && result.conversations.some((conversation) => conversation.id === current)
+          ? current
+          : result.conversations[0]?.id ?? null,
+      );
+    } catch (error) {
+      if (requestId === conversationLoadSequence.current && accountScopeRef.current === requestScope) setConversationsLoaded(false);
+      throw error;
+    }
   }, [accountScope]);
 
   const loadStatus = useCallback(async () => {
     const requestId = ++statusLoadSequence.current;
     const requestScope = accountScope;
-    const result = await businessGrowApi.getStatus();
-    if (requestId !== statusLoadSequence.current || accountScopeRef.current !== requestScope) return;
-    setProviders(result.providers);
+    try {
+      const result = await businessGrowApi.getStatus();
+      if (requestId !== statusLoadSequence.current || accountScopeRef.current !== requestScope) return;
+      setProviders(result.providers);
+    } catch (error) {
+      if (requestId === statusLoadSequence.current && accountScopeRef.current === requestScope) setProviders(null);
+      throw error;
+    }
   }, [accountScope]);
 
   const loadOperationalDetails = useCallback(async () => {
@@ -1609,12 +1637,15 @@ export default function BusinessGrowWorkspace() {
       setBackendLoading(false);
       setProviders(null);
       setConversations([]);
+      setConversationsLoaded(false);
       setSelectedConversationId(null);
       setMessages([]);
       setError('Session VYORA indisponible. Reconnectez-vous pour charger Business Grow.');
       return;
     }
     setBackendReady(false);
+    setProviders(null);
+    setConversationsLoaded(false);
     setError(null);
     setBackendLoading(true);
     let [statusResult, conversationsResult] = await Promise.allSettled([loadStatus(), loadConversations()]);
@@ -1630,6 +1661,8 @@ export default function BusinessGrowWorkspace() {
     setBackendLoading(false);
     if (statusResult.status === 'fulfilled' || conversationsResult.status === 'fulfilled') {
       setBackendReady(true);
+      if (statusResult.status === 'rejected') setError('Impossible de vérifier les services IA. Réessayez.');
+      else if (conversationsResult.status === 'rejected') setError('Impossible de charger l’historique des conversations. Réessayez.');
       void loadOperationalDetails();
       return;
     }
@@ -2055,14 +2088,14 @@ export default function BusinessGrowWorkspace() {
   const staleProviders = providersNeedingVerification(providers);
   const showStaleNotice = backendReady && staleProviders.length > 0;
   const noVerifiedProvider = availableProviderCount === 0;
-  const providerStatusTone = availableProviderCount
+  const providerStatusTone = !backendLoading && providers !== null && availableProviderCount
     ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100'
-    : backendReady
+    : !backendLoading && providers !== null
       ? 'border-amber-400/20 bg-amber-400/[0.06] text-amber-100'
       : 'border-white/10 bg-white/[0.04] text-slate-300';
-  const providerStatusDot = availableProviderCount
+  const providerStatusDot = !backendLoading && providers !== null && availableProviderCount
     ? 'bg-emerald-300'
-    : backendReady
+    : !backendLoading && providers !== null
       ? 'bg-amber-300'
       : 'bg-slate-500';
 
@@ -2085,13 +2118,13 @@ export default function BusinessGrowWorkspace() {
           </div>
           <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium', providerStatusTone)} data-testid="business-overall-status">
             <span className={cn('h-1.5 w-1.5 rounded-full', providerStatusDot)} />
-            {availableProviderCount
-              ? `${availableProviderCount} service(s) IA vérifié(s)`
-              : backendReady
-                ? 'IA non disponible'
-                : backendLoading
-                  ? 'Connexion…'
-                  : 'Backend en attente'}
+            {backendLoading
+              ? 'Connexion…'
+              : providers === null
+                ? 'Statut IA indisponible'
+                : availableProviderCount
+                  ? `${availableProviderCount} service(s) IA vérifié(s)`
+                  : 'IA non disponible'}
           </span>
         </div>
       </header>
@@ -2139,7 +2172,7 @@ export default function BusinessGrowWorkspace() {
       <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
           <div className="flex items-center gap-2 text-xs text-slate-400"><MessageSquare size={14} className="text-cyan-300" /> Conversations</div>
-          <p className="mt-2 text-xl font-semibold text-white">{backendReady ? conversations.length : '—'}</p>
+          <p className="mt-2 text-xl font-semibold text-white">{conversationsLoaded ? conversations.length : '—'}</p>
           <p className="mt-1 text-[11px] text-slate-500">Historique de votre espace métier</p>
         </div>
         <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
@@ -2178,7 +2211,7 @@ export default function BusinessGrowWorkspace() {
           ))}
           <div className="hidden border-t border-white/[0.07] px-2 pt-3 lg:block">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Historique</p>
-            <p className="text-xs leading-relaxed text-slate-500">{conversations.length} conversation(s) dans VYORA.</p>
+            <p className="text-xs leading-relaxed text-slate-500">{conversationsLoaded ? `${conversations.length} conversation(s) dans VYORA.` : 'Historique non chargé.'}</p>
           </div>
         </nav>
 
@@ -2195,6 +2228,7 @@ export default function BusinessGrowWorkspace() {
               quota={quota}
               tools={tools}
               conversations={conversations}
+              conversationsLoaded={conversationsLoaded}
               selectedConversationId={selectedConversationId}
               messages={messages}
               loading={loadingMessages}

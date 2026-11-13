@@ -74,10 +74,12 @@ describe('Business Grow browser API', () => {
       expect(error).toMatchObject({ code: 'BUSINESS_GROW_UNREACHABLE' });
       // Aucune affirmation d'absence de déploiement : ce serait un diagnostic inventé.
       expect((error as BusinessGrowApiError).message).not.toMatch(/absent|déployée|pas encore installé/i);
-      // Les deux transports ont réellement été tentés (direct puis relais same-origin).
+      // Sur Vite, le relais same-origin constitue le secours du chemin direct.
       const targets = fetcher.mock.calls.map((call) => String(call[0]));
       expect(targets[0]).toContain('/functions/v1/business-grow');
-      expect(targets).toContain('/api/business-grow');
+      expect(targets[1]).toBe('/api/business-grow');
+      expect(targets).not.toContain('/.netlify/functions/business-grow');
+      expect((error as BusinessGrowApiError).message).not.toMatch(/JSON invalide|404/);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -124,7 +126,7 @@ describe('Business Grow browser API', () => {
     }
   });
 
-  it('can target only the local Supabase Edge endpoint in development', async () => {
+  it('routes local Supabase development through the same-origin relay', async () => {
     vi.stubEnv(
       'VITE_BUSINESS_GROW_FUNCTION_URL',
       'http://127.0.0.1:54321/functions/v1/business-grow',
@@ -137,7 +139,7 @@ describe('Business Grow browser API', () => {
     try {
       await expect(businessGrowApi.listConversations()).resolves.toEqual({ conversations: [] });
       const [url, init] = fetcher.mock.calls[0];
-      expect(String(url)).toBe('http://127.0.0.1:54321/functions/v1/business-grow');
+      expect(String(url)).toBe('/api/business-grow');
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-session-token');
       expect(new Headers(init?.headers).get('apikey')).toBe('test-publishable-key');
       expect(invoke).not.toHaveBeenCalled();
@@ -297,6 +299,122 @@ describe('Business Grow browser API', () => {
       await expect(businessGrowApi.getStatus()).resolves.toEqual({ providers: [{ provider_key: 'groq' }] });
       expect(String(fetcher.mock.calls[0][0])).toBe('/api/business-grow');
       expect(String(fetcher.mock.calls[1][0])).toBe('/.netlify/functions/business-grow');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('selects the working Vite relay before issuing a mutation', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-demo.e2b.app' } });
+    const calls: Array<{ target: string; action: string }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push({ target, action });
+      if (target.includes('supabase.co')) throw new TypeError('Network blocked');
+      return new Response(JSON.stringify({ data: action === 'status'
+        ? { providers: [] } : { conversationId: 'created-once' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.getStatus();
+      await expect(businessGrowApi.createConversation('Essai', null)).resolves.toEqual({ conversationId: 'created-once' });
+      expect(calls.map(({ target, action }) => [target.includes('supabase.co') ? 'direct' : target, action])).toEqual([
+        ['direct', 'status'], ['/api/business-grow', 'status'],
+        ['/api/business-grow', 'status'], ['/api/business-grow', 'conversations.create'],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rechecks the channel with a read when the network changes before a mutation', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-changing.e2b.app' } });
+    let directBlocked = true;
+    let relayBlocked = false;
+    const calls: Array<{ target: string; action: string }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push({ target, action });
+      if (target.includes('supabase.co') && directBlocked) throw new TypeError('Blocked');
+      if (target === '/api/business-grow' && relayBlocked) {
+        return new Response(JSON.stringify({ error: { code: 'BUSINESS_GROW_RELAY_UNAVAILABLE' } }), { status: 502 });
+      }
+      return new Response(JSON.stringify({ data: action === 'status'
+        ? { providers: [] } : { conversationId: 'one-conversation' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.getStatus();
+      directBlocked = false;
+      relayBlocked = true;
+      await expect(businessGrowApi.createConversation('Essai', null)).resolves.toEqual({ conversationId: 'one-conversation' });
+      expect(calls.filter((call) => call.action === 'conversations.create')).toEqual([
+        { target: 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/business-grow', action: 'conversations.create' },
+      ]);
+      expect(calls.slice(2).map(({ target, action }) => [target.includes('supabase.co') ? 'direct' : target, action])).toEqual([
+        ['/api/business-grow', 'status'], ['direct', 'status'], ['direct', 'conversations.create'],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['network', 'relay-error', 'html'] as const)(
+    'never replays a mutation when the result is ambiguous (%s)', async (failure) => {
+      vi.stubGlobal('window', { location: { hostname: 'vyora-ugc.netlify.app' } });
+      const calls: Array<{ target: string; action: string }> = [];
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input);
+        const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+        calls.push({ target, action });
+        if (action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+        if (failure === 'network') throw new TypeError('response lost');
+        if (failure === 'relay-error') {
+          return new Response(JSON.stringify({ error: { code: 'BUSINESS_GROW_UNAVAILABLE' } }), { status: 502 });
+        }
+        return new Response('<html>réponse illisible</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+      });
+      vi.stubGlobal('fetch', fetcher);
+      try {
+        const error = await businessGrowApi.createConversation('Ne pas dupliquer', null).catch((caught: unknown) => caught);
+        expect(error).toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+        expect((error as Error).message).toMatch(/vérifiez son résultat/i);
+        expect(calls.filter((call) => call.action === 'conversations.create')).toEqual([
+          { target: '/api/business-grow', action: 'conversations.create' },
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('shows an expired gateway JWT as an authentication error without retrying another transport', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-auth.e2b.app' } });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      code: 'UNAUTHORIZED_INVALID_JWT_FORMAT', message: 'Invalid JWT',
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const error = await businessGrowApi.getStatus().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'UNAUTHENTICATED', status: 401 });
+      expect((error as Error).message).toMatch(/session.*reconnectez/i);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('propagates an explicit CORS denial instead of claiming a network failure', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-denied.e2b.app' } });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: {
+      code: 'ORIGIN_NOT_ALLOWED', message: 'Origine non autorisée.',
+    } }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'ORIGIN_NOT_ALLOWED', status: 403 });
+      expect(fetcher).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
     }

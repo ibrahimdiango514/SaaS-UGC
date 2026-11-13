@@ -206,7 +206,7 @@ describe('Business Grow', () => {
 
   it('charge le backend sans prétendre disposer d’un service IA', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    expect(await screen.findByText(/Aucun service IA vérifié/)).toBeTruthy();
+    expect(await screen.findByText(/Aucun service IA vérifié n’est actuellement disponible/)).toBeTruthy();
     expect(screen.getByTestId('business-overall-status').textContent).toContain('IA non disponible');
 
     const composer = screen.getByLabelText('Votre demande') as HTMLTextAreaElement;
@@ -460,10 +460,33 @@ describe('Business Grow', () => {
     expect(screen.getByTestId('business-ai-loading')).toBeTruthy();
     expect(screen.queryByTestId('business-ai-unavailable')).toBeNull();
     expect(await screen.findByText('Business Grow ne répond pas pour le moment', undefined, { timeout: 4000 })).toBeTruthy();
-    expect(screen.getByTestId('business-overall-status').textContent).toContain('Backend en attente');
+    expect(screen.getByTestId('business-overall-status').textContent).toContain('Statut IA indisponible');
+    expect(screen.getByText(/statut des services IA indisponible/i)).toBeTruthy();
+    expect(screen.getByText('Historique indisponible')).toBeTruthy();
+    expect(screen.queryByText('Aucune conversation enregistrée')).toBeNull();
+    expect(screen.queryByText(/aucun service IA vérifié/i)).toBeNull();
     expect((screen.getByRole('button', { name: 'Envoyer' }) as HTMLButtonElement).disabled).toBe(true);
     // Aucune cause inventée sur le déploiement.
     expect(screen.queryByText(/pas déployée|absent ou injoignable|pas encore installé/i)).toBeNull();
+  });
+
+  it('ne confond pas un statut IA non chargé avec une absence de fournisseur', async () => {
+    businessMocks.getStatus.mockRejectedValue(new Error('Réseau indisponible.'));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+
+    expect(await screen.findByText(/statut des services IA indisponible/i)).toBeTruthy();
+    expect(screen.getByTestId('business-overall-status').textContent).toContain('Statut IA indisponible');
+    expect(screen.queryByText(/aucun service IA vérifié/i)).toBeNull();
+    expect(screen.getByText('Aucune conversation enregistrée')).toBeTruthy();
+  });
+
+  it('ne présente pas un historique non chargé comme vide lorsque le statut IA répond', async () => {
+    businessMocks.listConversations.mockRejectedValue(new Error('Réseau indisponible.'));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+
+    expect(await screen.findByText('Historique indisponible')).toBeTruthy();
+    expect(screen.queryByText('Aucune conversation enregistrée')).toBeNull();
+    expect(screen.getByText('Impossible de charger l’historique des conversations. Réessayez.')).toBeTruthy();
   });
 
   it('enregistre et révoque le consentement avant d’afficher les données mémoire', async () => {

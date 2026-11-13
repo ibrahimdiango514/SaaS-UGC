@@ -112,18 +112,27 @@ describe('Business Grow Edge handler', () => {
     expect(store.listProviders).not.toHaveBeenCalled();
   });
 
-  it('rejects disallowed preflight origins', async () => {
-    const { handler } = fixture();
-    const response = await handler(new Request('https://edge.test/business-grow', {
+  it('allows preflight negotiation but rejects disallowed POSTs before authentication or store access', async () => {
+    const { handler, dependencies, store } = fixture();
+    const origin = 'https://attacker.example';
+    const preflight = await handler(new Request('https://edge.test/business-grow', {
       method: 'OPTIONS',
-      headers: { Origin: 'https://attacker.example' },
+      headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,apikey,content-type' },
     }));
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+    expect(preflight.headers.get('Access-Control-Allow-Headers')).toContain('authorization');
 
-    expect(response.status).toBe(403);
-    // Le refus est renvoyé AVEC l'en-tête d'origine : sans lui le navigateur
-    // transforme ce 403 en erreur réseau, affichée à tort « backend absent ».
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://attacker.example');
-    expect(await response.json()).toMatchObject({ error: { code: 'ORIGIN_NOT_ALLOWED' } });
+    const denied = await handler(new Request('https://edge.test/business-grow', {
+      method: 'POST',
+      headers: { Origin: origin, Authorization: 'Bearer valid-user-session', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'conversations.create', title: 'ne doit pas exister' }),
+    }));
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+    expect(await denied.json()).toMatchObject({ error: { code: 'ORIGIN_NOT_ALLOWED' } });
+    expect(dependencies.getUserId).not.toHaveBeenCalled();
+    expect(store.createConversation).not.toHaveBeenCalled();
   });
 
   it('derives the owner from the validated session, not a body user id', async () => {
@@ -854,11 +863,15 @@ describe('Business Grow Edge handler', () => {
       method: 'OPTIONS',
       headers: { Origin: 'https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com' },
     }));
-    expect(spoofedPreflight.status).toBe(403);
-    expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin'))
-      .toBe('https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com');
-    const spoofedBody = await spoofedPreflight.json() as { error?: { code?: string } };
-    expect(spoofedBody.error?.code).toBe('ORIGIN_NOT_ALLOWED');
+    expect(spoofedPreflight.status).toBe(204);
+    const spoofedOrigin = 'https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com';
+    expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin')).toBe(spoofedOrigin);
+    const denied = await handler(new Request('https://edge.test/business-grow', {
+      method: 'POST', headers: { Origin: spoofedOrigin, Authorization: 'Bearer valid-user-session' },
+      body: JSON.stringify({ action: 'status' }),
+    }));
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ error: { code: 'ORIGIN_NOT_ALLOWED' } });
   });
 
   it('falls back cleanly when preferredModelKey is unavailable and allowFallback is true', async () => {
@@ -987,16 +1000,19 @@ describe('Origines des aperçus de travail (régression CORS)', () => {
       'https://4180-ia19ukd7j0vjzx70dsuks.e2b.app.evil.com',
       'http://4180-ia19ukd7j0vjzx70dsuks.e2b.app',
     ]) {
-      const blocked = await handler(new Request('https://edge.test/business-grow', {
+      const preflight = await handler(new Request('https://edge.test/business-grow', {
         method: 'OPTIONS',
         headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
       }));
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+      const blocked = await handler(new Request('https://edge.test/business-grow', {
+        method: 'POST', headers: { Origin: origin, Authorization: 'Bearer valid-user-session' },
+        body: JSON.stringify({ action: 'status' }),
+      }));
       expect(blocked.status).toBe(403);
-      // Refus explicite et lisible : l'origine est renvoyée pour que le navigateur
-      // expose le 403 ORIGIN_NOT_ALLOWED au lieu d'une erreur réseau opaque.
       expect(blocked.headers.get('Access-Control-Allow-Origin')).toBe(origin);
-      const blockedBody = await blocked.json() as { error?: { code?: string } };
-      expect(blockedBody.error?.code).toBe('ORIGIN_NOT_ALLOWED');
+      expect(await blocked.json()).toMatchObject({ error: { code: 'ORIGIN_NOT_ALLOWED' } });
     }
   });
 });
