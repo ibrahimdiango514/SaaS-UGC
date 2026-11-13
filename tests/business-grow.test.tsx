@@ -628,12 +628,15 @@ describe('Business Grow', () => {
     expect(await screen.findByText(/Connexion vérifiée avec succès/)).toBeTruthy();
   });
 
-  it('affiche les intégrations planifiées dans l’onglet Intégrations sans fausse connexion', async () => {
+  it('affiche les intégrations sans fausse connexion et propose une demande d’activation', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
     expect(await screen.findByTestId('business-integrations')).toBeTruthy();
-    expect(screen.getByTestId('connector-facebook').textContent).toContain('Planifié');
-    expect(screen.getByTestId('connector-shopify').textContent).toContain('Planifié');
+    const facebook = screen.getByTestId('connector-facebook').textContent ?? '';
+    expect(facebook).toContain('Non connecté');
+    expect(facebook).toContain('Demander l’activation');
+    expect(facebook).not.toContain('Connecté');
+    expect(screen.getByTestId('connector-shopify').textContent).toContain('Non connecté');
     expect(screen.getByTestId('connector-woocommerce')).toBeTruthy();
   });
 

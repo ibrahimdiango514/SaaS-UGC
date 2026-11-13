@@ -33,8 +33,10 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('parcours public', () => {
   it('affiche la page d’accueil en français avec les formules issues de la base', async () => {
     render(<App />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Vos idées prennent forme');
-    expect(screen.getByText('Fonctionnalités')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('fait grandir vos ambitions');
+    expect(screen.getByRole('heading', { name: /Transformez vos idées et vos produits/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Ne laissez plus votre entreprise/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Votre entreprise mérite mieux/ })).toBeTruthy();
     await waitFor(() => expect(screen.getByText('Découverte')).toBeTruthy());
     expect(screen.getByText('Pour découvrir VYORA')).toBeTruthy();
     expect(screen.getByText('Studio', { selector: 'h3' })).toBeTruthy();
@@ -43,7 +45,7 @@ describe('parcours public', () => {
 
   it('navigue vers l’inscription et affiche le formulaire complet', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('link', { name: /Commencer/ }));
+    fireEvent.click(screen.getAllByRole('link', { name: /Créer mon compte/ })[0]);
     await waitFor(() => expect(window.location.pathname).toBe('/inscription'));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte'), { timeout: 5000 });
     expect(screen.getByLabelText('Nom complet')).toBeTruthy();

@@ -151,6 +151,14 @@ export interface BusinessIntegrationConnection {
   updated_at: string;
 }
 
+export interface BusinessModuleRecord {
+  id: string;
+  category: string;
+  data: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BusinessSendOptions {
   roleKey?: string;
   workspaceId?: string | null;
@@ -430,6 +438,28 @@ export const businessGrowApi = {
     invoke<Record<string, unknown>>('tools.resolve', { executionId, decision }),
   listIntegrations: () =>
     invoke<{ connections: BusinessIntegrationConnection[] }>('integrations.list'),
+  requestIntegration: (connectorKey: string, workspaceId?: string | null) =>
+    invoke<{ connectorKey: string; status: string }>('integrations.request', {
+      connectorKey,
+      ...(workspaceId ? { workspaceId } : {}),
+    }),
+  cancelIntegration: (connectorKey: string) =>
+    invoke<{ connectorKey: string; cancelled: boolean }>('integrations.cancel', { connectorKey }),
+  disconnectIntegration: (connectorKey: string) =>
+    invoke<{ connectorKey: string; disconnected: boolean }>('integrations.disconnect', { connectorKey }),
+  listModuleRecords: (category: string) =>
+    invoke<{ records: BusinessModuleRecord[] }>('modules.records', { category, op: 'list' }),
+  createModuleRecord: (category: string, data: Record<string, unknown>, dedupeKey?: string | null) =>
+    invoke<{ recordId: string }>('modules.records', {
+      category,
+      op: 'create',
+      data,
+      ...(dedupeKey ? { dedupeKey } : {}),
+    }),
+  updateModuleRecord: (category: string, recordId: string, data: Record<string, unknown>) =>
+    invoke<{ updated: boolean }>('modules.records', { category, op: 'update', recordId, data }),
+  deleteModuleRecord: (category: string, recordId: string) =>
+    invoke<{ deleted: boolean }>('modules.records', { category, op: 'delete', recordId }),
   listConversations: () => invoke<{ conversations: BusinessConversation[] }>('conversations.list'),
   createConversation: (title: string, workspaceId: string | null) =>
     invoke<{ conversationId: string }>('conversations.create', { title, workspaceId }),

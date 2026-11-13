@@ -231,6 +231,58 @@ const store: BusinessGrowStore = {
   async listIntegrationConnections(userId) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_integration_connections(${userId}::uuid)`);
   },
+  async requestIntegrationConnection(userId, connectorKey, workspaceId) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_request_integration_connection(
+        ${userId}::uuid, ${connectorKey}, ${workspaceId}::uuid
+      ) as status
+    `;
+    return row.status as string;
+  },
+  async cancelIntegrationRequest(userId, connectorKey) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_cancel_integration_request(${userId}::uuid, ${connectorKey}) as cancelled
+    `;
+    return row.cancelled as boolean;
+  },
+  async disconnectIntegrationConnection(userId, connectorKey) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_disconnect_integration_connection(${userId}::uuid, ${connectorKey}) as disconnected
+    `;
+    return row.disconnected as boolean;
+  },
+  async listModuleRecords(userId, category) {
+    return asRows(await requiredSql()`
+      select * from saas_business.bg_list_module_records(${userId}::uuid, ${category})
+    `);
+  },
+  async createModuleRecord(userId, category, data, dedupeKey = null) {
+    const db = requiredSql();
+    const [row] = await db`
+      select saas_business.bg_create_module_record(
+        ${userId}::uuid,
+        ${category},
+        ${db.json(asJsonValue(data))},
+        ${dedupeKey}
+      ) as id
+    `;
+    return row.id as string;
+  },
+  async updateModuleRecord(userId, recordId, data) {
+    const db = requiredSql();
+    const [row] = await db`
+      select saas_business.bg_update_module_record(
+        ${userId}::uuid, ${recordId}::uuid, ${db.json(asJsonValue(data))}
+      ) as updated
+    `;
+    return row.updated as boolean;
+  },
+  async deleteModuleRecord(userId, recordId) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_delete_module_record(${userId}::uuid, ${recordId}::uuid) as deleted
+    `;
+    return row.deleted as boolean;
+  },
   async listConversations(userId) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_conversations(${userId}::uuid, 50)`);
   },

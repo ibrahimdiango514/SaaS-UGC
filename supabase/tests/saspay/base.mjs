@@ -13,6 +13,7 @@ const steps = [
     create table saas_ugc.ugc_products (id uuid primary key default gen_random_uuid(), workspace_id uuid, name text);`],
   ['bg_core', readMigration('20261110172827_business_grow_saas_business.sql')],
   ['bg_ai', readMigration('20261110172909_business_grow_ai_extensions.sql')],
+  ['bg_modules', readMigration('20261114100000_business_grow_module_records.sql')],
   // Migration prod 20261112054553 (absente du dépôt) : colonnes commerciales des formules.
   ['bg_catalog', `alter table saas_business.plans add column if not exists tagline text, add column if not exists monthly_price_minor bigint,
       add column if not exists currency text not null default 'XOF', add column if not exists monthly_credit_units integer,

@@ -36,6 +36,10 @@ function fixture() {
     }),
     failRequest: vi.fn(async () => undefined),
     finalizeAttempt: vi.fn(async () => undefined),
+    listModuleRecords: vi.fn(async () => []),
+    createModuleRecord: vi.fn(async () => 'ffffffff-ffff-4fff-8fff-ffffffffffff'),
+    updateModuleRecord: vi.fn(async () => true),
+    deleteModuleRecord: vi.fn(async () => true),
   };
   const dependencies: BusinessGrowDependencies = {
     store,
@@ -890,6 +894,72 @@ describe('Business Grow Edge handler', () => {
       },
     });
     expect(store.selectRoute).toHaveBeenCalledTimes(2);
+  });
+
+  it('liste les enregistrements d’un module métier autorisé', async () => {
+    const { handler, store } = fixture();
+    store.listModuleRecords = vi.fn(async () => [{
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      category: 'bg_module_lead_rescue',
+      data: { name: 'Amina', status: 'nouveau' },
+      created_at: '2026-11-13T10:00:00Z',
+      updated_at: '2026-11-13T10:00:00Z',
+    }]);
+
+    const response = await handler(request({ action: 'modules.records', op: 'list', category: 'bg_module_lead_rescue' }));
+    expect(response.status).toBe(200);
+    expect(store.listModuleRecords).toHaveBeenCalledWith(userA, 'bg_module_lead_rescue');
+    expect(await response.json()).toMatchObject({
+      data: { records: [{ data: { name: 'Amina', status: 'nouveau' } }] },
+    });
+  });
+
+  it('refuse une catégorie de module inconnue avant tout accès au stockage', async () => {
+    const { handler, store } = fixture();
+    const response = await handler(request({ action: 'modules.records', op: 'list', category: 'public.ugc_projects' }));
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error?: { code?: string } }).error?.code).toBe('INVALID_MODULE');
+    expect(store.listModuleRecords).not.toHaveBeenCalled();
+  });
+
+  it('crée un enregistrement avec une clé de déduplication', async () => {
+    const { handler, store } = fixture();
+    const response = await handler(request({
+      action: 'modules.records',
+      op: 'create',
+      category: 'bg_module_operations_manager',
+      data: { title: 'Relancer la facture', status: 'a_faire' },
+      dedupeKey: 'playbook:record',
+    }));
+    expect(response.status).toBe(200);
+    expect(store.createModuleRecord).toHaveBeenCalledWith(
+      userA, 'bg_module_operations_manager',
+      { title: 'Relancer la facture', status: 'a_faire' },
+      'playbook:record',
+    );
+  });
+
+  it('renvoie 404 quand la mise à jour ne trouve aucun enregistrement', async () => {
+    const { handler, store } = fixture();
+    store.updateModuleRecord = vi.fn(async () => false);
+    const response = await handler(request({
+      action: 'modules.records',
+      op: 'update',
+      category: 'bg_module_lead_rescue',
+      recordId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      data: { status: 'relance' },
+    }));
+    expect(response.status).toBe(404);
+    expect((await response.json() as { error?: { code?: string } }).error?.code).toBe('MODULE_RECORD_NOT_FOUND');
+  });
+
+  it('signale honnêtement un stockage de modules non déployé', async () => {
+    const { dependencies } = fixture();
+    const store = { ...dependencies.store, listModuleRecords: undefined };
+    const unavailable = createBusinessGrowHandler({ ...dependencies, store });
+    const response = await unavailable(request({ action: 'modules.records', op: 'list', category: 'bg_module_lead_rescue' }));
+    expect(response.status).toBe(503);
+    expect((await response.json() as { error?: { code?: string } }).error?.code).toBe('MODULES_UNAVAILABLE');
   });
 });
 

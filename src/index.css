@@ -40,7 +40,7 @@
   .btn-sm { @apply px-3 py-1.5 text-xs; }
   .btn-md { @apply px-4 py-2.5 text-sm; }
   .btn-lg { @apply px-6 py-3 text-base; }
-  .btn-icon { @apply h-9 w-9 p-0; }
+  .btn-icon { @apply h-11 w-11 p-0; }
 
   .field { @apply flex w-full flex-col gap-1.5; }
   .field-label { @apply text-xs font-semibold uppercase tracking-wide text-slate-400; }
@@ -193,9 +193,11 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
   }
 }
 
@@ -279,4 +281,215 @@
   .studio-pill-active {
     @apply border-cyan-400/45 bg-cyan-400/[0.12] text-cyan-100;
   }
+}
+
+/* --------------------------------------------------------------------------- */
+/* VYORA — vitrine d’accueil premium                                           */
+/* Uniquement des animations `opacity` / `transform` ; tout le contenu reste    */
+/* lisible si une animation ne joue pas (filet de sécurité côté composant).     */
+/* --------------------------------------------------------------------------- */
+@layer base {
+  html { scroll-padding-top: 5.75rem; }
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+}
+
+@layer components {
+  .landing-root {
+    @apply relative min-h-screen overflow-x-hidden bg-[#04070d] text-slate-200;
+  }
+  .landing-root ::selection { background: rgba(34, 211, 238, 0.28); color: #fff; }
+  .landing-root a:focus-visible,
+  .landing-root button:focus-visible,
+  .landing-root summary:focus-visible {
+    @apply outline-none ring-2 ring-cyan-300/80 ring-offset-2 ring-offset-[#04070d];
+    border-radius: 0.75rem;
+  }
+  .landing-shell { @apply mx-auto w-full max-w-[1240px] px-4 sm:px-6 lg:px-8; }
+  .landing-rule { @apply h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent; }
+  .landing-eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[9.5px] font-semibold uppercase tracking-[0.2em];
+  }
+  .landing-h1 {
+    @apply font-display text-[2.15rem] font-semibold leading-[1.03] tracking-[-0.045em] text-white sm:text-[3.15rem] lg:text-[3.9rem];
+    text-wrap: balance;
+  }
+  .landing-h2 {
+    @apply font-display text-[1.8rem] font-semibold leading-[1.08] tracking-[-0.04em] text-white sm:text-[2.4rem] lg:text-[2.8rem];
+    text-wrap: balance;
+  }
+  .landing-h3 {
+    @apply font-display text-lg font-semibold tracking-[-0.02em] text-white sm:text-xl;
+  }
+  .landing-lead { @apply text-[15px] leading-7 text-slate-300 sm:text-base sm:leading-8; }
+  .landing-body { @apply text-[13.5px] leading-relaxed text-slate-400 sm:text-sm; }
+  .landing-card {
+    @apply relative overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-[#080d16]/85 backdrop-blur-xl;
+    box-shadow: 0 30px 80px -55px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  .landing-card-hover {
+    @apply transition duration-300 hover:-translate-y-1 hover:border-cyan-300/25;
+  }
+  .landing-card-hover:hover {
+    box-shadow: 0 42px 90px -55px rgba(34, 211, 238, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  .landing-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-medium text-slate-300;
+  }
+  .landing-grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.075) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.075) 1px, transparent 1px);
+    background-size: 58px 58px;
+    mask-image: radial-gradient(ellipse 72% 62% at 50% 32%, black 36%, transparent 100%);
+    -webkit-mask-image: radial-gradient(ellipse 72% 62% at 50% 32%, black 36%, transparent 100%);
+  }
+  .landing-aurora {
+    @apply pointer-events-none absolute rounded-full blur-[110px];
+  }
+  .landing-problem {
+    @apply relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.022] p-4 transition duration-300 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.04] sm:p-5;
+  }
+  .landing-problem::before {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .landing-problem:hover::before { opacity: 1; }
+  .landing-plan {
+    @apply relative flex flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#080d16]/85 p-5;
+  }
+  .landing-plan-featured {
+    border-color: rgba(34, 211, 238, 0.34);
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(34, 211, 238, 0.14), transparent 62%),
+      #080d16;
+    box-shadow: 0 48px 110px -65px rgba(34, 211, 238, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  .landing-link {
+    @apply inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-200 transition hover:text-white;
+  }
+  .landing-shine { position: relative; overflow: hidden; }
+  .landing-shine::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-130%) skewX(-18deg);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+    transition: transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+  }
+  .landing-shine:hover::after { transform: translateX(130%) skewX(-18deg); }
+
+  /* Révélation au défilement ------------------------------------------------ */
+  .vyora-reveal {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0);
+    transition: opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1), transform 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .vyora-reveal-in { opacity: 1; transform: none; }
+
+  .vyora-words { display: inline; }
+  .vyora-word {
+    display: inline-block;
+    opacity: 0;
+    animation: vyoraWordIn 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .vyora-rotate-item {
+    display: inline-block;
+    animation: vyoraRotateIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .vyora-float { animation: vyoraFloat 7.5s ease-in-out infinite; }
+  .vyora-float-soft { animation: vyoraFloatSoft 9s ease-in-out infinite; }
+  .vyora-glow-pulse { animation: vyoraGlowPulse 10s ease-in-out infinite; }
+  .vyora-flow-dot { animation: vyoraDotTravel 3.4s ease-in-out infinite; }
+
+  .vyora-chart-line { stroke-dasharray: 1; stroke-dashoffset: 0; }
+  .vyora-chart-line-anim { stroke-dashoffset: 1; }
+  .vyora-reveal-in .vyora-chart-line-anim {
+    animation: vyoraDrawLine 1.7s 0.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .vyora-bar-grow { transform-origin: left center; transform: scaleX(0.06); }
+  .vyora-reveal-in .vyora-bar-grow {
+    animation: vyoraBarGrow 1.05s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  .vyora-ring-draw { stroke-dasharray: 113; stroke-dashoffset: 113; }
+  .vyora-reveal-in .vyora-ring-draw {
+    animation: vyoraRingDraw 1.6s 0.2s ease-out forwards;
+  }
+}
+
+@keyframes vyoraWordIn {
+  0% { opacity: 0; transform: translate3d(0, 0.42em, 0); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes vyoraRotateIn {
+  0% { opacity: 0.25; transform: translate3d(0, 0.3em, 0); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes vyoraFloat {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -9px, 0); }
+}
+@keyframes vyoraFloatSoft {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -5px, 0); }
+}
+@keyframes vyoraGlowPulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.97); }
+  50% { opacity: 0.75; transform: scale(1.04); }
+}
+@keyframes vyoraDotTravel {
+  0% { opacity: 0; transform: translate(-50%, -50%) translateX(-34px); }
+  18% { opacity: 1; }
+  82% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) translateX(34px); }
+}
+@keyframes vyoraDrawLine {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes vyoraBarGrow {
+  from { transform: scaleX(0.06); }
+  to { transform: scaleX(1); }
+}
+@keyframes vyoraRingDraw {
+  from { stroke-dashoffset: 113; }
+  to { stroke-dashoffset: 38; }
+}
+
+/* Deuxième ligne du titre principal : révélation douce sans découpe de texte.
+   Le dégradé est appliqué à un enfant direct du bloc animé (et non à des
+   `inline-block`), sinon `background-clip: text` ne peint pas les mots. */
+@keyframes vyoraLineIn {
+  0% { opacity: 0; transform: translate3d(0, 0.3em, 0); }
+  100% { opacity: 1; transform: none; }
+}
+@layer components {
+  .vyora-line-reveal { animation: vyoraLineIn 0.9s 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; }
+}
+
+@layer components {
+  /* Cibles tactiles confortables sur toute la vitrine. */
+  .landing-root .btn { min-height: 44px; }
+  .landing-root .btn-lg { min-height: 48px; }
+  .landing-root a,
+  .landing-root button { touch-action: manipulation; }
+}
+
+
+/* Accueil post-authentification : orbite légère, désactivée si mouvement réduit. */
+.vyora-home-orbit { animation: vyoraHomeFloat 7s ease-in-out infinite; }
+@keyframes vyoraHomeFloat {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vyora-home-orbit { animation: none !important; }
 }

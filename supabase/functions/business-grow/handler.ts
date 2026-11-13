@@ -42,7 +42,11 @@ export type BusinessAction =
   | 'requests.list'
   | 'tools.list'
   | 'tools.resolve'
-  | 'integrations.list';
+  | 'integrations.list'
+  | 'integrations.request'
+  | 'integrations.cancel'
+  | 'integrations.disconnect'
+  | 'modules.records';
 
 export interface RoutingOptions {
   selectionMode?: 'auto' | 'manual';
@@ -137,6 +141,13 @@ export interface BusinessGrowStore {
     output_result?: Record<string, unknown>;
   }>;
   listIntegrationConnections?: (userId: string) => Promise<unknown[]>;
+  requestIntegrationConnection?: (userId: string, connectorKey: string, workspaceId: string | null) => Promise<string>;
+  cancelIntegrationRequest?: (userId: string, connectorKey: string) => Promise<boolean>;
+  disconnectIntegrationConnection?: (userId: string, connectorKey: string) => Promise<boolean>;
+  listModuleRecords?: (userId: string, category: string) => Promise<unknown[]>;
+  createModuleRecord?: (userId: string, category: string, data: Record<string, unknown>, dedupeKey?: string | null) => Promise<string>;
+  updateModuleRecord?: (userId: string, recordId: string, data: Record<string, unknown>) => Promise<boolean>;
+  deleteModuleRecord?: (userId: string, recordId: string) => Promise<boolean>;
 }
 
 export class NoVerifiedProviderRouteError extends Error {
@@ -226,6 +237,14 @@ function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+const INTEGRATION_CONNECTOR_KEYS = new Set(['facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce']);
+
+function integrationConnectorKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const key = value.trim().toLowerCase();
+  return INTEGRATION_CONNECTOR_KEYS.has(key) ? key : null;
 }
 
 function uuid(value: unknown): string | null {
@@ -573,6 +592,99 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             : [];
           data = { connections };
           break;
+        }
+        case 'integrations.request': {
+          if (!dependencies.store.requestIntegrationConnection) {
+            return response(failure('INTEGRATIONS_UNAVAILABLE', 'Les demandes de connexion ne sont pas encore disponibles.'), 503, origin, dependencies.allowedOrigins);
+          }
+          const connectorKey = integrationConnectorKey(body.connectorKey);
+          if (!connectorKey) {
+            return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) {
+            return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const status = await dependencies.store.requestIntegrationConnection(userId, connectorKey, workspaceId);
+          data = { connectorKey, status };
+          break;
+        }
+        case 'integrations.cancel': {
+          if (!dependencies.store.cancelIntegrationRequest) {
+            return response(failure('INTEGRATIONS_UNAVAILABLE', 'Les demandes de connexion ne sont pas encore disponibles.'), 503, origin, dependencies.allowedOrigins);
+          }
+          const connectorKey = integrationConnectorKey(body.connectorKey);
+          if (!connectorKey) {
+            return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const cancelled = await dependencies.store.cancelIntegrationRequest(userId, connectorKey);
+          data = { connectorKey, cancelled };
+          break;
+        }
+        case 'integrations.disconnect': {
+          if (!dependencies.store.disconnectIntegrationConnection) {
+            return response(failure('INTEGRATIONS_UNAVAILABLE', 'La révocation n’est pas encore disponible.'), 503, origin, dependencies.allowedOrigins);
+          }
+          const connectorKey = integrationConnectorKey(body.connectorKey);
+          if (!connectorKey) {
+            return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const disconnected = await dependencies.store.disconnectIntegrationConnection(userId, connectorKey);
+          data = { connectorKey, disconnected };
+          break;
+        }
+        case 'modules.records': {
+          const category = string(body.category, 80);
+          const op = string(body.op, 20) || 'list';
+          if (!/^bg_module_[a-z0-9_]{2,60}$/.test(category)) {
+            return response(failure('INVALID_MODULE', 'Module métier inconnu.'), 400, origin, dependencies.allowedOrigins);
+          }
+          if (!dependencies.store.listModuleRecords) {
+            return response(
+              failure('MODULES_UNAVAILABLE', 'Le stockage des modules métier n’est pas encore déployé.'),
+              503, origin, dependencies.allowedOrigins,
+            );
+          }
+          if (op === 'list') {
+            data = { records: await dependencies.store.listModuleRecords(userId, category) };
+            break;
+          }
+          if (op === 'create') {
+            const recordData = object(body.data);
+            if (!Object.keys(recordData).length || !dependencies.store.createModuleRecord) {
+              return response(failure('INVALID_MODULE_DATA', 'Données du module invalides.'), 400, origin, dependencies.allowedOrigins);
+            }
+            const dedupeKey = body.dedupeKey == null ? null : string(body.dedupeKey, 200);
+            const recordId = await dependencies.store.createModuleRecord(userId, category, recordData, dedupeKey || null);
+            data = { recordId };
+            break;
+          }
+          if (op === 'update') {
+            const recordId = uuid(body.recordId);
+            const recordData = object(body.data);
+            if (!recordId || !Object.keys(recordData).length || !dependencies.store.updateModuleRecord) {
+              return response(failure('INVALID_MODULE_RECORD', 'Enregistrement ou données invalides.'), 400, origin, dependencies.allowedOrigins);
+            }
+            const updated = await dependencies.store.updateModuleRecord(userId, recordId, recordData);
+            if (!updated) {
+              return response(failure('MODULE_RECORD_NOT_FOUND', 'Enregistrement introuvable.'), 404, origin, dependencies.allowedOrigins);
+            }
+            data = { updated };
+            break;
+          }
+          if (op === 'delete') {
+            const recordId = uuid(body.recordId);
+            if (!recordId || !dependencies.store.deleteModuleRecord) {
+              return response(failure('INVALID_MODULE_RECORD', 'Enregistrement invalide.'), 400, origin, dependencies.allowedOrigins);
+            }
+            const deleted = await dependencies.store.deleteModuleRecord(userId, recordId);
+            if (!deleted) {
+              return response(failure('MODULE_RECORD_NOT_FOUND', 'Enregistrement introuvable.'), 404, origin, dependencies.allowedOrigins);
+            }
+            data = { deleted };
+            break;
+          }
+          return response(failure('INVALID_MODULE_OPERATION', 'Opération de module inconnue.'), 400, origin, dependencies.allowedOrigins);
         }
         case 'conversations.list':
           data = { conversations: await dependencies.store.listConversations(userId) };

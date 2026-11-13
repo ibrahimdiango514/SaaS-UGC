@@ -1,0 +1,274 @@
+{
+  "branch": "arena/ada94e4c-saas-ugc",
+  "base_commit": "5b6bc240a7a9f9ba7f316b0e5565ba207c7ef7ea",
+  "date": "2026-11-13",
+  "scope": "Hub post-connexion /app et 13 modules metier Business Growth + 3 fondations",
+  "checks": {
+    "tsc_build": {
+      "status": "pass",
+      "errors": 0
+    },
+    "vitest": {
+      "status": "pass",
+      "files": 67,
+      "tests": 998
+    },
+    "vite_build": {
+      "status": "pass",
+      "index_kb": 587.77,
+      "index_gzip_kb": 163.21,
+      "business_module_workspace_kb": 22.72,
+      "registry_kb": 35.95,
+      "business_grow_kb": 139.32
+    },
+    "edge_artifact": {
+      "status": "pass",
+      "sha256": "aff2ff1c455545b4c87692811c8ad02ad383c23f619cd6727284430c33db5701",
+      "chars": 41538,
+      "gzip_bytes": 12656,
+      "base64_chars": 16876
+    },
+    "edge_imports": {
+      "status": "pass"
+    },
+    "sql_saspay": {
+      "status": "pass",
+      "checks": 52
+    },
+    "sql_modules": {
+      "status": "pass",
+      "checks": 9
+    },
+    "git_diff_check": {
+      "status": "pass"
+    },
+    "agent_brief": {
+      "status": "pass",
+      "route": "/app/business/modules/lead-rescue -> /app/business",
+      "draft_has_prompt": true,
+      "draft_has_record": true,
+      "draft_has_status": true,
+      "draft_has_guardrail": true,
+      "overflow": 0
+    }
+  },
+  "routes": [
+    "/app",
+    "/app/studio/accueil",
+    "/app/studio",
+    "/app/business",
+    "/app/business?section=integrations",
+    "/app/business?section=growth&growthTab=crm",
+    "/app/business/modules",
+    "/app/business/modules/:moduleKey"
+  ],
+  "modules": {
+    "persisted": [
+      "lead-rescue",
+      "sales-automation",
+      "customer-recovery",
+      "payment-recovery",
+      "order-cart-recovery",
+      "social-growth",
+      "smart-inventory",
+      "finance-intelligence",
+      "operations-manager",
+      "customer-support-ai",
+      "supplier-delivery",
+      "dispute-shield",
+      "revenue-leak"
+    ],
+    "foundations": [
+      "ai-agent",
+      "integrations-hub",
+      "smart-crm"
+    ],
+    "total": 16
+  },
+  "responsive": [
+    {
+      "shot": "01-hub-1440",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 1554,
+      "smallTargets": 0
+    },
+    {
+      "shot": "02-catalogue-1440",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 2292,
+      "smallTargets": 0
+    },
+    {
+      "shot": "03-lead-rescue-1440",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 1479,
+      "smallTargets": 0
+    },
+    {
+      "shot": "04-sales-automation-1440",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 1363,
+      "smallTargets": 0
+    },
+    {
+      "shot": "05-fuites-1440",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 1700,
+      "smallTargets": 0
+    },
+    {
+      "shot": "06-business-1440",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 1270,
+      "smallTargets": 1
+    },
+    {
+      "shot": "07-studio-1440",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 1779,
+      "smallTargets": 7
+    },
+    {
+      "shot": "09-hub-390",
+      "width": 390,
+      "scrollWidth": 390,
+      "height": 2719,
+      "smallTargets": 0
+    },
+    {
+      "shot": "10-catalogue-390",
+      "width": 390,
+      "scrollWidth": 390,
+      "height": 5151,
+      "smallTargets": 0
+    },
+    {
+      "shot": "11-lead-rescue-390",
+      "width": 390,
+      "scrollWidth": 390,
+      "height": 3090,
+      "smallTargets": 0
+    },
+    {
+      "shot": "12-fuites-390",
+      "width": 390,
+      "scrollWidth": 390,
+      "height": 3052,
+      "smallTargets": 0
+    },
+    {
+      "shot": "13-hub-1024",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "height": 1647,
+      "smallTargets": 0
+    },
+    {
+      "shot": "14-catalogue-1024",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "height": 3169,
+      "smallTargets": 0
+    },
+    {
+      "shot": "15-lead-rescue-1024",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "height": 1537,
+      "smallTargets": 0
+    },
+    {
+      "shot": "16-studio-1024",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "height": 1917,
+      "smallTargets": 6
+    },
+    {
+      "shot": "17-fuites-1024",
+      "width": 1024,
+      "scrollWidth": 1024,
+      "height": 1835,
+      "smallTargets": 0
+    },
+    {
+      "shot": "hub-820",
+      "width": 820,
+      "scrollWidth": 820,
+      "height": 2155,
+      "smallTargets": 0
+    },
+    {
+      "shot": "catalogue-820",
+      "width": 820,
+      "scrollWidth": 820,
+      "height": 3228,
+      "smallTargets": 0
+    },
+    {
+      "shot": "lead-rescue-820",
+      "width": 820,
+      "scrollWidth": 820,
+      "height": 1837,
+      "smallTargets": 0
+    },
+    {
+      "shot": "fuites-820",
+      "width": 820,
+      "scrollWidth": 820,
+      "height": 1859,
+      "smallTargets": 0
+    },
+    {
+      "shot": "studio-820",
+      "width": 820,
+      "scrollWidth": 820,
+      "height": 2663,
+      "smallTargets": 6
+    }
+  ],
+  "crud_flow": {
+    "ops": [
+      "list",
+      "list",
+      "create",
+      "list",
+      "update",
+      "list",
+      "update",
+      "list",
+      "delete",
+      "list"
+    ],
+    "created": {
+      "name": "Salif Traoré",
+      "company": "Studio Sahel",
+      "source": "instagram",
+      "estimatedValue": 125000,
+      "lastContactAt": "2026-11-13",
+      "nextAction": "Envoyer le devis",
+      "status": "nouveau"
+    },
+    "quickAction": {
+      "status": "relance",
+      "lastContactAt": "2026-11-13"
+    },
+    "updatedValue": 130000,
+    "deleteConfirmed": true
+  },
+  "screenshots": "screenshots/01..19",
+  "limitations": [
+    "Integrations Hub: six contrats de connecteurs lisibles, mais aucun OAuth ni publication externe (badge Planifie).",
+    "Social Growth: calendrier et statuts reels, aucune publication automatique.",
+    "Customer Support AI: brouillon de reponse prepare, aucun envoi automatique.",
+    "AI Business Agent: repond uniquement si un fournisseur est verifie; sinon aucune reponse simulee.",
+    "Migration non appliquee en production, fonction Edge non redeployee, aucun commit/push/deploiement."
+  ]
+}

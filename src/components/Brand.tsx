@@ -53,7 +53,7 @@ export function BrandLockup({
       <BrandSymbol size={symbolSize} />
       <span className="flex flex-col leading-none">
         <BrandName className="text-[15px]" />
-        {tagline && <span className="mt-1.5 text-[9px] font-medium tracking-[0.16em] text-slate-400">CREATE. EVOLVE. GROW.</span>}
+        {tagline && <span className="mt-1.5 whitespace-nowrap text-[9px] font-medium tracking-[0.14em] text-slate-400">CREATE. EVOLVE. GROW.</span>}
       </span>
     </span>
   );

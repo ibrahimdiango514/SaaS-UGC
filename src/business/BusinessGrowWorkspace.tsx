@@ -2,16 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useLocation } from 'react-router-dom';
 import {
   Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, Loader2, LockKeyhole,
-  MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, X, Zap,
+  MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, X, Zap,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { listBrands, listProducts } from '../lib/api';
-import { humanizeError } from '../lib/errors';
+import { asAppError, humanizeError } from '../lib/errors';
 import {
   buildStudioLocationStateFromBrief,
   parseBusinessGrowEntryIntent,
   type BusinessGrowEntryIntent,
+  type BusinessGrowGrowthTab,
 } from '../contracts/business-grow';
 import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
 import GrowthWorkspace from './growth/GrowthWorkspace';
@@ -1343,35 +1344,90 @@ function ProvidersView({
   );
 }
 
-function IntegrationsView({ connections }: { connections: BusinessIntegrationConnection[] }) {
-  const byConnector = new Map(connections.map((conn) => [conn.connector_key, conn]));
+function IntegrationsView({
+  connections, busyKey, notice, onRequest, onCancel, onDisconnect,
+}: {
+  connections: BusinessIntegrationConnection[];
+  busyKey: string | null;
+  notice: { tone: 'success' | 'error'; text: string } | null;
+  onRequest: (connectorKey: string) => void;
+  onCancel: (connectorKey: string) => void;
+  onDisconnect: (connectorKey: string) => void;
+}) {
+  const statusPriority: Record<string, number> = { connected: 4, pending: 3, error: 2, disconnected: 1, unconfigured: 0 };
+  const byConnector = new Map<string, BusinessIntegrationConnection>();
+  for (const conn of connections) {
+    const prev = byConnector.get(conn.connector_key);
+    if (!prev || (statusPriority[conn.status] ?? 0) > (statusPriority[prev.status] ?? 0)) {
+      byConnector.set(conn.connector_key, conn);
+    }
+  }
   return (
     <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="business-integrations">
-      <div className="mb-5 max-w-2xl">
-        <h2 className="text-lg font-semibold text-white">Connecteurs métier (planifiés)</h2>
+      <div className="mb-5 max-w-3xl">
+        <h2 className="text-lg font-semibold text-white">Intégrations et connexions sécurisées</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Les contrats d’intégration définissent les autorisations par espace de travail. Aucune connexion ou publication externe n’est simulée.
+          Les connecteurs ci-dessous tracent une demande d’activation réelle. Aucune connexion n’est déclarée opérationnelle
+          avant l’échange OAuth ou la validation des identifiants côté serveur. Les secrets restent dans Supabase Vault,
+          jamais dans le navigateur.
         </p>
       </div>
+
+      {notice && (
+        <div className={`mb-4 rounded-xl border px-3.5 py-2.5 text-xs ${notice.tone === 'success' ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100' : 'border-rose-400/20 bg-rose-400/[0.06] text-rose-100'}`} role="status">
+          {notice.text}
+        </div>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2">
         {INTEGRATION_DEFINITIONS.map((contract: IntegrationDefinition) => {
           const persisted = byConnector.get(contract.id);
+          const status = persisted?.status ?? 'unconfigured';
+          const busy = busyKey?.startsWith(`${contract.id}:`) ?? false;
+          const tone = status === 'connected' ? 'success' : status === 'pending' ? 'warning' : status === 'error' ? 'danger' : 'neutral';
+          const label = status === 'connected' ? 'Connecté' : status === 'pending' ? 'Demande enregistrée' : status === 'error' ? 'Erreur de connexion' : status === 'disconnected' ? 'Déconnecté' : 'Non connecté';
           return (
-            <article key={contract.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`connector-${contract.id}`}>
+            <article key={contract.id} className="flex flex-col rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`connector-${contract.id}`}>
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-white">{contract.name}</h3>
                   <p className="mt-1 text-[11px] text-slate-500">Authentification : {contract.authorization}</p>
                 </div>
-                <Badge tone="neutral">{persisted?.status ?? 'Planifié'}</Badge>
+                <Badge tone={tone}>{label}</Badge>
               </div>
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs leading-relaxed text-slate-400">
                 Capacités proposées : {contract.proposedCapabilities.join(', ')}
               </p>
-              <p className="mt-1 text-[11px] text-slate-500">{contract.note}</p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{contract.note}</p>
+              {persisted?.updated_at && (
+                <p className="mt-2 text-[10px] text-slate-600">Dernière activité : {new Date(persisted.updated_at).toLocaleString('fr-FR')}</p>
+              )}
+              <div className="mt-auto pt-3">
+                {status === 'connected' ? (
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDisconnect(contract.id)}>
+                    {busy ? 'Révocation…' : 'Révoquer la connexion'}
+                  </Button>
+                ) : status === 'pending' ? (
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => onCancel(contract.id)}>
+                    {busy ? 'Annulation…' : 'Annuler la demande'}
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRequest(contract.id)}>
+                    {busy ? 'Enregistrement…' : status === 'error' || status === 'disconnected' ? 'Redemander l’activation' : 'Demander l’activation'}
+                  </Button>
+                )}
+              </div>
             </article>
           );
         })}
+      </div>
+
+      <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-300/15 bg-amber-400/[0.04] px-3.5 py-3 text-[11px] leading-relaxed text-amber-100/80">
+        <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+        <p>
+          La synchronisation, les erreurs fournisseur et la révocation seront visibles ici dès qu’une application OAuth
+          sera configurée. Aucune donnée externe n’est importée tant que la connexion réelle n’existe pas.
+        </p>
       </div>
     </section>
   );
@@ -1392,6 +1448,8 @@ export default function BusinessGrowWorkspace() {
   const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
   const [tools, setTools] = useState<BusinessToolExecution[]>([]);
   const [integrations, setIntegrations] = useState<BusinessIntegrationConnection[]>([]);
+  const [integrationBusyKey, setIntegrationBusyKey] = useState<string | null>(null);
+  const [integrationNotice, setIntegrationNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BusinessMessage[]>([]);
@@ -1426,6 +1484,25 @@ export default function BusinessGrowWorkspace() {
     if (parsedIntent.section) setSection(parsedIntent.section);
     if (parsedIntent.roleKey) setRoleKey(parsedIntent.roleKey);
   }, [parsedIntent]);
+
+  // Les liens de découverte (Integrations Hub, Smart CRM) peuvent cibler une
+  // section précise sans dépendre d'un état de navigation perdu au rechargement.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const requestedSection = params.get('section');
+    const requestedTab = params.get('growthTab');
+    const validSections: BusinessSection[] = ['chat', 'growth', 'company', 'memory', 'providers', 'integrations'];
+    const sectionValue = validSections.find((value) => value === requestedSection);
+    const validTabs = ['overview', 'company', 'goals', 'catalog', 'market', 'crm', 'strategy', 'activity', 'settings'];
+    const growthTab = validTabs.find((value) => value === requestedTab) as BusinessGrowGrowthTab | undefined;
+    if (!sectionValue && !growthTab) return;
+    if (sectionValue) setSection(sectionValue);
+    setEntryIntent((current) => current ?? {
+      version: 'reelora-bg-entry-v1',
+      ...(sectionValue ? { section: sectionValue } : {}),
+      ...(growthTab ? { growthTab } : {}),
+    });
+  }, [location.search]);
 
   useEffect(() => {
     accountScopeRef.current = accountScope;
@@ -1497,6 +1574,32 @@ export default function BusinessGrowWorkspace() {
       setSavedRouting(routingRes.value.preferences);
     }
   }, [accountScope]);
+
+  const handleIntegrationAction = useCallback(async (
+    action: 'request' | 'cancel' | 'disconnect', connectorKey: string,
+  ) => {
+    setIntegrationBusyKey(`${connectorKey}:${action}`);
+    setIntegrationNotice(null);
+    try {
+      if (action === 'request') await businessGrowApi.requestIntegration(connectorKey, workspaceId ?? null);
+      else if (action === 'cancel') await businessGrowApi.cancelIntegration(connectorKey);
+      else await businessGrowApi.disconnectIntegration(connectorKey);
+      const refreshed = await businessGrowApi.listIntegrations();
+      setIntegrations(refreshed.connections);
+      setIntegrationNotice({
+        tone: 'success',
+        text: action === 'request'
+          ? 'Demande enregistrée. Aucune connexion n’est active tant que l’autorisation réelle n’a pas été validée.'
+          : action === 'cancel'
+            ? 'Demande annulée.'
+            : 'Connexion révoquée. Les secrets associés ne sont plus utilisés.',
+      });
+    } catch (error) {
+      setIntegrationNotice({ tone: 'error', text: asAppError(error).message });
+    } finally {
+      setIntegrationBusyKey(null);
+    }
+  }, [workspaceId]);
 
   const refreshWorkspace = useCallback(async () => {
     const requestId = ++workspaceLoadSequence.current;
@@ -1977,7 +2080,7 @@ export default function BusinessGrowWorkspace() {
             </div>
             <h1 className="vyora-display text-2xl tracking-tight text-white sm:text-3xl">Votre copilote business</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
-              Intelligence, stratégie et croissance, reliées à votre espace Studio UGC VYORA.
+              Intelligence, stratégie et croissance, reliées à votre contexte métier.
             </p>
           </div>
           <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium', providerStatusTone)} data-testid="business-overall-status">
@@ -1992,6 +2095,24 @@ export default function BusinessGrowWorkspace() {
           </span>
         </div>
       </header>
+
+      <Link
+        to="/app/business/modules"
+        className="group flex flex-col gap-3 rounded-2xl border border-brand-400/20 bg-brand-500/[0.06] px-4 py-4 transition hover:border-brand-400/40 hover:bg-brand-500/[0.1] sm:flex-row sm:items-center sm:justify-between"
+      >
+        <span className="flex min-w-0 items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/15 text-brand-200"><Package size={19} /></span>
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-white">13 modules métier opérationnels</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
+              Récupération des revenus, intelligence commerciale, opérations et protection, reliées à vos données Business Growth.
+            </span>
+          </span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-brand-200">
+          Ouvrir les modules <ArrowUpRight size={15} className="transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+        </span>
+      </Link>
 
       {showStaleNotice && (
         <section
@@ -2143,7 +2264,16 @@ export default function BusinessGrowWorkspace() {
               onSaveRouting={saveRouting}
             />
           )}
-          {section === 'integrations' && <IntegrationsView connections={integrations} />}
+          {section === 'integrations' && (
+            <IntegrationsView
+              connections={integrations}
+              busyKey={integrationBusyKey}
+              notice={integrationNotice}
+              onRequest={(connectorKey) => { void handleIntegrationAction('request', connectorKey); }}
+              onCancel={(connectorKey) => { void handleIntegrationAction('cancel', connectorKey); }}
+              onDisconnect={(connectorKey) => { void handleIntegrationAction('disconnect', connectorKey); }}
+            />
+          )}
         </div>
       </div>
     </div>

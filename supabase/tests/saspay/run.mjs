@@ -6,6 +6,8 @@ import { start, HERE } from './pg.mjs';
 const steps = [
   ['base.mjs', []],
   ['mig.mjs', []],
+  // Modules métier Business Growth : persistance, cloisonnement, RLS.
+  ['modules.mjs', []],
   ['scenario.mjs', []],
   ['legacy.mjs', []],
   // Remboursements, entretien, sélection de réconciliation, anomalies, planification.

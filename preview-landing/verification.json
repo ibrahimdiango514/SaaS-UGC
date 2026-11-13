@@ -1,0 +1,213 @@
+{
+  "generatedAt": "2026-11-13T01:55:16.322Z",
+  "base": "http://127.0.0.1:5173",
+  "viewports": {
+    "desktop": {
+      "viewport": [
+        1440,
+        1000
+      ],
+      "scrollWidth": 1440,
+      "clientWidth": 1440,
+      "scrollHeight": 8851,
+      "horizontalOverflow": false,
+      "clippedText": [],
+      "overflowElements": [],
+      "brokenImages": [],
+      "imageCount": 10,
+      "h1": {
+        "text": "L’intelligence artificielle qui fait grandir vos ambitions.",
+        "rect": [
+          132,
+          193,
+          581,
+          261
+        ],
+        "fontSize": "62.4px",
+        "lineHeight": "64.272px"
+      },
+      "gradientLine": {
+        "color": "rgba(0, 0, 0, 0)",
+        "clip": "text",
+        "rect": [
+          132,
+          321,
+          488,
+          137
+        ]
+      },
+      "rotating": {
+        "text": "développer votre activité.",
+        "opacity": "1",
+        "color": "rgb(207, 250, 254)",
+        "animation": "vyoraRotateIn"
+      },
+      "buttons": []
+    },
+    "mobile390": {
+      "viewport": [
+        390,
+        844
+      ],
+      "scrollWidth": 390,
+      "clientWidth": 390,
+      "scrollHeight": 15391,
+      "horizontalOverflow": false,
+      "clippedText": [],
+      "overflowElements": [],
+      "brokenImages": [],
+      "imageCount": 10,
+      "h1": {
+        "text": "L’intelligence artificielle qui fait grandir vos ambitions.",
+        "rect": [
+          16,
+          161,
+          358,
+          146
+        ],
+        "fontSize": "34.4px",
+        "lineHeight": "35.432px"
+      },
+      "gradientLine": {
+        "color": "rgba(0, 0, 0, 0)",
+        "clip": "text",
+        "rect": [
+          16,
+          233,
+          269,
+          75
+        ]
+      },
+      "rotating": {
+        "text": "structurer votre croissance.",
+        "opacity": "0.527518",
+        "color": "rgb(207, 250, 254)",
+        "animation": "vyoraRotateIn"
+      },
+      "buttons": []
+    },
+    "mobile360": {
+      "viewport": [
+        360,
+        800
+      ],
+      "scrollWidth": 360,
+      "clientWidth": 360,
+      "scrollHeight": 15850,
+      "horizontalOverflow": false,
+      "clippedText": [],
+      "overflowElements": [],
+      "brokenImages": [],
+      "imageCount": 10,
+      "h1": {
+        "text": "L’intelligence artificielle qui fait grandir vos ambitions.",
+        "rect": [
+          16,
+          161,
+          328,
+          146
+        ],
+        "fontSize": "34.4px",
+        "lineHeight": "35.432px"
+      },
+      "gradientLine": {
+        "color": "rgba(0, 0, 0, 0)",
+        "clip": "text",
+        "rect": [
+          16,
+          233,
+          269,
+          75
+        ]
+      },
+      "rotating": {
+        "text": "structurer votre croissance.",
+        "opacity": "0.25",
+        "color": "rgb(207, 250, 254)",
+        "animation": "vyoraRotateIn"
+      },
+      "buttons": []
+    },
+    "tablet820": {
+      "viewport": [
+        820,
+        1100
+      ],
+      "scrollWidth": 820,
+      "clientWidth": 820,
+      "scrollHeight": 11678,
+      "horizontalOverflow": false,
+      "clippedText": [],
+      "overflowElements": [],
+      "brokenImages": [],
+      "imageCount": 10,
+      "h1": {
+        "text": "L’intelligence artificielle qui fait grandir vos ambitions.",
+        "rect": [
+          24,
+          177,
+          640,
+          160
+        ],
+        "fontSize": "50.4px",
+        "lineHeight": "51.912px"
+      },
+      "gradientLine": {
+        "color": "rgba(0, 0, 0, 0)",
+        "clip": "text",
+        "rect": [
+          24,
+          229,
+          394,
+          111
+        ]
+      },
+      "rotating": {
+        "text": "développer votre activité.",
+        "opacity": "1",
+        "color": "rgb(207, 250, 254)",
+        "animation": "vyoraRotateIn"
+      },
+      "buttons": []
+    }
+  },
+  "errors": [],
+  "consoleErrors": [],
+  "failedRequests": [
+    "1440: https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap :: net::ERR_CONNECTION_CLOSED",
+    "390: https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap :: net::ERR_CONNECTION_CLOSED",
+    "360: https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap :: net::ERR_CONNECTION_CLOSED",
+    "820: https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap :: net::ERR_CONNECTION_CLOSED",
+    "1440: https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap :: net::ERR_CONNECTION_CLOSED"
+  ],
+  "notes": [
+    "FAQ refermée puis rouverte : ok"
+  ],
+  "reducedMotion": {
+    "h1": {
+      "opacity": "1",
+      "visibility": "visible",
+      "text": "L’intelligence artificielle qui fait grandir vos ambitions."
+    },
+    "word": {
+      "opacity": "1",
+      "visibility": "visible",
+      "text": "L’intelligence"
+    },
+    "line": {
+      "opacity": "1",
+      "visibility": "visible",
+      "text": "qui fait grandir vos ambitions."
+    },
+    "cta": {
+      "opacity": "1",
+      "visibility": "visible",
+      "text": "Découvrir VYORA"
+    },
+    "lead": {
+      "opacity": "1",
+      "visibility": "visible",
+      "text": "Créez des contenus qui attirent. Développez votre activité. Gagnez du "
+    }
+  }
+}

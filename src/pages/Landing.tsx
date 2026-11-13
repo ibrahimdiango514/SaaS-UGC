@@ -1,65 +1,345 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, ArrowUpRight, BadgeCheck, Brain, Check, Clapperboard, Coins, Database,
-  Gauge, Layers3, LockKeyhole, Play, ShieldCheck, Sparkles, TrendingUp, Users, Wand2, Zap,
+  AlertTriangle, ArrowRight, ArrowUpRight, BadgeCheck, Bot, Brain, Check, Clapperboard,
+  Coins, CreditCard, EyeOff, FileText, FileWarning, Layers3, LockKeyhole, Menu,
+  MessageSquare, Plus, RefreshCw, ShieldCheck, ShoppingCart, Sparkles, Target,
+  TrendingUp, UserMinus, Users, Wand2, X, Zap, type LucideIcon,
 } from 'lucide-react';
 import { listPlans } from '../lib/api';
 import { formatMoney } from '../lib/format';
 import type { Plan } from '../lib/types';
-import { BrandLockup } from '../components/Brand';
+import { BrandLockup, BrandSymbol } from '../components/Brand';
 import { LoadingState, cn } from '../components/ui';
+import { Reveal, RotatingText, WordReveal } from '../components/landing/motion';
+import {
+  ArrowRightIcon, EcosystemFlow, GrowthShowcase, HeroConsole, SectionBadge,
+  StudioShowcase, TrustStrip,
+} from '../components/landing/visuals';
 
-const DIMENSIONS = [
+/* -------------------------------------------------------------------------- */
+/* Contenus                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const NAV_LINKS = [
+  { href: '#studio', label: 'Studio' },
+  { href: '#business', label: 'Business Growth' },
+  { href: '#ecosysteme', label: 'Écosystème' },
+  { href: '#tarifs', label: 'Tarifs' },
+  { href: '#faq', label: 'FAQ' },
+];
+
+const ROTATING = [
+  'créer des contenus qui attirent.',
+  'développer votre activité.',
+  'structurer votre croissance.',
+  'ne plus perdre d’opportunités.',
+];
+
+const STUDIO_FEATURES = [
+  { icon: Clapperboard, title: 'Vidéos UGC & publicités', text: 'Format vertical, accroche, scènes et appel à l’action.' },
+  { icon: Sparkles, title: 'Produit mis en scène', text: 'Animez une image produit importée (image → vidéo).' },
+  { icon: Wand2, title: 'Scripts & hooks IA', text: 'Accroche, scènes, sous-titres et CTA générés puis modifiables.' },
+  { icon: Coins, title: 'Catalogue & devis vérifiés', text: 'Modèle réel, tarif fournisseur et coût en crédits avant génération.' },
+  { icon: Layers3, title: 'Montage & export', text: 'Timeline, sous-titres, voix off importée, export vidéo et .srt.' },
+  { icon: LockKeyhole, title: 'Bibliothèque privée', text: 'Vidéos conservées dans un espace privé et rattachées à vos projets.' },
+];
+
+const BUSINESS_FEATURES = [
+  { icon: Bot, title: 'Agent IA Business', text: 'Conversation avec mémoire consentie, ancrée dans votre contexte.' },
+  { icon: Users, title: 'Prospects & pipeline', text: 'De prospect à gagné : étapes, relances et historique au même endroit.' },
+  { icon: Target, title: 'Objectifs & plan 30/60/90', text: 'Priorités, progression et actions concrètes.' },
+  { icon: TrendingUp, title: 'Marché & concurrence', text: 'Concurrents, signaux et lecture des opportunités.' },
+  { icon: Layers3, title: 'Catalogue produits', text: 'Produits, offres et prix réels, saisis ou importés.' },
+  { icon: FileText, title: 'Briefs marketing → Studio', text: 'Un brief vidéo à valider, puis à ouvrir dans Studio — sans débit.' },
+];
+
+const PROBLEMS: {
+  icon: LucideIcon;
+  tag: string;
+  title: string;
+  detail: string;
+  solution: string;
+  tone: 'cyan' | 'violet' | 'amber';
+}[] = [
   {
-    key: 'studio',
-    eyebrow: '01 · Créer',
-    title: 'VYORA Studio',
-    text: 'Brief, script, storyboard, paramètres vérifiés, devis réel, génération suivie et montage. Un studio de production relié à de vrais outils.',
-    image: '/studio-examples/cosmetique.jpg',
-    icon: Clapperboard,
-    points: ['Scripts et hooks IA', 'Catalogue vidéo vérifié', 'Devis avant génération', 'Montage et export'],
-    accent: 'cyan',
-    to: '/inscription',
+    icon: MessageSquare,
+    tag: 'Prospect',
+    title: 'Le message resté sans réponse',
+    detail: 'Un prospect intéressé attend. Le temps passe, l’opportunité s’éteint en silence.',
+    solution: 'Un pipeline avec étapes, relances et historique pour garder une prochaine action visible.',
+    tone: 'cyan',
   },
   {
-    key: 'business',
-    eyebrow: '02 · Développer',
-    title: 'VYORA Business',
-    text: 'Un cerveau commercial qui connaît votre entreprise, vos objectifs, vos produits et vos marchés — et transforme ces données en actions.',
-    image: '/brand/vyora-growth.jpg',
-    icon: Brain,
-    points: ['Mémoire par entreprise', 'Objectifs et priorités', 'Veille marché et concurrence', 'Prospects et opportunités'],
-    accent: 'violet',
-    to: '/inscription',
+    icon: FileWarning,
+    tag: 'Suivi',
+    title: 'Le dossier qui dort',
+    detail: 'Une prestation terminée, une relance oubliée, une trésorerie sous tension.',
+    solution: 'Gardez les dossiers, les échanges et les actions au même endroit pour ne plus laisser une affaire sans suite.',
+    tone: 'amber',
   },
-] as const;
-
-const FEATURES = [
-  { icon: Wand2, title: 'Scripts UGC structurés', text: 'Accroche, scènes, sous-titres et appel à l’action, versionnés dans votre historique.' },
-  { icon: Layers3, title: 'Catalogue vidéo réel', text: 'Modèles, formats, durées et résolutions issus du catalogue fournisseur, sans option inventée.' },
-  { icon: Coins, title: 'Devis avant génération', text: 'Le tarif fournisseur et le coût en crédits sont vérifiés côté serveur avant toute réservation.' },
-  { icon: Brain, title: 'Mémoire métier', text: 'Chaque entreprise conserve son contexte : offre, cible, marché, objectifs et décisions.' },
-  { icon: TrendingUp, title: 'Pilotage commercial', text: 'Objectifs, prospects, opportunités et plans d’action réunis dans un tableau de bord lisible.' },
-  { icon: ShieldCheck, title: 'Sécurité par conception', text: 'Authentification Supabase, isolation par espace et clés fournisseur exclusivement serveur.' },
+  {
+    icon: UserMinus,
+    tag: 'Fidélisation',
+    title: 'Le client qui ne revient plus',
+    detail: 'Un client satisfait disparaît faute de suivi ou d’attention.',
+    solution: 'Analysez votre base et préparez une campagne de réactivation soumise à votre validation.',
+    tone: 'violet',
+  },
+  {
+    icon: ShoppingCart,
+    tag: 'Vente',
+    title: 'La commande abandonnée',
+    detail: 'Un produit suscite l’intérêt, mais l’acheteur repart sans finaliser.',
+    solution: 'Remettez le produit en scène avec une vidéo Studio conçue pour capter l’attention.',
+    tone: 'cyan',
+  },
+  {
+    icon: EyeOff,
+    tag: 'Visibilité',
+    title: 'Le produit invisible',
+    detail: 'Un bon produit reste noyé dans un flux saturé de contenus.',
+    solution: 'Transformez une image produit en vidéo publicitaire verticale, prête à être publiée.',
+    tone: 'violet',
+  },
+  {
+    icon: RefreshCw,
+    tag: 'Temps',
+    title: 'Les tâches qui se répètent',
+    detail: 'Relances, briefs, reportings : les mêmes gestes chaque semaine.',
+    solution: 'L’agent prépare plans d’action et briefs. Vous approuvez ou rejetez — rien ne s’exécute seul.',
+    tone: 'amber',
+  },
 ];
 
 const STEPS = [
-  { n: '01', title: 'Décrivez votre entreprise', text: 'Offre, cible, marché, objectifs et produits : VYORA construit le contexte.' },
-  { n: '02', title: 'L’IA analyse et propose', text: 'Diagnostic, priorités et angles d’acquisition appuyés sur vos données réelles.' },
-  { n: '03', title: 'Produisez vos contenus', text: 'Scripts, publicités et vidéos UGC avec devis vérifié avant chaque génération.' },
-  { n: '04', title: 'Mesurez et ajustez', text: 'Suivez vos résultats, vos prospects et vos actions, puis adaptez la stratégie.' },
+  { n: '01', title: 'Créez votre compte', text: 'Un compte VYORA, un espace de travail isolé et sécurisé.' },
+  { n: '02', title: 'Choisissez votre espace', text: 'Studio pour créer, Business Growth pour développer. Aucun mélange.' },
+  { n: '03', title: 'Produisez ou analysez', text: 'Une vidéo avec devis vérifié, ou un plan d’action appuyé sur vos données.' },
+  { n: '04', title: 'Décidez et avancez', text: 'Vous validez chaque action. VYORA conserve l’historique.' },
 ];
 
 const FAQ = [
-  { q: 'VYORA génère-t-il réellement des vidéos ?', a: 'Oui. Les créations finalisées sont enregistrées dans votre bibliothèque privée. Le lecteur ne s’affiche qu’une fois le fichier vidéo réellement disponible.' },
-  { q: 'Comment le devis fonctionne-t-il ?', a: 'Le devis est calculé côté serveur. Pour les modèles à tarification dynamique, VYORA interroge l’endpoint de devis officiel du fournisseur et affiche le montant exact en USD. Si ce montant ne peut pas être vérifié, le devis est indiqué comme indisponible : aucun prix n’est inventé.' },
-  { q: 'Que se passe-t-il si un service est indisponible ?', a: 'La génération est bloquée tant que le service n’est pas rétabli. Les crédits réservés sont restitués en cas d’échec ou d’annulation autorisée.' },
-  { q: 'Mes données sont-elles isolées ?', a: 'Chaque espace de travail est isolé et les clés techniques restent sécurisées côté serveur. Vos contenus et votre mémoire métier ne sont pas exposés aux autres espaces.' },
-  { q: 'Les réseaux sociaux sont-ils connectés ?', a: 'Les connecteurs Facebook, Instagram, WhatsApp, YouTube, TikTok et Shopify sont préparés côté architecture. Ils restent désactivés tant que vous n’avez pas autorisé la connexion et que les secrets serveur ne sont pas configurés.' },
+  {
+    q: 'Quelle est la différence entre VYORA Studio et Business Growth ?',
+    a: 'Studio est l’espace de création : scripts, vidéos UGC et publicités, montage, bibliothèque. Business Growth est l’espace de pilotage : contexte d’entreprise, objectifs, marché, prospects, stratégie et agent IA. Les deux partagent un compte, jamais leurs données ni leurs quotas.',
+  },
+  {
+    q: 'VYORA génère-t-il réellement des vidéos ?',
+    a: 'Oui. Les créations finalisées sont enregistrées dans votre bibliothèque privée. Le lecteur ne s’affiche qu’une fois le fichier vidéo réellement disponible.',
+  },
+  {
+    q: 'Comment le devis fonctionne-t-il ?',
+    a: 'Le devis est calculé côté serveur. Pour les modèles à tarification dynamique, VYORA interroge l’endpoint de devis officiel du fournisseur et affiche le montant exact. Si ce montant ne peut pas être vérifié, le devis est indiqué comme indisponible : aucun prix n’est inventé.',
+  },
+  {
+    q: 'Business Growth utilise-t-il mes crédits Studio ?',
+    a: 'Non. Business Growth dispose de ses propres quotas et ne lit ni ne débite le portefeuille Studio. Un brief transféré vers Studio ne consomme aucun crédit ; la génération lancée dans Studio utilise vos crédits Studio et votre formule.',
+  },
+  {
+    q: 'Puis-je créer une vidéo depuis Business Growth ?',
+    a: 'L’agent prépare un brief (produit, angle, accroche, cible). Après votre validation, vous l’ouvrez dans Studio pour le produire. La création pilotée depuis Business Growth est destinée aux abonnés Business Growth lorsque la facturation de cet espace sera officiellement activée ; les droits d’accès actuels restent inchangés.',
+  },
+  {
+    q: 'Que se passe-t-il si un service est indisponible ?',
+    a: 'La génération est bloquée tant que le service n’est pas rétabli. Les crédits réservés sont restitués en cas d’échec ou d’annulation autorisée.',
+  },
+  {
+    q: 'Mes données sont-elles isolées ?',
+    a: 'Chaque espace de travail est isolé et les clés techniques restent sécurisées côté serveur. Vos contenus, vos prospects et votre mémoire métier ne sont pas exposés aux autres espaces.',
+  },
+  {
+    q: 'Les réseaux sociaux sont-ils connectés ?',
+    a: 'Les connecteurs Facebook, Instagram, YouTube, TikTok, Shopify et WooCommerce sont préparés côté architecture. Ils restent désactivés tant que les secrets serveur ne sont pas configurés.',
+  },
 ];
 
-const TRUST = ['Un compte, deux espaces', 'Devis vérifié avant génération', 'Clés API côté serveur'];
+const STUDIO_INSPIRATIONS = [
+  { src: '/studio-examples/cosmetique.jpg', label: 'Beauté' },
+  { src: '/studio-examples/mode.jpg', label: 'Mode' },
+  { src: '/studio-examples/food.jpg', label: 'Food' },
+  { src: '/studio-examples/tech.jpg', label: 'Tech' },
+];
+
+/* -------------------------------------------------------------------------- */
+/* En-tête et pied de page                                                     */
+/* -------------------------------------------------------------------------- */
+
+function SiteHeader() {
+  const [open, setOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && headerRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [open]);
+
+  return (
+    <>
+      {open && (
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 top-16 z-40 bg-[#04070d]/70 backdrop-blur-sm lg:hidden"
+        />
+      )}
+
+      <header
+        ref={headerRef}
+      className={cn(
+        'fixed inset-x-0 top-0 z-50 border-b transition-colors duration-300',
+        scrolled || open
+          ? 'border-white/[0.08] bg-[#04070d]/[0.92] backdrop-blur-2xl'
+          : 'border-transparent bg-[#04070d]/[0.55] backdrop-blur-xl',
+      )}
+    >
+      <div className="landing-shell flex h-16 items-center gap-3">
+        <Link to="/" aria-label="VYORA, accueil" className="flex shrink-0 items-center">
+          <BrandLockup tagline />
+        </Link>
+
+        <nav aria-label="Navigation principale" className="ml-6 hidden items-center gap-1 lg:flex">
+          {NAV_LINKS.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              className="rounded-lg px-3 py-2 text-[12.5px] font-medium text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
+            >
+              {link.label}
+            </a>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex items-center gap-2">
+          <Link to="/connexion" className="hidden rounded-lg px-3 py-2 text-[12.5px] font-medium text-slate-300 transition hover:bg-white/[0.05] hover:text-white sm:inline-flex">
+            Connexion
+          </Link>
+          <Link to="/inscription" className="btn btn-primary btn-sm landing-shine hidden sm:inline-flex">
+            Créer mon compte
+          </Link>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+            aria-controls="landing-mobile-menu"
+            aria-label={open ? 'Fermer le menu' : 'Ouvrir le menu'}
+            className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-200 lg:hidden"
+          >
+            {open ? <X size={19} /> : <Menu size={19} />}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div id="landing-mobile-menu" className="border-t border-white/[0.07] bg-[#04070d]/[0.97] px-4 pb-5 pt-3 lg:hidden">
+          <nav aria-label="Navigation mobile" className="grid gap-1">
+            {NAV_LINKS.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                onClick={() => setOpen(false)}
+                className="flex min-h-[44px] items-center justify-between rounded-xl px-3 text-sm font-medium text-slate-200 hover:bg-white/[0.05]"
+              >
+                {link.label} <ArrowRight size={14} className="text-slate-500" />
+              </a>
+            ))}
+          </nav>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Link to="/connexion" onClick={() => setOpen(false)} className="btn btn-outline btn-md">Connexion</Link>
+            <Link to="/inscription" onClick={() => setOpen(false)} className="btn btn-primary btn-md">Créer un compte</Link>
+          </div>
+        </div>
+      )}
+      </header>
+    </>
+  );
+}
+
+function SiteFooter() {
+  const year = new Date().getFullYear();
+  return (
+    <footer className="border-t border-white/[0.06] bg-[#03060b]">
+      <div className="landing-shell py-12 sm:py-14">
+        <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
+          <div className="min-w-0">
+            <BrandLockup tagline symbolSize={38} />
+            <p className="mt-4 max-w-xs text-[12.5px] leading-relaxed text-slate-400">
+              Deux espaces intelligents, un seul écosystème. Créez des contenus, développez votre activité,
+              gardez la maîtrise de vos données.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              <a href="#studio" className="landing-chip transition hover:text-white"><Clapperboard size={10} className="text-cyan-300" /> Studio</a>
+              <a href="#business" className="landing-chip transition hover:text-white"><Brain size={10} className="text-violet-300" /> Business Growth</a>
+            </div>
+          </div>
+
+          <nav aria-label="VYORA Studio" className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200/80">VYORA Studio</p>
+            <ul className="mt-3 space-y-2 text-[12.5px] text-slate-400">
+              <li><Link to="/app/studio" className="transition hover:text-white">Ouvrir le Studio</Link></li>
+              <li><Link to="/app/projets" className="transition hover:text-white">Projets</Link></li>
+              <li><Link to="/app/bibliotheque" className="transition hover:text-white">Bibliothèque</Link></li>
+              <li><a href="#tarifs" className="transition hover:text-white">Formules Studio</a></li>
+            </ul>
+          </nav>
+
+          <nav aria-label="VYORA Business Growth" className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-200/80">Business Growth</p>
+            <ul className="mt-3 space-y-2 text-[12.5px] text-slate-400">
+              <li><Link to="/app/business" className="transition hover:text-white">Ouvrir Business Growth</Link></li>
+              <li><Link to="/app/business/abonnement" className="transition hover:text-white">Formules Business Growth</Link></li>
+              <li><a href="#ecosysteme" className="transition hover:text-white">Le lien avec Studio</a></li>
+              <li><Link to="/app/parametres" className="transition hover:text-white">Compte et données</Link></li>
+            </ul>
+          </nav>
+
+          <nav aria-label="Informations" className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300">Informations</p>
+            <ul className="mt-3 space-y-2 text-[12.5px] text-slate-400">
+              <li><a href="#problemes" className="transition hover:text-white">Ce que VYORA résout</a></li>
+              <li><a href="#tarifs" className="transition hover:text-white">Tarifs</a></li>
+              <li><a href="#faq" className="transition hover:text-white">FAQ</a></li>
+              <li><Link to="/confidentialite" className="transition hover:text-white">Confidentialité</Link></li>
+              <li><Link to="/conditions" className="transition hover:text-white">Conditions d’utilisation</Link></li>
+              <li><Link to="/connexion" className="transition hover:text-white">Connexion</Link></li>
+            </ul>
+          </nav>
+        </div>
+
+        <div className="landing-rule mt-10" />
+        <div className="mt-5 flex flex-col items-start justify-between gap-3 text-[10.5px] text-slate-500 sm:flex-row sm:items-center">
+          <span>© {year} VYORA — Create. Evolve. Grow.</span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <span className="inline-flex items-center gap-1"><LockKeyhole size={11} /> Données isolées</span>
+            <span className="inline-flex items-center gap-1"><ShieldCheck size={11} /> Clés côté serveur</span>
+            <Link to="/proprietaire" className="transition hover:text-slate-300">Espace propriétaire</Link>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page                                                                        */
+/* -------------------------------------------------------------------------- */
 
 export default function Landing() {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -71,7 +351,7 @@ export default function Landing() {
     setPlansLoading(true);
     setPlansError('');
     return listPlans()
-      .then((p) => setPlans(p))
+      .then((result) => setPlans(result))
       .catch(() => {
         setPlans([]);
         setPlansError('Les formules ne peuvent pas être chargées pour le moment.');
@@ -82,389 +362,601 @@ export default function Landing() {
   useEffect(() => { void loadPlans(); }, [loadPlans]);
 
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      {/* Nav */}
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#05080e]/70 backdrop-blur-2xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
-          <Link to="/" aria-label="VYORA, accueil" className="flex items-center gap-2.5">
-            <BrandLockup tagline />
-          </Link>
-          <nav className="ml-8 hidden items-center gap-7 text-[13px] text-slate-300 lg:flex">
-            <a href="#dimensions" className="transition hover:text-white">Les deux espaces</a>
-            <a href="#fonctionnalites" className="transition hover:text-white">Fonctionnalités</a>
-            <a href="#workflow" className="transition hover:text-white">Comment ça marche</a>
-            <a href="#tarifs" className="transition hover:text-white">Tarifs</a>
-            <a href="#faq" className="transition hover:text-white">FAQ</a>
-          </nav>
-          <div className="ml-auto flex items-center gap-2">
-            <Link to="/connexion" className="btn btn-ghost btn-sm hidden sm:inline-flex">Connexion</Link>
-            <Link to="/inscription" className="btn btn-primary btn-sm vyora-btn-sheen">Commencer <ArrowRight size={14} /></Link>
-          </div>
-        </div>
-      </header>
+    <div className="landing-root">
+      <a
+        href="#contenu"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-cyan-400 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-[#03131a]"
+      >
+        Aller au contenu
+      </a>
 
-      <main className="pt-16">
-        {/* ---------------------------------------------------------------- */}
-        {/* Hero                                                              */}
-        {/* ---------------------------------------------------------------- */}
-        <section className="relative isolate overflow-hidden">
-          <div aria-hidden="true" className="absolute inset-0 -z-20 bg-[#05080e]" />
-          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_16%_-10%,rgba(34,211,238,0.16),transparent_55%),radial-gradient(ellipse_at_92%_18%,rgba(139,92,246,0.16),transparent_52%)]" />
-          <div aria-hidden="true" className="vyora-grid-bg absolute inset-0 -z-10 opacity-25" />
-          <div aria-hidden="true" className="vyora-glow-ring -left-40 top-10 h-[28rem] w-[28rem] animate-aurora bg-cyan-400/20" />
-          <div aria-hidden="true" className="vyora-glow-ring right-[-8rem] top-40 h-[26rem] w-[26rem] animate-aurora bg-violet-500/20" style={{ animationDelay: '-6s' }} />
+      <SiteHeader />
 
-          <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 pb-10 pt-14 sm:px-6 sm:pb-14 sm:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
-            <div className="relative z-10 max-w-2xl">
-              <div className="vyora-eyebrow animate-riseIn">
-                <Sparkles size={13} /> Create. Evolve. Grow.
-              </div>
-              <h1 className="vyora-display mt-6 text-[2.6rem] leading-[1.02] text-white sm:text-[3.4rem] lg:text-[3.9rem]">
-                Vos idées prennent forme.<br />
-                <span className="bg-gradient-to-r from-cyan-200 via-white to-violet-300 bg-clip-text text-transparent">Votre activité prend de l’ampleur.</span>
-              </h1>
-              <p className="mt-6 max-w-xl text-[15px] leading-7 text-slate-300 sm:text-base sm:leading-8">
-                VYORA réunit la création de contenus UGC et le pilotage de votre croissance dans une même plateforme. Deux espaces spécialisés, une seule intelligence nourrie par les données de votre entreprise.
-              </p>
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link to="/inscription" className="btn btn-primary btn-lg vyora-btn-sheen">Découvrir VYORA <ArrowRight size={17} /></Link>
-                <a href="#dimensions" className="btn btn-outline btn-lg"><Play size={15} /> Explorer la plateforme</a>
-              </div>
-              <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs text-slate-300">
-                {TRUST.map((item) => (
-                  <span key={item} className="flex items-center gap-2"><BadgeCheck size={15} className="text-cyan-300" /> {item}</span>
-                ))}
-              </div>
-            </div>
+      <main id="contenu" className="pt-16">
+        {/* ------------------------------------------------------------------ */}
+        {/* Hero                                                                */}
+        {/* ------------------------------------------------------------------ */}
+        <section className="relative isolate overflow-hidden" aria-labelledby="hero-title">
+          <div aria-hidden="true" className="absolute inset-0 -z-30 bg-[#04070d]" />
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 -z-20 bg-[radial-gradient(ellipse_at_12%_-8%,rgba(34,211,238,0.17),transparent_54%),radial-gradient(ellipse_at_94%_12%,rgba(139,92,246,0.17),transparent_52%),radial-gradient(ellipse_at_50%_100%,rgba(8,145,178,0.08),transparent_60%)]"
+          />
+          <div aria-hidden="true" className="landing-grid-bg absolute inset-0 -z-20 opacity-60" />
+          <div aria-hidden="true" className="landing-aurora vyora-glow-pulse -left-32 top-8 -z-10 h-[26rem] w-[26rem] bg-cyan-400/20" />
+          <div aria-hidden="true" className="landing-aurora vyora-glow-pulse -right-24 top-40 -z-10 h-[24rem] w-[24rem] bg-violet-500/20" style={{ animationDelay: '-4s' }} />
 
-            <div className="relative mx-auto w-full max-w-xl lg:max-w-none">
-              <div aria-hidden="true" className="absolute -inset-6 rounded-[2.5rem] bg-gradient-to-br from-cyan-400/15 via-transparent to-violet-500/20 blur-2xl" />
-              <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#080d15] shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]">
-                <img
-                  src="/brand/vyora-hero.jpg"
-                  alt="Direction artistique VYORA : lumière, matière et profondeur"
-                  className="h-[380px] w-full object-cover object-center sm:h-[440px] lg:h-[560px]"
-                />
-                <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,14,0.94),rgba(5,8,14,0.18)_58%,rgba(5,8,14,0.28))]" />
-                <span className="absolute right-4 top-4 rounded-full border border-white/15 bg-[#05080e]/75 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white backdrop-blur">
-                  Créer · Développer
+          <div className="landing-shell relative grid items-center gap-10 pb-14 pt-12 sm:pb-16 sm:pt-16 lg:grid-cols-[1.03fr_0.97fr] lg:gap-12 lg:pb-24 lg:pt-20">
+            <div className="relative z-10 min-w-0 max-w-[640px]">
+              <div className="vyora-eyebrow">
+                <Sparkles size={12} /> VYORA · L’écosystème IA
+              </div>
+
+              <h1 id="hero-title" className="landing-h1 mt-5">
+                <WordReveal text="L’intelligence artificielle" />{' '}
+                <span className="vyora-line-reveal mt-1 block">
+                  <span className="bg-gradient-to-r from-cyan-200 via-white to-violet-300 bg-clip-text text-transparent">
+                    qui fait grandir vos ambitions.
+                  </span>
                 </span>
-                <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
-                  <div className="rounded-2xl border border-white/10 bg-[#05080e]/85 p-3.5 backdrop-blur-xl">
-                    <p className="text-[10px] uppercase tracking-[0.22em] text-cyan-200">VYORA · Studio &amp; Business</p>
-                    <p className="mt-1 text-sm font-semibold text-white">Une seule mémoire, deux espaces de travail.</p>
-                  </div>
-                </div>
+              </h1>
+
+              <p className="landing-lead mt-5 max-w-[560px]">
+                Créez des contenus qui attirent. Développez votre activité. Gagnez du temps sur ce qui se
+                répète. Ne laissez plus filer vos opportunités. Deux espaces intelligents, un seul écosystème.
+              </p>
+
+              <div className="mt-4 flex min-h-[1.7rem] flex-wrap items-baseline gap-x-1.5 text-[13px] text-slate-500">
+                <span>VYORA vous aide à</span>
+                <RotatingText items={ROTATING} className="font-semibold text-cyan-100" />
               </div>
+
+              <div className="mt-7 flex flex-wrap items-center gap-2.5">
+                <a href="#univers" className="btn btn-primary btn-lg landing-shine w-full sm:w-auto">
+                  Découvrir VYORA <ArrowRightIcon />
+                </a>
+                <Link to="/inscription" className="btn btn-outline btn-lg w-full sm:w-auto">
+                  Créer mon compte
+                </Link>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-slate-400">
+                <span className="inline-flex items-center gap-1.5"><BadgeCheck size={13} className="text-cyan-300" /> Devis vérifié avant génération</span>
+                <span className="inline-flex items-center gap-1.5"><LockKeyhole size={13} className="text-cyan-300" /> Clés API côté serveur</span>
+                <span className="inline-flex items-center gap-1.5"><ShieldCheck size={13} className="text-cyan-300" /> Espaces isolés</span>
+              </div>
+
+              <p className="mt-5 text-[11.5px] text-slate-500">
+                Déjà un compte ?{' '}
+                <Link to="/connexion" className="font-semibold text-slate-300 underline-offset-4 transition hover:text-white hover:underline">
+                  Se connecter
+                </Link>
+              </p>
+            </div>
+
+            <div className="relative z-0 mt-1 min-w-0 lg:mt-0">
+              <HeroConsole />
             </div>
           </div>
 
-          <div className="relative mx-auto max-w-7xl px-4 pb-20 sm:px-6 sm:pb-24">
-            {/* Floating product preview */}
-            <div className="relative mt-16 sm:mt-20">
-              <div className="pointer-events-none absolute -inset-x-10 -top-10 h-40 bg-gradient-to-b from-cyan-400/10 to-transparent blur-3xl" aria-hidden="true" />
-              <div className="vyora-panel-hero animate-riseIn">
-                <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3 sm:px-5">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-rose-400/70" />
-                    <span className="h-2.5 w-2.5 rounded-full bg-amber-300/70" />
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400/70" />
-                    <span className="ml-3 text-[11px] text-slate-500">vyora.app/app/studio</span>
-                  </div>
-                  <span className="vyora-badge-soft"><Database size={10} /> Aperçu de l’interface</span>
-                </div>
-                <div className="grid gap-3 p-3 sm:grid-cols-[190px_minmax(0,1fr)_260px] sm:p-4">
-                  <aside className="hidden rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3 sm:block">
-                    {[
-                      ['Tableau de bord', Gauge, true],
-                      ['Studio UGC', Clapperboard, false],
-                      ['Business Grow', Brain, false],
-                      ['Bibliothèque', Sparkles, false],
-                      ['Historique', TrendingUp, false],
-                    ].map(([label, Icon, active]) => {
-                      const ItemIcon = Icon as typeof Gauge;
-                      return (
-                        <div key={String(label)} className={cn('mb-1 flex items-center gap-2 rounded-xl px-2.5 py-2 text-[11px]', active ? 'bg-cyan-400/10 text-cyan-100 ring-1 ring-inset ring-cyan-300/20' : 'text-slate-400')}>
-                          <ItemIcon size={13} /> {String(label)}
-                        </div>
-                      );
-                    })}
-                    <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-2.5">
-                      <p className="text-[9px] uppercase tracking-wide text-slate-500">Crédits Studio</p>
-                      <p className="mt-1 text-lg font-semibold text-white">120</p>
-                      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/10"><div className="h-full w-2/3 rounded-full bg-gradient-to-r from-cyan-400 to-violet-400" /></div>
-                    </div>
-                  </aside>
-
-                  <div className="space-y-3">
-                    <div className="rounded-2xl border border-white/[0.07] bg-gradient-to-br from-cyan-400/[0.07] to-transparent p-3.5">
-                      <p className="text-[9px] uppercase tracking-[0.18em] text-cyan-200">Studio UGC</p>
-                      <p className="mt-1.5 text-sm font-semibold text-white">Publicité verticale · 15 s · 9:16</p>
-                      <div className="mt-3 grid grid-cols-4 gap-1.5">
-                        {[38, 62, 48, 78].map((h, i) => (
-                          <div key={i} className="flex h-16 items-end overflow-hidden rounded-lg bg-black/30">
-                            <div className="w-full rounded-t-md bg-gradient-to-t from-cyan-500/50 to-cyan-300/80" style={{ height: `${h}%` }} />
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] text-slate-400">
-                        {['Script validé', '3 scènes', 'Sous-titres', 'CTA'].map((tag) => (
-                          <span key={tag} className="rounded-md border border-white/[0.07] bg-white/[0.03] px-1.5 py-0.5">{tag}</span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-                        <p className="text-[9px] uppercase tracking-wide text-slate-500">Devis fournisseur</p>
-                        <p className="mt-1 text-sm font-semibold text-white">Vérifié côté serveur</p>
-                        <p className="mt-1 text-[9px] text-slate-500">Aucune génération sans devis</p>
-                      </div>
-                      <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-                        <p className="text-[9px] uppercase tracking-wide text-slate-500">Business Grow</p>
-                        <p className="mt-1 text-sm font-semibold text-white">Contexte entreprise</p>
-                        <p className="mt-1 text-[9px] text-slate-500">Mémoire métier consentie</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-semibold text-white">Croissance</p>
-                      <span className="vyora-badge-soft"><TrendingUp size={10} /> Suivi</span>
-                    </div>
-                    <div className="mt-3 flex h-24 items-end gap-1.5">
-                      {[26, 40, 32, 52, 44, 68, 58, 82, 74, 92].map((h, i) => (
-                        <div key={i} className="flex-1 rounded-t bg-gradient-to-t from-violet-500/30 to-cyan-300/70" style={{ height: `${h}%` }} />
-                      ))}
-                    </div>
-                    <div className="mt-3 space-y-1.5">
-                      {['Objectifs actifs', 'Prospects suivis', 'Actions planifiées'].map((label, i) => (
-                        <div key={label} className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-black/20 px-2 py-1.5 text-[9px] text-slate-400">
-                          <span>{label}</span><span className="font-semibold text-slate-200">{['—', '—', '—'][i]}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-[8px] leading-snug text-slate-600">Aperçu illustratif : aucun chiffre client réel n’est affiché.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#04070d] to-transparent" />
         </section>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* Dimensions                                                        */}
-        {/* ---------------------------------------------------------------- */}
-        <section id="dimensions" className="mx-auto max-w-7xl scroll-mt-24 px-4 pb-8 pt-16 sm:px-6 sm:pt-24">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200">Une identité. Deux dimensions.</p>
-              <h2 className="vyora-display mt-3 max-w-xl text-3xl text-white sm:text-4xl">Tout avance mieux, ensemble.</h2>
-            </div>
-            <p className="max-w-md text-sm leading-relaxed text-slate-400">Passez naturellement de la création de vos contenus au pilotage de votre croissance. Votre compte, vos données, votre espace.</p>
+        <TrustStrip />
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Deux univers — index                                                */}
+        {/* ------------------------------------------------------------------ */}
+        <section id="univers" className="landing-shell scroll-mt-24 py-16 sm:py-20">
+          <div className="grid items-end gap-6 lg:grid-cols-[0.92fr_1.08fr]">
+            <Reveal>
+              <SectionBadge icon={Sparkles} tone="neutral">Deux univers, une même exigence</SectionBadge>
+              <h2 className="landing-h2 mt-4 max-w-xl">
+                Un compte.{' '}
+                <span className="bg-gradient-to-r from-cyan-200 to-violet-300 bg-clip-text text-transparent">
+                  Deux espaces spécialisés.
+                </span>
+              </h2>
+            </Reveal>
+            <Reveal delay={80}>
+              <p className="landing-lead max-w-2xl lg:pb-1">
+                VYORA n’est pas un tableau de bord fourre-tout. Studio sert à créer. Business Growth sert à
+                développer. Chacun garde son interface, ses données et ses quotas — et vous passez de l’un à
+                l’autre avec le même compte.
+              </p>
+            </Reveal>
           </div>
 
-          <div className="mt-9 grid gap-4 lg:grid-cols-2">
-            {DIMENSIONS.map((dimension) => {
-              const Icon = dimension.icon;
-              const cyan = dimension.accent === 'cyan';
+          <div className="mt-8 grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                href: '#studio', icon: Clapperboard, index: '01', label: 'Créer',
+                title: 'VYORA Studio',
+                text: 'Vidéos UGC, publicités, produits mis en scène, montage et bibliothèque privée.',
+                tone: 'cyan' as const,
+              },
+              {
+                href: '#business', icon: Brain, index: '02', label: 'Développer',
+                title: 'VYORA Business Growth',
+                text: 'Agent IA, prospects, objectifs, marché, stratégie et briefs marketing.',
+                tone: 'violet' as const,
+              },
+            ].map((item, index) => {
+              const Icon = item.icon;
+              const cyan = item.tone === 'cyan';
               return (
-                <article key={dimension.key} className="vyora-card vyora-card-hover group">
-                  <div className="relative h-56 overflow-hidden sm:h-64">
-                    <img src={dimension.image} alt="" aria-hidden="true" className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.04]" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#080d15] via-[#080d15]/30 to-transparent" />
-                    <span className={cn('absolute left-5 top-5 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] backdrop-blur', cyan ? 'border-cyan-300/25 bg-cyan-400/10 text-cyan-100' : 'border-violet-300/25 bg-violet-400/10 text-violet-100')}>
-                      <Icon size={12} /> {dimension.eyebrow}
-                    </span>
-                  </div>
-                  <div className="relative -mt-14 p-5 sm:p-6">
-                    <h3 className="vyora-display text-2xl text-white">{dimension.title}</h3>
-                    <p className="mt-2 max-w-lg text-sm leading-relaxed text-slate-400">{dimension.text}</p>
-                    <ul className="mt-4 grid gap-1.5 sm:grid-cols-2">
-                      {dimension.points.map((point) => (
-                        <li key={point} className="flex items-center gap-2 text-[12px] text-slate-300">
-                          <span className={cn('grid h-4 w-4 place-items-center rounded-full', cyan ? 'bg-cyan-400/15 text-cyan-200' : 'bg-violet-400/15 text-violet-200')}><Check size={10} /></span>
-                          {point}
-                        </li>
-                      ))}
-                    </ul>
-                    <Link to={dimension.to} className={cn('mt-5 inline-flex items-center gap-1.5 text-[12px] font-semibold transition', cyan ? 'text-cyan-200 hover:text-cyan-100' : 'text-violet-200 hover:text-violet-100')}>
-                      Découvrir cet espace <ArrowUpRight size={13} />
-                    </Link>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* Features                                                          */}
-        {/* ---------------------------------------------------------------- */}
-        <section id="fonctionnalites" className="mx-auto max-w-7xl scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24">
-          <div className="mx-auto max-w-2xl text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200">La plateforme</p>
-            <h2 className="vyora-display mt-3 text-3xl text-white sm:text-4xl">Tout le cycle, de l’idée au résultat</h2>
-            <p className="mt-3 text-sm leading-relaxed text-slate-400">Chaque étape est reliée à des services réels et à votre base de données. Rien n’est simulé.</p>
-          </div>
-          <div className="mt-11 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((feature, index) => {
-              const Icon = feature.icon;
-              return (
-                <article key={feature.title} className={cn('vyora-card vyora-card-hover p-5 sm:p-6', index === 0 && 'lg:row-span-1')}>
-                  <div className="flex items-start justify-between">
-                    <div className="grid h-11 w-11 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-200">
+                <Reveal key={item.title} delay={index * 80}>
+                  <a
+                    href={item.href}
+                    className={cn(
+                      'group relative flex h-full items-start gap-3 overflow-hidden rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 sm:p-5',
+                      cyan
+                        ? 'border-cyan-300/15 bg-cyan-400/[0.04] hover:border-cyan-300/35'
+                        : 'border-violet-300/15 bg-violet-400/[0.05] hover:border-violet-300/35',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'grid h-11 w-11 shrink-0 place-items-center rounded-xl border',
+                        cyan ? 'border-cyan-300/25 bg-cyan-400/10 text-cyan-200' : 'border-violet-300/25 bg-violet-400/10 text-violet-200',
+                      )}
+                    >
                       <Icon size={19} />
-                    </div>
-                    <span className="text-[10px] font-semibold text-white/15">0{index + 1}</span>
-                  </div>
-                  <h3 className="mt-4 text-[15px] font-semibold text-white">{feature.title}</h3>
-                  <p className="mt-2 text-[13px] leading-relaxed text-slate-400">{feature.text}</p>
-                </article>
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-display text-[10px] font-bold tracking-[0.2em] text-slate-500">{item.index}</span>
+                        <span className={cn('text-[9px] font-semibold uppercase tracking-[0.18em]', cyan ? 'text-cyan-200/80' : 'text-violet-200/80')}>
+                          {item.label}
+                        </span>
+                      </span>
+                      <span className="mt-1 block font-display text-lg font-semibold text-white">{item.title}</span>
+                      <span className="mt-1 block text-[12.5px] leading-relaxed text-slate-400">{item.text}</span>
+                      <span className={cn('mt-3 inline-flex items-center gap-1.5 text-[11.5px] font-semibold', cyan ? 'text-cyan-200' : 'text-violet-200')}>
+                        Explorer cet espace <ArrowUpRight size={12} className="transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                      </span>
+                    </span>
+                  </a>
+                </Reveal>
               );
             })}
           </div>
         </section>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* Workflow                                                          */}
-        {/* ---------------------------------------------------------------- */}
-        <section id="workflow" className="relative scroll-mt-24 border-y border-white/[0.06] bg-[#060a11] py-16 sm:py-24">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-violet-200">Workflow</p>
-                <h2 className="vyora-display mt-3 text-3xl text-white sm:text-4xl">Quatre étapes, une seule plateforme</h2>
+        {/* ------------------------------------------------------------------ */}
+        {/* VYORA Studio                                                        */}
+        {/* ------------------------------------------------------------------ */}
+        <section id="studio" aria-labelledby="studio-title" className="relative scroll-mt-24 overflow-hidden border-y border-white/[0.06] py-16 sm:py-24">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_35%,rgba(34,211,238,0.09),transparent_58%)]" />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/25 to-transparent" />
+
+          <div className="landing-shell grid items-center gap-10 lg:grid-cols-[1.04fr_0.96fr] lg:gap-12">
+            <Reveal className="order-2 mx-auto w-full min-w-0 max-w-[600px] lg:order-1 lg:max-w-none">
+              <StudioShowcase />
+            </Reveal>
+
+            <Reveal className="order-1 min-w-0 lg:order-2" delay={90}>
+              <SectionBadge icon={Clapperboard} tone="cyan">01 · Créer — VYORA Studio</SectionBadge>
+              <h2 id="studio-title" className="landing-h2 mt-4">
+                Transformez vos idées et vos produits en vidéos qui attirent l’attention.
+              </h2>
+              <p className="landing-lead mt-4">
+                Un studio de création assisté par IA : brief, script, plan de production, choix du modèle,
+                devis vérifié, génération suivie, montage et export. Chaque étape s’appuie sur un outil réel —
+                rien n’est simulé.
+              </p>
+
+              <ul className="mt-6 grid gap-2 sm:grid-cols-2">
+                {STUDIO_FEATURES.map((feature) => {
+                  const Icon = feature.icon;
+                  return (
+                    <li key={feature.title} className="flex items-start gap-2.5 rounded-xl border border-cyan-300/10 bg-cyan-400/[0.035] p-2.5">
+                      <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-400/10 text-cyan-200">
+                        <Icon size={12} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[12px] font-semibold text-white">{feature.title}</span>
+                        <span className="mt-0.5 block text-[11px] leading-snug text-slate-400">{feature.text}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div className="mt-6 flex flex-wrap items-center gap-2.5">
+                <Link to="/app/studio" className="btn btn-primary btn-md landing-shine w-full sm:w-auto">
+                  Découvrir VYORA Studio <ArrowRightIcon />
+                </Link>
+                <Link to="/inscription" className="btn btn-outline btn-md w-full sm:w-auto">Créer mon compte</Link>
+                <a href="#tarifs" className="landing-link px-1 text-cyan-200 hover:text-cyan-100">
+                  Voir les formules <ArrowUpRight size={12} />
+                </a>
               </div>
-              <Link to="/inscription" className="btn btn-outline btn-md">Lancer mon premier projet <ArrowRight size={15} /></Link>
+
+              <div className="mt-6 flex flex-wrap items-center gap-2.5">
+                <span className="text-[10px] uppercase tracking-[0.16em] text-slate-600">Inspirations</span>
+                {STUDIO_INSPIRATIONS.map((item) => (
+                  <span key={item.label} className="group relative h-[68px] w-[50px] overflow-hidden rounded-lg border border-white/10">
+                    <img
+                      src={item.src}
+                      alt={`Direction visuelle ${item.label} pour une vidéo UGC`}
+                      className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span className="absolute inset-x-0 bottom-0 bg-black/65 px-1 py-0.5 text-center text-[7.5px] font-medium text-white backdrop-blur-sm">
+                      {item.label}
+                    </span>
+                  </span>
+                ))}
+                <span className="max-w-[190px] text-[9.5px] leading-snug text-slate-500">
+                  Exemples de directions visuelles. Vos vidéos dépendent du catalogue réellement disponible.
+                </span>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* VYORA Business Growth                                               */}
+        {/* ------------------------------------------------------------------ */}
+        <section id="business" aria-labelledby="business-title" className="relative scroll-mt-24 overflow-hidden py-16 sm:py-24">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_82%_35%,rgba(139,92,246,0.1),transparent_58%)]" />
+
+          <div className="landing-shell grid items-center gap-10 lg:grid-cols-[0.96fr_1.04fr] lg:gap-12">
+            <Reveal className="min-w-0">
+              <SectionBadge icon={Brain} tone="violet">02 · Développer — Business Growth</SectionBadge>
+              <h2 id="business-title" className="landing-h2 mt-4">
+                Ne laissez plus votre entreprise perdre des clients, du temps et de l’argent.
+              </h2>
+              <p className="landing-lead mt-4">
+                Business Growth réunit votre contexte d’entreprise, vos objectifs, votre catalogue, votre
+                marché et vos prospects dans un espace intelligent. Son agent vous aide à décider, préparer et
+                suivre — vous gardez la main sur chaque action.
+              </p>
+
+              <ul className="mt-6 grid gap-2 sm:grid-cols-2">
+                {BUSINESS_FEATURES.map((feature) => {
+                  const Icon = feature.icon;
+                  return (
+                    <li key={feature.title} className="flex items-start gap-2.5 rounded-xl border border-violet-300/10 bg-violet-400/[0.04] p-2.5">
+                      <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg border border-violet-300/20 bg-violet-400/10 text-violet-200">
+                        <Icon size={12} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[12px] font-semibold text-white">{feature.title}</span>
+                        <span className="mt-0.5 block text-[11px] leading-snug text-slate-400">{feature.text}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div className="mt-6 flex flex-wrap items-center gap-2.5">
+                <Link to="/app/business" className="btn btn-primary btn-md landing-shine w-full sm:w-auto">
+                  Découvrir Business Growth <ArrowRightIcon />
+                </Link>
+                <Link to="/app/business/abonnement" className="btn btn-outline btn-md w-full sm:w-auto">
+                  Voir les formules
+                </Link>
+              </div>
+
+              <p className="mt-4 flex items-start gap-2 text-[11px] leading-relaxed text-slate-400">
+                <ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-300" />
+                Quotas Business Growth distincts des crédits Studio. Aucun débit Studio depuis Business Growth.
+              </p>
+            </Reveal>
+
+            <Reveal className="mx-auto w-full min-w-0 max-w-[640px] lg:max-w-none" delay={90}>
+              <GrowthShowcase />
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Problèmes résolus                                                   */}
+        {/* ------------------------------------------------------------------ */}
+        <section id="problemes" aria-labelledby="problemes-title" className="relative scroll-mt-24 border-y border-white/[0.06] bg-[#050810] py-16 sm:py-24">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(34,211,238,0.07),transparent_55%)]" />
+          <div className="landing-shell relative">
+            <Reveal className="mx-auto max-w-2xl text-center">
+              <SectionBadge icon={AlertTriangle} tone="neutral">Le quotidien des entrepreneurs</SectionBadge>
+              <h2 id="problemes-title" className="landing-h2 mt-4">
+                Votre entreprise mérite mieux que de perdre des opportunités.
+              </h2>
+              <p className="landing-lead mt-4">
+                Un message sans réponse, une relance oubliée, un produit invisible : les pertes ne font pas de
+                bruit. VYORA relie les informations et prépare les actions — vous décidez de la suite.
+              </p>
+            </Reveal>
+
+            <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {PROBLEMS.map((problem, index) => {
+                const Icon = problem.icon;
+                const tone = problem.tone;
+                return (
+                  <Reveal key={problem.title} delay={(index % 3) * 70} className="h-full">
+                    <article className="landing-problem group flex h-full flex-col">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            'grid h-9 w-9 place-items-center rounded-xl border',
+                            tone === 'cyan' && 'border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-200',
+                            tone === 'violet' && 'border-violet-300/20 bg-violet-400/[0.08] text-violet-200',
+                            tone === 'amber' && 'border-amber-300/20 bg-amber-400/[0.08] text-amber-200',
+                          )}
+                        >
+                          <Icon size={16} />
+                        </span>
+                        <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500">{problem.tag}</span>
+                      </div>
+
+                      <h3 className="mt-3 text-[14px] font-semibold leading-snug text-white">{problem.title}</h3>
+                      <p className="mt-1.5 text-[12px] leading-relaxed text-slate-400">{problem.detail}</p>
+
+                      <div className="mt-4 flex-1 rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                        <p className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.15em] text-slate-500">
+                          <Zap size={10} className="text-cyan-300" /> Ce que VYORA apporte
+                        </p>
+                        <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-300">{problem.solution}</p>
+                      </div>
+                    </article>
+                  </Reveal>
+                );
+              })}
             </div>
-            <div className="mt-10 grid gap-3 md:grid-cols-4">
-              {STEPS.map((step, index) => (
-                <div key={step.n} className="relative rounded-2xl border border-white/[0.07] bg-white/[0.02] p-5">
-                  {index < STEPS.length - 1 && (
-                    <span aria-hidden="true" className="absolute -right-1.5 top-9 hidden h-px w-3 bg-white/15 md:block" />
-                  )}
-                  <span className="font-display text-3xl font-bold text-white/10">{step.n}</span>
-                  <h3 className="mt-2 text-sm font-semibold text-white">{step.title}</h3>
-                  <p className="mt-2 text-xs leading-relaxed text-slate-400">{step.text}</p>
+
+            <Reveal delay={80}>
+              <div className="mt-8 flex flex-col items-start justify-between gap-4 rounded-2xl border border-white/[0.09] bg-white/[0.03] p-5 sm:flex-row sm:items-center">
+                <div className="max-w-2xl">
+                  <p className="text-[13px] font-semibold text-white">Pas de promesse magique.</p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-slate-400">
+                    VYORA ne garantit aucun résultat commercial. Les propositions de l’IA restent soumises à
+                    votre validation et dépendent de vos données, de votre marché et de votre exécution.
+                  </p>
                 </div>
+                <Link to="/inscription" className="btn btn-primary btn-md landing-shine w-full shrink-0 sm:w-auto">
+                  Commencer avec VYORA <ArrowRightIcon />
+                </Link>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Écosystème                                                          */}
+        {/* ------------------------------------------------------------------ */}
+        <section id="ecosysteme" aria-labelledby="ecosysteme-title" className="landing-shell scroll-mt-24 py-16 sm:py-24">
+          <Reveal className="mx-auto max-w-3xl text-center">
+            <SectionBadge icon={Layers3} tone="neutral">Deux espaces, un écosystème</SectionBadge>
+            <h2 id="ecosysteme-title" className="landing-h2 mt-4">
+              Studio crée. Business Growth prépare. <span className="text-slate-400">Vous décidez.</span>
+            </h2>
+            <p className="landing-lead mt-4">
+              Les deux espaces restent distincts. Une seule passerelle : un brief vidéo préparé par Business
+              Growth, validé par vous, puis ouvert dans Studio. Les crédits et les fichiers restent ceux du
+              Studio.
+            </p>
+          </Reveal>
+
+          <Reveal className="mt-10" delay={80}>
+            <EcosystemFlow />
+          </Reveal>
+        </section>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Démarrage                                                           */}
+        {/* ------------------------------------------------------------------ */}
+        <section className="border-y border-white/[0.06] bg-[#050810] py-16 sm:py-20">
+          <div className="landing-shell">
+            <Reveal className="flex flex-wrap items-end justify-between gap-5">
+              <div>
+                <SectionBadge icon={Zap} tone="neutral">Comment démarrer</SectionBadge>
+                <h2 className="landing-h2 mt-4">Quatre étapes, aucun détour.</h2>
+              </div>
+              <Link to="/inscription" className="btn btn-outline btn-md">
+                Créer mon compte <ArrowRightIcon />
+              </Link>
+            </Reveal>
+
+            <div className="mt-9 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {STEPS.map((step, index) => (
+                <Reveal key={step.n} delay={index * 70} className="h-full">
+                  <article className="relative h-full rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="font-display text-2xl font-bold text-white/10">{step.n}</span>
+                      <span className="grid h-6 w-6 place-items-center rounded-full border border-cyan-300/20 bg-cyan-400/[0.08] text-cyan-200">
+                        <Check size={11} />
+                      </span>
+                    </div>
+                    <h3 className="mt-2 text-[13px] font-semibold text-white">{step.title}</h3>
+                    <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">{step.text}</p>
+                  </article>
+                </Reveal>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* Pricing                                                           */}
-        {/* ---------------------------------------------------------------- */}
-        <section id="tarifs" className="mx-auto max-w-7xl scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24">
-          <div className="mx-auto max-w-2xl text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200">Tarifs</p>
-            <h2 className="vyora-display mt-3 text-3xl text-white sm:text-4xl">Des formules adaptées à votre cadence</h2>
-            <p className="mt-3 text-sm text-slate-400">Les formules et quotas ci-dessous proviennent directement de la base de données VYORA.</p>
-          </div>
+        {/* ------------------------------------------------------------------ */}
+        {/* Tarifs                                                              */}
+        {/* ------------------------------------------------------------------ */}
+        <section id="tarifs" className="landing-shell scroll-mt-24 py-16 sm:py-24">
+          <Reveal className="mx-auto max-w-2xl text-center">
+            <SectionBadge icon={CreditCard} tone="cyan">Tarifs Studio</SectionBadge>
+            <h2 className="landing-h2 mt-4">Des formules claires, un catalogue serveur.</h2>
+            <p className="landing-lead mt-4">
+              Les formules et quotas Studio ci-dessous proviennent de la base VYORA. Aucun prix n’est inventé :
+              ce qui n’est pas disponible n’est pas affiché.
+            </p>
+          </Reveal>
+
           {plansLoading && <LoadingState label="Chargement des formules…" />}
+
           {!plansLoading && plansError && (
             <div className="mx-auto mt-10 max-w-md rounded-2xl border border-rose-400/25 bg-rose-400/[0.06] p-4 text-center">
               <p className="text-sm text-rose-100">{plansError}</p>
-              <button type="button" onClick={() => { void loadPlans(); }} className="btn btn-outline btn-sm mt-3">Réessayer</button>
+              <button type="button" onClick={() => { void loadPlans(); }} className="btn btn-outline btn-sm mt-3">
+                Réessayer
+              </button>
             </div>
           )}
+
           {!plansLoading && !plansError && plans.length === 0 && (
-            <p className="mt-10 text-center text-sm text-slate-400">Les formules seront affichées dès que le catalogue sera disponible.</p>
+            <p className="mt-10 text-center text-sm text-slate-400">
+              Les formules seront affichées dès que le catalogue sera disponible.
+            </p>
           )}
-          <div className="mt-11 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {plans.map((plan) => {
-              const highlighted = plan.plan_key === 'studio';
-              return (
-                <article key={plan.plan_key} className={cn('vyora-card flex flex-col p-6', highlighted && 'border-cyan-300/30 shadow-[0_40px_100px_-60px_rgba(34,211,238,0.55)]')}>
-                  {highlighted && <span className="mb-3 w-fit rounded-full bg-cyan-400/15 px-2.5 py-1 text-[10px] font-semibold text-cyan-100">Le plus choisi</span>}
-                  <h3 className="text-lg font-semibold text-white">{plan.display_name}</h3>
-                  <p className="mt-1 text-xs text-slate-400">{(plan.tagline ?? '').replace(/\bReelora\b/gi, 'VYORA')}</p>
-                  <p className="mt-5 text-2xl font-semibold text-white">{formatMoney(plan.monthly_price_minor, plan.currency)}<span className="text-sm font-normal text-slate-500"> / mois</span></p>
-                  <ul className="mt-5 flex-1 space-y-2.5">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-2 text-xs text-slate-300">
-                        <Check size={14} className="mt-0.5 shrink-0 text-emerald-400" /> {feature.replace(/\bReelora\b/gi, 'VYORA')}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs text-slate-400">
-                    {plan.max_projects} projets · {plan.max_videos_per_month} vidéos/mois · {plan.max_scripts_per_month} scripts/mois
-                  </div>
-                  <Link to="/inscription" className={cn('btn btn-md mt-4 w-full', highlighted ? 'btn-primary' : 'btn-outline')}>Choisir {plan.display_name}</Link>
-                </article>
-              );
-            })}
-          </div>
+
+          {!plansLoading && !plansError && plans.length > 0 && (
+            <div className="mt-10 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {plans.map((plan, index) => {
+                const highlighted = plan.plan_key === 'studio';
+                return (
+                  <Reveal key={plan.plan_key} delay={index * 60} className="h-full">
+                    <article className={cn('landing-plan h-full', highlighted && 'landing-plan-featured')}>
+                      {highlighted && (
+                        <span className="absolute right-4 top-4 rounded-full border border-cyan-300/25 bg-cyan-400/15 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
+                          Le plus choisi
+                        </span>
+                      )}
+                      <h3 className="font-display text-lg font-semibold text-white">{plan.display_name}</h3>
+                      <p className="mt-1 min-h-[2.2rem] text-[11.5px] leading-relaxed text-slate-400">
+                        {(plan.tagline ?? '').replace(/\bReelora\b/gi, 'VYORA')}
+                      </p>
+                      <p className="mt-4 text-[1.7rem] font-semibold tracking-[-0.03em] text-white">
+                        {plan.monthly_price_minor === 0 ? 'Gratuit' : formatMoney(plan.monthly_price_minor, plan.currency)}
+                        {plan.monthly_price_minor > 0 && <span className="text-[13px] font-normal text-slate-500"> / mois</span>}
+                      </p>
+                      <ul className="mt-4 flex-1 space-y-2">
+                        {plan.features.map((feature) => (
+                          <li key={feature} className="flex items-start gap-2 text-[11.5px] leading-snug text-slate-300">
+                            <Check size={13} className="mt-0.5 shrink-0 text-emerald-400" />
+                            {feature.replace(/\bReelora\b/gi, 'VYORA')}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-4 rounded-lg border border-white/[0.07] bg-black/20 px-3 py-2 text-[10.5px] leading-relaxed text-slate-400">
+                        {plan.max_projects} projets · {plan.max_videos_per_month} vidéos/mois · {plan.max_scripts_per_month} scripts/mois
+                      </div>
+                      <Link
+                        to="/inscription"
+                        className={cn('btn btn-md mt-4 w-full', highlighted ? 'btn-primary landing-shine' : 'btn-outline')}
+                      >
+                        Choisir {plan.display_name}
+                      </Link>
+                    </article>
+                  </Reveal>
+                );
+              })}
+            </div>
+          )}
+
+          <Reveal delay={80}>
+            <div className="mt-4 flex flex-col items-start justify-between gap-4 rounded-2xl border border-violet-300/15 bg-violet-400/[0.05] p-4 sm:flex-row sm:items-center sm:p-5">
+              <div className="flex items-start gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-violet-300/25 bg-violet-400/10 text-violet-200">
+                  <Brain size={16} />
+                </span>
+                <div>
+                  <p className="text-[12.5px] font-semibold text-white">Business Growth : formules dédiées</p>
+                  <p className="mt-1 max-w-xl text-[11.5px] leading-relaxed text-slate-400">
+                    Quotas et facturation propres à Business Growth, indépendants du Studio. Les formules
+                    s’affichent uniquement lorsque le catalogue serveur les rend disponibles.
+                  </p>
+                </div>
+              </div>
+              <Link to="/app/business/abonnement" className="btn btn-outline btn-sm shrink-0">
+                Voir les formules Business Growth <ArrowUpRight size={13} />
+              </Link>
+            </div>
+          </Reveal>
         </section>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* FAQ                                                               */}
-        {/* ---------------------------------------------------------------- */}
-        <section id="faq" className="scroll-mt-24 border-t border-white/[0.06] bg-[#060a11] py-16 sm:py-24">
-          <div className="mx-auto max-w-3xl px-4 sm:px-6">
-            <h2 className="vyora-display text-center text-3xl text-white sm:text-4xl">Questions fréquentes</h2>
-            <div className="mt-10 space-y-2.5">
+        {/* ------------------------------------------------------------------ */}
+        {/* FAQ                                                                 */}
+        {/* ------------------------------------------------------------------ */}
+        <section id="faq" className="scroll-mt-24 border-y border-white/[0.06] bg-[#050810] py-16 sm:py-24">
+          <div className="landing-shell">
+            <Reveal className="mx-auto max-w-2xl text-center">
+              <SectionBadge icon={MessageSquare} tone="neutral">Questions fréquentes</SectionBadge>
+              <h2 className="landing-h2 mt-4">Tout ce qu’il faut savoir avant de commencer.</h2>
+            </Reveal>
+
+            <div className="mx-auto mt-9 max-w-3xl space-y-2">
               {FAQ.map((item, index) => {
                 const open = openFaq === index;
+                const panelId = `faq-panel-${index}`;
                 return (
-                  <div key={item.q} className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02]">
-                    <button
-                      type="button"
-                      onClick={() => setOpenFaq(open ? null : index)}
-                      aria-expanded={open}
-                      className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left text-sm font-semibold text-white"
-                    >
-                      {item.q}
-                      <span className={cn('text-cyan-300 transition', open && 'rotate-45')}>+</span>
-                    </button>
-                    {open && <p className="px-5 pb-5 text-sm leading-relaxed text-slate-400">{item.a}</p>}
-                  </div>
+                  <Reveal key={item.q} delay={Math.min(index, 4) * 40}>
+                    <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.02]">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFaq(open ? null : index)}
+                        aria-expanded={open}
+                        aria-controls={panelId}
+                        className="flex min-h-[52px] w-full items-center justify-between gap-3 px-4 py-3.5 text-left text-[13px] font-semibold text-white sm:px-5"
+                      >
+                        <span className="min-w-0">{item.q}</span>
+                        <Plus
+                          size={15}
+                          className={cn('shrink-0 text-cyan-300 transition-transform duration-300', open && 'rotate-45')}
+                        />
+                      </button>
+                      <div id={panelId} hidden={!open}>
+                        <p className="px-4 pb-4 text-[12.5px] leading-relaxed text-slate-400 sm:px-5">{item.a}</p>
+                      </div>
+                    </div>
+                  </Reveal>
                 );
               })}
             </div>
           </div>
         </section>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* CTA                                                               */}
-        {/* ---------------------------------------------------------------- */}
-        <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-24">
-          <div className="relative isolate overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-[#070d16] p-8 text-center sm:p-16">
-            <img src="/brand/vyora-hero.jpg" alt="" aria-hidden="true" className="absolute inset-0 -z-10 h-full w-full object-cover opacity-25" />
-            <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-br from-[#05080e]/90 via-[#05080e]/70 to-violet-900/40" />
-            <div aria-hidden="true" className="vyora-glow-ring left-1/4 top-0 h-56 w-56 animate-pulseGlow bg-cyan-400/25" />
-            <Zap className="mx-auto text-cyan-200" size={26} />
-            <h2 className="vyora-display mx-auto mt-5 max-w-2xl text-3xl text-white sm:text-4xl">Prêt à faire grandir votre activité ?</h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-300">Un seul espace pour créer vos contenus, comprendre votre marché et développer vos ventes avec VYORA.</p>
-            <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-              <Link to="/inscription" className="btn btn-primary btn-lg vyora-btn-sheen">Créer mon compte <ArrowRight size={17} /></Link>
-              <Link to="/connexion" className="btn btn-outline btn-lg">J’ai déjà un compte</Link>
+        {/* ------------------------------------------------------------------ */}
+        {/* Appel à l’action final                                              */}
+        {/* ------------------------------------------------------------------ */}
+        <section className="landing-shell py-16 sm:py-24">
+          <Reveal>
+            <div className="relative isolate overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-[#060b14] px-5 py-12 text-center sm:px-12 sm:py-16">
+              <img
+                src="/brand/vyora-cta.jpg"
+                alt=""
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 -z-20 h-full w-full object-cover opacity-55"
+                loading="lazy"
+                decoding="async"
+              />
+              <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[linear-gradient(to_top,#05080f_10%,rgba(5,8,15,0.82)_55%,rgba(5,8,15,0.55))]" />
+              <div aria-hidden="true" className="landing-aurora vyora-glow-pulse left-1/4 top-0 -z-10 h-56 w-56 bg-cyan-400/25" />
+              <div aria-hidden="true" className="landing-aurora vyora-glow-pulse bottom-0 right-1/4 -z-10 h-56 w-56 bg-violet-500/25" style={{ animationDelay: '-5s' }} />
+
+              <BrandSymbol size={44} className="mx-auto" />
+              <h2 className="landing-h2 mx-auto mt-5 max-w-2xl">Votre prochaine étape commence avec VYORA.</h2>
+              <p className="mx-auto mt-4 max-w-xl text-[14px] leading-relaxed text-slate-300 sm:text-[15px]">
+                Donnez à vos idées les moyens de prendre forme et à votre entreprise les moyens de grandir.
+              </p>
+
+              <div className="mt-7 flex flex-wrap items-center justify-center gap-2.5">
+                <Link to="/inscription" className="btn btn-primary btn-lg landing-shine w-full sm:w-auto">
+                  Créer mon compte <ArrowRightIcon />
+                </Link>
+                <Link to="/app/studio" className="btn btn-outline btn-lg w-full sm:w-auto">Explorer VYORA Studio</Link>
+                <Link to="/app/business" className="btn btn-outline btn-lg w-full sm:w-auto">Découvrir Business Growth</Link>
+              </div>
+
+              <div className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[10.5px] text-slate-400">
+                <span className="inline-flex items-center gap-1.5"><Users size={12} /> Un compte, deux espaces</span>
+                <span className="inline-flex items-center gap-1.5"><LockKeyhole size={12} /> Données isolées</span>
+                <span className="inline-flex items-center gap-1.5"><ShieldCheck size={12} /> Aucun résultat fictif</span>
+              </div>
             </div>
-            <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[11px] text-slate-400">
-              <span className="flex items-center gap-1.5"><Users size={12} /> Espaces isolés</span>
-              <span className="flex items-center gap-1.5"><LockKeyhole size={12} /> Données hébergées dans l’UE</span>
-              <span className="flex items-center gap-1.5"><ShieldCheck size={12} /> Aucun résultat fictif</span>
-            </div>
-          </div>
+          </Reveal>
         </section>
       </main>
 
-      <footer className="border-t border-white/[0.06] py-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 text-xs text-slate-500 sm:flex-row sm:px-6">
-          <div className="flex items-center gap-3"><BrandLockup tagline /> <span className="hidden text-slate-600 sm:inline">One platform. Two dimensions.</span></div>
-          <div className="flex flex-wrap items-center gap-5">
-            <Link to="/confidentialite" className="hover:text-white">Confidentialité</Link>
-            <Link to="/conditions" className="hover:text-white">Conditions d’utilisation</Link>
-            <Link to="/connexion" className="hover:text-white">Connexion</Link>
-            <span className="flex items-center gap-1.5"><LockKeyhole size={12} /> UE</span>
-          </div>
-        </div>
-        <div className="mx-auto mt-5 flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 text-[10px] text-slate-600 sm:px-6">
-          <span>© {new Date().getFullYear()} VYORA — Create. Evolve. Grow.</span>
-          <Link to="/proprietaire" className="transition-colors hover:text-slate-400">Espace propriétaire</Link>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   );
 }
