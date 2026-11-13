@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BusinessGrow from '../src/business/BusinessGrow';
 import { BusinessGrowApiError } from '../src/business/api';
@@ -68,7 +68,15 @@ const businessMocks = vi.hoisted(() => {
       request_model_key?: string | null;
     }>;
     memory: { consent: boolean; policyVersion: string | null; profile: Record<string, unknown> | null; items: Array<{ id: string; category: string; content: unknown; created_at: string; updated_at: string }> };
-  } = { conversations: [], messages: [], memory: { consent: false, policyVersion: null, profile: null, items: [] } };
+    agentMemories: Array<{ id: string; category: string; title: string; content: string; confidence: string; created_at?: string | null }>;
+  } = {
+    conversations: [], messages: [],
+    memory: { consent: false, policyVersion: null, profile: null, items: [] },
+    agentMemories: [
+      { id: 'mem-company-1', category: 'company', title: 'Notre entreprise vend des savons artisanaux', content: 'Notre entreprise vend des savons artisanaux à Bamako.', confidence: 'fact', created_at: '2026-11-10T09:00:00Z' },
+      { id: 'mem-decision-1', category: 'decision', title: 'J’ai décidé de cibler les pharmacies', content: 'J’ai décidé de cibler les pharmacies plutôt que les supermarchés.', confidence: 'fact', created_at: '2026-11-11T10:30:00Z' },
+    ],
+  };
   const createdId = '11111111-1111-4111-8111-111111111111';
   return {
     state,
@@ -125,7 +133,7 @@ const businessMocks = vi.hoisted(() => {
       reserved_units: 0,
       monthly_allowance: null,
     })),
-    listRequests: vi.fn(async () => ({ requests: [] })),
+    listRequests: vi.fn(async () => ({ requests: [] as Array<Record<string, unknown>> })),
     listTools: vi.fn(async () => ({ tools: [] as Array<Record<string, unknown>> })),
     resolveTool: vi.fn(async (_id: string, _decision: 'approved' | 'rejected') => ({ status: 'executed' })),
     listIntegrations: vi.fn(async () => ({ connections: [] })),
@@ -139,6 +147,15 @@ const businessMocks = vi.hoisted(() => {
     saveMemoryProfile: vi.fn(async () => ({ saved: true })),
     putMemoryItem: vi.fn(async () => ({ itemId: '22222222-2222-4222-8222-222222222222' })),
     deleteMemoryItem: vi.fn(async () => ({ deleted: true })),
+    listAgentMemories: vi.fn(async () => ({ memories: state.agentMemories })),
+    searchAgentMemories: vi.fn(async (query: string) => ({
+      memories: state.agentMemories.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(query.toLowerCase())),
+    })),
+    forgetAgentMemory: vi.fn(async (id: string) => {
+      const originalLength = state.agentMemories.length;
+      state.agentMemories = state.agentMemories.filter((item) => item.id !== id);
+      return { forgotten: state.agentMemories.length !== originalLength };
+    }),
   };
 });
 
@@ -167,6 +184,10 @@ beforeEach(() => {
   businessMocks.state.conversations = [];
   businessMocks.state.messages = [];
   businessMocks.state.memory = { consent: false, policyVersion: null, profile: null, items: [] };
+  businessMocks.state.agentMemories = [
+    { id: 'mem-company-1', category: 'company', title: 'Notre entreprise vend des savons artisanaux', content: 'Notre entreprise vend des savons artisanaux à Bamako.', confidence: 'fact', created_at: '2026-11-10T09:00:00Z' },
+    { id: 'mem-decision-1', category: 'decision', title: 'J’ai décidé de cibler les pharmacies', content: 'J’ai décidé de cibler les pharmacies plutôt que les supermarchés.', confidence: 'fact', created_at: '2026-11-11T10:30:00Z' },
+  ];
   vi.clearAllMocks();
   verifyProviderImpl.current = defaultVerifyProvider;
   businessMocks.getStatus.mockResolvedValue({ providers: [] });
@@ -781,5 +802,108 @@ describe('Business Grow', () => {
       roleKey: 'business_advisor',
       routing: { selectionMode: 'auto', allowFallback: true },
     });
+  });
+});
+
+describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
+  it('affiche les éléments mémorisés de l’agent avec leur statut de confiance', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+
+    const memoryPanel = await screen.findByTestId('ai-memory-panel');
+    expect(screen.getByText('Mémoire de l’agent')).toBeTruthy();
+    expect(within(memoryPanel).getByTestId('ai-memory-mem-company-1')).toBeTruthy();
+    expect(within(memoryPanel).getByTestId('ai-memory-mem-decision-1')).toBeTruthy();
+    expect(within(memoryPanel).getByText('Entreprise')).toBeTruthy();
+    expect(within(memoryPanel).getByText('Décision')).toBeTruthy();
+    expect(within(memoryPanel).getAllByText('Vérifié').length).toBeGreaterThanOrEqual(2);
+    expect(within(memoryPanel).getByText('Notre entreprise vend des savons artisanaux')).toBeTruthy();
+  });
+
+  it('efface une mémoire au clic sur « Oublier » (tombstone, la liste se met à jour)', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByTestId('ai-memory-mem-company-1')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Oublier « Notre entreprise vend des savons artisanaux »/ }));
+
+    await waitFor(() => expect(businessMocks.forgetAgentMemory).toHaveBeenCalledWith('mem-company-1'));
+    expect(screen.queryByTestId('ai-memory-mem-company-1')).toBeNull();
+    expect(screen.getByTestId('ai-memory-mem-decision-1')).toBeTruthy();
+  });
+
+  it('recherche dans la mémoire de l’agent et filtre les résultats', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByTestId('ai-memory-mem-company-1')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Rechercher dans la mémoire de l’agent'), { target: { value: 'pharmacies' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rechercher' }));
+
+    await waitFor(() => expect(businessMocks.searchAgentMemories).toHaveBeenCalledWith('pharmacies'));
+    await waitFor(() => expect(screen.queryByTestId('ai-memory-mem-company-1')).toBeNull());
+    expect(screen.getByTestId('ai-memory-mem-decision-1')).toBeTruthy();
+  });
+
+  it('présente l’état vide quand la mémoire est désactivée (consentement off)', async () => {
+    businessMocks.state.agentMemories = [];
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByText('Mémoire désactivée')).toBeTruthy();
+    expect(screen.getByText(/Activez la mémoire pour que VYORA retienne vos déclarations explicites/)).toBeTruthy();
+  });
+
+  it('change le consentement de la mémoire de l’agent (activation)', async () => {
+    businessMocks.state.agentMemories = [];
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    await screen.findByText('Mémoire désactivée');
+
+    const toggle = screen.getByRole('switch');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(businessMocks.setMemoryConsent).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(screen.queryByText('Mémoire désactivée')).toBeNull());
+  });
+
+  it('affiche les règles de routage sauvegardées et l’activité IA récente', async () => {
+    savedPreferences.current = [{
+      role_key: 'marketing_campaign',
+      selection_mode: 'manual',
+      preferred_provider_key: 'gemini',
+      preferred_model_key: 'gemini-2.5-flash',
+      allow_fallback: false,
+    }];
+    businessMocks.listRequests.mockResolvedValueOnce({ requests: [{
+      id: 'req-ai-1', conversation_id: 'conv-1', role_key: 'business_advisor',
+      provider_key: 'groq', model_key: 'openai/gpt-oss-120b', status: 'succeeded',
+      input_tokens: 120, output_tokens: 340, latency_ms: 850,
+      error_code: null, created_at: '2026-11-12T09:00:00Z',
+    }]});
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByTestId('ai-routing-panel')).toBeTruthy();
+    expect(await screen.findByTestId('ai-routing-rules')).toBeTruthy();
+    expect(screen.getByTestId('ai-routing-rules').textContent).toContain('marketing_campaign');
+    expect(screen.getByText('Configurer')).toBeTruthy();
+
+    expect(await screen.findByTestId('ai-activity-panel')).toBeTruthy();
+    expect(screen.getByTestId('ai-activity-panel').textContent).toContain('succeeded');
+    expect(screen.getByTestId('ai-activity-panel').textContent).toContain('850 ms');
+    expect(screen.getByTestId('ai-activity-panel').textContent).toContain('120→340 jetons');
   });
 });

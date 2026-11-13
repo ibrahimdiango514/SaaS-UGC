@@ -18,7 +18,7 @@ import GrowthWorkspace from './growth/GrowthWorkspace';
 import type { Brand, Product, Workspace } from '../lib/types';
 import {
   BusinessGrowApiError, businessGrowApi,
-  type BusinessConversation, type BusinessIntegrationConnection, type BusinessMemory,
+  type BusinessAgentMemory, type BusinessConversation, type BusinessIntegrationConnection, type BusinessMemory,
   type BusinessMessage, type BusinessModelRecord, type BusinessProviderStatus,
   type BusinessQuotaStatus, type BusinessRoutingPreference, type BusinessSendOptions,
   type BusinessToolExecution, type BusinessVerificationResult,
@@ -28,7 +28,7 @@ import {
   type BusinessCapability, type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
 
-type BusinessSection = 'chat' | 'growth' | 'company' | 'memory' | 'providers' | 'integrations';
+type BusinessSection = 'chat' | 'growth' | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
 
 const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare }[] = [
   { id: 'chat', label: 'Assistant', icon: MessageSquare },
@@ -36,8 +36,19 @@ const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare
   { id: 'company', label: 'Entreprise', icon: Building2 },
   { id: 'memory', label: 'Mémoire métier', icon: Building2 },
   { id: 'providers', label: 'Services IA', icon: Zap },
+  { id: 'ai', label: 'Contrôle IA', icon: Brain },
   { id: 'integrations', label: 'Intégrations', icon: Plug },
 ];
+
+const AGENT_MEMORY_CATEGORY_LABELS: Record<string, string> = {
+  company: 'Entreprise',
+  user: 'Préférences',
+  decision: 'Décision',
+  conversation: 'Conversation',
+  domain: 'Domaine',
+  operational: 'Opérations',
+  document: 'Document',
+};
 
 function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -1377,6 +1388,222 @@ function IntegrationsView({ connections }: { connections: BusinessIntegrationCon
   );
 }
 
+/**
+ * A6 — Contrôle IA : le centre de contrôle de l'AI CORE, côté utilisateur.
+ * Mémoire de l'agent (consentement, lecture, effacement), règles de routage
+ * et activité IA récente. Les détails techniques (fournisseurs) restent
+ * anonymisés, conformément à l'identité produit.
+ */
+function AiControlCenterView({
+  memories,
+  loading,
+  searching,
+  error,
+  consent,
+  consentBusy,
+  savedRouting,
+  requests,
+  onToggleConsent,
+  onSearch,
+  onForget,
+  onRetry,
+  onOpenProviders,
+}: {
+  memories: BusinessAgentMemory[];
+  loading: boolean;
+  searching: boolean;
+  error: string | null;
+  consent: boolean;
+  consentBusy: boolean;
+  savedRouting: Array<Record<string, unknown>>;
+  requests: Array<Record<string, unknown>>;
+  onToggleConsent: (enabled: boolean) => Promise<void>;
+  onSearch: (query: string) => Promise<void>;
+  onForget: (memoryId: string) => Promise<void>;
+  onRetry: () => void;
+  onOpenProviders: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [forgettingId, setForgettingId] = useState<string | null>(null);
+
+  const handleSearch = (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = query.trim();
+    if (trimmed) void onSearch(trimmed);
+  };
+
+  const handleForget = async (memoryId: string) => {
+    setForgettingId(memoryId);
+    try {
+      await onForget(memoryId);
+    } finally {
+      setForgettingId(null);
+    }
+  };
+
+  const formatDate = (value: string | null | undefined) => {
+    if (!value) return '';
+    try {
+      return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(value));
+    } catch {
+      return '';
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Mémoire de l'agent */}
+      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-memory-panel">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-2xl">
+            <h2 className="text-lg font-semibold text-white">Mémoire de l’agent</h2>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              Les éléments que VYORA retient de vous pour personnaliser ses réponses : votre entreprise, vos décisions, vos préférences.
+              Seules vos déclarations explicites sont mémorisées. Vous décidez, vous vérifiez, vous effacez.
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-2.5">
+            <p className="mb-1.5 text-[11px] font-medium text-slate-400">Mémoire activée</p>
+            <Toggle
+              checked={consent}
+              onChange={(next) => { if (!consentBusy) void onToggleConsent(next); }}
+              label={consent ? 'Mémoriser mes déclarations' : 'Ne rien mémoriser'}
+            />
+            {consentBusy && <p className="mt-1.5 text-[10px] text-slate-500" role="status">Enregistrement…</p>}
+          </div>
+        </div>
+
+        <form onSubmit={handleSearch} className="mb-4 flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Rechercher dans la mémoire (ex. « savon », « prix »)…"
+            aria-label="Rechercher dans la mémoire de l’agent"
+            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white placeholder:text-slate-600"
+          />
+          <Button size="sm" variant="outline" loading={searching} type="submit">
+            Rechercher
+          </Button>
+          {memories.length > 0 && (
+            <Button size="sm" variant="ghost" type="button" onClick={onRetry}>
+              Tout afficher
+            </Button>
+          )}
+        </form>
+
+        {error ? (
+          <ErrorState message={error} onRetry={onRetry} />
+        ) : loading ? (
+          <LoadingState label="Chargement de la mémoire de l’agent…" />
+        ) : memories.length === 0 ? (
+          <EmptyState
+            icon={<Brain size={24} />}
+            title={consent ? 'Aucun élément mémorisé pour l’instant' : 'Mémoire désactivée'}
+            description={
+              consent
+                ? 'Vos déclarations explicites (entreprise, décisions, préférences) apparaîtront ici.'
+                : 'Activez la mémoire pour que VYORA retienne vos déclarations explicites.'
+            }
+          />
+        ) : (
+          <ul className="space-y-2.5">
+            {memories.map((memory) => (
+              <li key={memory.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`ai-memory-${memory.id}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge tone="brand">{AGENT_MEMORY_CATEGORY_LABELS[memory.category] ?? memory.category}</Badge>
+                      <Badge tone={memory.confidence === 'fact' ? 'success' : 'neutral'}>
+                        {memory.confidence === 'fact' ? 'Vérifié' : memory.confidence === 'hypothesis' ? 'À confirmer' : 'Incertitude'}
+                      </Badge>
+                      {memory.created_at && <span className="text-[11px] text-slate-500">{formatDate(memory.created_at)}</span>}
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-white">{memory.title}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-400">{memory.content}</p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={forgettingId === memory.id}
+                    disabled={forgettingId !== null && forgettingId !== memory.id}
+                    onClick={() => { void handleForget(memory.id); }}
+                    aria-label={`Oublier « ${memory.title} »`}
+                  >
+                    <Trash2 size={13} /> Oublier
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Règles de routage */}
+      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-routing-panel">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal size={16} className="text-brand-300" />
+            <h3 className="text-sm font-semibold text-white">Règles de routage</h3>
+          </div>
+          <Button size="sm" variant="outline" onClick={onOpenProviders}>
+            Configurer <ArrowUpRight size={13} />
+          </Button>
+        </div>
+        <p className="mb-3 text-xs leading-relaxed text-slate-400">
+          Par défaut, VYORA sélectionne automatiquement le service adapté et le modèle le plus fiable.
+          Vous pouvez imposer un moteur précis par rôle d’assistant.
+        </p>
+        {savedRouting.length === 0 ? (
+          <p className="rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2.5 text-xs text-slate-500">
+            Aucune règle personnalisée — routage automatique actif pour tous les rôles.
+          </p>
+        ) : (
+          <ul className="flex flex-wrap gap-1.5" data-testid="ai-routing-rules">
+            {savedRouting.map((pref) => (
+              <li key={String(pref.role_key)} className="rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-300">
+                {String(pref.role_key)} · {String(pref.selection_mode) === 'manual' ? 'moteur imposé' : 'auto'}
+                {pref.preferred_model_key ? ' / modèle imposé' : ''}
+                {pref.allow_fallback === false ? ' (sans secours)' : ''}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Activité IA récente */}
+      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-activity-panel">
+        <div className="mb-4 flex items-center gap-2">
+          <Activity size={16} className="text-cyan-300" />
+          <h3 className="text-sm font-semibold text-white">Activité IA récente</h3>
+        </div>
+        {requests.length === 0 ? (
+          <p className="rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2.5 text-xs text-slate-500">
+            Aucune exécution IA enregistrée pour l’instant.
+          </p>
+        ) : (
+          <ul className="space-y-1.5 text-[11px]">
+            {requests.slice(0, 8).map((req) => {
+              const inputTokens = typeof req.input_tokens === 'number' ? req.input_tokens : null;
+              const outputTokens = typeof req.output_tokens === 'number' ? req.output_tokens : null;
+              return (
+                <li key={String(req.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-slate-300">
+                  <span>{String(req.role_key ?? 'business_advisor')} · réponse IA</span>
+                  <span className="text-slate-500">
+                    {String(req.status ?? '')}
+                    {req.latency_ms ? ` · ${String(req.latency_ms)} ms` : ''}
+                    {inputTokens !== null || outputTokens !== null ? ` · ${inputTokens ?? 0}→${outputTokens ?? 0} jetons` : ''}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export default function BusinessGrowWorkspace() {
   const location = useLocation();
   const { user, session, workspace, workspaceId } = useAuth();
@@ -1396,6 +1623,12 @@ export default function BusinessGrowWorkspace() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<BusinessMessage[]>([]);
   const [memory, setMemory] = useState<BusinessMemory | null>(null);
+  /** A6 — Contrôle IA : mémoire persistante de l'agent. */
+  const [agentMemories, setAgentMemories] = useState<BusinessAgentMemory[]>([]);
+  const [agentMemoriesLoading, setAgentMemoriesLoading] = useState(false);
+  const [agentMemoriesError, setAgentMemoriesError] = useState<string | null>(null);
+  const [agentSearching, setAgentSearching] = useState(false);
+  const [agentConsentBusy, setAgentConsentBusy] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
   /** Premier appel encore en vol : ne jamais présenter cela comme une panne. */
   const [backendLoading, setBackendLoading] = useState(true);
@@ -1418,6 +1651,7 @@ export default function BusinessGrowWorkspace() {
   const conversationLoadSequence = useRef(0);
   const statusLoadSequence = useRef(0);
   const memoryLoadSequence = useRef(0);
+  const agentMemoryLoadSequence = useRef(0);
   const detailsLoadSequence = useRef(0);
 
   useEffect(() => {
@@ -1433,6 +1667,7 @@ export default function BusinessGrowWorkspace() {
     conversationLoadSequence.current += 1;
     statusLoadSequence.current += 1;
     memoryLoadSequence.current += 1;
+    agentMemoryLoadSequence.current += 1;
     messageLoadSequence.current += 1;
     detailsLoadSequence.current += 1;
     setProviders(null);
@@ -1446,6 +1681,10 @@ export default function BusinessGrowWorkspace() {
     setSelectedConversationId(null);
     setMessages([]);
     setMemory(null);
+    setAgentMemories([]);
+    setAgentMemoriesError(null);
+    setAgentSearching(false);
+    setAgentConsentBusy(false);
     setBackendReady(false);
     setBackendLoading(true);
     setLoadingMessages(false);
@@ -1595,6 +1834,81 @@ export default function BusinessGrowWorkspace() {
   useEffect(() => {
     if ((section === 'memory' || section === 'growth') && backendReady) void loadMemory();
   }, [backendReady, loadMemory, section]);
+
+  const loadAgentMemories = useCallback(async () => {
+    const requestId = ++agentMemoryLoadSequence.current;
+    const requestScope = accountScope;
+    setAgentMemoriesLoading(true);
+    setAgentMemoriesError(null);
+    try {
+      const result = await businessGrowApi.listAgentMemories();
+      if (requestId === agentMemoryLoadSequence.current && accountScopeRef.current === requestScope) {
+        setAgentMemories(result.memories);
+      }
+    } catch (loadError) {
+      if (requestId === agentMemoryLoadSequence.current && accountScopeRef.current === requestScope) {
+        setAgentMemoriesError(loadError instanceof Error ? loadError.message : 'Impossible de charger la mémoire de l’agent.');
+      }
+    } finally {
+      if (requestId === agentMemoryLoadSequence.current && accountScopeRef.current === requestScope) setAgentMemoriesLoading(false);
+    }
+  }, [accountScope]);
+
+  useEffect(() => {
+    if (section === 'ai' && backendReady) void loadAgentMemories();
+  }, [backendReady, loadAgentMemories, section]);
+
+  const searchAgentMemory = useCallback(async (query: string) => {
+    const requestId = ++agentMemoryLoadSequence.current;
+    const requestScope = accountScope;
+    setAgentSearching(true);
+    setAgentMemoriesError(null);
+    try {
+      const result = await businessGrowApi.searchAgentMemories(query);
+      if (requestId === agentMemoryLoadSequence.current && accountScopeRef.current === requestScope) {
+        setAgentMemories(result.memories);
+      }
+    } catch (searchError) {
+      if (requestId === agentMemoryLoadSequence.current && accountScopeRef.current === requestScope) {
+        setAgentMemoriesError(searchError instanceof Error ? searchError.message : 'Recherche impossible.');
+      }
+    } finally {
+      if (requestId === agentMemoryLoadSequence.current && accountScopeRef.current === requestScope) setAgentSearching(false);
+    }
+  }, [accountScope]);
+
+  const forgetAgentMemory = useCallback(async (memoryId: string) => {
+    const requestScope = accountScope;
+    try {
+      await businessGrowApi.forgetAgentMemory(memoryId);
+      if (accountScopeRef.current !== requestScope) return;
+      // Optimiste : l'entrée disparaît de la liste ; la relecture corrige l'état.
+      setAgentMemories((current) => current.filter((item) => item.id !== memoryId));
+      void loadAgentMemories();
+    } catch (forgetError) {
+      if (accountScopeRef.current === requestScope) {
+        setAgentMemoriesError(forgetError instanceof Error ? forgetError.message : 'Effacement impossible.');
+      }
+    }
+  }, [accountScope, loadAgentMemories]);
+
+  const toggleAgentMemoryConsent = useCallback(async (enabled: boolean) => {
+    const requestScope = accountScope;
+    setAgentConsentBusy(true);
+    setAgentMemoriesError(null);
+    try {
+      await businessGrowApi.setMemoryConsent(enabled);
+      if (accountScopeRef.current !== requestScope) return;
+      await loadMemory();
+      await loadAgentMemories();
+    } catch (consentError) {
+      if (accountScopeRef.current === requestScope) {
+        setAgentMemoriesError(consentError instanceof Error ? consentError.message : 'Impossible de modifier le consentement.');
+      }
+    } finally {
+      if (accountScopeRef.current === requestScope) setAgentConsentBusy(false);
+    }
+  }, [accountScope, loadMemory, loadAgentMemories]);
 
   const createConversation = useCallback(async () => {
     const requestScope = accountScope;
@@ -2141,6 +2455,23 @@ export default function BusinessGrowWorkspace() {
               verifyBanner={verifyBanner}
               onVerifyProvider={verifyProvider}
               onSaveRouting={saveRouting}
+            />
+          )}
+          {section === 'ai' && (
+            <AiControlCenterView
+              memories={agentMemories}
+              loading={agentMemoriesLoading}
+              searching={agentSearching}
+              error={agentMemoriesError}
+              consent={memory?.consent === true}
+              consentBusy={agentConsentBusy}
+              savedRouting={savedRouting}
+              requests={requests}
+              onToggleConsent={toggleAgentMemoryConsent}
+              onSearch={searchAgentMemory}
+              onForget={forgetAgentMemory}
+              onRetry={() => { void loadAgentMemories(); }}
+              onOpenProviders={() => setSection('providers')}
             />
           )}
           {section === 'integrations' && <IntegrationsView connections={integrations} />}

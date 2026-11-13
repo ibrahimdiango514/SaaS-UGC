@@ -75,6 +75,18 @@ export interface BusinessMemory {
   items: BusinessMemoryItem[];
 }
 
+/** Mémoire persistante de l'agent : une déclaration explicite de l'utilisateur,
+ *  mémorisée avec son niveau de confiance (fact = vérifié, hypothèse = à confirmer). */
+export interface BusinessAgentMemory {
+  id: string;
+  category: string;
+  title: string;
+  content: string;
+  confidence: string;
+  score?: number | null;
+  created_at?: string | null;
+}
+
 export interface BusinessProviderStatus {
   provider_key: string;
   display_name: string;
@@ -473,4 +485,17 @@ export const businessGrowApi = {
     invoke<{ itemId: string }>('memory.item.put', { itemId, category, content }),
   deleteMemoryItem: (itemId: string) =>
     invoke<{ deleted: boolean }>('memory.item.delete', { itemId }),
+  /** Mémoire persistante de l'agent (VYORA AI CORE, saas_business.ai_memories). */
+  listAgentMemories: (options?: { category?: string; limit?: number }) =>
+    invoke<{ memories: BusinessAgentMemory[] }>('agentMemory.list', {
+      ...(options?.category ? { category: options.category } : {}),
+      ...(options?.limit ? { limit: options.limit } : {}),
+    }),
+  searchAgentMemories: (query: string, limit?: number) =>
+    invoke<{ memories: BusinessAgentMemory[] }>('agentMemory.search', {
+      query,
+      ...(limit ? { limit } : {}),
+    }),
+  forgetAgentMemory: (memoryId: string) =>
+    invoke<{ forgotten: boolean }>('agentMemory.forget', { memoryId }),
 };
