@@ -265,10 +265,13 @@ un webhook de paiement rejoué ne relivre rien.
 | `supabase/tests/saspay/` | Banc PostgreSQL local (voir son `README.md`) ; `audit.mjs` = audit de concurrence avant mise en production ; `unconfirmed.mjs` = demandes sans réponse |
 | `tests/saspay-unconfirmed.test.ts` | Demandes sans réponse : service, webhook, tâche planifiée, décision de l'administrateur |
 | `tests/saspay-*.test.ts(x)` | Tests unitaires et d'interface |
+| `scripts/build-saspay-artifact.mjs`, `supabase/functions/vyora-saspay.edge.js`, `supabase/functions/<fonction>/loader.ts` | Artefact de production : bundle unique et chargeurs déployés (§ 10) ; `tests/saspay-loader.test.ts` les exécute |
+| `supabase/migrations/20261113130000_vyora_admin_rpc_revoke_anon.sql` | RPC d'administration : droit `EXECUTE` retiré à `anon` |
 
-## 5. Mise en service (à faire par un humain, dans cet ordre)
+## 5. Mise en service (dans cet ordre)
 
-Rien de ce qui suit n'a été fait.
+État au 13/11/2026 : les étapes 2 et 3 sont faites en production (§ 10). Les
+étapes 1 et 4 (secrets, webhook côté SasPay) et l'activation restent à faire.
 
 1. **Créer la clé SasPay de VYORA.** Les secrets `SASPAY_SECRET_KEY` et
    `SASPAY_WEBHOOK_SECRET` existants appartiennent au produit immobilier et ne
@@ -283,8 +286,10 @@ Rien de ce qui suit n'a été fait.
    dans Vault et la tâche pg_cron ; tant qu'aucune commande SasPay n'existe, la
    tâche ne fait aucun appel sortant.
 3. **Déployer les trois Edge Functions.** Elles importent `../_shared/saspay/*.ts` :
-   le déploiement doit envoyer ces fichiers avec chaque fonction (CLI Supabase, ou
-   bundle). `vyora-payments` : `verify_jwt = true` ; `vyora-saspay-webhook` et
+   le déploiement doit envoyer ces fichiers avec chaque fonction. Avec la CLI
+   Supabase, `index.ts` suffit. Par le canal qui n'écrit qu'un `body` court, la
+   source déployée est `<fonction>/loader.ts` et le code est le bundle
+   `vyora-saspay.edge.js` publié en base (procédure : § 10). `vyora-payments` : `verify_jwt = true` ; `vyora-saspay-webhook` et
    `vyora-payments-reconcile` : `verify_jwt = false`. L'adresse de
    `vyora-payments-reconcile` est écrite dans la migration (projet
    `xbuuhfwobrafcbgtdgjx`) : à adapter pour un autre projet.
@@ -635,3 +640,77 @@ section « prix tout compris » de `e2e.mjs` (vraies Edge Functions),
 `tests/saspay-pricing.test.ts` (moteur de calcul, mêmes vecteurs que la base),
 `tests/saspay-pricing-service.test.ts` (parcours de paiement),
 `tests/saspay-pricing-ui.test.tsx` (écrans client et administrateur).
+
+## 10. État de production (13/11/2026, projet `xbuuhfwobrafcbgtdgjx`)
+
+### Ce qui est en place
+
+| Élément | État constaté |
+| --- | --- |
+| Migrations | `vyora_saspay_payments` (20261112235956), `vyora_saspay_refunds_reconcile` (20261113000005), `vyora_pricing_margin` (20261113000013), `vyora_admin_rpc_revoke_anon` (20261113000339). Répétition à blanc préalable sur la base cible (bloc annulé) ; aucune ligne existante modifiée (6 comptes, 4 portefeuilles, 8 écritures, 0 commande avant comme après). |
+| Fonctions | `vyora-payments` v1 (`verify_jwt = true`), `vyora-saspay-webhook` v1 et `vyora-payments-reconcile` v1 (`verify_jwt = false`), toutes `ACTIVE`. |
+| Bundle | `public._edge_function_artifact`, nom `vyora-saspay`, SHA-256 `acefd467…dd690`, 56 709 caractères, copié par la base depuis le commit `6f3c8d9`. |
+| Tâche planifiée | `vyora-payments-reconcile`, toutes les 5 minutes ; jeton présent dans Vault. |
+| Configuration | `saspay_payment_config` : `enabled = false`, `mode = "test"`. Politique de prix active (provision 1 000 FCFA, « Déduits » demandé), barème vide. |
+| Secrets | `VYORA_SASPAY_SECRET_KEY` et `VYORA_SASPAY_WEBHOOK_SECRET` **absents**. |
+
+### Réponses mesurées en production (sondes `pg_net`)
+
+| Appel | Réponse |
+| --- | --- |
+| Webhook, sans signature | 503 `WEBHOOK_NOT_CONFIGURED` |
+| Webhook, signature forgée | 503 `WEBHOOK_NOT_CONFIGURED` |
+| Webhook, `GET` | 405 `METHOD_NOT_ALLOWED` |
+| Réconciliation, sans en-tête | 403 `CRON_FORBIDDEN` |
+| Réconciliation, mauvais jeton | 401 `CRON_UNAUTHORIZED` |
+| Réconciliation, jeton de Vault | 200 `{"ran":false,"reason":"not_configured"}` |
+| `vyora-payments`, sans session | 401 de la passerelle (`UNAUTHORIZED_NO_AUTH_HEADER`) |
+| `vyora_payment_quote`, pack Creator (SQL, rôle de service) | 6 000 FCFA, 27 crédits, `enabled: false` |
+| `vyora_payment_quote`, pack Studio Business | 36 000 FCFA, 265 crédits |
+| `vyora_payment_quote`, Business Grow | `business_billing_disabled` |
+
+Tant que les secrets manquent, aucun chemin ne peut créditer : le webhook
+répond 503 avant toute lecture, la réconciliation ne s'exécute pas, la création
+de paiement répond « service non configuré ».
+
+**Non mesuré** : un appel connecté à `vyora-payments`. Il exige la session d'un
+vrai compte ; aucun compte de sonde n'a été créé (aucune suppression de compte
+n'étant permise ensuite). Le même bundle démarre dans les deux autres fonctions.
+
+### Reste à faire pour encaisser
+
+1. Installer `VYORA_SASPAY_SECRET_KEY` (`sk_live_…`) et
+   `VYORA_SASPAY_WEBHOOK_SECRET` dans Supabase → Edge Functions → Secrets.
+2. Dans le tableau de bord SasPay : créer le webhook vers
+   `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/vyora-saspay-webhook`
+   (`transaction.success`, `transaction.failed`, `transaction.cancelled`), avec
+   le secret de signature de l'étape 1 ; régler les frais sur « Déduits » ou
+   autoriser le choix du mode par l'API.
+3. Passer `mode` à `"live"` et `enabled` à `true` dans `saspay_payment_config`
+   (la clé `sk_live_…` et le mode doivent concorder, sinon tout est refusé).
+4. Administration → « Importer les tarifs du compte ».
+5. Publier l'interface (branche non fusionnée, aucun déploiement Netlify fait).
+
+### Publier une nouvelle version du code de paiement
+
+1. `node scripts/build-saspay-artifact.mjs`, committer, pousser.
+2. Faire copier le bundle par la base, au commit poussé :
+   `select net.http_get(url := 'https://raw.githubusercontent.com/ibrahimdiango514/SaaS-UGC/<commit>/supabase/functions/vyora-saspay.edge.js');`
+3. `insert into public._edge_function_artifact (name, sha256, chars, source, source_ref) select 'vyora-saspay', …`
+   depuis `net._http_response`, à la seule condition que l'empreinte soit celle
+   des `loader.ts` (modèle : `docs/incident-business-grow-prod-20261112.md`).
+4. Redéployer les trois `loader.ts`. L'ancienne ligne reste en place : le retour
+   arrière consiste à redéployer les chargeurs précédents.
+
+Les migrations longues suivent le même principe : le texte est copié par la base
+depuis le commit, et la migration enregistrée ne l'exécute que si son SHA-256
+est celui du fichier du dépôt.
+
+### Netlify
+
+Aucun build n'a été lancé pour ce travail. La PR #6 porte `[skip netlify]` dans
+son titre, les commits poussés aussi, et `netlify.toml` annule tout build de la
+branche `arena/323bad30-saas-ugc`. Pour rétablir l'aperçu de cette branche :
+retirer la mention du titre **et** la ligne `ignore`. La fusion dans `main`
+déclenchera un déploiement de production Netlify.
+
