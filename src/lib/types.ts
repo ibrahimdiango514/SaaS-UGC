@@ -460,6 +460,61 @@ export interface AdminProviderSpendSummary {
   history: AdminProviderSpendEntry[];
 }
 
+/** VYORA AI CORE — registre multi-fournisseurs (lecture admin, snapshot v2). */
+export interface AiCoreRegistryProvider {
+  key: string;
+  name: string;
+  status: string;
+  aggregator: boolean;
+}
+
+export interface AiCoreRegistryModel {
+  provider: string;
+  key: string;
+  provider_model: string;
+  name: string;
+  verified: boolean;
+  tier: string | null;
+}
+
+export interface AiCoreRegistrySnapshot {
+  version: number;
+  generated_at: string;
+  providers: AiCoreRegistryProvider[];
+  models: AiCoreRegistryModel[];
+  roles: Array<{ key: string; capabilities: Record<string, boolean>; enabled: boolean }>;
+  rules: Array<{ role: string; provider: string; model: string; priority: number }>;
+  budget: { monthly: number | null; alert: number; daily: number | null };
+  monthly_spend_usd: number;
+}
+
+/** VYORA AI CORE — ligne du journal des appels IA (lecture admin). */
+export interface AiCoreCallEntry {
+  id: string;
+  space: 'business' | 'studio' | 'system' | string;
+  task_key: string | null;
+  provider: string;
+  model: string | null;
+  provider_model: string | null;
+  attempt: number;
+  status: 'success' | 'error' | 'timeout' | 'blocked' | string;
+  error_code: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  latency_ms: number | null;
+  cost_usd: number;
+  fallback_from: string | null;
+  created_at: string;
+}
+
+/** VYORA AI CORE — réglages d'administration IA (budgets, seuil d'alerte). */
+export interface AiCoreAdminSettings {
+  monthly_budget_usd: number | null;
+  alert_threshold_pct: number;
+  max_daily_cost_usd: number | null;
+  updated_at: string | null;
+}
+
 /** Opaque customer quote; provider costs and supplier diagnostics stay server-side. */
 export type ProviderQuoteSource = 'provider_estimate' | 'catalog_tariff' | 'none';
 

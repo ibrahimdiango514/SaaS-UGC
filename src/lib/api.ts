@@ -1,7 +1,7 @@
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
-  AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
+  AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiCoreAdminSettings, AiCoreCallEntry, AiCoreRegistrySnapshot, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
   ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
@@ -911,6 +911,38 @@ export async function adminRefreshProviderBalance(): Promise<AdminProviderBalanc
     { action: 'admin-provider-balance', refresh: true },
   );
   return data.balance;
+}
+
+/**
+ * VYORA AI CORE — lecture admin du registre multi-fournisseurs (fournisseurs,
+ * modèles vérifiés, rôles, règles, budgets, dépense du mois). Réservé à
+ * l'administrateur vérifié côté serveur (ugc_is_admin).
+ */
+export function adminAiCoreRegistry(): Promise<AiCoreRegistrySnapshot> {
+  return rpc<AiCoreRegistrySnapshot>('vyora_ai_admin_registry_get');
+}
+
+/** VYORA AI CORE — journal des appels IA récents (lecture admin). */
+export function adminAiCoreCalls(limit = 50): Promise<AiCoreCallEntry[]> {
+  return rpc<AiCoreCallEntry[]>('vyora_ai_admin_calls_list', { p_limit: limit });
+}
+
+/** VYORA AI CORE — réglages d'administration IA (lecture). */
+export function adminAiCoreSettingsGet(): Promise<AiCoreAdminSettings> {
+  return rpc<AiCoreAdminSettings>('vyora_ai_admin_settings_get');
+}
+
+/** VYORA AI CORE — réglages d'administration IA (écriture, admin vérifié). */
+export function adminAiCoreSettingsSet(args: {
+  monthly_budget_usd: number | null;
+  alert_threshold_pct: number;
+  max_daily_cost_usd: number | null;
+}): Promise<AiCoreAdminSettings> {
+  return rpc<AiCoreAdminSettings>('vyora_ai_admin_settings_set', {
+    p_monthly_budget_usd: args.monthly_budget_usd,
+    p_alert_threshold_pct: args.alert_threshold_pct,
+    p_max_daily_cost_usd: args.max_daily_cost_usd,
+  });
 }
 
 export async function adminSetProviderSpendCap(maxUsd: number, enabled: boolean): Promise<boolean> {

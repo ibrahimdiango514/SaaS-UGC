@@ -133,6 +133,24 @@ export interface BusinessGrowStore {
   ): Promise<void>;
   // Optional central AI engine store extensions (backward compatible with legacy test fixtures)
   recordHealthCheck?: (result: ProviderProbeResult) => Promise<void>;
+  /** Journal central des appels IA (saas_business.ai_calls_log). Best-effort :
+   *  un échec de journalisation ne doit jamais faire échouer la réponse. */
+  logAiCall?(args: {
+    space: string;
+    userId: string | null;
+    workspaceId: string | null;
+    taskKey: string | null;
+    providerKey: string;
+    modelKey: string | null;
+    providerModelKey: string | null;
+    attemptNumber: number;
+    status: 'success' | 'error' | 'timeout';
+    errorCode: string | null;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    latencyMs: number | null;
+    fallbackFrom: string | null;
+  }): Promise<void>;
   listModels?: (providerKey?: string | null) => Promise<unknown[]>;
   listRoles?: () => Promise<unknown[]>;
   getRoutingPreferences?: (userId: string) => Promise<unknown[]>;
@@ -777,6 +795,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           await dependencies.store.startRequest(userId, submitted.requestId);
           const excludedProviders: BusinessProvider[] = [];
           let previousAttemptId: string | null = null;
+          let previousProviderKey: string | null = null;
           let fallbackReason: string | null = null;
           let lastErrorCode = 'NO_VERIFIED_PROVIDER';
 
@@ -921,18 +940,64 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               excludedProviders.push(provider);
               previousAttemptId = route.attemptId;
               fallbackReason = providerError.code;
+              // Journal central AI CORE : un essai raté est tracé (meilleur
+              // effort — un échec de journalisation ne bloque pas le secours).
+              if (dependencies.store.logAiCall) {
+                try {
+                  await dependencies.store.logAiCall({
+                    space: 'business',
+                    userId,
+                    workspaceId,
+                    taskKey: roleKey,
+                    providerKey: provider,
+                    modelKey: route.modelKey || null,
+                    providerModelKey: selectedModel || null,
+                    attemptNumber,
+                    status: providerError.code === 'PROVIDER_TIMEOUT' ? 'timeout' : 'error',
+                    errorCode: providerError.code,
+                    inputTokens: null,
+                    outputTokens: null,
+                    latencyMs: Date.now() - startedAt,
+                    fallbackFrom: previousProviderKey,
+                  });
+                } catch { /* journal best-effort */ }
+              }
+              previousProviderKey = provider;
               continue;
             }
 
             const { cleanText, proposals } = extractToolProposals(result.content);
+            const successLatencyMs = Date.now() - startedAt;
             await dependencies.store.finalizeAttempt(userId, submitted.requestId, route.attemptId, {
               status: 'succeeded',
               errorCode: null,
               inputTokens: result.inputTokens,
               outputTokens: result.outputTokens,
-              latencyMs: Date.now() - startedAt,
+              latencyMs: successLatencyMs,
               outputContent: cleanText,
             });
+            // Journal central AI CORE : l'essai réussi est tracé (meilleur
+            // effort — un échec de journalisation ne fait pas échouer la réponse).
+            if (dependencies.store.logAiCall) {
+              try {
+                await dependencies.store.logAiCall({
+                  space: 'business',
+                  userId,
+                  workspaceId,
+                  taskKey: roleKey,
+                  providerKey: provider,
+                  modelKey: route.modelKey || null,
+                  providerModelKey: selectedModel || null,
+                  attemptNumber,
+                  status: 'success',
+                  errorCode: null,
+                  inputTokens: result.inputTokens,
+                  outputTokens: result.outputTokens,
+                  latencyMs: successLatencyMs,
+                  fallbackFrom: previousProviderKey,
+                });
+              } catch { /* journal best-effort */ }
+            }
 
             if (quotaReserved && dependencies.store.captureQuota) {
               await dependencies.store.captureQuota(userId, submitted.requestId, reserveAmount, reserveAmount);

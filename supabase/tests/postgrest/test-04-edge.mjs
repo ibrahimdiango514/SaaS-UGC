@@ -258,5 +258,30 @@ export async function run(ctx) {
     'mémoire agent : ISOLATION stricte — bob ne voit aucune mémoire d’alice',
     `n=${bobMem.json?.data?.memories?.length}`);
 
+  // --- 12. AI CORE — contrôle admin (façades ugc_is_admin) --------------------
+  const T_BOSS = tokens.boss;
+
+  r = await h.rpc(T_BOSS, 'vyora_ai_admin_registry_get', {});
+  h.check(r.status === 200 && Array.isArray(r.json?.providers) && (r.json?.providers?.length ?? 0) >= 2
+    && Array.isArray(r.json?.models) && typeof r.json?.monthly_spend_usd === 'number',
+    'AI CORE admin : l’administrateur lit le registre (fournisseurs/modèles/budget/dépense)',
+    `status=${r.status} providers=${r.json?.providers?.length} models=${r.json?.models?.length}`);
+
+  r = await h.rpc(T_ALICE, 'vyora_ai_admin_registry_get', {});
+  h.check(r.status >= 400,
+    'AI CORE admin : un utilisateur non admin ne peut PAS lire le registre',
+    `status=${r.status}`);
+
+  r = await h.rpc(T_BOSS, 'vyora_ai_admin_calls_list', { p_limit: 25 });
+  h.check(r.status === 200 && Array.isArray(r.json) && r.json.length >= 1
+    && r.json.every((call) => call.user_id === undefined),
+    'AI CORE admin : le journal des appels est lisible (sans identifiants clients)',
+    `status=${r.status} n=${Array.isArray(r.json) ? r.json.length : '?'}`);
+
+  r = await h.rpc(T_BOB, 'vyora_ai_admin_calls_list', { p_limit: 25 });
+  h.check(r.status >= 400,
+    'AI CORE admin : un utilisateur non admin ne peut PAS lire le journal des appels',
+    `status=${r.status}`);
+
   return h.finish();
 }

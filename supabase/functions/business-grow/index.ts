@@ -156,6 +156,30 @@ const store: BusinessGrowStore = {
       `;
     }
   },
+  /** Journal central des appels IA (A7). La fonction SECURITY DEFINER
+   *  `vyora_ai_log_call` vérifie le périmètre ; EXECUTE réservé bg_edge. */
+  async logAiCall(args) {
+    await requiredSql()`
+      select public.vyora_ai_log_call(
+        ${args.space},
+        ${args.userId}::uuid,
+        ${args.workspaceId}::uuid,
+        ${args.taskKey},
+        ${args.providerKey},
+        ${args.modelKey},
+        ${args.providerModelKey},
+        ${args.attemptNumber},
+        ${args.status},
+        ${args.errorCode},
+        ${args.inputTokens},
+        ${args.outputTokens},
+        ${args.latencyMs},
+        null,
+        null,
+        ${args.fallbackFrom}
+      )
+    `;
+  },
   async listModels(providerKey) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_models(${providerKey ?? null})`);
   },

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Activity, Bot, Coins, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
+import { Activity, Bot, Coins, Cpu, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Modal, Banner, LoadingState, ErrorState, EmptyState, Tabs, StatCard } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
 import { formatDate, formatMoney, statusLabel, truncate } from '../lib/format';
 import ProviderBudgetSettings from './admin/ProviderBudgetSettings';
 import ProviderBalanceCard from './admin/ProviderBalanceCard';
+import AiCoreControl from './admin/AiCoreControl';
 import CreditManager from './admin/CreditManager';
 import SasPayPanel from './admin/SasPayPanel';
 import {
@@ -244,6 +245,7 @@ export default function Admin() {
         { id: 'services', label: 'Services', icon: <Zap size={14} /> },
         { id: 'models', label: 'Modèles vidéo', icon: <Video size={14} /> },
         { id: 'providers', label: 'Fournisseurs IA', icon: <Bot size={14} /> },
+        { id: 'ai-core', label: 'Contrôle IA', icon: <Cpu size={14} /> },
         { id: 'studio-activity', label: 'Activité Studio', icon: <Video size={14} /> },
         { id: 'growth-activity', label: 'Activité Business Growth', icon: <Sparkles size={14} /> },
         { id: 'video-pricing', label: 'Tarifs vidéo', icon: <Video size={14} /> },
@@ -296,6 +298,8 @@ export default function Admin() {
       {tab === 'models' && <ModelsSection />}
 
       {tab === 'providers' && <ProvidersSection metrics={metrics} />}
+
+      {tab === 'ai-core' && <AiCoreControl />}
 
       {tab === 'studio-activity' && <StudioActivitySection metrics={metrics} loading={metricsLoading} />}
 
