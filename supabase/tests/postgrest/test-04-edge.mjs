@@ -188,5 +188,41 @@ export async function run(ctx) {
     'séparation : le portefeuille Studio UGC d’alice (100 crédits) n’a PAS été entamé par Business Grow',
     `studio_credits=${studio.json?.credits}`);
 
+  // --- 10. VYORA AI CORE — surface registre (service_role uniquement) ----------
+  // Le moteur central lit le registre multi-fournisseurs via une RPC public
+  // réservée au service_role. Un jeton utilisateur ne doit ni lire le
+  // registre, ni journaliser des appels, ni toucher les paramètres admin.
+  r = await h.rpc(tokens.service, 'vyora_ai_registry_snapshot', {});
+  h.check(r.status === 200 && r.json && Array.isArray(r.json.providers)
+      && Array.isArray(r.json.models) && Array.isArray(r.json.rules)
+      && r.json.budget && typeof r.json.monthly_spend_usd === 'number',
+    'AI CORE : le snapshot du registre est lisible par service_role (providers/modèles/règles/budget)',
+    `providers=${r.json?.providers?.length} models=${r.json?.models?.length} rules=${r.json?.rules?.length}`);
+
+  r = await h.rpc(T_ALICE, 'vyora_ai_registry_snapshot', {});
+  h.check(r.status >= 400,
+    'AI CORE : un jeton utilisateur ne peut PAS lire le registre (EXECUTE réservé à service_role)',
+    `status=${r.status}`);
+
+  r = await h.rpc(T_ALICE, 'vyora_ai_log_call', {
+    p_space: 'business', p_user_id: users.alice.id, p_workspace_id: null, p_task_key: 'hack',
+    p_provider_key: 'groq', p_model_key: 'x', p_provider_model_key: 'x', p_attempt_number: 1,
+    p_status: 'success', p_error_code: null, p_input_tokens: 1, p_output_tokens: 1,
+    p_latency_ms: 1, p_cost_input_usd: null, p_cost_output_usd: null, p_fallback_from: null,
+  });
+  h.check(r.status >= 400,
+    'AI CORE : un utilisateur ne peut PAS écrire au journal des appels IA (EXECUTE service_role/bg_edge)',
+    `status=${r.status}`);
+
+  r = await h.rpc(T_ALICE, 'vyora_ai_admin_settings_get', {});
+  h.check(r.status >= 400,
+    'AI CORE : les paramètres admin (budgets IA) sont refusés à un utilisateur non admin',
+    `status=${r.status}`);
+
+  r = await h.get(T_ALICE, '/rest/v1/ai_memories?select=*');
+  h.check(r.status === 404 || r.status === 403,
+    'AI CORE : la table mémoire saas_business n’est JAMAIS exposée au client (pas de schéma public, RLS deny-by-default)',
+    `status=${r.status}`);
+
   return h.finish();
 }

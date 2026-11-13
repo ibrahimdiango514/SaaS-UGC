@@ -124,14 +124,23 @@ describe('Business Grow provider clients', () => {
     expect(providerOrder('unknown')).toEqual(['groq', 'gemini']);
   });
 
-  it('registers prepared extensible adapters without claiming live execution', async () => {
-    expect(PROVIDER_ADAPTERS.get('openai')?.implemented).toBe(false);
-    expect(PROVIDER_ADAPTERS.get('anthropic')?.implemented).toBe(false);
-    expect(PROVIDER_ADAPTERS.get('deepseek')?.implemented).toBe(false);
-    expect(PROVIDER_ADAPTERS.get('mistral')?.implemented).toBe(false);
+  it('expose les 7 fournisseurs VYORA AI CORE ; seules OpenAI/Anthropic restent en préparation', () => {
     expect(getProviderAdapter('groq')?.implemented).toBe(true);
     expect(getProviderAdapter('gemini')?.implemented).toBe(true);
+    expect(getProviderAdapter('deepseek')?.implemented).toBe(true);
+    expect(getProviderAdapter('mistral')?.implemented).toBe(true);
+    expect(getProviderAdapter('grok')?.implemented).toBe(true);
+    expect(getProviderAdapter('cloudflare')?.implemented).toBe(true);
+    expect(getProviderAdapter('openrouter')?.implemented).toBe(true);
+    expect(PROVIDER_ADAPTERS.get('openai')?.implemented).toBe(false);
+    expect(PROVIDER_ADAPTERS.get('anthropic')?.implemented).toBe(false);
 
+    // L'ordre serveur accepte les 7 fournisseurs, sans doublon ni inconnu.
+    expect(providerOrder('groq,deepseek,mistral,grok,cloudflare,openrouter,gemini,zzz'))
+      .toEqual(['groq', 'deepseek', 'mistral', 'grok', 'cloudflare', 'openrouter', 'gemini']);
+  });
+
+  it('refuse toujours d’exécuter un adaptateur non implémenté (sans appel réseau)', async () => {
     const fetcher = vi.fn();
     await expect(
       callProvider('openai' as unknown as 'groq', { apiKey: 'test-key', model: 'gpt-4o-mini' }, messages, fetcher),
@@ -140,6 +149,57 @@ describe('Business Grow provider clients', () => {
       getProviderAdapter('openai')!.complete({ apiKey: 'test-key', model: 'gpt-4o-mini' }, messages, fetcher),
     ).rejects.toMatchObject({ code: 'PROVIDER_ADAPTER_NOT_IMPLEMENTED', retryable: false });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('DeepSeek / Mistral / Grok / OpenRouter : appels locaux conformes à leurs API', async () => {
+    const ok = {
+      choices: [{ message: { role: 'assistant', content: 'Réponse.' } }],
+      usage: { prompt_tokens: 3, completion_tokens: 5 },
+    };
+    const cases: Array<{ provider: 'deepseek' | 'mistral' | 'grok' | 'openrouter'; url: string }> = [
+      { provider: 'deepseek', url: 'https://api.deepseek.com/chat/completions' },
+      { provider: 'mistral', url: 'https://api.mistral.ai/v1/chat/completions' },
+      { provider: 'grok', url: 'https://api.x.ai/v1/chat/completions' },
+      { provider: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions' },
+    ];
+    let lastCall: [RequestInfo | URL, RequestInit | undefined] = ['', undefined];
+    for (const { provider, url } of cases) {
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        lastCall = [input, init];
+        return new Response(JSON.stringify(ok), { status: 200 });
+      });
+      const result = await callProvider(provider, { apiKey: `secret-${provider}`, model: 'some-model' }, messages, fetcher);
+      expect(String(lastCall[0])).toBe(url);
+      expect(new Headers(lastCall[1]?.headers as Record<string, string>).get('Authorization'))
+        .toBe(`Bearer secret-${provider}`);
+      expect(result).toEqual({ content: 'Réponse.', inputTokens: 3, outputTokens: 5 });
+    }
+  });
+
+  it('Cloudflare Workers AI : URL par compte ; sans compte, aucun appel réseau', async () => {
+    const ok = {
+      choices: [{ message: { role: 'assistant', content: 'Réponse CF.' } }],
+      usage: { prompt_tokens: 2, completion_tokens: 4 },
+    };
+    let cfUrl = '';
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      cfUrl = String(input);
+      return new Response(JSON.stringify(ok), { status: 200 });
+    });
+    const result = await callProvider(
+      'cloudflare',
+      { apiKey: 'cf-token', model: '@cf/qwen/qwen3.8-27b', accountId: 'acct-42' },
+      messages,
+      fetcher,
+    );
+    expect(cfUrl).toBe('https://api.cloudflare.com/client/v4/accounts/acct-42/ai/v1/chat');
+    expect(result.content).toBe('Réponse CF.');
+
+    const noAccount = vi.fn();
+    await expect(
+      callProvider('cloudflare', { apiKey: 'cf-token', model: '@cf/qwen/qwen3.8-27b', accountId: null }, messages, noAccount),
+    ).rejects.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
+    expect(noAccount).not.toHaveBeenCalled();
   });
 
   it('discovers remote models for Groq and Gemini from official endpoints', async () => {

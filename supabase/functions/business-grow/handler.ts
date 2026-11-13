@@ -14,6 +14,7 @@ import {
   probeProvider,
   ProviderCallError,
   type BusinessProvider,
+  type CentralRouteMeta,
   type ChatMessage,
   type ProviderConfig,
   type ProviderProbeResult,
@@ -156,6 +157,7 @@ export interface BusinessGrowDependencies {
     provider: BusinessProvider,
     config: ProviderConfig,
     messages: ChatMessage[],
+    meta?: CentralRouteMeta,
   ) => Promise<ProviderReply>;
   probe?: (provider: BusinessProvider, config: ProviderConfig) => Promise<ProviderProbeResult>;
   discoverModels?: (provider: BusinessProvider, config: ProviderConfig) => Promise<string[]>;
@@ -267,7 +269,9 @@ function chatHistory(
 }
 
 function isProvider(value: string): value is BusinessProvider {
-  return value === 'groq' || value === 'gemini';
+  return value === 'groq' || value === 'gemini'
+    || value === 'deepseek' || value === 'mistral' || value === 'grok'
+    || value === 'cloudflare' || value === 'openrouter';
 }
 
 function parseRoutingOptions(raw: unknown): RoutingOptions {
@@ -842,12 +846,18 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
 
             const effectiveConfig: ProviderConfig = config.model === selectedModel
               ? config
-              : { apiKey: config.apiKey, model: selectedModel };
+              : { apiKey: config.apiKey, model: selectedModel, accountId: config.accountId ?? null };
 
             const startedAt = Date.now();
             let result: ProviderReply;
             try {
-              result = await dependencies.complete(provider, effectiveConfig, history);
+              // Le route choisi par le registre (modèle + rôle) part avec
+              // l'appel : le moteur central l'exécute en tête de chaîne et
+              // peut basculer sur un secours compatible (VYORA AI CORE).
+              result = await dependencies.complete(provider, effectiveConfig, history, {
+                model: selectedModel,
+                roleKey,
+              });
             } catch (error) {
               const providerError = error instanceof ProviderCallError
                 ? error

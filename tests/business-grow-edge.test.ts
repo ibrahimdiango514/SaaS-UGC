@@ -5,7 +5,12 @@ import {
   type BusinessGrowDependencies,
   type BusinessGrowStore,
 } from '../supabase/functions/business-grow/handler';
-import { ProviderCallError } from '../supabase/functions/business-grow/providers';
+import {
+  ProviderCallError,
+  type BusinessProvider,
+  type ProviderConfig,
+  type ProviderProbeResult,
+} from '../supabase/functions/business-grow/providers';
 
 const userA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const userB = 'abababab-abab-4bab-8bab-abababababab';
@@ -224,7 +229,7 @@ describe('Business Grow Edge handler', () => {
       { role: 'user', content: 'Contexte précédent' },
       { role: 'assistant', content: 'Réponse précédente' },
       { role: 'user', content: 'Test explicite.' },
-    ]);
+    ], { model: 'verified-groq-model', roleKey: 'business_advisor' });
     expect(store.finalizeAttempt).toHaveBeenCalledWith(
       userA, requestA, '99999999-9999-4999-8999-999999999999',
       expect.objectContaining({ status: 'succeeded', outputContent: 'Réponse de test.', inputTokens: 10, outputTokens: 12 }),
@@ -412,12 +417,12 @@ describe('Business Grow Edge handler', () => {
     const { dependencies, store } = fixture();
     const recordHealthCheck = vi.fn(async () => undefined);
     store.recordHealthCheck = recordHealthCheck;
-    const probeMock = vi.fn(async (providerKey: 'groq' | 'gemini', config: { apiKey: string; model: string }) => {
+    const probeMock = vi.fn(async (providerKey: BusinessProvider, config: ProviderConfig): Promise<ProviderProbeResult> => {
       if (!config.apiKey || !config.model) {
         return {
           providerKey,
           modelKey: config.model || '',
-          status: 'failed' as const,
+          status: 'failed',
           latencyMs: 0,
           errorCode: 'PROVIDER_NOT_CONFIGURED',
           availableModels: [],
@@ -426,7 +431,7 @@ describe('Business Grow Edge handler', () => {
       return {
         providerKey,
         modelKey: config.model,
-        status: 'healthy' as const,
+        status: 'healthy',
         latencyMs: 42,
         errorCode: null,
         availableModels: ['verified-groq-model', 'other-model'],

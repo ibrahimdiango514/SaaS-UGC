@@ -19,6 +19,14 @@
 // Aucune réponse n'est fabriquée localement : un échec fournisseur est renvoyé
 // tel quel (code + message).
 
+import {
+  parseRegistrySnapshot,
+  runAiCall,
+  type AiCallLogEntry,
+  type AiEngineDeps,
+  type AiRegistrySnapshot,
+} from "../_shared/ai-core/index.ts";
+
 type Json = Record<string, unknown>;
 
 const CORS: Record<string, string> = {
@@ -39,6 +47,16 @@ const GROQ_KEY = () => env("BUSINESS_GROW_GROQ_API_KEY") || env("GROQ_API_KEY");
 const GEMINI_KEY = () => env("BUSINESS_GROW_GEMINI_API_KEY") || env("GEMINI_API_KEY");
 const GROQ_MODEL = () => env("BUSINESS_GROW_GROQ_MODEL") || env("GROQ_MODEL") || "llama-3.3-70b-versatile";
 const GEMINI_MODEL = () => env("BUSINESS_GROW_GEMINI_MODEL") || env("GEMINI_MODEL") || "gemini-2.0-flash";
+// VYORA AI CORE — 5 nouveaux fournisseurs. Tous restent INACTIFS tant que
+// leur clé n'est pas présente ET que leur modèle n'a pas passé un test API
+// réel (registre Supabase) : aucun modèle non vérifié n'est jamais servi.
+const DEEPSEEK_KEY = () => env("BUSINESS_GROW_DEEPSEEK_API_KEY") || env("DEEPSEEK_API_KEY");
+const MISTRAL_KEY = () => env("BUSINESS_GROW_MISTRAL_API_KEY") || env("MISTRAL_API_KEY");
+const GROK_KEY = () => env("BUSINESS_GROW_GROK_API_KEY") || env("XAI_API_KEY");
+const OPENROUTER_KEY = () => env("BUSINESS_GROW_OPENROUTER_API_KEY") || env("OPENROUTER_API_KEY");
+const CLOUDFLARE_TOKEN = () => env("BUSINESS_GROW_CLOUDFLARE_API_TOKEN");
+const CLOUDFLARE_ACCOUNT = () => env("BUSINESS_GROW_CLOUDFLARE_ACCOUNT_ID");
+const CLOUDFLARE_MODEL = () => env("BUSINESS_GROW_CLOUDFLARE_MODEL");
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -61,7 +79,10 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
 }
 function redact(text: string): string {
   let out = text;
-  for (const key of [GROQ_KEY(), GEMINI_KEY(), SERVICE_KEY()]) if (key) out = out.split(key).join("[REDACTED]");
+  for (const key of [
+    GROQ_KEY(), GEMINI_KEY(), DEEPSEEK_KEY(), MISTRAL_KEY(), GROK_KEY(),
+    OPENROUTER_KEY(), CLOUDFLARE_TOKEN(), SERVICE_KEY(),
+  ]) if (key) out = out.split(key).join("[REDACTED]");
   return out;
 }
 
@@ -75,7 +96,12 @@ const SYSTEM = {
   scenes: "Tu es réalisateur UGC. Décris des scènes tournables, cohérentes et sobres. Réponds en JSON valide.",
 };
 
-export type ProviderName = "groq" | "gemini";
+export type ProviderName =
+  | "groq" | "gemini" | "deepseek" | "mistral" | "grok" | "cloudflare" | "openrouter";
+
+export const PROVIDER_NAMES: readonly ProviderName[] = [
+  "groq", "gemini", "deepseek", "mistral", "grok", "cloudflare", "openrouter",
+];
 export type MessageRole = "system" | "user" | "assistant";
 
 type ProviderMessage = { role: MessageRole; content: string };
@@ -286,6 +312,166 @@ function readHistory(body: Json): ProviderMessage[] {
   return history;
 }
 
+/* -------------------------------------------------------------------------- */
+/* VYORA AI CORE — hôte du moteur central                                     */
+/*                                                                             */
+/* Le moteur central est le SEUL point d'appel IA du produit : Business Grow  */
+/* et Studio UGC y convergent. Il s'appuie sur le registre Supabase (fournis- */
+/* seurs, modèles vérifiés, règles, budgets) et sur les 7 adaptateurs de la   */
+/* pile partagée. Les secrets restent ici (Edge) : le navigateur ne voit       */
+/* jamais de clé. Un appel interne (moteur BG) n'est pas double-facturé.       */
+/* -------------------------------------------------------------------------- */
+
+function aiCoreCredentials(): Record<string, { apiKey: string | null; accountId: string | null }> {
+  return {
+    groq: { apiKey: GROQ_KEY() || null, accountId: null },
+    gemini: { apiKey: GEMINI_KEY() || null, accountId: null },
+    deepseek: { apiKey: DEEPSEEK_KEY() || null, accountId: null },
+    mistral: { apiKey: MISTRAL_KEY() || null, accountId: null },
+    grok: { apiKey: GROK_KEY() || null, accountId: null },
+    cloudflare: { apiKey: CLOUDFLARE_TOKEN() || null, accountId: CLOUDFLARE_ACCOUNT() || null },
+    openrouter: { apiKey: OPENROUTER_KEY() || null, accountId: null },
+  };
+}
+
+function aiCoreConfiguredProviders(): Set<string> {
+  const creds = aiCoreCredentials();
+  const out = new Set<string>();
+  for (const [key, c] of Object.entries(creds)) {
+    if (!c.apiKey) continue;
+    if (key === "cloudflare" && !c.accountId) continue;
+    out.add(key);
+  }
+  return out;
+}
+
+// Cache court du registre : la base n'est pas relue à chaque appel.
+let registryCache: { at: number; value: AiRegistrySnapshot | null } = { at: 0, value: null };
+const REGISTRY_TTL_MS = 60_000;
+
+async function loadRegistrySnapshot(): Promise<AiRegistrySnapshot | null> {
+  const now = Date.now();
+  if (registryCache.value !== null && now - registryCache.at < REGISTRY_TTL_MS) return registryCache.value;
+  const url = SUPABASE_URL();
+  const key = SERVICE_KEY();
+  if (!url || !key) return null;
+  try {
+    const res = await fetch(`${url}/rest/v1/rpc/vyora_ai_registry_snapshot`, {
+      method: "POST",
+      headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (!res.ok) return null;
+    const parsed = parseRegistrySnapshot(await res.json());
+    if (parsed) { registryCache = { at: now, value: parsed }; }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+// Journalisation : UNE ligne par tentative réelle (ai_calls_log), jamais
+// bloquante pour l'appel IA, jamais de secret.
+async function logAiCall(entry: AiCallLogEntry): Promise<void> {
+  const url = SUPABASE_URL();
+  const key = SERVICE_KEY();
+  if (!url || !key || !entry.attempts.length) return;
+  const lastSuccess = entry.attempts.length - 1;
+  for (let i = 0; i < entry.attempts.length; i += 1) {
+    const attempt = entry.attempts[i];
+    const isFinalSuccess = attempt.status === "success" && i === lastSuccess;
+    try {
+      await fetch(`${url}/rest/v1/rpc/vyora_ai_log_call`, {
+        method: "POST",
+        headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          p_space: entry.space,
+          p_user_id: entry.userId && entry.userId !== "service" ? entry.userId : null,
+          p_workspace_id: entry.workspaceId,
+          p_task_key: entry.taskKey,
+          p_provider_key: attempt.providerKey,
+          p_model_key: attempt.modelKey,
+          p_provider_model_key: attempt.providerModelKey,
+          p_attempt_number: attempt.attempt,
+          p_status: attempt.status,
+          p_error_code: attempt.errorCode,
+          p_input_tokens: attempt.inputTokens,
+          p_output_tokens: attempt.outputTokens,
+          p_latency_ms: attempt.latencyMs,
+          p_cost_input_usd: isFinalSuccess ? entry.costInputUsd : null,
+          p_cost_output_usd: isFinalSuccess ? entry.costOutputUsd : null,
+          p_fallback_from: i > 0 ? entry.attempts[i - 1].providerKey : null,
+        }),
+        signal: AbortSignal.timeout(4_000),
+      });
+    } catch {
+      // La journalisation ne doit jamais faire échouer l'appel IA.
+    }
+  }
+}
+
+function aiEngineDeps(): AiEngineDeps {
+  const creds = aiCoreCredentials();
+  return {
+    loadRegistry: loadRegistrySnapshot,
+    configuredProviders: aiCoreConfiguredProviders,
+    credentials: (providerKey) => creds[providerKey] ?? { apiKey: null, accountId: null },
+    fetcher: fetch,
+    logCall: logAiCall,
+  };
+}
+
+interface CompleteResultEx extends ProviderResult {
+  tokenUsage: { input_tokens: number | null; output_tokens: number | null } | null;
+  costUsd: number | null;
+}
+
+/**
+ * Exécute une complétion via le moteur central.
+ * - Si une route (modèle et/ou rôle) est fournie, passe par le registre
+ *   multi-fournisseurs avec secours plafonné (VYORA AI CORE).
+ * - Sinon, conserve le comportement historique (Groq → Gemini).
+ */
+async function completeViaCore(
+  messages: ProviderMessage[],
+  options: CompleteOptions,
+  meta: { routeModel: string | null; roleKey: string | null; userId: string | null },
+): Promise<CompleteResultEx> {
+  if (meta.routeModel || meta.roleKey) {
+    const outcome = await runAiCall(aiEngineDeps(), {
+      messages,
+      options: {
+        ...(typeof options.temperature === "number" ? { temperature: options.temperature } : {}),
+        ...(typeof options.maxTokens === "number" ? { maxOutputTokens: options.maxTokens } : {}),
+      },
+      role: meta.roleKey,
+      preferProvider: options.prefer ?? null,
+      space: "business",
+      userId: meta.userId,
+      taskKey: meta.roleKey,
+    });
+    if (outcome.ok && outcome.content && outcome.providerKey && outcome.providerModelKey) {
+      return {
+        provider: outcome.providerKey as ProviderName,
+        model: outcome.providerModelKey,
+        content: outcome.content,
+        tokenUsage: { input_tokens: outcome.inputTokens, output_tokens: outcome.outputTokens },
+        costUsd: outcome.estimatedCostUsd,
+      };
+    }
+    // Au moins UNE tentative réelle a échoué : on ne relance PAS le chemin
+    // historique (les mêmes fournisseurs seraient double sollicités/facturés).
+    if (outcome.attempts.length > 0) {
+      const codes = outcome.attempts.map((a) => `${a.providerKey}:${a.errorCode ?? "?"}`).join(" · ");
+      throw new Error(`${outcome.code ?? "AI_PROVIDER_ERROR"} · ${codes}`);
+    }
+    // Registre indisponible ou aucun candidat : repli sur le chemin historique.
+  }
+  const result = await complete(messages, options);
+  return { ...result, tokenUsage: null, costUsd: null };
+}
+
 export async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST") return fail("METHOD_NOT_ALLOWED", "Méthode non autorisée.", 405);
@@ -299,7 +485,10 @@ export async function handler(req: Request): Promise<Response> {
   let body: Json;
   try { body = rec(await req.json()); } catch { return fail("INVALID_BODY", "Corps de requête JSON invalide.", 400); }
   const action = str(body.action, 40) || "complete";
-  const prefer = str(body.prefer, 20) === "gemini" ? "gemini" : str(body.prefer, 20) === "groq" ? "groq" : undefined;
+  const preferRaw = str(body.prefer, 20).toLowerCase();
+  const prefer: ProviderName | undefined = (PROVIDER_NAMES as readonly string[]).includes(preferRaw)
+    ? (preferRaw as ProviderName)
+    : undefined;
   const projectId = str(body.project_id, 80) || null;
   const temperature = Number.isFinite(Number(body.temperature)) ? clamp(body.temperature, 0, 2, 0.7) : undefined;
 
@@ -311,6 +500,11 @@ export async function handler(req: Request): Promise<Response> {
       providers: {
         groq: { configured: Boolean(GROQ_KEY()), model: GROQ_MODEL() },
         gemini: { configured: Boolean(GEMINI_KEY()), model: GEMINI_MODEL() },
+        deepseek: { configured: Boolean(DEEPSEEK_KEY()) },
+        mistral: { configured: Boolean(MISTRAL_KEY()) },
+        grok: { configured: Boolean(GROK_KEY()) },
+        openrouter: { configured: Boolean(OPENROUTER_KEY()) },
+        cloudflare: { configured: Boolean(CLOUDFLARE_TOKEN() && CLOUDFLARE_ACCOUNT()) },
       },
     });
   }
@@ -427,13 +621,29 @@ export async function handler(req: Request): Promise<Response> {
       } else if (!messages.some((m) => m.role === "system")) {
         messages = [{ role: "system", content: `${SYSTEM.brand}\n${SYSTEM.honesty}` }, ...messages];
       }
-      const result = await complete(messages, {
-        prefer,
-        maxTokens: clamp(body.max_tokens, 64, 4096, 2400),
-        jsonMode: body.json === true,
-        ...(temperature === undefined ? {} : { temperature }),
+      const result = await completeViaCore(
+        messages,
+        {
+          prefer,
+          maxTokens: clamp(body.max_tokens, 64, 4096, 2400),
+          jsonMode: body.json === true,
+          ...(temperature === undefined ? {} : { temperature }),
+        },
+        {
+          routeModel: str(body.model, 120) || null,
+          roleKey: str(body.role_key, 40) || null,
+          userId: internal ? null : userId,
+        },
+      );
+      return json({
+        action,
+        provider: result.provider,
+        model: result.model,
+        content: result.content,
+        usage,
+        ...(result.tokenUsage ? { token_usage: result.tokenUsage } : {}),
+        ...(result.costUsd !== null ? { cost_usd: result.costUsd } : {}),
       });
-      return json({ action, provider: result.provider, model: result.model, content: result.content, usage });
     }
 
     return fail("UNKNOWN_ACTION", "Action IA inconnue.", 400);
@@ -441,9 +651,10 @@ export async function handler(req: Request): Promise<Response> {
     if (!internal) await refund(quotaKind, projectId, userId);
     const message = redact(error instanceof Error ? error.message : String(error));
     const code = message.includes("NOT_CONFIGURED") ? "AI_NOT_CONFIGURED"
-      : message.includes("TIMEOUT") ? "AI_TIMEOUT"
-        : message.includes("SAFETY") ? "AI_SAFETY_BLOCKED"
-          : "AI_PROVIDER_ERROR";
+      : message.includes("BUDGET") ? "AI_BUDGET_EXHAUSTED"
+        : message.includes("TIMEOUT") ? "AI_TIMEOUT"
+          : message.includes("SAFETY") ? "AI_SAFETY_BLOCKED"
+            : "AI_PROVIDER_ERROR";
     return fail(code, `Le fournisseur IA n’a pas pu répondre : ${message}. Aucun texte n’a été inventé.`, 502);
   }
 }
