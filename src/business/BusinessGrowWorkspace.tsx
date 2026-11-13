@@ -16,13 +16,14 @@ import {
 } from '../contracts/business-grow';
 import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
 import GrowthWorkspace from './growth/GrowthWorkspace';
+import AgentReports from './agent/AgentReports';
 import type { Brand, Product, Workspace } from '../lib/types';
 import {
   BusinessGrowApiError, businessGrowApi,
   type BusinessConversation, type BusinessIntegrationConnection, type BusinessMemory,
   type BusinessMessage, type BusinessModelRecord, type BusinessProviderStatus,
   type BusinessQuotaStatus, type BusinessRoutingPreference, type BusinessSendOptions,
-  type BusinessToolExecution, type BusinessVerificationResult,
+  type BusinessToolExecution, type BusinessVerificationResult, type BusinessRecommendation, type BusinessReport,
 } from './api';
 import {
   BUSINESS_PROVIDERS, BUSINESS_ROLES, EXTENSIBLE_PROVIDER_ADAPTERS,
@@ -180,9 +181,12 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
 }
 
 const PROMPT_IDEAS = [
-  { label: 'Rédiger', text: 'Aidez-moi à rédiger un contenu pour mon activité.', icon: FileText },
-  { label: 'Analyser', text: 'Aidez-moi à analyser une campagne marketing.', icon: Lightbulb },
-  { label: 'Planifier', text: 'Aidez-moi à structurer les prochaines étapes de mon activité.', icon: Sparkles },
+  { label: 'Factures à suivre', text: 'Analyse les factures impayées disponibles et priorise les relances. Signale les données manquantes.', icon: FileText, categories: ['bg_module_payment_recovery'] },
+  { label: 'Prospects à relancer', text: 'Quels prospects ou leads nécessitent un suivi ? Appuie-toi seulement sur les données enregistrées.', icon: Lightbulb, categories: ['growth_prospect', 'bg_module_lead_rescue'] },
+  { label: 'Paniers en attente', text: 'Examine les paniers ou commandes en attente et propose des suivis sans envoyer de message.', icon: Package, categories: ['bg_module_order_cart_recovery'] },
+  { label: 'Clients à réactiver', text: 'Analyse les clients à risque et les demandes support disponibles, sans inventer de chiffres.', icon: MessageSquare, categories: ['bg_module_customer_recovery', 'bg_module_customer_support_ai'] },
+  { label: 'Stock & opérations', text: 'Quels stocks et tâches opérationnelles demandent mon attention ? Précise les données manquantes.', icon: Activity, categories: ['bg_module_smart_inventory', 'bg_module_operations_manager'] },
+  { label: 'Situation financière', text: 'Analyse les mouvements financiers disponibles sur les 30 derniers jours, en séparant faits et limites.', icon: TrendingUp, categories: ['bg_module_finance_intelligence'] },
 ];
 
 const CAPABILITY_LABELS: Record<BusinessCapability, string> = {
@@ -207,6 +211,7 @@ const TOOL_LABELS: Record<string, string> = {
   propose_campaign_brief: 'Créer un brief campagne marketing',
   handoff_ugc_brief: 'Transférer vers Studio UGC',
   request_connector_read: 'Demander une lecture connecteur',
+  create_follow_up_task: 'Créer une tâche dans Operations Manager',
 };
 
 interface VerifyBanner {
@@ -367,6 +372,7 @@ function ProviderStatusList({ statuses, compact = false, loading = false }: {
 }
 
 function AssistantView({
+  workspaceId,
   backendReady,
   backendLoading,
   providers,
@@ -393,6 +399,7 @@ function AssistantView({
   onChangeManualAllowFallback,
   onDismissEntryIntent,
   onResolveTool,
+  onProposeTask,
   onNewConversation,
   onRenameConversation,
   onDeleteConversation,
@@ -400,6 +407,7 @@ function AssistantView({
   onSend,
   onRetry,
 }: {
+  workspaceId: string | null;
   backendReady: boolean;
   backendLoading: boolean;
   providers: BusinessProviderStatus[] | null;
@@ -426,6 +434,7 @@ function AssistantView({
   onChangeManualAllowFallback: (allow: boolean) => void;
   onDismissEntryIntent: () => void;
   onResolveTool: (executionId: string, decision: 'approved' | 'rejected') => Promise<void>;
+  onProposeTask: (finding: BusinessRecommendation) => Promise<boolean>;
   onNewConversation: () => void;
   onRenameConversation: (id: string, title: string) => Promise<boolean>;
   onDeleteConversation: (id: string) => Promise<boolean>;
@@ -434,6 +443,11 @@ function AssistantView({
   onRetry: () => void;
 }) {
   const [draft, setDraft] = useState('');
+  const [contextReport, setContextReport] = useState<BusinessReport | null>(null);
+  const ideas = useMemo(() => [...PROMPT_IDEAS].sort((a, b) => {
+    const count = (categories: string[]) => contextReport?.coverage.filter((item) => categories.includes(item.category) && item.status === 'available').reduce((sum, item) => sum + item.count, 0) ?? 0;
+    return count(b.categories) - count(a.categories);
+  }), [contextReport]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -610,6 +624,7 @@ function AssistantView({
               </div>
             </div>
           )}
+          <AgentReports key={workspaceId ?? 'personal'} workspaceId={workspaceId} ready={backendReady} busy={busy} onReport={setContextReport} onPropose={onProposeTask} onAsk={setDraft} />
           {backendReady && messages.length === 0 && (
             <div className="m-auto max-w-xl text-center">
               <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-violet-200/20 bg-violet-300/[0.08] text-violet-100">
@@ -621,7 +636,7 @@ function AssistantView({
                 {activeConversation?.title || 'Parlez de vos priorités, explorez vos options et structurez la suite avec votre copilote métier.'}
               </p>
               <div className="mt-7 grid gap-2 sm:grid-cols-3">
-                {PROMPT_IDEAS.map(({ label, text, icon: Icon }) => (
+                {ideas.map(({ label, text, icon: Icon }) => (
                   <button
                     key={label}
                     type="button"
@@ -680,9 +695,15 @@ function AssistantView({
                   <p className="mt-1.5 text-[11px] text-slate-400">
                     {typeof tool.input_args?.summary === 'string' ? tool.input_args.summary : JSON.stringify(tool.input_args)}
                   </p>
+                  {tool.tool_name === 'create_follow_up_task' && Boolean(tool.input_args?.task) && typeof tool.input_args.task === 'object' && (
+                    <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/20 p-2.5 text-[11px] leading-relaxed text-slate-300">
+                      <p>Priorité : {String((tool.input_args.task as Record<string, unknown>).priority ?? 'à préciser')} · Échéance : {String((tool.input_args.task as Record<string, unknown>).dueDate ?? 'à préciser')}</p>
+                      <p className="mt-1 text-slate-400">La confirmation crée une tâche interne ; aucun message ni action externe ne sera envoyé.</p>
+                    </div>
+                  )}
                   <div className="mt-2.5 flex flex-wrap gap-2">
                     <Button size="sm" onClick={() => { void onResolveTool(tool.id, 'approved'); }} disabled={busy}>
-                      Approuver
+                      {tool.tool_name === 'create_follow_up_task' ? 'Confirmer la création' : 'Approuver'}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => { void onResolveTool(tool.id, 'rejected'); }} disabled={busy}>
                       Rejeter
@@ -742,6 +763,9 @@ function AssistantView({
                 return (
                   <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-[#0c111b] px-2.5 py-2">
                     <span className="text-slate-200">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
+                    {tool.tool_name === 'create_follow_up_task' && tool.status === 'executed' && typeof tool.output_result?.taskId === 'string' && (
+                      <Link to="/app/business/modules/operations-manager" className="text-violet-200 underline">Voir la tâche</Link>
+                    )}
                     <Badge tone={tool.status === 'executed' ? 'success' : 'neutral'}>{statusBadge}</Badge>
                   </div>
                 );
@@ -919,7 +943,7 @@ function AssistantView({
             <h2 className="text-sm font-semibold text-white">Données privées</h2>
           </div>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
-            Les conversations sont liées à votre compte VYORA. La mémoire n’est utilisée qu’après votre consentement.
+            À l’envoi, la conversation, le contexte d’entreprise et la mémoire consentie peuvent être transmis au fournisseur IA sélectionné. Évitez les données sensibles ; aucune action externe n’est exécutée automatiquement.
           </p>
         </section>
       </aside>
@@ -928,6 +952,7 @@ function AssistantView({
 }
 
 function MemoryView({
+  workspaceId,
   memory,
   loading,
   busy,
@@ -936,22 +961,30 @@ function MemoryView({
   onSaveProfile,
   onPutItem,
   onDeleteItem,
+  onImportLegacy,
   onRetry,
 }: {
+  workspaceId: string | null;
   memory: BusinessMemory | null;
   loading: boolean;
   busy: boolean;
   error: string | null;
   onConsent: (enabled: boolean) => Promise<void>;
   onSaveProfile: (profile: Record<string, unknown>) => Promise<void>;
-  onPutItem: (category: string, content: unknown) => Promise<void>;
+  onPutItem: (category: string, content: unknown, itemId?: string) => Promise<void>;
   onDeleteItem: (id: string) => Promise<void>;
+  onImportLegacy: () => Promise<{ importedItems: number; importedProfile: boolean } | null>;
   onRetry: () => void;
 }) {
   const [profileDraft, setProfileDraft] = useState('{}');
   const [category, setCategory] = useState('business_context');
   const [itemDraft, setItemDraft] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState('');
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [confirmImport, setConfirmImport] = useState(false);
+  const [importNotice, setImportNotice] = useState('');
 
   useEffect(() => {
     if (memory) setProfileDraft(JSON.stringify(memory.profile ?? {}, null, 2));
@@ -970,8 +1003,23 @@ function MemoryView({
 
   const addItem = async () => {
     if (!itemDraft.trim()) return;
-    await onPutItem(category, { text: itemDraft.trim() });
-    setItemDraft('');
+    try { await onPutItem(category, { text: itemDraft.trim() }); setItemDraft(''); }
+    catch { /* l'erreur serveur reste visible dans le panneau */ }
+  };
+
+  const saveItem = async (itemCategory: string, id: string) => {
+    try {
+      const value: unknown = JSON.parse(editingDraft);
+      await onPutItem(itemCategory, value, id);
+      setEditingItem(null); setFormError(null);
+    } catch (error) { setFormError(error instanceof Error ? error.message : 'Contenu JSON invalide.'); }
+  };
+  const importLegacy = async () => {
+    try {
+      const result = await onImportLegacy();
+      if (result) setImportNotice(`${result.importedItems} note(s) importée(s)${result.importedProfile ? ' et profil importé' : ' ; aucun profil copié (déjà présent ou absent)'}. Les données personnelles d’origine restent intactes.`);
+      setConfirmImport(false);
+    } catch { /* l'erreur serveur reste visible dans le panneau */ }
   };
 
   return (
@@ -979,7 +1027,7 @@ function MemoryView({
       <div className="max-w-2xl">
         <h2 className="text-lg font-semibold text-white">Mémoire métier privée</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Cette mémoire est rattachée à votre compte VYORA. La révocation supprime les éléments mémorisés; elle n’efface pas vos conversations.
+          Cette mémoire est privée pour votre compte et l’entreprise active. La révocation supprime uniquement les éléments de cette mémoire ; les tâches, rapports et conversations enregistrés restent conservés et peuvent contenir des informations copiées.
         </p>
       </div>
       {error && (
@@ -987,7 +1035,7 @@ function MemoryView({
           <span>{error}</span><button type="button" className="underline" onClick={onRetry}>Réessayer</button>
         </div>
       )}
-      {loading ? <p className="mt-6 text-sm text-slate-400">Chargement de votre mémoire…</p> : (
+      {loading ? <p className="mt-6 text-sm text-slate-400">Chargement de votre mémoire…</p> : !memory ? <p className="mt-6 text-sm text-amber-200">État de la mémoire indisponible. Rechargez avant de modifier le consentement.</p> : (
         <>
           <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
             <div>
@@ -996,9 +1044,19 @@ function MemoryView({
                 {memory?.consent ? 'La mémoire métier peut être enregistrée.' : 'La mémoire est désactivée et reste vide.'}
               </p>
             </div>
-            <Toggle checked={Boolean(memory?.consent)} onChange={(enabled) => { void onConsent(enabled); }} label={memory?.consent ? 'Activée' : 'Désactivée'} />
+            <Toggle checked={Boolean(memory?.consent)} onChange={(enabled) => { if (enabled) void onConsent(true); else setConfirmRevoke(true); }} label={memory?.consent ? 'Activée' : 'Désactivée'} />
           </div>
 
+          {confirmRevoke && <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/5 p-3 text-xs text-amber-100" role="alert">
+            <p>La désactivation supprimera les notes, le profil, les prospects et les plans de cette mémoire. Les tâches, rapports et conversations déjà enregistrés restent conservés et peuvent contenir des informations copiées.</p>
+            <div className="mt-2 flex gap-2"><Button size="sm" disabled={busy} onClick={() => { setConfirmRevoke(false); void onConsent(false); }}>Confirmer la désactivation et la suppression</Button><Button size="sm" variant="ghost" onClick={() => setConfirmRevoke(false)}>Annuler</Button></div>
+          </div>}
+          {workspaceId && memory?.consent && <div className="mt-3 rounded-xl border border-white/[0.07] p-3 text-xs text-slate-400">
+            <p>L’ancienne mémoire personnelle reste séparée. Vous pouvez la copier explicitement dans cette entreprise, sans écraser le profil existant.</p>
+            {!confirmImport ? <button type="button" className="mt-2 text-violet-200 underline" onClick={() => setConfirmImport(true)}>Importer l’ancienne mémoire personnelle</button> :
+              <div className="mt-2 flex flex-wrap items-center gap-2"><span>Confirmer la copie dans l’entreprise active ?</span><Button size="sm" disabled={busy} onClick={() => void importLegacy()}>Confirmer l’import</Button><Button size="sm" variant="ghost" onClick={() => setConfirmImport(false)}>Annuler</Button></div>}
+            {importNotice && <p className="mt-2 text-emerald-200" role="status">{importNotice}</p>}
+          </div>}
           {memory?.consent && (
             <div className="mt-5 grid gap-5 lg:grid-cols-2">
               <div className="space-y-3">
@@ -1016,20 +1074,25 @@ function MemoryView({
               <div className="space-y-3">
                 <h3 className="text-sm font-medium text-white">Notes métier</h3>
                 <div className="flex gap-2">
-                  <input value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Catégorie mémoire" className="w-36 rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white" />
+                  <select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Catégorie mémoire" className="w-36 rounded-lg border border-white/10 bg-[#0c111b] px-2 py-2 text-xs text-white">
+                    <option value="business_context">Contexte</option><option value="sector">Secteur</option><option value="goals">Objectifs</option><option value="preferences">Préférences</option><option value="information">Informations</option><option value="decisions">Décisions</option><option value="plans">Plans</option>
+                  </select>
                   <input value={itemDraft} onChange={(event) => setItemDraft(event.target.value)} aria-label="Note mémoire" placeholder="Contexte utile…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white" />
                   <Button size="sm" onClick={() => { void addItem(); }} disabled={busy || !itemDraft.trim()}>Ajouter</Button>
                 </div>
                 <div className="max-h-64 space-y-2 overflow-y-auto">
                   {(memory?.items ?? []).map((item) => (
                     <article key={item.id} className="flex items-start justify-between gap-3 rounded-xl border border-white/[0.07] bg-black/15 p-3">
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="text-[10px] uppercase tracking-wide text-brand-200">{item.category}</p>
-                        <p className="mt-1 break-words text-xs text-slate-300">{typeof item.content === 'object' && item.content !== null && 'text' in item.content ? String((item.content as { text: unknown }).text) : JSON.stringify(item.content)}</p>
+                        {editingItem === item.id ? <div className="mt-2 space-y-2">
+                          <textarea aria-label="Contenu de la note (JSON)" value={editingDraft} onChange={(event) => setEditingDraft(event.target.value)} rows={4} className="w-full rounded-lg border border-white/10 bg-[#080d15] p-2 font-mono text-xs text-white" />
+                          {formError && <p className="text-rose-300" role="alert">{formError}</p>}
+                          <div className="flex gap-2"><Button size="sm" disabled={busy} onClick={() => void saveItem(item.category, item.id)}>Enregistrer la note</Button><Button size="sm" variant="ghost" onClick={() => { setEditingItem(null); setFormError(null); }}>Annuler</Button></div>
+                        </div> : <p className="mt-1 break-words text-xs text-slate-300">{typeof item.content === 'object' && item.content !== null && 'text' in item.content ? String((item.content as { text: unknown }).text) : JSON.stringify(item.content)}</p>}
                       </div>
-                      <button type="button" onClick={() => { void onDeleteItem(item.id); }} disabled={busy} aria-label="Supprimer la note" className="text-slate-500 hover:text-rose-300 disabled:opacity-50">
-                        <Trash2 size={14} />
-                      </button>
+                      <button type="button" onClick={() => { setEditingItem(item.id); setEditingDraft(JSON.stringify(item.content, null, 2)); setFormError(null); }} disabled={busy} aria-label="Modifier la note" className="text-slate-500 hover:text-violet-300 disabled:opacity-50"><Pencil size={14} /></button>
+                      <button type="button" onClick={() => { void onDeleteItem(item.id).catch(() => undefined); }} disabled={busy} aria-label="Supprimer la note" className="text-slate-500 hover:text-rose-300 disabled:opacity-50"><Trash2 size={14} /></button>
                     </article>
                   ))}
                   {!memory?.items.length && <p className="rounded-xl border border-dashed border-white/10 p-4 text-center text-xs text-slate-500">Aucune note enregistrée.</p>}
@@ -1360,18 +1423,20 @@ function ProvidersView({
 }
 
 function IntegrationsView({
-  connections, busyKey, notice, onRequest, onCancel, onDisconnect,
+  connections, loadError, busyKey, notice, onRetry, onRequest, onCancel, onDisconnect,
 }: {
-  connections: BusinessIntegrationConnection[];
+  connections: BusinessIntegrationConnection[] | null;
+  loadError: string | null;
   busyKey: string | null;
   notice: { tone: 'success' | 'error'; text: string } | null;
+  onRetry: () => void;
   onRequest: (connectorKey: string) => void;
   onCancel: (connectorKey: string) => void;
   onDisconnect: (connectorKey: string) => void;
 }) {
   const statusPriority: Record<string, number> = { connected: 4, pending: 3, error: 2, disconnected: 1, unconfigured: 0 };
   const byConnector = new Map<string, BusinessIntegrationConnection>();
-  for (const conn of connections) {
+  for (const conn of connections ?? []) {
     const prev = byConnector.get(conn.connector_key);
     if (!prev || (statusPriority[conn.status] ?? 0) > (statusPriority[prev.status] ?? 0)) {
       byConnector.set(conn.connector_key, conn);
@@ -1382,12 +1447,22 @@ function IntegrationsView({
       <div className="mb-5 max-w-3xl">
         <h2 className="text-lg font-semibold text-white">Intégrations et connexions sécurisées</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Les connecteurs ci-dessous tracent une demande d’activation réelle. Aucune connexion n’est déclarée opérationnelle
-          avant l’échange OAuth ou la validation des identifiants côté serveur. Les secrets restent dans Supabase Vault,
-          jamais dans le navigateur.
+          Une demande est enregistrée pour votre compte et cette entreprise. Elle ne lance pas de connexion OAuth
+          et n’importe aucune donnée externe automatiquement.
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-amber-100/75">
+          La déconnexion retire uniquement l’association locale. Si une autorisation existe chez un fournisseur,
+          révoquez-la également auprès de celui-ci : aucune révocation externe n’est effectuée ici.
         </p>
       </div>
 
+      {loadError && (
+        <div role="alert" className="mb-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">
+          État des intégrations indisponible : {loadError}{' '}
+          <button type="button" className="underline" onClick={onRetry}>Réessayer</button>
+        </div>
+      )}
+      {!connections && !loadError && <p role="status" className="mb-4 text-xs text-slate-400">Chargement des intégrations…</p>}
       {notice && (
         <div className={`mb-4 rounded-xl border px-3.5 py-2.5 text-xs ${notice.tone === 'success' ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100' : 'border-rose-400/20 bg-rose-400/[0.06] text-rose-100'}`} role="status">
           {notice.text}
@@ -1397,10 +1472,11 @@ function IntegrationsView({
       <div className="grid gap-3 sm:grid-cols-2">
         {INTEGRATION_DEFINITIONS.map((contract: IntegrationDefinition) => {
           const persisted = byConnector.get(contract.id);
-          const status = persisted?.status ?? 'unconfigured';
+          const status = connections ? persisted?.status ?? 'unconfigured' : null;
           const busy = busyKey?.startsWith(`${contract.id}:`) ?? false;
+          const disabled = Boolean(busyKey) || !connections;
           const tone = status === 'connected' ? 'success' : status === 'pending' ? 'warning' : status === 'error' ? 'danger' : 'neutral';
-          const label = status === 'connected' ? 'Connecté' : status === 'pending' ? 'Demande enregistrée' : status === 'error' ? 'Erreur de connexion' : status === 'disconnected' ? 'Déconnecté' : 'Non connecté';
+          const label = status === null ? 'État inconnu' : status === 'connected' ? 'Connecté' : status === 'pending' ? 'Demande enregistrée' : status === 'error' ? 'Erreur de connexion' : status === 'disconnected' ? 'Déconnecté localement' : 'Non connecté';
           return (
             <article key={contract.id} className="flex flex-col rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`connector-${contract.id}`}>
               <div className="flex items-start justify-between gap-2">
@@ -1419,15 +1495,15 @@ function IntegrationsView({
               )}
               <div className="mt-auto pt-3">
                 {status === 'connected' ? (
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => onDisconnect(contract.id)}>
-                    {busy ? 'Révocation…' : 'Révoquer la connexion'}
+                  <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onDisconnect(contract.id)}>
+                    {busy ? 'Déconnexion locale…' : 'Retirer l’association locale'}
                   </Button>
                 ) : status === 'pending' ? (
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => onCancel(contract.id)}>
+                  <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onCancel(contract.id)}>
                     {busy ? 'Annulation…' : 'Annuler la demande'}
                   </Button>
                 ) : (
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRequest(contract.id)}>
+                  <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onRequest(contract.id)}>
                     {busy ? 'Enregistrement…' : status === 'error' || status === 'disconnected' ? 'Redemander l’activation' : 'Demander l’activation'}
                   </Button>
                 )}
@@ -1440,8 +1516,8 @@ function IntegrationsView({
       <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-300/15 bg-amber-400/[0.04] px-3.5 py-3 text-[11px] leading-relaxed text-amber-100/80">
         <ShieldAlert size={14} className="mt-0.5 shrink-0" />
         <p>
-          La synchronisation, les erreurs fournisseur et la révocation seront visibles ici dès qu’une application OAuth
-          sera configurée. Aucune donnée externe n’est importée tant que la connexion réelle n’existe pas.
+          Les connexions et synchronisations fournisseur ne sont pas configurées ici. Une demande enregistrée
+          ne signifie pas qu’un service externe est connecté.
         </p>
       </div>
     </section>
@@ -1449,6 +1525,14 @@ function IntegrationsView({
 }
 
 export default function BusinessGrowWorkspace() {
+  const { user, workspaceId } = useAuth();
+  const [section, setSection] = useState<BusinessSection>('chat');
+  // Remonter tout l'état métier à chaque changement de compte/entreprise : une
+  // réponse tardive ne peut jamais réafficher le périmètre précédent.
+  return <ScopedBusinessGrowWorkspace key={`${user?.id ?? ''}:${workspaceId ?? ''}`} section={section} setSection={setSection} />;
+}
+
+function ScopedBusinessGrowWorkspace({ section, setSection }: { section: BusinessSection; setSection: (value: BusinessSection) => void }) {
   const location = useLocation();
   const { user, session, workspace, workspaceId } = useAuth();
   const accountScope = `${user?.id ?? ''}:${workspaceId ?? ''}`;
@@ -1456,13 +1540,13 @@ export default function BusinessGrowWorkspace() {
   const sessionToken = session?.access_token ?? null;
   const parsedIntent = useMemo(() => parseBusinessGrowEntryIntent(location.state), [location.state]);
   const [entryIntent, setEntryIntent] = useState<BusinessGrowEntryIntent | null>(null);
-  const [section, setSection] = useState<BusinessSection>('chat');
   const [providers, setProviders] = useState<BusinessProviderStatus[] | null>(null);
   const [models, setModels] = useState<BusinessModelRecord[]>([]);
   const [quota, setQuota] = useState<BusinessQuotaStatus | null>(null);
   const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
   const [tools, setTools] = useState<BusinessToolExecution[]>([]);
-  const [integrations, setIntegrations] = useState<BusinessIntegrationConnection[]>([]);
+  const [integrations, setIntegrations] = useState<BusinessIntegrationConnection[] | null>(null);
+  const [integrationLoadError, setIntegrationLoadError] = useState<string | null>(null);
   const [integrationBusyKey, setIntegrationBusyKey] = useState<string | null>(null);
   const [integrationNotice, setIntegrationNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
@@ -1487,12 +1571,24 @@ export default function BusinessGrowWorkspace() {
   const [manualAllowFallback, setManualAllowFallback] = useState(false);
   const [savedRouting, setSavedRouting] = useState<Array<Record<string, unknown>>>([]);
   const messageLoadSequence = useRef(0);
+  const toolLoadSequence = useRef(0);
   const accountScopeRef = useRef(accountScope);
   const workspaceLoadSequence = useRef(0);
   const conversationLoadSequence = useRef(0);
   const statusLoadSequence = useRef(0);
   const memoryLoadSequence = useRef(0);
   const detailsLoadSequence = useRef(0);
+  const integrationLoadSequence = useRef(0);
+  const integrationMutationPending = useRef(false);
+  const taskProposalKeys = useRef(new Map<string, string>());
+  const selectedConversationRef = useRef(selectedConversationId);
+  const selectionRevision = useRef(0);
+  selectedConversationRef.current = selectedConversationId;
+
+  useEffect(() => {
+    accountScopeRef.current = accountScope;
+    return () => { accountScopeRef.current = ''; };
+  }, [accountScope]);
 
   useEffect(() => {
     if (!parsedIntent) return;
@@ -1527,13 +1623,17 @@ export default function BusinessGrowWorkspace() {
     statusLoadSequence.current += 1;
     memoryLoadSequence.current += 1;
     messageLoadSequence.current += 1;
+    toolLoadSequence.current += 1;
     detailsLoadSequence.current += 1;
+    integrationLoadSequence.current += 1;
+    taskProposalKeys.current.clear();
     setProviders(null);
     setModels([]);
     setQuota(null);
     setRequests([]);
     setTools([]);
-    setIntegrations([]);
+    setIntegrations(null);
+    setIntegrationLoadError(null);
     setSavedRouting([]);
     setConversations([]);
     setConversationsLoaded(false);
@@ -1554,8 +1654,9 @@ export default function BusinessGrowWorkspace() {
   const loadConversations = useCallback(async () => {
     const requestId = ++conversationLoadSequence.current;
     const requestScope = accountScope;
+    if (!workspaceId) { setConversations([]); setConversationsLoaded(false); return; }
     try {
-      const result = await businessGrowApi.listConversations();
+      const result = await businessGrowApi.listConversations(workspaceId);
       if (requestId !== conversationLoadSequence.current || accountScopeRef.current !== requestScope) return;
       setConversations(result.conversations);
       setConversationsLoaded(true);
@@ -1568,7 +1669,7 @@ export default function BusinessGrowWorkspace() {
       if (requestId === conversationLoadSequence.current && accountScopeRef.current === requestScope) setConversationsLoaded(false);
       throw error;
     }
-  }, [accountScope]);
+  }, [accountScope, workspaceId]);
 
   const loadStatus = useCallback(async () => {
     const requestId = ++statusLoadSequence.current;
@@ -1583,51 +1684,90 @@ export default function BusinessGrowWorkspace() {
     }
   }, [accountScope]);
 
+  const loadIntegrations = useCallback(async () => {
+    if (!workspaceId || typeof businessGrowApi.listIntegrations !== 'function') return;
+    const seq = ++integrationLoadSequence.current;
+    const scope = accountScope;
+    setIntegrationLoadError(null);
+    try {
+      const result = await businessGrowApi.listIntegrations(workspaceId);
+      if (!Array.isArray(result.connections) || result.connections.some((connection) => connection.workspace_id !== workspaceId)) {
+        throw new Error('Réponse invalide pour cette entreprise.');
+      }
+      if (seq === integrationLoadSequence.current && accountScopeRef.current === scope) setIntegrations(result.connections);
+    } catch (cause) {
+      if (seq === integrationLoadSequence.current && accountScopeRef.current === scope) {
+        setIntegrations(null);
+        setIntegrationLoadError(cause instanceof Error ? cause.message : 'Réessayez plus tard.');
+      }
+      throw cause;
+    }
+  }, [accountScope, workspaceId]);
+
   const loadOperationalDetails = useCallback(async () => {
     const requestId = ++detailsLoadSequence.current;
     const requestScope = accountScope;
-    const [modelsRes, quotaRes, reqRes, integrationsRes, routingRes] = await Promise.allSettled([
+    const [modelsRes, quotaRes, reqRes, , routingRes] = await Promise.allSettled([
       businessGrowApi.listModels?.() ?? Promise.resolve(null),
       businessGrowApi.getQuota?.() ?? Promise.resolve(null),
-      businessGrowApi.listRequests?.() ?? Promise.resolve(null),
-      businessGrowApi.listIntegrations?.() ?? Promise.resolve(null),
+      workspaceId ? businessGrowApi.listRequests?.(workspaceId) ?? Promise.resolve(null) : Promise.resolve(null),
+      loadIntegrations(),
       businessGrowApi.getRouting?.() ?? Promise.resolve(null),
     ]);
     if (requestId !== detailsLoadSequence.current || accountScopeRef.current !== requestScope) return;
     if (modelsRes.status === 'fulfilled' && modelsRes.value) setModels(modelsRes.value.models);
     if (quotaRes.status === 'fulfilled' && quotaRes.value) setQuota(quotaRes.value);
     if (reqRes.status === 'fulfilled' && reqRes.value) setRequests(reqRes.value.requests);
-    if (integrationsRes.status === 'fulfilled' && integrationsRes.value) setIntegrations(integrationsRes.value.connections);
     if (routingRes.status === 'fulfilled' && routingRes.value && Array.isArray(routingRes.value.preferences)) {
       setSavedRouting(routingRes.value.preferences);
     }
-  }, [accountScope]);
+  }, [accountScope, workspaceId, loadIntegrations]);
 
   const handleIntegrationAction = useCallback(async (
     action: 'request' | 'cancel' | 'disconnect', connectorKey: string,
   ) => {
+    if (!workspaceId || integrationMutationPending.current) return;
+    integrationMutationPending.current = true;
+    integrationLoadSequence.current++; // invalider toute lecture antérieure à la mutation
+    const scope = accountScope;
     setIntegrationBusyKey(`${connectorKey}:${action}`);
     setIntegrationNotice(null);
     try {
-      if (action === 'request') await businessGrowApi.requestIntegration(connectorKey, workspaceId ?? null);
-      else if (action === 'cancel') await businessGrowApi.cancelIntegration(connectorKey);
-      else await businessGrowApi.disconnectIntegration(connectorKey);
-      const refreshed = await businessGrowApi.listIntegrations();
-      setIntegrations(refreshed.connections);
-      setIntegrationNotice({
-        tone: 'success',
-        text: action === 'request'
-          ? 'Demande enregistrée. Aucune connexion n’est active tant que l’autorisation réelle n’a pas été validée.'
-          : action === 'cancel'
-            ? 'Demande annulée.'
-            : 'Connexion révoquée. Les secrets associés ne sont plus utilisés.',
-      });
+      let text: string;
+      let tone: 'success' | 'error' = 'success';
+      if (action === 'request') {
+        const result = await businessGrowApi.requestIntegration(connectorKey, workspaceId);
+        if (result.status === 'connected') text = 'Une association existe déjà dans cette entreprise.';
+        else if (result.status === 'pending') text = 'Demande enregistrée pour cette entreprise. Aucun service externe n’a été connecté.';
+        else throw new Error('Réponse de demande invalide.');
+      } else if (action === 'cancel') {
+        const result = await businessGrowApi.cancelIntegration(connectorKey, workspaceId);
+        if (typeof result.cancelled !== 'boolean') throw new Error('Réponse d’annulation invalide.');
+        tone = result.cancelled ? 'success' : 'error';
+        text = result.cancelled ? 'Demande annulée dans cette entreprise.' : 'Aucune demande en attente à annuler dans cette entreprise.';
+      } else {
+        const result = await businessGrowApi.disconnectIntegration(connectorKey, workspaceId);
+        if (typeof result.disconnected !== 'boolean') throw new Error('Réponse de déconnexion invalide.');
+        tone = result.disconnected ? 'success' : 'error';
+        text = result.disconnected
+          ? 'Association locale retirée. Révoquez aussi l’autorisation chez le fournisseur si nécessaire.'
+          : 'Aucune association locale à retirer dans cette entreprise.';
+      }
+      if (accountScopeRef.current !== scope) return;
+      try { await loadIntegrations(); }
+      catch { text += ' État non rechargé : actualisez avant toute nouvelle opération.'; }
+      if (accountScopeRef.current === scope) setIntegrationNotice({ tone, text });
     } catch (error) {
-      setIntegrationNotice({ tone: 'error', text: asAppError(error).message });
+      if (accountScopeRef.current === scope) {
+        setIntegrations(null);
+        setIntegrationLoadError('Opération non confirmée. Rechargez l’état avant de poursuivre.');
+        setIntegrationNotice({ tone: 'error', text: `${asAppError(error).message} Vérifiez l’état avant de recommencer.` });
+      }
     } finally {
-      setIntegrationBusyKey(null);
+      integrationMutationPending.current = false;
+      if (accountScopeRef.current === scope) setIntegrationBusyKey(null);
     }
-  }, [workspaceId]);
+  }, [accountScope, workspaceId, loadIntegrations]);
 
   const refreshWorkspace = useCallback(async () => {
     const requestId = ++workspaceLoadSequence.current;
@@ -1680,6 +1820,7 @@ export default function BusinessGrowWorkspace() {
 
   const loadMessages = useCallback(async () => {
     const sequence = ++messageLoadSequence.current;
+    const toolSequence = ++toolLoadSequence.current;
     const requestScope = accountScope;
     if (!selectedConversationId || !backendReady) {
       setMessages([]);
@@ -1690,12 +1831,12 @@ export default function BusinessGrowWorkspace() {
     setLoadingMessages(true);
     try {
       const [result, toolsResult] = await Promise.all([
-        businessGrowApi.listMessages(selectedConversationId),
-        businessGrowApi.listTools?.(selectedConversationId).catch(() => null) ?? Promise.resolve(null),
+        businessGrowApi.listMessages(selectedConversationId, workspaceId),
+        businessGrowApi.listTools?.(selectedConversationId, workspaceId).catch(() => null) ?? Promise.resolve(null),
       ]);
       if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) {
         setMessages(result.messages);
-        if (toolsResult) setTools(toolsResult.tools);
+        if (toolsResult && toolSequence === toolLoadSequence.current) setTools(toolsResult.tools);
         setError(null);
       }
     } catch (loadError) {
@@ -1705,7 +1846,7 @@ export default function BusinessGrowWorkspace() {
     } finally {
       if (messageLoadSequence.current === sequence && accountScopeRef.current === requestScope) setLoadingMessages(false);
     }
-  }, [accountScope, backendReady, selectedConversationId]);
+  }, [accountScope, backendReady, selectedConversationId, workspaceId]);
 
   useEffect(() => {
     void loadMessages();
@@ -1714,10 +1855,11 @@ export default function BusinessGrowWorkspace() {
   const loadMemory = useCallback(async () => {
     const requestId = ++memoryLoadSequence.current;
     const requestScope = accountScope;
+    if (!workspaceId) { setMemory(null); setLoadingMemory(false); return; }
     setLoadingMemory(true);
     setMemoryError(null);
     try {
-      const result = await businessGrowApi.getMemory();
+      const result = await businessGrowApi.getMemory(workspaceId);
       if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) setMemory(result);
     } catch (loadError) {
       if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) {
@@ -1726,21 +1868,24 @@ export default function BusinessGrowWorkspace() {
     } finally {
       if (requestId === memoryLoadSequence.current && accountScopeRef.current === requestScope) setLoadingMemory(false);
     }
-  }, [accountScope]);
+  }, [accountScope, workspaceId]);
 
   useEffect(() => {
     if ((section === 'memory' || section === 'growth') && backendReady) void loadMemory();
   }, [backendReady, loadMemory, section]);
 
   const createConversation = useCallback(async () => {
+    if (!workspaceId) return;
     const requestScope = accountScope;
+    const initialSelection = selectionRevision.current;
     setBusy(true);
     setError(null);
     try {
       const result = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
       if (accountScopeRef.current !== requestScope) return;
       await loadConversations();
-      if (accountScopeRef.current !== requestScope) return;
+      if (accountScopeRef.current !== requestScope || selectionRevision.current !== initialSelection) return;
+      selectedConversationRef.current = result.conversationId;
       setSelectedConversationId(result.conversationId);
       setMessages([]);
       setTools([]);
@@ -1757,7 +1902,7 @@ export default function BusinessGrowWorkspace() {
     const requestScope = accountScope;
     setError(null);
     try {
-      await businessGrowApi.renameConversation(conversationId, title);
+      await businessGrowApi.renameConversation(conversationId, title, workspaceId);
       if (accountScopeRef.current !== requestScope) return false;
       await loadConversations();
       if (accountScopeRef.current !== requestScope) return false;
@@ -1768,15 +1913,19 @@ export default function BusinessGrowWorkspace() {
       }
       return false;
     }
-  }, [accountScope, loadConversations]);
+  }, [accountScope, loadConversations, workspaceId]);
 
   const deleteConversation = useCallback(async (conversationId: string): Promise<boolean> => {
     const requestScope = accountScope;
     setError(null);
     try {
-      await businessGrowApi.deleteConversation(conversationId);
+      await businessGrowApi.deleteConversation(conversationId, workspaceId);
       if (accountScopeRef.current !== requestScope) return false;
-      if (selectedConversationId === conversationId) {
+      if (selectedConversationRef.current === conversationId) {
+        selectionRevision.current++;
+        selectedConversationRef.current = null;
+        messageLoadSequence.current++;
+        toolLoadSequence.current++;
         setSelectedConversationId(null);
         setMessages([]);
         setTools([]);
@@ -1790,10 +1939,12 @@ export default function BusinessGrowWorkspace() {
       }
       return false;
     }
-  }, [accountScope, loadConversations, selectedConversationId]);
+  }, [accountScope, loadConversations, workspaceId]);
 
   const sendMessage = useCallback(async (content: string): Promise<boolean> => {
+    if (!workspaceId) { setError('Sélectionnez une entreprise avant de commencer.'); return false; }
     const requestScope = accountScope;
+    const initialSelection = selectionRevision.current;
     setError(null);
     setBusy(true);
     let conversationId = selectedConversationId;
@@ -1802,7 +1953,10 @@ export default function BusinessGrowWorkspace() {
         const result = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
         if (accountScopeRef.current !== requestScope) return false;
         conversationId = result.conversationId;
-        setSelectedConversationId(conversationId);
+        if (selectionRevision.current === initialSelection) {
+          selectedConversationRef.current = conversationId;
+          setSelectedConversationId(conversationId);
+        }
       }
       const hasSavedManualOverride = savedRouting.some(
         (pref) => pref.role_key === roleKey && pref.selection_mode === 'manual',
@@ -1835,17 +1989,27 @@ export default function BusinessGrowWorkspace() {
         await businessGrowApi.sendMessage(conversationId, content, crypto.randomUUID());
       }
       if (accountScopeRef.current !== requestScope) return false;
-      await Promise.all([
-        loadConversations(),
-        businessGrowApi.listMessages(conversationId).then((result) => {
-          if (accountScopeRef.current === requestScope) setMessages(result.messages);
-        }),
-        businessGrowApi.listTools?.(conversationId).then((res) => {
-          if (accountScopeRef.current === requestScope && res) setTools(res.tools);
-        }).catch(() => undefined),
-        loadOperationalDetails(),
-      ]);
-      return accountScopeRef.current === requestScope;
+      // L'envoi a réussi : une erreur de rafraîchissement ne doit jamais
+      // laisser croire qu'il faut le renvoyer. Ne pas invalider une lecture
+      // de la conversation B si l'utilisateur a quitté A pendant l'envoi.
+      const refreshes: Promise<unknown>[] = [loadConversations(), loadOperationalDetails()];
+      let messageSequence: number | null = null;
+      if (selectedConversationRef.current === conversationId) {
+        messageSequence = ++messageLoadSequence.current;
+        const toolSequence = ++toolLoadSequence.current;
+        const currentMessageSequence = messageSequence;
+        refreshes.push(businessGrowApi.listMessages(conversationId, workspaceId).then((result) => {
+          if (accountScopeRef.current === requestScope && selectedConversationRef.current === conversationId && currentMessageSequence === messageLoadSequence.current) setMessages(result.messages);
+        }));
+        refreshes.push(businessGrowApi.listTools?.(conversationId).then((res) => {
+          if (accountScopeRef.current === requestScope && selectedConversationRef.current === conversationId && toolSequence === toolLoadSequence.current && res) setTools(res.tools);
+        }).catch(() => undefined) ?? Promise.resolve());
+      }
+      const refreshed = await Promise.allSettled(refreshes);
+      if (accountScopeRef.current !== requestScope) return false;
+      if (messageSequence !== null && messageSequence === messageLoadSequence.current && selectedConversationRef.current === conversationId) setLoadingMessages(false);
+      if (refreshed.some((result) => result.status === 'rejected')) setError('Message envoyé, mais l’historique n’a pas pu être actualisé. Réessayez le chargement avant toute nouvelle demande.');
+      return true;
     } catch (sendError) {
       if (accountScopeRef.current !== requestScope) return false;
       const code = sendError instanceof BusinessGrowApiError
@@ -1876,14 +2040,18 @@ export default function BusinessGrowWorkspace() {
             ? 'Aucun service IA n’est vérifié pour le moment. Ouvrez « Services IA » puis lancez « Vérifier la connexion » sur un fournisseur configuré : votre message reste enregistré et aucun crédit n’a été débité.'
             : errorMessage,
         );
-        await Promise.allSettled([
-          loadConversations(),
-          conversationId
-            ? businessGrowApi.listMessages(conversationId).then((result) => {
-              if (accountScopeRef.current === requestScope) setMessages(result.messages);
-            })
-            : Promise.resolve(),
-        ]);
+        const refreshes: Promise<unknown>[] = [loadConversations()];
+        let messageSequence: number | null = null;
+        if (conversationId && selectedConversationRef.current === conversationId) {
+          messageSequence = ++messageLoadSequence.current;
+          const currentMessageSequence = messageSequence;
+          refreshes.push(businessGrowApi.listMessages(conversationId, workspaceId).then((result) => {
+            if (accountScopeRef.current === requestScope && selectedConversationRef.current === conversationId && currentMessageSequence === messageLoadSequence.current) setMessages(result.messages);
+          }));
+        }
+        await Promise.allSettled(refreshes);
+        if (accountScopeRef.current !== requestScope) return false;
+        if (messageSequence !== null && messageSequence === messageLoadSequence.current && selectedConversationRef.current === conversationId) setLoadingMessages(false);
         return true;
       }
       setError(sendError instanceof Error ? sendError.message : 'Impossible d’envoyer la demande.');
@@ -1893,17 +2061,62 @@ export default function BusinessGrowWorkspace() {
     }
   }, [accountScope, loadConversations, loadOperationalDetails, manualAllowFallback, preferredModelKey, preferredProviderKey, roleKey, routingMode, savedRouting, selectedConversationId, workspaceId]);
 
+  const proposeTask = useCallback(async (finding: BusinessRecommendation): Promise<boolean> => {
+    if (!workspaceId) throw new Error('Sélectionnez une entreprise pour préparer une tâche.');
+    const requestScope = accountScope;
+    const initialSelection = selectionRevision.current;
+    setBusy(true); setError(null);
+    let conversationId = selectedConversationId;
+    try {
+      if (!conversationId) {
+        const created = await businessGrowApi.createConversation('Nouvelle conversation', workspaceId);
+        if (accountScopeRef.current !== requestScope) return false;
+        conversationId = created.conversationId;
+        if (selectionRevision.current === initialSelection) {
+          selectedConversationRef.current = conversationId;
+          setSelectedConversationId(conversationId);
+        }
+        await loadConversations();
+      }
+      if (accountScopeRef.current !== requestScope) return false;
+      const key = `${workspaceId}:${conversationId}:${finding.sourceCategory}:${finding.sourceRecordId}`;
+      if (!taskProposalKeys.current.has(key)) taskProposalKeys.current.set(key, crypto.randomUUID());
+      const proposal = await businessGrowApi.proposeTask(workspaceId, conversationId, finding.sourceCategory, finding.sourceRecordId, taskProposalKeys.current.get(key)!);
+      if (accountScopeRef.current !== requestScope) return false;
+      if (proposal.status !== 'pending_approval') {
+        taskProposalKeys.current.delete(key);
+        throw new Error('Cette proposition a déjà été traitée. Consultez l’historique des actions.');
+      }
+      if (selectedConversationRef.current === conversationId) {
+        const sequence = ++toolLoadSequence.current;
+        try {
+          const result = await businessGrowApi.listTools(conversationId, workspaceId);
+          if (accountScopeRef.current === requestScope && selectedConversationRef.current === conversationId && toolLoadSequence.current === sequence) setTools(result.tools);
+        } catch {
+          if (accountScopeRef.current === requestScope && selectedConversationRef.current === conversationId) setError('Proposition enregistrée, mais l’historique des actions n’a pas pu être rechargé.');
+        }
+      }
+      taskProposalKeys.current.delete(key);
+      return accountScopeRef.current === requestScope;
+    } finally { if (accountScopeRef.current === requestScope) setBusy(false); }
+  }, [accountScope, selectedConversationId, workspaceId, loadConversations]);
+
   const resolveTool = useCallback(async (executionId: string, decision: 'approved' | 'rejected') => {
     const requestScope = accountScope;
     if (!businessGrowApi.resolveTool) return;
     setBusy(true);
     setError(null);
     try {
-      await businessGrowApi.resolveTool(executionId, decision);
+      await businessGrowApi.resolveTool(executionId, decision, workspaceId);
       if (accountScopeRef.current !== requestScope) return;
-      if (selectedConversationId && businessGrowApi.listTools) {
-        const res = await businessGrowApi.listTools(selectedConversationId);
-        if (accountScopeRef.current === requestScope) setTools(res.tools);
+      if (selectedConversationId && selectedConversationRef.current === selectedConversationId && businessGrowApi.listTools) {
+        const sequence = ++toolLoadSequence.current;
+        try {
+          const res = await businessGrowApi.listTools(selectedConversationId, workspaceId);
+          if (accountScopeRef.current === requestScope && selectedConversationRef.current === selectedConversationId && toolLoadSequence.current === sequence) setTools(res.tools);
+        } catch {
+          if (accountScopeRef.current === requestScope && selectedConversationRef.current === selectedConversationId) setError('Action traitée, mais son historique n’a pas pu être rechargé. Vérifiez-le avant de recommencer.');
+        }
       }
     } catch (resolveError) {
       if (accountScopeRef.current === requestScope) {
@@ -1912,7 +2125,7 @@ export default function BusinessGrowWorkspace() {
     } finally {
       if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [accountScope, selectedConversationId]);
+  }, [accountScope, selectedConversationId, workspaceId]);
 
   const verifyProvider = useCallback(async (
     providerKey: string,
@@ -2030,11 +2243,12 @@ export default function BusinessGrowWorkspace() {
   }, []);
 
   const saveMemoryConsent = useCallback(async (enabled: boolean) => {
+    if (!workspaceId) { setMemoryError('Aucune entreprise active.'); return; }
     const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
-      await businessGrowApi.setMemoryConsent(enabled);
+      await businessGrowApi.setMemoryConsent(enabled, workspaceId);
       if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (consentError) {
@@ -2044,14 +2258,15 @@ export default function BusinessGrowWorkspace() {
     } finally {
       if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [accountScope, loadMemory]);
+  }, [accountScope, loadMemory, workspaceId]);
 
   const saveMemoryProfile = useCallback(async (profile: Record<string, unknown>) => {
+    if (!workspaceId) { setMemoryError('Aucune entreprise active.'); return; }
     const requestScope = accountScope;
     setBusy(true);
     setMemoryError(null);
     try {
-      await businessGrowApi.saveMemoryProfile(profile);
+      await businessGrowApi.saveMemoryProfile(profile, workspaceId);
       if (accountScopeRef.current !== requestScope) return;
       await loadMemory();
     } catch (saveError) {
@@ -2061,7 +2276,7 @@ export default function BusinessGrowWorkspace() {
     } finally {
       if (accountScopeRef.current === requestScope) setBusy(false);
     }
-  }, [accountScope, loadMemory]);
+  }, [accountScope, loadMemory, workspaceId]);
 
   const mutateMemoryItem = useCallback(async (operation: () => Promise<unknown>) => {
     const requestScope = accountScope;
@@ -2075,10 +2290,24 @@ export default function BusinessGrowWorkspace() {
       if (accountScopeRef.current === requestScope) {
         setMemoryError(itemError instanceof Error ? itemError.message : 'Impossible de modifier la mémoire.');
       }
+      throw itemError;
     } finally {
       if (accountScopeRef.current === requestScope) setBusy(false);
     }
   }, [accountScope, loadMemory]);
+
+  const importLegacyMemory = useCallback(async () => {
+    if (!workspaceId) return null;
+    const requestScope = accountScope; setBusy(true); setMemoryError(null);
+    try {
+      const result = await businessGrowApi.importLegacyMemory(workspaceId);
+      if (accountScopeRef.current !== requestScope) return null;
+      await loadMemory(); return result;
+    } catch (importError) {
+      if (accountScopeRef.current === requestScope) setMemoryError(importError instanceof Error ? importError.message : 'Import impossible.');
+      throw importError;
+    } finally { if (accountScopeRef.current === requestScope) setBusy(false); }
+  }, [accountScope, loadMemory, workspaceId]);
 
   const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
   const ActiveIcon = activeSection.icon;
@@ -2219,8 +2448,14 @@ export default function BusinessGrowWorkspace() {
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <ActiveIcon size={14} className="text-brand-300" /> {activeSection.label}
           </div>
-          {section === 'chat' && (
+          {!workspaceId && ['chat', 'growth', 'company', 'memory', 'integrations'].includes(section) && (
+            <section role="status" className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.05] p-5 text-sm text-amber-100">
+              Aucune entreprise active. Créez ou sélectionnez une entreprise pour accéder à son assistant et à ses données. Les données personnelles historiques ne sont pas chargées automatiquement.
+            </section>
+          )}
+          {workspaceId && section === 'chat' && (
             <AssistantView
+              workspaceId={workspaceId}
               backendReady={backendReady}
               backendLoading={backendLoading}
               providers={providers}
@@ -2247,15 +2482,16 @@ export default function BusinessGrowWorkspace() {
               onChangeManualAllowFallback={setManualAllowFallback}
               onDismissEntryIntent={() => setEntryIntent(null)}
               onResolveTool={resolveTool}
+              onProposeTask={proposeTask}
               onNewConversation={() => { void createConversation(); }}
               onRenameConversation={renameConversation}
               onDeleteConversation={deleteConversation}
-              onSelectConversation={setSelectedConversationId}
+              onSelectConversation={(id) => { if (selectedConversationRef.current === id) return; selectionRevision.current++; messageLoadSequence.current++; toolLoadSequence.current++; selectedConversationRef.current = id; setSelectedConversationId(id); setMessages([]); setTools([]); }}
               onSend={sendMessage}
               onRetry={() => { void refreshWorkspace(); void loadMessages(); }}
             />
           )}
-          {section === 'growth' && (
+          {workspaceId && section === 'growth' && (
             <GrowthWorkspace
               workspace={workspace}
               workspaceId={workspaceId}
@@ -2269,17 +2505,19 @@ export default function BusinessGrowWorkspace() {
               initialTab={entryIntent?.growthTab ?? null}
             />
           )}
-          {section === 'company' && <CompanyContextView workspace={workspace} />}
-          {section === 'memory' && (
+          {workspaceId && section === 'company' && <CompanyContextView workspace={workspace} />}
+          {workspaceId && section === 'memory' && (
             <MemoryView
+              workspaceId={workspaceId}
               memory={memory}
               loading={loadingMemory}
               busy={busy}
               error={memoryError}
               onConsent={saveMemoryConsent}
               onSaveProfile={saveMemoryProfile}
-              onPutItem={(category, content) => mutateMemoryItem(() => businessGrowApi.putMemoryItem(category, content))}
-              onDeleteItem={(id) => mutateMemoryItem(() => businessGrowApi.deleteMemoryItem(id))}
+              onPutItem={(category, content, itemId) => mutateMemoryItem(() => { if (!workspaceId) throw new Error('Aucune entreprise active.'); return businessGrowApi.putMemoryItem(category, content, itemId ?? null, workspaceId); })}
+              onDeleteItem={(id) => mutateMemoryItem(() => { if (!workspaceId) throw new Error('Aucune entreprise active.'); return businessGrowApi.deleteMemoryItem(id, workspaceId); })}
+              onImportLegacy={importLegacyMemory}
               onRetry={() => { void loadMemory(); }}
             />
           )}
@@ -2298,9 +2536,11 @@ export default function BusinessGrowWorkspace() {
               onSaveRouting={saveRouting}
             />
           )}
-          {section === 'integrations' && (
+          {workspaceId && section === 'integrations' && (
             <IntegrationsView
               connections={integrations}
+              loadError={integrationLoadError}
+              onRetry={() => { void loadIntegrations().catch(() => {}); }}
               busyKey={integrationBusyKey}
               notice={integrationNotice}
               onRequest={(connectorKey) => { void handleIntegrationAction('request', connectorKey); }}

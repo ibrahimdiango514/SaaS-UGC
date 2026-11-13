@@ -25,6 +25,7 @@ export interface ModuleField {
   placeholder?: string;
   help?: string;
   min?: number;
+  max?: number;
   step?: number;
   full?: boolean;
   inList?: boolean;
@@ -149,6 +150,13 @@ export function numberFrom(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** A missing or invalid measurement is not the number zero. */
+export function measuredNumber(value: unknown): number | null {
+  if (typeof value !== 'number' && !(typeof value === 'string' && /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim()))) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1_000_000_000_000 ? parsed : null;
+}
+
 export function textFrom(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
@@ -160,9 +168,11 @@ export function dateFrom(value: unknown): string {
 export function daysSince(value: unknown, now = Date.now()): number | null {
   const text = dateFrom(value);
   if (!text) return null;
-  const date = Date.parse(`${text}T12:00:00`);
-  if (!Number.isFinite(date)) return null;
-  return Math.floor((now - date) / 86_400_000);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const date = Date.parse(`${text}T00:00:00Z`);
+  if (!Number.isFinite(date) || new Date(date).toISOString().slice(0, 10) !== text) return null;
+  const today = new Date(now).toISOString().slice(0, 10);
+  return Math.floor((Date.parse(`${today}T00:00:00Z`) - date) / 86_400_000);
 }
 
 export function formatModuleMoney(value: unknown, currency = 'XOF'): string {
@@ -186,7 +196,8 @@ export function formatModuleDate(value: unknown): string {
 export function displayFieldValue(_module: ModuleDefinition, record: ModuleRecord, field: ModuleField): string {
   const value = record.data[field.key];
   if (field.type === 'number') {
-    const numeric = numberFrom(value);
+    const numeric = measuredNumber(value);
+    if (numeric === null) return '—';
     if (field.suffix === 'FCFA') return formatModuleMoney(numeric);
     return `${numeric.toLocaleString('fr-FR')}${field.suffix ? ` ${field.suffix}` : ''}`;
   }
@@ -201,6 +212,23 @@ export function sumBy(records: readonly ModuleRecord[], key: string, predicate?:
     if (predicate && !predicate(record)) return total;
     return total + numberFrom(record.data[key]);
   }, 0);
+}
+
+/** Show a total only when all relevant amounts are known; empty data isn't a financial zero. */
+function knownSum(records: readonly ModuleRecord[], key: string, predicate: (record: ModuleRecord) => boolean = () => true): number | null {
+  const selected = records.filter(predicate);
+  if (!selected.length) return null;
+  const values = selected.map((record) => measuredNumber(record.data[key]));
+  if (values.some((value) => value === null)) return null;
+  return values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+}
+function knownMoney(records: readonly ModuleRecord[], key: string, predicate?: (record: ModuleRecord) => boolean): string {
+  const amount = knownSum(records, key, predicate);
+  return amount === null ? '—' : formatModuleMoney(amount);
+}
+function lowStock(record: ModuleRecord): boolean {
+  const stock = measuredNumber(record.data.stock), threshold = measuredNumber(record.data.threshold);
+  return stock !== null && (stock === 0 || (threshold !== null && stock <= threshold));
 }
 
 export function countBy(records: readonly ModuleRecord[], predicate: (record: ModuleRecord) => boolean): number {
@@ -278,8 +306,8 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['nouveau', 'relance', 'qualifie'],
     kpis: [
-      { label: 'À relancer', hint: 'Sans contact depuis 3 jours', compute: (records) => String(countBy(records, (r) => isOpen(MODULE_DEFINITIONS[0], r) && (daysSince(r.data.lastContactAt) ?? 0) >= 3)) },
-      { label: 'Valeur en jeu', hint: 'Leads encore ouverts', compute: (records) => formatModuleMoney(sumBy(records, 'estimatedValue', (r) => isOpen(MODULE_DEFINITIONS[0], r))) },
+      { label: 'À relancer', hint: 'Sans contact depuis 3 jours', compute: (records) => String(countBy(records, (r) => isOpen(getModuleDefinition('lead-rescue')!, r) && (daysSince(r.data.lastContactAt) ?? 0) >= 3)) },
+      { label: 'Valeur en jeu', hint: 'Leads encore ouverts', compute: (records) => knownMoney(records, 'estimatedValue', (r) => isOpen(getModuleDefinition('lead-rescue')!, r)) },
       { label: 'Convertis', hint: 'Sur l’ensemble des leads', compute: (records) => String(countBy(records, (r) => r.data.status === 'converti')) },
     ],
     quickActions: [
@@ -316,7 +344,7 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
         { value: 'alerte_interne', label: 'Alerte interne' },
         { value: 'email_validation', label: 'Message à valider' },
       ], inList: true },
-      { key: 'delayDays', label: 'Délai avant action', type: 'number', min: 0, step: 1, suffix: 'jours' },
+      { key: 'delayDays', label: 'Délai avant action', type: 'number', min: 0, max: 3650, step: 1, suffix: 'jours', help: 'En jours entiers à partir de la génération ; vide ou 0 signifie aujourd’hui.' },
       NOTES,
     ],
     statuses: [
@@ -364,7 +392,7 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     openStatuses: ['a_risque', 'contacte'],
     kpis: [
       { label: 'À risque', hint: 'Clients sans commande récente', compute: (records) => String(countBy(records, (r) => r.data.status === 'a_risque')) },
-      { label: 'Valeur à récupérer', hint: 'Valeur historique des clients à risque', compute: (records) => formatModuleMoney(sumBy(records, 'totalSpent', (r) => r.data.status === 'a_risque')) },
+      { label: 'Valeur historique', hint: 'Dépenses passées des clients à risque, pas un revenu garanti', compute: (records) => knownMoney(records, 'totalSpent', (r) => r.data.status === 'a_risque') },
       { label: 'Réactivés', compute: (records) => String(countBy(records, (r) => r.data.status === 'reactive')) },
     ],
     quickActions: [
@@ -405,9 +433,9 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['a_echeance', 'en_retard', 'relance', 'litige'],
     kpis: [
-      { label: 'Encours', hint: 'Factures non payées', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => r.data.status !== 'paye')) },
-      { label: 'En retard', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => r.data.status === 'en_retard')) },
-      { label: 'Encaissé', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => r.data.status === 'paye')) },
+      { label: 'Encours', hint: 'Factures non payées', compute: (records) => knownMoney(records, 'amount', (r) => r.data.status !== 'paye') },
+      { label: 'En retard', compute: (records) => knownMoney(records, 'amount', (r) => r.data.status === 'en_retard') },
+      { label: 'Encaissé', compute: (records) => knownMoney(records, 'amount', (r) => r.data.status === 'paye') },
     ],
     quickActions: [
       { id: 'relance', label: 'Relancer', tone: 'warning', patch: (data) => ({ status: 'relance', reminderLevel: Math.min(3, numberFrom(data.reminderLevel) + 1) }) },
@@ -447,7 +475,7 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['panier', 'commande', 'relance'],
     kpis: [
-      { label: 'Valeur ouverte', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => isOpen(MODULE_DEFINITIONS[4], r))) },
+      { label: 'Valeur ouverte', compute: (records) => knownMoney(records, 'amount', (r) => isOpen(getModuleDefinition('order-cart-recovery')!, r)) },
       { label: 'À relancer', compute: (records) => String(countBy(records, (r) => ['panier', 'commande'].includes(textFrom(r.data.status)))) },
       { label: 'Récupérés', compute: (records) => String(countBy(records, (r) => r.data.status === 'recupere')) },
     ],
@@ -535,9 +563,12 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['stock_bas', 'rupture', 'reapprovisionnement'],
     kpis: [
-      { label: 'Alertes stock', hint: 'Stock ≤ seuil', compute: (records) => String(countBy(records, (r) => numberFrom(r.data.stock) <= numberFrom(r.data.threshold))) },
-      { label: 'Ruptures', compute: (records) => String(countBy(records, (r) => numberFrom(r.data.stock) === 0)) },
-      { label: 'Valeur du stock', compute: (records) => formatModuleMoney(records.reduce((total, r) => total + numberFrom(r.data.stock) * numberFrom(r.data.price), 0)) },
+      { label: 'Alertes stock', hint: 'Rupture ou stock ≤ seuil renseigné', compute: (records) => String(countBy(records, lowStock)) },
+      { label: 'Ruptures', compute: (records) => String(countBy(records, (r) => measuredNumber(r.data.stock) === 0)) },
+      { label: 'Stock au coût', hint: 'Coût unitaire × quantité, si tous les coûts sont renseignés', compute: (records) => {
+        if (!records.length || records.some((r) => measuredNumber(r.data.stock) === null || measuredNumber(r.data.unitCost) === null)) return '—';
+        return formatModuleMoney(records.reduce((total, r) => total + measuredNumber(r.data.stock)! * measuredNumber(r.data.unitCost)!, 0));
+      } },
     ],
     quickActions: [
       { id: 'reappro', label: 'Marquer réapprovisionné', tone: 'success', patch: () => ({ status: 'reapprovisionnement' }) },
@@ -551,7 +582,7 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     category: moduleKeyToCategory('finance-intelligence'),
     title: 'Finance Intelligence',
     shortTitle: 'Finance',
-    description: 'Consolidez revenus et dépenses réels pour lire la trésorerie et la marge de votre activité.',
+    description: 'Suivez les revenus et dépenses saisis pour lire le solde des mouvements renseignés.',
     purpose: 'Chaque ligne est un mouvement réel saisi ou importé. Les totaux se recalculent immédiatement, sans extrapolation.',
     group: 'intelligence',
     icon: Wallet,
@@ -579,9 +610,13 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['prevu'],
     kpis: [
-      { label: 'Revenus réalisés', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => r.data.kind === 'revenu' && r.data.status === 'realise')) },
-      { label: 'Dépenses réalisées', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => r.data.kind === 'depense' && r.data.status === 'realise')) },
-      { label: 'Solde réalisé', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => r.data.kind === 'revenu' && r.data.status === 'realise') - sumBy(records, 'amount', (r) => r.data.kind === 'depense' && r.data.status === 'realise')) },
+      { label: 'Revenus réalisés', compute: (records) => knownMoney(records, 'amount', (r) => r.data.kind === 'revenu' && r.data.status === 'realise') },
+      { label: 'Dépenses réalisées', compute: (records) => knownMoney(records, 'amount', (r) => r.data.kind === 'depense' && r.data.status === 'realise') },
+      { label: 'Solde saisi', hint: 'Mouvements renseignés ; pas la trésorerie totale', compute: (records) => {
+        const income = knownSum(records, 'amount', (r) => r.data.kind === 'revenu' && r.data.status === 'realise');
+        const expense = knownSum(records, 'amount', (r) => r.data.kind === 'depense' && r.data.status === 'realise');
+        return income === null || expense === null ? '—' : formatModuleMoney(income - expense);
+      } },
     ],
     emptyTitle: 'Aucun mouvement financier',
     emptyDescription: 'Ajoutez un revenu ou une dépense réalisée pour construire votre lecture financière.',
@@ -622,8 +657,8 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['a_faire', 'en_cours', 'bloque'],
     kpis: [
-      { label: 'Ouvertes', compute: (records) => String(countBy(records, (r) => isOpen(MODULE_DEFINITIONS[8], r))) },
-      { label: 'En retard', compute: (records) => String(countBy(records, (r) => isOpen(MODULE_DEFINITIONS[8], r) && (daysSince(r.data.dueDate) ?? 0) > 0)) },
+      { label: 'Ouvertes', compute: (records) => String(countBy(records, (r) => isOpen(getModuleDefinition('operations-manager')!, r))) },
+      { label: 'En retard', compute: (records) => String(countBy(records, (r) => isOpen(getModuleDefinition('operations-manager')!, r) && (daysSince(r.data.dueDate) ?? 0) > 0)) },
       { label: 'Terminées', compute: (records) => String(countBy(records, (r) => r.data.status === 'termine')) },
     ],
     quickActions: [
@@ -661,8 +696,8 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['ouvert', 'en_cours'],
     kpis: [
-      { label: 'Ouverts', compute: (records) => String(countBy(records, (r) => isOpen(MODULE_DEFINITIONS[10], r))) },
-      { label: 'Haute priorité', compute: (records) => String(countBy(records, (r) => isOpen(MODULE_DEFINITIONS[10], r) && r.data.priority === 'haute')) },
+      { label: 'Ouverts', compute: (records) => String(countBy(records, (r) => isOpen(getModuleDefinition('customer-support-ai')!, r))) },
+      { label: 'Haute priorité', compute: (records) => String(countBy(records, (r) => isOpen(getModuleDefinition('customer-support-ai')!, r) && r.data.priority === 'haute')) },
       { label: 'Résolus', compute: (records) => String(countBy(records, (r) => r.data.status === 'resolu')) },
     ],
     quickActions: [
@@ -703,7 +738,7 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     openStatuses: ['commande', 'expedie', 'transit', 'retard'],
     kpis: [
       { label: 'En transit', compute: (records) => String(countBy(records, (r) => ['expedie', 'transit'].includes(textFrom(r.data.status)))) },
-      { label: 'En retard', compute: (records) => String(countBy(records, (r) => r.data.status === 'retard' || (isOpen(MODULE_DEFINITIONS[11], r) && (daysSince(r.data.expectedAt) ?? 0) > 0))) },
+      { label: 'En retard', compute: (records) => String(countBy(records, (r) => r.data.status === 'retard' || (isOpen(getModuleDefinition('supplier-delivery')!, r) && (daysSince(r.data.expectedAt) ?? 0) > 0))) },
       { label: 'Livrés', compute: (records) => String(countBy(records, (r) => r.data.status === 'livre')) },
     ],
     quickActions: [
@@ -744,8 +779,8 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     ],
     openStatuses: ['ouvert', 'negociation', 'escalade'],
     kpis: [
-      { label: 'Montant en litige', compute: (records) => formatModuleMoney(sumBy(records, 'amount', (r) => isOpen(MODULE_DEFINITIONS[12], r))) },
-      { label: 'Ouverts', compute: (records) => String(countBy(records, (r) => isOpen(MODULE_DEFINITIONS[12], r))) },
+      { label: 'Montant en litige', compute: (records) => knownMoney(records, 'amount', (r) => isOpen(getModuleDefinition('dispute-shield')!, r)) },
+      { label: 'Ouverts', compute: (records) => String(countBy(records, (r) => isOpen(getModuleDefinition('dispute-shield')!, r))) },
       { label: 'Résolus', compute: (records) => String(countBy(records, (r) => r.data.status === 'resolu')) },
     ],
     quickActions: [
@@ -811,7 +846,7 @@ export interface DetectedLeak {
   id: string;
   title: string;
   detail: string;
-  amount: number;
+  amount: number | null;
   severity: 'haute' | 'moyenne' | 'basse';
   moduleKey: string;
   moduleTitle: string;
@@ -822,13 +857,13 @@ export function computeRevenueLeaks(recordsByModule: Record<string, ModuleRecord
   const list = (key: string) => recordsByModule[key] ?? [];
   const moduleOf = (key: string) => MODULE_DEFINITIONS.find((item) => item.key === key)!;
 
-  const overdue = list('payment-recovery').filter((record) => ['en_retard', 'relance', 'litige'].includes(textFrom(record.data.status)));
+  const overdue = list('payment-recovery').filter((record) => record.data.status === 'en_retard' || (['a_echeance', 'relance', 'litige'].includes(textFrom(record.data.status)) && (daysSince(record.data.dueDate) ?? 0) > 0));
   if (overdue.length) {
     leaks.push({
       id: 'leak-invoices',
       title: `${overdue.length} facture(s) en retard`,
       detail: 'Encours non encaissé, relances à reprendre ou litige à traiter.',
-      amount: sumBy(overdue, 'amount'),
+      amount: knownSum(overdue, 'amount'),
       severity: 'haute',
       moduleKey: 'payment-recovery',
       moduleTitle: moduleOf('payment-recovery').title,
@@ -841,7 +876,7 @@ export function computeRevenueLeaks(recordsByModule: Record<string, ModuleRecord
       id: 'leak-leads',
       title: `${staleLeads.length} lead(s) sans contact récent`,
       detail: 'Opportunités ouvertes qui refroidissent faute de relance.',
-      amount: sumBy(staleLeads, 'estimatedValue'),
+      amount: knownSum(staleLeads, 'estimatedValue'),
       severity: 'haute',
       moduleKey: 'lead-rescue',
       moduleTitle: moduleOf('lead-rescue').title,
@@ -853,8 +888,8 @@ export function computeRevenueLeaks(recordsByModule: Record<string, ModuleRecord
     leaks.push({
       id: 'leak-customers',
       title: `${atRisk.length} client(s) à réactiver`,
-      detail: 'Valeur historique exposée à la perte silencieuse.',
-      amount: sumBy(atRisk, 'totalSpent'),
+      detail: 'Valeur historique déclarée : elle ne représente pas un revenu récupérable garanti.',
+      amount: knownSum(atRisk, 'totalSpent'),
       severity: 'moyenne',
       moduleKey: 'customer-recovery',
       moduleTitle: moduleOf('customer-recovery').title,
@@ -867,24 +902,20 @@ export function computeRevenueLeaks(recordsByModule: Record<string, ModuleRecord
       id: 'leak-carts',
       title: `${carts.length} panier(s) ou commande(s) en attente`,
       detail: 'Valeur ouverte dont la récupération peut encore être tentée.',
-      amount: sumBy(carts, 'amount'),
+      amount: knownSum(carts, 'amount'),
       severity: 'moyenne',
       moduleKey: 'order-cart-recovery',
       moduleTitle: moduleOf('order-cart-recovery').title,
     });
   }
 
-  const lowStock = list('smart-inventory').filter((record) => numberFrom(record.data.stock) <= numberFrom(record.data.threshold));
-  if (lowStock.length) {
-    const amount = lowStock.reduce((total, record) => {
-      const gap = Math.max(0, numberFrom(record.data.threshold) - numberFrom(record.data.stock));
-      return total + gap * numberFrom(record.data.price);
-    }, 0);
+  const lowStockItems = list('smart-inventory').filter(lowStock);
+  if (lowStockItems.length) {
     leaks.push({
       id: 'leak-stock',
-      title: `${lowStock.length} produit(s) sous le seuil`,
-      detail: 'Ventes potentielles perdues si le stock n’est pas reconstitué.',
-      amount,
+      title: `${lowStockItems.length} produit(s) en rupture ou sous le seuil`,
+      detail: 'Risque de ventes manquées non chiffrable sans données de demande.',
+      amount: null,
       severity: 'moyenne',
       moduleKey: 'smart-inventory',
       moduleTitle: moduleOf('smart-inventory').title,
@@ -897,7 +928,7 @@ export function computeRevenueLeaks(recordsByModule: Record<string, ModuleRecord
       id: 'leak-disputes',
       title: `${disputes.length} litige(s) ouvert(s)`,
       detail: 'Montants bloqués en attente de résolution ou de preuve.',
-      amount: sumBy(disputes, 'amount'),
+      amount: knownSum(disputes, 'amount'),
       severity: 'haute',
       moduleKey: 'dispute-shield',
       moduleTitle: moduleOf('dispute-shield').title,
@@ -905,7 +936,7 @@ export function computeRevenueLeaks(recordsByModule: Record<string, ModuleRecord
   }
 
   const order: Record<DetectedLeak['severity'], number> = { haute: 0, moyenne: 1, basse: 2 };
-  return leaks.sort((a, b) => order[a.severity] - order[b.severity] || b.amount - a.amount);
+  return leaks.sort((a, b) => order[a.severity] - order[b.severity] || (b.amount ?? -1) - (a.amount ?? -1));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -931,52 +962,80 @@ export interface AutomationTaskDraft {
   notes: string;
 }
 
-export function automationCandidate(trigger: string, record: ModuleRecord): boolean {
+export function automationCandidate(trigger: string, record: ModuleRecord, now = Date.now()): boolean {
   switch (trigger) {
     case 'nouveau_prospect':
       return record.data.status === 'nouveau';
     case 'panier_abandonne':
       return ['panier', 'commande'].includes(textFrom(record.data.status));
     case 'facture_echue':
-      return ['en_retard', 'relance'].includes(textFrom(record.data.status));
+      return record.data.status === 'en_retard' || (['a_echeance', 'relance'].includes(textFrom(record.data.status))
+        && /^\d{4}-\d{2}-\d{2}$/.test(textFrom(record.data.dueDate)) && (daysSince(record.data.dueDate, now) ?? 0) > 0);
     case 'client_inactif':
       return ['a_risque', 'contacte'].includes(textFrom(record.data.status));
     case 'stock_bas':
-      return numberFrom(record.data.stock) <= numberFrom(record.data.threshold);
+      return lowStock(record);
     default:
       return false;
   }
 }
 
-export function buildAutomationTasks(
+export interface AutomationCandidate {
+  playbook: ModuleRecord;
+  record: ModuleRecord;
+  sourceModule: string;
+  trigger: string;
+  dueDate: string;
+}
+
+/** Parcours paresseux : ne matérialise pas 500 × 500 brouillons en mémoire. */
+export function* iterateAutomationCandidates(
   playbooks: readonly ModuleRecord[],
   recordsByModule: Record<string, ModuleRecord[]>,
-): AutomationTaskDraft[] {
-  const tasks: AutomationTaskDraft[] = [];
+  now = Date.now(),
+): Generator<AutomationCandidate> {
+  const today = new Date(now);
+  if (!Number.isFinite(today.getTime())) return;
+  const midnight = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const eligibleByTrigger = new Map<string, ModuleRecord[]>();
   for (const playbook of playbooks) {
     if (playbook.data.status !== 'actif') continue;
     const trigger = textFrom(playbook.data.trigger);
     const sourceModule = AUTOMATION_TRIGGERS.find((item) => item.value === trigger)?.sourceModule;
     if (!sourceModule) continue;
-    const sourceRecords = recordsByModule[sourceModule] ?? [];
-    const delay = Math.max(0, numberFrom(playbook.data.delayDays));
-    const dueDate = new Date(Date.now() + (delay + 1) * 86_400_000).toISOString().slice(0, 10);
-    for (const record of sourceRecords) {
-      if (!automationCandidate(trigger, record)) continue;
-      const label = textFrom(record.data.name) || textFrom(record.data.customer) || textFrom(record.data.product)
-        || textFrom(record.data.reference) || textFrom(record.data.invoiceRef) || textFrom(record.data.title)
-        || record.id.slice(0, 8);
-      tasks.push({
-        title: `${textFrom(playbook.data.name) || 'Relance'} · ${label}`,
-        owner: '',
-        dueDate,
-        priority: trigger === 'facture_echue' ? 'haute' : 'moyenne',
-        source: 'sales_automation',
-        sourcePlaybookId: playbook.id,
-        sourceRecordId: record.id,
-        notes: `Action : ${textFrom(playbook.data.action) || 'tache_relance'} · Déclencheur : ${trigger}.`,
-      });
+    // Un délai vide signifie 0 jour ; une ancienne valeur invalide ne doit
+    // pas être convertie silencieusement en échéance inventée.
+    const rawDelay = playbook.data.delayDays;
+    const delay = rawDelay === null || rawDelay === undefined || rawDelay === '' ? 0 : measuredNumber(rawDelay);
+    if (delay === null || !Number.isInteger(delay) || delay > 3650) continue;
+    const dueDate = new Date(midnight + delay * 86_400_000).toISOString().slice(0, 10);
+    if (!eligibleByTrigger.has(trigger)) {
+      eligibleByTrigger.set(trigger, (recordsByModule[sourceModule] ?? []).filter((record) => automationCandidate(trigger, record, now)));
     }
+    for (const record of eligibleByTrigger.get(trigger) ?? []) yield { playbook, record, sourceModule, trigger, dueDate };
   }
-  return tasks;
+}
+
+export function automationTaskFromCandidate({ playbook, record, trigger, dueDate }: AutomationCandidate): AutomationTaskDraft {
+  const label = textFrom(record.data.name) || textFrom(record.data.customer) || textFrom(record.data.product)
+    || textFrom(record.data.reference) || textFrom(record.data.invoiceRef) || textFrom(record.data.title)
+    || record.id.slice(0, 8);
+  return {
+    title: `${textFrom(playbook.data.name) || 'Relance'} · ${label}`,
+    owner: '',
+    dueDate,
+    priority: trigger === 'facture_echue' ? 'haute' : 'moyenne',
+    source: 'sales_automation',
+    sourcePlaybookId: playbook.id,
+    sourceRecordId: record.id,
+    notes: `Action : ${textFrom(playbook.data.action) || 'tache_relance'} · Déclencheur : ${trigger}.`,
+  };
+}
+
+export function buildAutomationTasks(
+  playbooks: readonly ModuleRecord[],
+  recordsByModule: Record<string, ModuleRecord[]>,
+  now = Date.now(),
+): AutomationTaskDraft[] {
+  return Array.from(iterateAutomationCandidates(playbooks, recordsByModule, now), automationTaskFromCandidate);
 }

@@ -207,7 +207,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
   const sizes = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl' };
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={onClose}>
-      <div className={cn('w-full animate-fadeUp rounded-t-3xl border border-line bg-panel shadow-2xl sm:rounded-2xl', sizes[size])} onMouseDown={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={cn('w-full animate-fadeUp rounded-t-3xl border border-line bg-panel shadow-2xl sm:rounded-2xl', sizes[size])} onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-white">{title}</h2>

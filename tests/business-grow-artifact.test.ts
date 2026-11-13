@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { LOADER, artifact, renderLoader } from '../scripts/build-business-grow-artifact.mjs';
+import { HOSTED_LOADER, LOADER, artifact, renderLoader, renderHostedLoader } from '../scripts/build-business-grow-artifact.mjs';
 
 /**
  * Le canal de déploiement peut tronquer une source longue : le code réellement
@@ -40,11 +40,14 @@ describe('artefact déployable business-grow', () => {
     expect(loader).toContain('import postgres from "npm:postgres@3.4.5";');
   });
 
-  it('tient sous la limite de troncature du canal de déploiement', () => {
-    const payload = loader.match(/const PAYLOAD = "([A-Za-z0-9+/=]+)";/)?.[1] ?? '';
-    // Au-delà de 20 000 caractères, l'API de déploiement tronque la source :
-    // la fonction démarrait alors en BOOT_ERROR (503).
-    expect(payload.length).toBeLessThan(20_000);
+  it('déploie un chargeur hébergé court, sans payload inline tronquable', () => {
+    const hosted = readFileSync(join(process.cwd(), HOSTED_LOADER), 'utf8');
+    const built = artifact();
+    // Le canal court publie loader.ts, pas la variante autonome bootstrap.ts.
+    expect(hosted).toBe(renderHostedLoader(built));
+    expect(hosted.length).toBeLessThan(20_000);
+    expect(hosted).not.toContain('const PAYLOAD');
+    expect(hosted).toContain(built.sha256);
   });
 
   it('est exécutable par new Function (aucun import) et démarre le handler', () => {

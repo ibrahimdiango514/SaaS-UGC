@@ -595,7 +595,9 @@ describe('Business Grow Edge handler', () => {
 
   it('honors manual routing without fallback and injects workspace + consented memory context', async () => {
     const { dependencies, store } = fixture();
-    store.getMemory = vi.fn(async () => ({
+    store.getMemory = vi.fn(async () => ({ consent: true, items: [{ category: 'secret', content: 'Autre espace historique' }] }));
+    store.getConversationScope = vi.fn(async () => ({ workspaceId: '11111111-1111-4111-8111-111111111111' }));
+    store.getScopedMemory = vi.fn(async () => ({
       consent: true,
       profile: { industry: 'Beauté naturelle' },
       items: [{ id: 'm1', category: 'audience', content: { text: 'Femmes 25-40 ans' }, created_at: '2026-01-01', updated_at: '2026-01-01' }],
@@ -654,6 +656,9 @@ describe('Business Grow Edge handler', () => {
     expect(sentMessages[0].content).toContain('Karité Pure');
     expect(sentMessages[0].content).toContain('Baume Éclat');
     expect(sentMessages[0].content).toContain('Femmes 25-40 ans');
+    expect(sentMessages[0].content).not.toContain('Autre espace historique');
+    expect(store.getMemory).not.toHaveBeenCalled();
+    expect(store.getScopedMemory).toHaveBeenCalledWith(userA, '11111111-1111-4111-8111-111111111111');
     expect(store.selectRoute).toHaveBeenCalledWith(
       userA, requestA, conversationA, 1, null, null, ['gemini'], [], 'verified-gemini-model',
     );
@@ -1014,5 +1019,273 @@ describe('Origines des aperçus de travail (régression CORS)', () => {
       expect(blocked.headers.get('Access-Control-Allow-Origin')).toBe(origin);
       expect(await blocked.json()).toMatchObject({ error: { code: 'ORIGIN_NOT_ALLOWED' } });
     }
+  });
+});
+
+describe('Business Agent Phase 3 · API cloisonnée et consentement', () => {
+  const workspace = '11111111-1111-4111-8111-111111111111';
+  const otherWorkspace = '22222222-2222-4222-8222-222222222222';
+  const source = '33333333-3333-4333-8333-333333333333';
+  const snapshot = {
+    crmConsent: true,
+    crm: [{ id: source, data: { name: 'Awa secrète', email: 'secret@example.test', stage: 'perdu' } }],
+    modules: { bg_module_payment_recovery: [{ id: source, data: { invoiceRef: 'FAC-PRIVÉE', customer: 'Client secret', notes: 'instruction secrète', status: 'en_retard', dueDate: '2026-01-01', amount: 75000 } }] },
+  };
+
+  it('exige le protocole SQL complet avant toute opération v3', async () => {
+    const { handler, store } = fixture();
+    const body = { action: 'v3.conversations.create', workspaceId: workspace, title: 'Entreprise' };
+    expect((await handler(request(body))).status).toBe(503);
+    expect(store.createConversation).not.toHaveBeenCalled();
+    store.getWorkspaceProtocol = vi.fn(async () => 'business-workspace-v3');
+    vi.mocked(store.getWorkspaceProtocol).mockRejectedValueOnce(new Error('function does not exist'));
+    expect((await handler(request(body))).status).toBe(503);
+    vi.mocked(store.getWorkspaceProtocol).mockRejectedValueOnce(new Error('workspace access denied'));
+    expect((await handler(request(body))).status).toBe(403);
+    vi.mocked(store.getWorkspaceProtocol).mockResolvedValueOnce('old-version');
+    expect((await handler(request(body))).status).toBe(503);
+    expect(store.createConversation).not.toHaveBeenCalled();
+    expect((await handler(request({ ...body, workspaceId: null }))).status).toBe(400);
+    expect((await handler(request({ ...body, action: 'v3.status' }))).status).toBe(400);
+    expect((await handler(request(body))).status).toBe(200);
+    expect(store.getWorkspaceProtocol).toHaveBeenCalledWith(userA, workspace);
+    expect(store.createConversation).toHaveBeenCalledWith(userA, 'Entreprise', workspace);
+  });
+
+  it('ne lit ni ne modifie une conversation ou proposition d’une autre entreprise en v3', async () => {
+    const { handler, store } = fixture();
+    store.getWorkspaceProtocol = vi.fn(async () => 'business-workspace-v3');
+    store.getConversationScope = vi.fn(async () => ({ workspaceId: otherWorkspace }));
+    store.listToolExecutions = vi.fn(async () => []);
+    store.resolveScopedAgentTool = vi.fn(async () => ({ status: 'executed' }));
+    for (const action of ['v3.conversations.rename', 'v3.conversations.delete', 'v3.messages.list', 'v3.tools.list']) {
+      expect((await handler(request({ action, workspaceId: workspace, conversationId: conversationA, title: 'Nouveau' }))).status).toBe(404);
+    }
+    expect(store.renameConversation).not.toHaveBeenCalled();
+    expect(store.deleteConversation).not.toHaveBeenCalled();
+    expect(store.listMessages).not.toHaveBeenCalled();
+    expect(store.listToolExecutions).not.toHaveBeenCalled();
+    vi.mocked(store.getConversationScope).mockResolvedValue({ workspaceId: workspace });
+    expect((await handler(request({ action: 'v3.tools.list', workspaceId: workspace, conversationId: conversationA }))).status).toBe(200);
+    expect(store.listToolExecutions).toHaveBeenCalledWith(userA, conversationA);
+    expect((await handler(request({ action: 'v3.tools.resolve', workspaceId: workspace, executionId: source, decision: 'approved' }))).status).toBe(200);
+    expect(store.resolveScopedAgentTool).toHaveBeenCalledWith(userA, workspace, source, 'approved');
+    expect(store.resolveAgentTool).toBeUndefined();
+    expect((await handler(request({ action: 'v3.tools.list', workspaceId: workspace }))).status).toBe(400);
+  });
+
+  it('confirme une tâche d’automatisation uniquement via le protocole et le store scoped', async () => {
+    const { handler, store } = fixture();
+    store.getWorkspaceProtocol = vi.fn(async () => 'business-workspace-v3');
+    const body = { action: 'v3.automation.task.confirm', workspaceId: workspace, playbookId: conversationA,
+      sourceCategory: 'bg_module_order_cart_recovery', sourceId: source, previewDay: '2026-11-13',
+      expectedPlaybook: { status: 'actif', trigger: 'panier_abandonne' }, expectedSource: { status: 'panier' },
+      task: { status: 'a_faire', title: 'Relance', sourceRecordId: source }, user_id: userB };
+    expect((await handler(request({ ...body, action: 'automation.task.confirm' }))).status).toBe(400);
+    expect((await handler(request(body))).status).toBe(503);
+    store.confirmAutomationTask = vi.fn(async () => ({ taskId: requestA, created: true }));
+    for (const invalid of [
+      { previewDay: '2026-02-30' }, { sourceCategory: 'growth_prospect' },
+      { sourceId: 'invalid' }, { expectedSource: [] }, { task: {} }, { workspaceId: null },
+    ]) expect((await handler(request({ ...body, ...invalid }))).status).toBe(400);
+    expect(store.confirmAutomationTask).not.toHaveBeenCalled();
+    const response = await handler(request(body));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { taskId: requestA, created: true } });
+    expect(store.confirmAutomationTask).toHaveBeenCalledWith(userA, workspace, conversationA, body.sourceCategory, source, body.previewDay, body.expectedPlaybook, body.expectedSource, body.task);
+    expect(store.createModuleRecord).not.toHaveBeenCalled();
+    for (const [message, code] of [
+      ['automation source changed', 'AUTOMATION_SOURCE_CHANGED'],
+      ['automation source no longer eligible', 'AUTOMATION_SOURCE_CHANGED'],
+      ['automation preview expired', 'AUTOMATION_PREVIEW_EXPIRED'],
+    ]) {
+      vi.mocked(store.confirmAutomationTask).mockRejectedValueOnce(new Error(message));
+      const failed = await handler(request(body));
+      expect(failed.status).toBe(409);
+      expect(await failed.json()).toMatchObject({ error: { code } });
+    }
+  });
+
+  it('isole toutes les opérations d’intégration et refuse le repli global', async () => {
+    const { handler, store } = fixture();
+    store.getWorkspaceProtocol = vi.fn(async () => 'business-workspace-v3');
+    store.listIntegrationConnections = vi.fn(async () => [{ status: 'global' }]);
+    store.requestIntegrationConnection = vi.fn(async () => 'pending');
+    const legacyRequest = await handler(request({ action: 'integrations.request', workspaceId: workspace, connectorKey: 'shopify' }));
+    expect(legacyRequest.status).toBe(409);
+    expect(await legacyRequest.json()).toMatchObject({ error: { code: 'BUSINESS_GROW_UPGRADE_REQUIRED' } });
+    store.cancelIntegrationRequest = vi.fn(async () => true);
+    store.disconnectIntegrationConnection = vi.fn(async () => true);
+    for (const action of ['list', 'request', 'cancel', 'disconnect']) {
+      expect((await handler(request({ action: `v3.integrations.${action}`, workspaceId: workspace, connectorKey: 'shopify' }))).status).toBe(503);
+    }
+    expect(store.listIntegrationConnections).not.toHaveBeenCalled();
+    expect(store.requestIntegrationConnection).not.toHaveBeenCalled();
+    expect(store.cancelIntegrationRequest).not.toHaveBeenCalled();
+    expect(store.disconnectIntegrationConnection).not.toHaveBeenCalled();
+    store.listScopedIntegrationConnections = vi.fn(async () => []);
+    store.requestScopedIntegrationConnection = vi.fn(async () => 'pending');
+    store.cancelScopedIntegrationRequest = vi.fn(async () => true);
+    store.disconnectScopedIntegrationConnection = vi.fn(async () => true);
+    for (const action of ['list', 'request', 'cancel', 'disconnect']) {
+      expect((await handler(request({ action: `v3.integrations.${action}`, workspaceId: workspace, connectorKey: 'shopify', user_id: userB }))).status).toBe(200);
+    }
+    expect(store.listScopedIntegrationConnections).toHaveBeenCalledWith(userA, workspace);
+    expect(store.requestScopedIntegrationConnection).toHaveBeenCalledWith(userA, workspace, 'shopify');
+    expect(store.cancelScopedIntegrationRequest).toHaveBeenCalledWith(userA, workspace, 'shopify');
+    expect(store.disconnectScopedIntegrationConnection).toHaveBeenCalledWith(userA, workspace, 'shopify');
+    expect((await handler(request({ action: 'v3.integrations.request', workspaceId: workspace, connectorKey: 'invalid' }))).status).toBe(400);
+  });
+
+  it('oriente conversations, mémoire et détails vers le périmètre demandé sans repli personnel', async () => {
+    const { handler, store } = fixture();
+    store.listScopedConversations = vi.fn(async () => [{ id: conversationA }]);
+    store.getScopedMemory = vi.fn(async () => ({ consent: true, profile: { company: 'A' }, items: [] }));
+    store.listScopedRecentRequests = vi.fn(async () => [{ id: requestA }]);
+    store.listRecentRequests = vi.fn(async () => [{ id: 'global' }]);
+    const conv = await handler(request({ action: 'conversations.list', workspaceId: workspace, user_id: userB }));
+    const mem = await handler(request({ action: 'memory.get', workspaceId: workspace }));
+    const history = await handler(request({ action: 'requests.list', workspaceId: workspace }));
+    expect([conv.status, mem.status, history.status]).toEqual([200, 200, 200]);
+    expect(store.listScopedConversations).toHaveBeenCalledWith(userA, workspace);
+    expect(store.getScopedMemory).toHaveBeenCalledWith(userA, workspace);
+    expect(store.listScopedRecentRequests).toHaveBeenCalledWith(userA, workspace, 25);
+    expect(store.listConversations).not.toHaveBeenCalled();
+    expect(store.getMemory).not.toHaveBeenCalled();
+    expect(store.listRecentRequests).not.toHaveBeenCalled();
+    expect(await history.json()).toMatchObject({ data: { requests: [{ id: requestA }] } });
+  });
+
+  it('échoue de façon fermée si les services scoped sont indisponibles ou le workspace invalide', async () => {
+    const { handler, store } = fixture();
+    for (const action of ['conversations.list', 'requests.list', 'memory.get']) {
+      const unavailable = await handler(request({ action, workspaceId: workspace }));
+      expect(unavailable.status).toBe(503);
+      expect(await unavailable.json()).toMatchObject({ error: { code: 'AGENT_UNAVAILABLE' } });
+      const invalid = await handler(request({ action, workspaceId: 'not-a-uuid' }));
+      expect(invalid.status).toBe(400);
+    }
+    expect(store.listConversations).not.toHaveBeenCalled();
+    expect(store.getMemory).not.toHaveBeenCalled();
+  });
+
+  it('transmet le scope aux mutations des modules et de la mémoire', async () => {
+    const { handler, store } = fixture();
+    store.listScopedModuleRecords = vi.fn(async () => []);
+    store.createScopedModuleRecord = vi.fn(async () => source);
+    store.updateScopedModuleRecord = vi.fn(async () => true);
+    store.deleteScopedModuleRecord = vi.fn(async () => true);
+    store.putScopedMemoryItem = vi.fn(async () => source);
+    const base = { action: 'modules.records', category: 'bg_module_payment_recovery', workspaceId: workspace };
+    expect((await handler(request({ ...base, op: 'create', data: { amount: 123 }, dedupeKey: 'dedupe' }))).status).toBe(200);
+    expect((await handler(request({ ...base, op: 'update', recordId: source, data: { status: 'paye' } }))).status).toBe(200);
+    expect((await handler(request({ ...base, op: 'delete', recordId: source }))).status).toBe(200);
+    expect((await handler(request({ action: 'memory.item.put', workspaceId: workspace, category: 'goals', content: { text: 'objectif' } }))).status).toBe(200);
+    expect(store.createScopedModuleRecord).toHaveBeenCalledWith(userA, workspace, base.category, { amount: 123 }, 'dedupe');
+    expect(store.updateScopedModuleRecord).toHaveBeenCalledWith(userA, workspace, base.category, source, { status: 'paye' });
+    expect(store.deleteScopedModuleRecord).toHaveBeenCalledWith(userA, workspace, base.category, source);
+    expect(store.putScopedMemoryItem).toHaveBeenCalledWith(userA, workspace, null, 'goals', { text: 'objectif' });
+    expect(store.createModuleRecord).not.toHaveBeenCalled();
+    expect(store.putMemoryItem).not.toHaveBeenCalled();
+  });
+
+  it('calcule un rapport sans fournisseur, ne sauvegarde que sur demande et valide période et idempotence', async () => {
+    const { handler, store, dependencies } = fixture();
+    store.getBusinessSnapshot = vi.fn(async () => snapshot);
+    store.saveAgentReport = vi.fn(async (_u, _w, _t, _f, _to, _key, report) => ({ report, created: true }));
+    store.listAgentReports = vi.fn(async () => [{ id: source }]);
+    const args = { action: 'agent.report', workspaceId: workspace, reportType: 'recovery', from: '2026-01-01', to: '2026-11-13' };
+    const analyzed = await handler(request(args));
+    expect(analyzed.status).toBe(200);
+    const result = await analyzed.json() as { data: { saved: boolean; report: { recommendations: Array<{ kind: string }> } } };
+    expect(result.data.saved).toBe(false);
+    expect(result.data.report.recommendations.map((item) => item.kind)).toContain('invoice_overdue');
+    expect(store.getBusinessSnapshot).toHaveBeenCalledWith(userA, workspace);
+    expect(store.saveAgentReport).not.toHaveBeenCalled();
+    expect(dependencies.complete).not.toHaveBeenCalled();
+    const badSave = await handler(request({ ...args, save: true }));
+    expect(badSave.status).toBe(400);
+    expect(store.saveAgentReport).not.toHaveBeenCalled();
+    const saved = await handler(request({ ...args, save: true, idempotencyKey }));
+    expect(saved.status).toBe(200);
+    expect(store.saveAgentReport).toHaveBeenCalledWith(userA, workspace, 'recovery', args.from, args.to, idempotencyKey, expect.objectContaining({ type: 'recovery' }));
+    expect((await handler(request({ action: 'agent.reports.list', workspaceId: workspace }))).status).toBe(200);
+    expect(store.listAgentReports).toHaveBeenCalledWith(userA, workspace);
+    expect((await handler(request({ ...args, from: '2026-01-01', to: '2027-01-02' }))).status).toBe(400);
+    expect((await handler(request({ ...args, reportType: 'sql arbitraire' }))).status).toBe(400);
+  });
+
+  it('supprime uniquement le rapport du compte et de l’entreprise autorisés', async () => {
+    const { handler, store } = fixture();
+    store.deleteAgentReport = vi.fn(async () => true);
+    const invalid = await handler(request({ action: 'agent.reports.delete', workspaceId: workspace, reportId: 'invalid' }));
+    expect(invalid.status).toBe(400);
+    expect(store.deleteAgentReport).not.toHaveBeenCalled();
+    const deleted = await handler(request({ action: 'agent.reports.delete', workspaceId: workspace, reportId: source, user_id: userB }));
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toMatchObject({ data: { deleted: true } });
+    expect(store.deleteAgentReport).toHaveBeenCalledWith(userA, workspace, source);
+    vi.mocked(store.deleteAgentReport).mockResolvedValueOnce(false);
+    const missing = await handler(request({ action: 'agent.reports.delete', workspaceId: otherWorkspace, reportId: source }));
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: { code: 'REPORT_NOT_FOUND' } });
+  });
+
+  it('exige une confirmation explicite pour importer l’historique et transmet le scope', async () => {
+    const { handler, store } = fixture();
+    store.importLegacyMemory = vi.fn(async () => ({ importedItems: 1, importedProfile: false }));
+    const rejected = await handler(request({ action: 'memory.legacy.import', workspaceId: workspace, confirmed: 'true' }));
+    expect(rejected.status).toBe(400);
+    expect(store.importLegacyMemory).not.toHaveBeenCalled();
+    const accepted = await handler(request({ action: 'memory.legacy.import', workspaceId: workspace, confirmed: true }));
+    expect(accepted.status).toBe(200);
+    expect(store.importLegacyMemory).toHaveBeenCalledWith(userA, workspace);
+    expect(await accepted.json()).toMatchObject({ data: { importedItems: 1, importedProfile: false } });
+  });
+
+  it('prépare une proposition sans créer de tâche, puis exige une décision humaine et propage une source modifiée', async () => {
+    const { handler, store, dependencies } = fixture();
+    store.proposeAgentTask = vi.fn(async () => ({ id: source, status: 'pending_approval' }));
+    store.resolveAgentTool = vi.fn(async () => { throw new Error('agent source changed'); });
+    const proposed = await handler(request({ action: 'agent.task.propose', workspaceId: workspace, conversationId: conversationA, sourceCategory: 'bg_module_payment_recovery', sourceRecordId: source, idempotencyKey }));
+    expect(proposed.status).toBe(200);
+    expect(store.proposeAgentTask).toHaveBeenCalledWith(userA, workspace, conversationA, 'bg_module_payment_recovery', source, idempotencyKey);
+    expect(store.createModuleRecord).not.toHaveBeenCalled();
+    expect(store.resolveAgentTool).not.toHaveBeenCalled();
+    const noDecision = await handler(request({ action: 'tools.resolve', executionId: source }));
+    expect(noDecision.status).toBe(400);
+    const conflict = await handler(request({ action: 'tools.resolve', executionId: source, decision: 'approved' }));
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ error: { code: 'AGENT_SOURCE_CHANGED' } });
+    expect(store.resolveAgentTool).toHaveBeenCalledWith(userA, source, 'approved');
+    expect(dependencies.complete).not.toHaveBeenCalled();
+  });
+
+  it('refuse une conversation d’une autre entreprise avant de lire la mémoire ou d’écrire un message', async () => {
+    const { handler, store, dependencies } = fixture();
+    store.getConversationScope = vi.fn(async () => ({ workspaceId: otherWorkspace }));
+    store.getScopedMemory = vi.fn(async () => ({ consent: true }));
+    const response = await handler(request({ action: 'messages.send', workspaceId: workspace, conversationId: conversationA, content: 'Bonjour', idempotencyKey }));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: 'CONVERSATION_SCOPE_MISMATCH' } });
+    expect(store.getScopedMemory).not.toHaveBeenCalled();
+    expect(store.getMemory).not.toHaveBeenCalled();
+    expect(store.submitUserMessage).not.toHaveBeenCalled();
+    expect(dependencies.complete).not.toHaveBeenCalled();
+  });
+
+  it('fournit au modèle des faits numériques, sans noms ni notes du diagnostic ou contacts CRM', async () => {
+    const { handler, store, dependencies } = fixture();
+    store.getConversationScope = vi.fn(async () => ({ workspaceId: workspace }));
+    store.getScopedMemory = vi.fn(async () => ({ consent: true, items: [{ category: 'growth_prospect', content: { email: 'secret@example.test', name: 'Awa secrète' } }] }));
+    store.getBusinessSnapshot = vi.fn(async () => snapshot);
+    vi.mocked(store.selectRoute).mockResolvedValue({ attemptId: source, providerKey: 'groq', modelKey: 'groq-logical-key', providerModelKey: 'verified-groq-model' });
+    const response = await handler(request({ action: 'messages.send', conversationId: conversationA, workspaceId: workspace, content: 'Analyse les priorités.', idempotencyKey }));
+    expect(response.status).toBe(200);
+    const prompt = vi.mocked(dependencies.complete).mock.calls[0][2][0].content;
+    expect(prompt).toContain('75000');
+    expect(prompt).toContain('invoice_overdue');
+    for (const secret of ['Awa secrète', 'secret@example.test', 'FAC-PRIVÉE', 'Client secret', 'instruction secrète']) expect(prompt).not.toContain(secret);
+    expect(store.getMemory).not.toHaveBeenCalled();
   });
 });

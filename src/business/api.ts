@@ -142,6 +142,35 @@ export interface BusinessModuleRecord {
   updated_at: string;
 }
 
+/** Un seul élément de l'aperçu confirmé ; les instantanés ne sont pas transmis à un fournisseur IA. */
+export interface AutomationTaskConfirmation {
+  playbookId: string;
+  sourceCategory: string;
+  sourceId: string;
+  previewDay: string;
+  expectedPlaybook: Record<string, unknown>;
+  expectedSource: Record<string, unknown>;
+  task: Record<string, unknown>;
+}
+
+export type BusinessReportType = 'commercial' | 'financial' | 'customers' | 'recovery' | 'operations' | 'health';
+export interface BusinessRecommendation {
+  id: string; kind: string; module: string; priority: 'critique' | 'élevée' | 'moyenne' | 'faible';
+  problem: string; evidence: string[]; potentialImpact: string; action: string;
+  sourceCategory: string; sourceRecordId: string;
+  facts: Record<string, number | string>;
+}
+export interface BusinessReport {
+  type: BusinessReportType; period: { from: string; to: string }; asOf: string;
+  coverage: Array<{ module: string; category: string; count: number; status: 'available' | 'empty' | 'consent_required'; truncated: boolean }>;
+  metrics: Array<{ label: string; value: number; unit: string; basis: string }>;
+  recommendations: BusinessRecommendation[]; totalRecommendations: number; warnings: string[];
+}
+export interface SavedBusinessReport {
+  id: string; report_type: BusinessReportType; period_from: string; period_to: string;
+  document: BusinessReport; created_at: string;
+}
+
 export interface BusinessSendOptions {
   roleKey?: string;
   workspaceId?: string | null;
@@ -177,15 +206,18 @@ function currentWindow(): Window | null {
 }
 
 function transportOrder(localOnly: boolean): Transport[] {
+  // Les relais hébergés de ce dépôt ciblent le projet canonique en dur, y
+  // compris derrière un domaine personnalisé. Ne jamais leur transmettre le
+  // JWT d'un autre projet, même lorsque son accès direct échoue. Le mode local
+  // explicite utilise uniquement le proxy Vite validé vers localhost:54321.
+  const canonicalProject = SUPABASE_URL.replace(/\/+$/, '') === DEFAULT_SUPABASE_URL;
   const defaults: Transport[] = localOnly
     ? ['relay']
-    : isNetlifyHost()
-      // Les relais Netlify de ce dépôt ciblent le projet canonique en dur : ne
-      // jamais leur transmettre le JWT d'un autre projet configuré par Vite.
-      ? SUPABASE_URL.replace(/\/+$/, '') === DEFAULT_SUPABASE_URL
+    : !canonicalProject
+      ? ['direct']
+      : isNetlifyHost()
         ? ['relay', 'netlify-function', 'direct']
-        : ['direct']
-      : ['direct', 'relay'];
+        : ['direct', 'relay'];
   const win = currentWindow();
   const preferred = win ? preferredTransport.get(win) : undefined;
   return preferred && defaults.includes(preferred)
@@ -201,11 +233,24 @@ function edgeFunctionUrl(): string {
 const READ_ACTIONS = new Set([
   'status', 'models.list', 'roles.list', 'routing.get', 'quota.status',
   'requests.list', 'tools.list', 'integrations.list', 'conversations.list',
-  'messages.list', 'memory.get',
+  'messages.list', 'memory.get', 'agent.reports.list',
+]);
+
+// Le préfixe de protocole est volontairement inconnu des anciennes versions
+// Edge : elles ne pourront pas ignorer workspaceId et écrire en personnel.
+const WORKSPACE_ACTIONS = new Set([
+  'requests.list', 'tools.list', 'tools.resolve',
+  'integrations.list', 'integrations.request', 'integrations.cancel', 'integrations.disconnect',
+  'conversations.list', 'conversations.create', 'conversations.rename', 'conversations.delete',
+  'messages.list', 'messages.send', 'memory.get', 'memory.consent', 'memory.profile.save',
+  'memory.item.put', 'memory.item.delete', 'memory.legacy.import', 'modules.records',
+  'agent.report', 'agent.reports.list', 'agent.reports.delete', 'agent.task.propose', 'automation.task.confirm',
 ]);
 
 function isReadOnly(action: string, values: Record<string, unknown>): boolean {
-  return READ_ACTIONS.has(action) || (action === 'modules.records' && values.op === 'list');
+  const canonical = action.startsWith('v3.') ? action.slice(3) : action;
+  return READ_ACTIONS.has(canonical) || (canonical === 'modules.records' && values.op === 'list')
+    || (canonical === 'agent.report' && values.save !== true);
 }
 
 type TransportOutcome<T> =
@@ -353,7 +398,16 @@ async function invoke<T>(action: string, values: Record<string, unknown> = {}): 
     // basculer si le réseau a changé depuis le dernier chargement de la page.
     await invokeWithFallback('status', {}, accessToken, localOnly);
   }
-  return invokeWithFallback<T>(action, values, accessToken, localOnly);
+  const versioned = typeof values.workspaceId === 'string' && values.workspaceId.length > 0 && WORKSPACE_ACTIONS.has(action);
+  const wireAction = versioned ? `v3.${action}` : action;
+  try {
+    return await invokeWithFallback<T>(wireAction, values, accessToken, localOnly);
+  } catch (error) {
+    if (versioned && error instanceof BusinessGrowApiError && error.code === 'UNKNOWN_ACTION') {
+      throw new BusinessGrowApiError('Cette version du service ne prend pas en charge les données par entreprise. Aucune modification n’a été effectuée.', 'BUSINESS_GROW_UPGRADE_REQUIRED', error.status);
+    }
+    throw error;
+  }
 }
 
 function parseResponse<T>(payload: unknown, status: number): T {
@@ -396,44 +450,51 @@ export const businessGrowApi = {
   saveRouting: (pref: BusinessRoutingPreference) =>
     invoke<{ saved: boolean; id: string | null }>('routing.save', { ...pref }),
   getQuota: () => invoke<BusinessQuotaStatus>('quota.status'),
-  listRequests: () => invoke<{ requests: Array<Record<string, unknown>> }>('requests.list'),
-  listTools: (conversationId?: string | null) =>
-    invoke<{ tools: BusinessToolExecution[] }>('tools.list', conversationId ? { conversationId } : {}),
-  resolveTool: (executionId: string, decision: 'approved' | 'rejected') =>
-    invoke<Record<string, unknown>>('tools.resolve', { executionId, decision }),
-  listIntegrations: () =>
-    invoke<{ connections: BusinessIntegrationConnection[] }>('integrations.list'),
+  listRequests: (workspaceId?: string | null) => invoke<{ requests: Array<Record<string, unknown>> }>('requests.list', workspaceId ? { workspaceId } : {}),
+  listTools: (conversationId?: string | null, workspaceId?: string | null) =>
+    invoke<{ tools: BusinessToolExecution[] }>('tools.list', { ...(conversationId ? { conversationId } : {}), ...(workspaceId ? { workspaceId } : {}) }),
+  resolveTool: (executionId: string, decision: 'approved' | 'rejected', workspaceId?: string | null) =>
+    invoke<Record<string, unknown>>('tools.resolve', { executionId, decision, ...(workspaceId ? { workspaceId } : {}) }),
+  listIntegrations: (workspaceId?: string | null) =>
+    invoke<{ connections: BusinessIntegrationConnection[] }>('integrations.list', workspaceId ? { workspaceId } : {}),
   requestIntegration: (connectorKey: string, workspaceId?: string | null) =>
     invoke<{ connectorKey: string; status: string }>('integrations.request', {
       connectorKey,
       ...(workspaceId ? { workspaceId } : {}),
     }),
-  cancelIntegration: (connectorKey: string) =>
-    invoke<{ connectorKey: string; cancelled: boolean }>('integrations.cancel', { connectorKey }),
-  disconnectIntegration: (connectorKey: string) =>
-    invoke<{ connectorKey: string; disconnected: boolean }>('integrations.disconnect', { connectorKey }),
-  listModuleRecords: (category: string) =>
-    invoke<{ records: BusinessModuleRecord[] }>('modules.records', { category, op: 'list' }),
-  createModuleRecord: (category: string, data: Record<string, unknown>, dedupeKey?: string | null) =>
+  cancelIntegration: (connectorKey: string, workspaceId?: string | null) =>
+    invoke<{ connectorKey: string; cancelled: boolean }>('integrations.cancel', { connectorKey, ...(workspaceId ? { workspaceId } : {}) }),
+  disconnectIntegration: (connectorKey: string, workspaceId?: string | null) =>
+    invoke<{ connectorKey: string; disconnected: boolean }>('integrations.disconnect', { connectorKey, ...(workspaceId ? { workspaceId } : {}) }),
+  listModuleRecords: (category: string, workspaceId?: string | null) =>
+    invoke<{ records: BusinessModuleRecord[] }>('modules.records', { category, op: 'list', ...(workspaceId ? { workspaceId } : {}) }),
+  createModuleRecord: (category: string, data: Record<string, unknown>, dedupeKey?: string | null, workspaceId?: string | null) =>
     invoke<{ recordId: string }>('modules.records', {
-      category,
-      op: 'create',
-      data,
-      ...(dedupeKey ? { dedupeKey } : {}),
+      category, op: 'create', data, ...(dedupeKey ? { dedupeKey } : {}), ...(workspaceId ? { workspaceId } : {}),
     }),
-  updateModuleRecord: (category: string, recordId: string, data: Record<string, unknown>) =>
-    invoke<{ updated: boolean }>('modules.records', { category, op: 'update', recordId, data }),
-  deleteModuleRecord: (category: string, recordId: string) =>
-    invoke<{ deleted: boolean }>('modules.records', { category, op: 'delete', recordId }),
-  listConversations: () => invoke<{ conversations: BusinessConversation[] }>('conversations.list'),
+  updateModuleRecord: (category: string, recordId: string, data: Record<string, unknown>, workspaceId?: string | null) =>
+    invoke<{ updated: boolean }>('modules.records', { category, op: 'update', recordId, data, ...(workspaceId ? { workspaceId } : {}) }),
+  deleteModuleRecord: (category: string, recordId: string, workspaceId?: string | null) =>
+    invoke<{ deleted: boolean }>('modules.records', { category, op: 'delete', recordId, ...(workspaceId ? { workspaceId } : {}) }),
+  confirmAutomationTask: (workspaceId: string, confirmation: AutomationTaskConfirmation) =>
+    invoke<{ taskId: string; created: boolean }>('automation.task.confirm', { workspaceId, ...confirmation }),
+  listConversations: (workspaceId?: string | null) => invoke<{ conversations: BusinessConversation[] }>('conversations.list', workspaceId ? { workspaceId } : {}),
+  generateReport: (workspaceId: string, reportType: BusinessReportType, from: string, to: string, save = false, idempotencyKey?: string) =>
+    invoke<{ report: BusinessReport; id?: string; created?: boolean; saved?: boolean }>('agent.report', {
+      workspaceId, reportType, from, to, save, ...(idempotencyKey ? { idempotencyKey } : {}),
+    }),
+  listReports: (workspaceId: string) => invoke<{ reports: SavedBusinessReport[] }>('agent.reports.list', { workspaceId }),
+  deleteReport: (workspaceId: string, reportId: string) => invoke<{ deleted: boolean }>('agent.reports.delete', { workspaceId, reportId }),
+  proposeTask: (workspaceId: string, conversationId: string, sourceCategory: string, sourceRecordId: string, idempotencyKey: string) =>
+    invoke<{ id: string; summary: string; status: string }>('agent.task.propose', { workspaceId, conversationId, sourceCategory, sourceRecordId, idempotencyKey }),
   createConversation: (title: string, workspaceId: string | null) =>
     invoke<{ conversationId: string }>('conversations.create', { title, workspaceId }),
-  renameConversation: (conversationId: string, title: string) =>
-    invoke<{ renamed: boolean }>('conversations.rename', { conversationId, title }),
-  deleteConversation: (conversationId: string) =>
-    invoke<{ deleted: boolean }>('conversations.delete', { conversationId }),
-  listMessages: (conversationId: string) =>
-    invoke<{ messages: BusinessMessage[] }>('messages.list', { conversationId }),
+  renameConversation: (conversationId: string, title: string, workspaceId?: string | null) =>
+    invoke<{ renamed: boolean }>('conversations.rename', { conversationId, title, ...(workspaceId ? { workspaceId } : {}) }),
+  deleteConversation: (conversationId: string, workspaceId?: string | null) =>
+    invoke<{ deleted: boolean }>('conversations.delete', { conversationId, ...(workspaceId ? { workspaceId } : {}) }),
+  listMessages: (conversationId: string, workspaceId?: string | null) =>
+    invoke<{ messages: BusinessMessage[] }>('messages.list', { conversationId, ...(workspaceId ? { workspaceId } : {}) }),
   sendMessage: (
     conversationId: string,
     content: string,
@@ -459,13 +520,15 @@ export const businessGrowApi = {
       ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(options?.routing ? { routing: options.routing } : {}),
     }),
-  getMemory: () => invoke<BusinessMemory>('memory.get'),
-  setMemoryConsent: (enabled: boolean) =>
-    invoke<{ event_id: number; occurred_at: string }>('memory.consent', { enabled }),
-  saveMemoryProfile: (profile: Record<string, unknown>) =>
-    invoke<{ saved: boolean }>('memory.profile.save', { profile }),
-  putMemoryItem: (category: string, content: unknown, itemId: string | null = null) =>
-    invoke<{ itemId: string }>('memory.item.put', { itemId, category, content }),
-  deleteMemoryItem: (itemId: string) =>
-    invoke<{ deleted: boolean }>('memory.item.delete', { itemId }),
+  getMemory: (workspaceId?: string | null) => invoke<BusinessMemory>('memory.get', workspaceId ? { workspaceId } : {}),
+  setMemoryConsent: (enabled: boolean, workspaceId?: string | null) =>
+    invoke<{ event_id: number; occurred_at: string }>('memory.consent', { enabled, ...(workspaceId ? { workspaceId } : {}) }),
+  saveMemoryProfile: (profile: Record<string, unknown>, workspaceId?: string | null) =>
+    invoke<{ saved: boolean }>('memory.profile.save', { profile, ...(workspaceId ? { workspaceId } : {}) }),
+  putMemoryItem: (category: string, content: unknown, itemId: string | null = null, workspaceId?: string | null) =>
+    invoke<{ itemId: string }>('memory.item.put', { itemId, category, content, ...(workspaceId ? { workspaceId } : {}) }),
+  deleteMemoryItem: (itemId: string, workspaceId?: string | null) =>
+    invoke<{ deleted: boolean }>('memory.item.delete', { itemId, ...(workspaceId ? { workspaceId } : {}) }),
+  importLegacyMemory: (workspaceId: string) =>
+    invoke<{ importedItems: number; importedProfile: boolean }>('memory.legacy.import', { workspaceId, confirmed: true }),
 };

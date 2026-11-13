@@ -1,3 +1,4 @@
+import { buildBusinessReport, defaultPeriod, isReportType, reportForModel, validDate, validPeriod, type BusinessReport, type BusinessSnapshot, type ReportType } from './diagnostics.ts';
 import {
   buildBusinessSystemInstruction,
   BUSINESS_ROLE_SPECS,
@@ -46,7 +47,25 @@ export type BusinessAction =
   | 'integrations.request'
   | 'integrations.cancel'
   | 'integrations.disconnect'
-  | 'modules.records';
+  | 'modules.records'
+  | 'automation.task.confirm'
+  | 'agent.report'
+  | 'agent.reports.list'
+  | 'agent.reports.delete'
+  | 'agent.task.propose'
+  | 'memory.legacy.import';
+
+// Une action préfixée ne peut pas être comprise par l'Edge historique v22.
+// Le client Phase 3 évite ainsi qu'un ancien serveur ignore workspaceId et
+// lise ou modifie silencieusement le périmètre personnel.
+const WORKSPACE_ACTIONS = new Set<string>([
+  'requests.list', 'tools.list', 'tools.resolve',
+  'integrations.list', 'integrations.request', 'integrations.cancel', 'integrations.disconnect',
+  'conversations.list', 'conversations.create', 'conversations.rename', 'conversations.delete',
+  'messages.list', 'messages.send', 'memory.get', 'memory.consent', 'memory.profile.save',
+  'memory.item.put', 'memory.item.delete', 'memory.legacy.import', 'modules.records',
+  'agent.report', 'agent.reports.list', 'agent.reports.delete', 'agent.task.propose', 'automation.task.confirm',
+]);
 
 export interface RoutingOptions {
   selectionMode?: 'auto' | 'manual';
@@ -120,6 +139,7 @@ export interface BusinessGrowStore {
   captureQuota?: (userId: string, requestId: string, reserved: number, actual: number) => Promise<unknown>;
   releaseQuota?: (userId: string, requestId: string, amount: number, reason: string) => Promise<unknown>;
   listRecentRequests?: (userId: string, limit?: number) => Promise<unknown[]>;
+  listScopedRecentRequests?: (userId: string, workspaceId: string, limit?: number) => Promise<unknown[]>;
   getWorkspaceContext?: (userId: string, workspaceId: string | null) => Promise<WorkspaceCompanyContext | null>;
   createToolExecution?: (
     userId: string,
@@ -144,10 +164,36 @@ export interface BusinessGrowStore {
   requestIntegrationConnection?: (userId: string, connectorKey: string, workspaceId: string | null) => Promise<string>;
   cancelIntegrationRequest?: (userId: string, connectorKey: string) => Promise<boolean>;
   disconnectIntegrationConnection?: (userId: string, connectorKey: string) => Promise<boolean>;
+  listScopedIntegrationConnections?: (userId: string, workspaceId: string) => Promise<unknown[]>;
+  requestScopedIntegrationConnection?: (userId: string, workspaceId: string, connectorKey: string) => Promise<string>;
+  cancelScopedIntegrationRequest?: (userId: string, workspaceId: string, connectorKey: string) => Promise<boolean>;
+  disconnectScopedIntegrationConnection?: (userId: string, workspaceId: string, connectorKey: string) => Promise<boolean>;
   listModuleRecords?: (userId: string, category: string) => Promise<unknown[]>;
   createModuleRecord?: (userId: string, category: string, data: Record<string, unknown>, dedupeKey?: string | null) => Promise<string>;
   updateModuleRecord?: (userId: string, recordId: string, data: Record<string, unknown>) => Promise<boolean>;
   deleteModuleRecord?: (userId: string, recordId: string) => Promise<boolean>;
+  // Phase 3 : services dédiés au périmètre utilisateur + entreprise.
+  getWorkspaceProtocol?: (userId: string, workspaceId: string) => Promise<string>;
+  resolveScopedAgentTool?: (userId: string, workspaceId: string, executionId: string, decision: 'approved' | 'rejected') => Promise<unknown>;
+  getConversationScope?: (userId: string, conversationId: string) => Promise<{ workspaceId: string | null } | null>;
+  listScopedConversations?: (userId: string, workspaceId: string) => Promise<unknown[]>;
+  getScopedMemory?: (userId: string, workspaceId: string) => Promise<unknown>;
+  setScopedMemoryConsent?: (userId: string, workspaceId: string, enabled: boolean, policy: string) => Promise<unknown>;
+  saveScopedMemoryProfile?: (userId: string, workspaceId: string, profile: Record<string, unknown>) => Promise<void>;
+  putScopedMemoryItem?: (userId: string, workspaceId: string, itemId: string | null, category: string, content: unknown) => Promise<string>;
+  deleteScopedMemoryItem?: (userId: string, workspaceId: string, itemId: string) => Promise<boolean>;
+  importLegacyMemory?: (userId: string, workspaceId: string) => Promise<unknown>;
+  listScopedModuleRecords?: (userId: string, workspaceId: string, category: string) => Promise<unknown[]>;
+  createScopedModuleRecord?: (userId: string, workspaceId: string, category: string, data: Record<string, unknown>, dedupeKey: string | null) => Promise<string>;
+  updateScopedModuleRecord?: (userId: string, workspaceId: string, category: string, recordId: string, data: Record<string, unknown>) => Promise<boolean>;
+  deleteScopedModuleRecord?: (userId: string, workspaceId: string, category: string, recordId: string) => Promise<boolean>;
+  confirmAutomationTask?: (userId: string, workspaceId: string, playbookId: string, sourceCategory: string, sourceId: string, previewDay: string, expectedPlaybook: Record<string, unknown>, expectedSource: Record<string, unknown>, task: Record<string, unknown>) => Promise<{ taskId: string; created: boolean }>;
+  getBusinessSnapshot?: (userId: string, workspaceId: string) => Promise<BusinessSnapshot>;
+  saveAgentReport?: (userId: string, workspaceId: string, type: ReportType, from: string, to: string, idempotencyKey: string, report: BusinessReport) => Promise<unknown>;
+  listAgentReports?: (userId: string, workspaceId: string) => Promise<unknown[]>;
+  deleteAgentReport?: (userId: string, workspaceId: string, reportId: string) => Promise<boolean>;
+  proposeAgentTask?: (userId: string, workspaceId: string, conversationId: string, category: string, sourceId: string, idempotencyKey: string) => Promise<unknown>;
+  resolveAgentTool?: (userId: string, executionId: string, decision: 'approved' | 'rejected') => Promise<unknown>;
 }
 
 export class NoVerifiedProviderRouteError extends Error {
@@ -367,8 +413,33 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
       return response(failure('INVALID_BODY', 'Corps JSON invalide.'), 400, origin, dependencies.allowedOrigins);
     }
 
-    const action = string(body.action, 60) as BusinessAction;
+    const rawAction = string(body.action, 60);
+    const versionedWorkspaceAction = rawAction.startsWith('v3.');
+    const action = (versionedWorkspaceAction ? rawAction.slice(3) : rawAction) as BusinessAction;
     try {
+      let scopedWorkspace: string | null = null;
+      if (versionedWorkspaceAction) {
+        if (!WORKSPACE_ACTIONS.has(action)) return response(failure('UNKNOWN_ACTION', 'Opération Business Grow inconnue.'), 400, origin, dependencies.allowedOrigins);
+        scopedWorkspace = uuid(body.workspaceId);
+        if (!scopedWorkspace) return response(failure('INVALID_WORKSPACE', 'Entreprise requise.'), 400, origin, dependencies.allowedOrigins);
+        if (!dependencies.store.getWorkspaceProtocol) return response(failure('AGENT_UNAVAILABLE', 'Le stockage par entreprise n’est pas disponible.'), 503, origin, dependencies.allowedOrigins);
+        let protocol: string;
+        try { protocol = await dependencies.store.getWorkspaceProtocol(userId, scopedWorkspace); }
+        catch (error) {
+          if (error instanceof Error && error.message.includes('workspace access denied')) throw error;
+          return response(failure('AGENT_UNAVAILABLE', 'Le stockage par entreprise n’est pas disponible.'), 503, origin, dependencies.allowedOrigins);
+        }
+        if (protocol !== 'business-workspace-v3') return response(failure('AGENT_UNAVAILABLE', 'Le stockage par entreprise n’est pas compatible.'), 503, origin, dependencies.allowedOrigins);
+        // Pour ces opérations, l'identifiant seul ne suffit pas : vérifier qu'il
+        // correspond aussi à l'entreprise active avant la lecture ou mutation.
+        if (['conversations.rename', 'conversations.delete', 'messages.list', 'tools.list'].includes(action)) {
+          const conversationId = uuid(body.conversationId);
+          if (!conversationId) return response(failure('INVALID_CONVERSATION', 'Conversation requise.'), 400, origin, dependencies.allowedOrigins);
+          if (!dependencies.store.getConversationScope) return response(failure('AGENT_UNAVAILABLE', 'Périmètre de conversation indisponible.'), 503, origin, dependencies.allowedOrigins);
+          const scope = await dependencies.store.getConversationScope(userId, conversationId);
+          if (!scope || scope.workspaceId !== scopedWorkspace) return response(failure('CONVERSATION_NOT_FOUND', 'Conversation introuvable dans cette entreprise.'), 404, origin, dependencies.allowedOrigins);
+        }
+      }
       let data: unknown;
       switch (action) {
         case 'status':
@@ -489,9 +560,11 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           break;
         }
         case 'requests.list': {
-          const requests = dependencies.store.listRecentRequests
-            ? await dependencies.store.listRecentRequests(userId, 25)
-            : [];
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.listScopedRecentRequests) return response(failure('AGENT_UNAVAILABLE', 'Historique par entreprise indisponible.'), 503, origin, dependencies.allowedOrigins);
+          const requests = workspaceId ? await dependencies.store.listScopedRecentRequests!(userId, workspaceId, 25)
+            : dependencies.store.listRecentRequests ? await dependencies.store.listRecentRequests(userId, 25) : [];
           data = { requests };
           break;
         }
@@ -514,16 +587,27 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           if (!executionId || !decision) {
             return response(failure('INVALID_TOOL_RESOLUTION', 'Identifiant d’outil et décision explicite requis.'), 400, origin, dependencies.allowedOrigins);
           }
-          if (!dependencies.store.resolveToolExecution) {
+          if (scopedWorkspace) {
+            if (!dependencies.store.resolveScopedAgentTool) return response(failure('TOOLS_NOT_CONFIGURED', 'Le module d’outils par entreprise n’est pas activé.'), 503, origin, dependencies.allowedOrigins);
+            data = await dependencies.store.resolveScopedAgentTool(userId, scopedWorkspace, executionId, decision);
+            break;
+          }
+          if (!dependencies.store.resolveToolExecution && !dependencies.store.resolveAgentTool) {
             return response(failure('TOOLS_NOT_CONFIGURED', 'Le module d’outils n’est pas activé.'), 501, origin, dependencies.allowedOrigins);
+          }
+          // En production, validation + effet + journal sont une seule transaction SQL.
+          // Une répétition de la même décision retourne le résultat initial.
+          if (dependencies.store.resolveAgentTool) {
+            data = await dependencies.store.resolveAgentTool(userId, executionId, decision);
+            break;
           }
           let resolved: Record<string, unknown>;
           try {
             if (decision === 'rejected') {
-              data = await dependencies.store.resolveToolExecution(userId, executionId, 'rejected', { rejectedByUser: true });
+              data = await dependencies.store.resolveToolExecution!(userId, executionId, 'rejected', { rejectedByUser: true });
               break;
             }
-            resolved = await dependencies.store.resolveToolExecution(userId, executionId, 'approved');
+            resolved = await dependencies.store.resolveToolExecution!(userId, executionId, 'approved');
           } catch (toolError) {
             const msg = toolError instanceof Error ? toolError.message : '';
             if (msg.includes('already resolved')) {
@@ -538,7 +622,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           if (resolved.tool_name === 'propose_memory_save') {
             const memory = (await dependencies.store.getMemory(userId)) as MemorySnapshot | null;
             if (!memory?.consent) {
-              await dependencies.store.resolveToolExecution(userId, executionId, 'failed', {
+              await dependencies.store.resolveToolExecution!(userId, executionId, 'failed', {
                 error: 'business_memory_consent_required',
               });
               return response(
@@ -551,14 +635,14 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             const category = string(args.category, 80) || 'business_context';
             const summary = string(args.summary, 1000) || string(args.text, 1000) || JSON.stringify(args);
             const itemId = await dependencies.store.putMemoryItem(userId, null, category, { text: summary, ...args });
-            data = await dependencies.store.resolveToolExecution(userId, executionId, 'executed', {
+            data = await dependencies.store.resolveToolExecution!(userId, executionId, 'executed', {
               memoryItemId: itemId,
             });
             break;
           }
           if (resolved.tool_name === 'handoff_ugc_brief') {
             const normalizedHandoff = normalizeToolProposalArguments('handoff_ugc_brief', args);
-            data = await dependencies.store.resolveToolExecution(userId, executionId, 'executed', {
+            data = await dependencies.store.resolveToolExecution!(userId, executionId, 'executed', {
               handoffDraft: {
                 ...normalizedHandoff,
                 product: string(normalizedHandoff.product, 160) || string(args.summary, 160),
@@ -580,122 +664,194 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               return record.connector_key === connectorKey && record.status === 'connected';
             });
             if (!active) {
-              data = await dependencies.store.resolveToolExecution(userId, executionId, 'failed', {
+              data = await dependencies.store.resolveToolExecution!(userId, executionId, 'failed', {
                 error: 'CONNECTOR_NOT_CONNECTED',
                 connectorKey,
               });
               break;
             }
           }
-          data = await dependencies.store.resolveToolExecution(userId, executionId, 'executed', {
-            acknowledged: true,
-            args,
+          // Ne jamais présenter un accusé de réception comme une action métier exécutée.
+          data = await dependencies.store.resolveToolExecution!(userId, executionId, 'failed', {
+            error: 'ATOMIC_TOOL_SERVICE_UNAVAILABLE',
           });
           break;
         }
         case 'integrations.list': {
-          const connections = dependencies.store.listIntegrationConnections
-            ? await dependencies.store.listIntegrationConnections(userId)
-            : [];
-          data = { connections };
-          break;
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.listScopedIntegrationConnections) return response(failure('INTEGRATIONS_UNAVAILABLE', 'Intégrations par entreprise indisponibles.'), 503, origin, dependencies.allowedOrigins);
+          if (!workspaceId && !dependencies.store.listIntegrationConnections) return response(failure('INTEGRATIONS_UNAVAILABLE', 'Intégrations indisponibles.'), 503, origin, dependencies.allowedOrigins);
+          const connections = workspaceId
+            ? await dependencies.store.listScopedIntegrationConnections!(userId, workspaceId)
+            : await dependencies.store.listIntegrationConnections!(userId);
+          data = { connections }; break;
         }
         case 'integrations.request': {
-          if (!dependencies.store.requestIntegrationConnection) {
+          const connectorKey = integrationConnectorKey(body.connectorKey);
+          if (!connectorKey) return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          // L'ancienne interface envoie l'entreprise à la demande, mais omet
+          // ensuite ce périmètre à la lecture/annulation : un succès serait invisible.
+          if (workspaceId && !scopedWorkspace) return response(failure('BUSINESS_GROW_UPGRADE_REQUIRED', 'Actualisez Business Grow avant de demander une intégration pour cette entreprise.'), 409, origin, dependencies.allowedOrigins);
+          if (workspaceId ? !dependencies.store.requestScopedIntegrationConnection : !dependencies.store.requestIntegrationConnection) {
             return response(failure('INTEGRATIONS_UNAVAILABLE', 'Les demandes de connexion ne sont pas encore disponibles.'), 503, origin, dependencies.allowedOrigins);
           }
-          const connectorKey = integrationConnectorKey(body.connectorKey);
-          if (!connectorKey) {
-            return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
-          }
-          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
-          if (body.workspaceId != null && !workspaceId) {
-            return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
-          }
-          const status = await dependencies.store.requestIntegrationConnection(userId, connectorKey, workspaceId);
-          data = { connectorKey, status };
-          break;
+          const status = workspaceId
+            ? await dependencies.store.requestScopedIntegrationConnection!(userId, workspaceId, connectorKey)
+            : await dependencies.store.requestIntegrationConnection!(userId, connectorKey, null);
+          data = { connectorKey, status }; break;
         }
         case 'integrations.cancel': {
-          if (!dependencies.store.cancelIntegrationRequest) {
+          const connectorKey = integrationConnectorKey(body.connectorKey);
+          if (!connectorKey) return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId ? !dependencies.store.cancelScopedIntegrationRequest : !dependencies.store.cancelIntegrationRequest) {
             return response(failure('INTEGRATIONS_UNAVAILABLE', 'Les demandes de connexion ne sont pas encore disponibles.'), 503, origin, dependencies.allowedOrigins);
           }
-          const connectorKey = integrationConnectorKey(body.connectorKey);
-          if (!connectorKey) {
-            return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
-          }
-          const cancelled = await dependencies.store.cancelIntegrationRequest(userId, connectorKey);
-          data = { connectorKey, cancelled };
-          break;
+          const cancelled = workspaceId
+            ? await dependencies.store.cancelScopedIntegrationRequest!(userId, workspaceId, connectorKey)
+            : await dependencies.store.cancelIntegrationRequest!(userId, connectorKey);
+          data = { connectorKey, cancelled }; break;
         }
         case 'integrations.disconnect': {
-          if (!dependencies.store.disconnectIntegrationConnection) {
-            return response(failure('INTEGRATIONS_UNAVAILABLE', 'La révocation n’est pas encore disponible.'), 503, origin, dependencies.allowedOrigins);
-          }
           const connectorKey = integrationConnectorKey(body.connectorKey);
-          if (!connectorKey) {
-            return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
+          if (!connectorKey) return response(failure('INVALID_CONNECTOR', 'Connecteur inconnu.'), 400, origin, dependencies.allowedOrigins);
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId ? !dependencies.store.disconnectScopedIntegrationConnection : !dependencies.store.disconnectIntegrationConnection) {
+            return response(failure('INTEGRATIONS_UNAVAILABLE', 'La déconnexion locale n’est pas encore disponible.'), 503, origin, dependencies.allowedOrigins);
           }
-          const disconnected = await dependencies.store.disconnectIntegrationConnection(userId, connectorKey);
-          data = { connectorKey, disconnected };
+          const disconnected = workspaceId
+            ? await dependencies.store.disconnectScopedIntegrationConnection!(userId, workspaceId, connectorKey)
+            : await dependencies.store.disconnectIntegrationConnection!(userId, connectorKey);
+          data = { connectorKey, disconnected }; break;
+        }
+        case 'agent.report': {
+          const workspaceId = uuid(body.workspaceId);
+          const type = body.reportType;
+          const from = body.from; const to = body.to;
+          if (!workspaceId || !isReportType(type) || !validPeriod(from, to) || typeof to !== 'string') {
+            return response(failure('INVALID_REPORT', 'Entreprise, type et période valide (366 jours maximum) sont requis.'), 400, origin, dependencies.allowedOrigins);
+          }
+          if (!dependencies.store.getBusinessSnapshot) {
+            return response(failure('AGENT_UNAVAILABLE', 'L’analyse métier n’est pas encore disponible.'), 503, origin, dependencies.allowedOrigins);
+          }
+          const snapshot = await dependencies.store.getBusinessSnapshot(userId, workspaceId);
+          const report = buildBusinessReport(snapshot, type, from, to);
+          if (body.save === true) {
+            const idempotencyKey = uuid(body.idempotencyKey);
+            if (!idempotencyKey || !dependencies.store.saveAgentReport) {
+              return response(failure('INVALID_REPORT', 'Une clé d’idempotence est requise pour enregistrer le rapport.'), 400, origin, dependencies.allowedOrigins);
+            }
+            data = await dependencies.store.saveAgentReport(userId, workspaceId, type, from, to, idempotencyKey, report);
+          } else data = { report, saved: false };
+          break;
+        }
+        case 'agent.reports.list': {
+          const workspaceId = uuid(body.workspaceId);
+          if (!workspaceId) return response(failure('INVALID_WORKSPACE', 'Entreprise requise.'), 400, origin, dependencies.allowedOrigins);
+          if (!dependencies.store.listAgentReports) return response(failure('AGENT_UNAVAILABLE', 'Rapports indisponibles.'), 503, origin, dependencies.allowedOrigins);
+          data = { reports: await dependencies.store.listAgentReports(userId, workspaceId) };
+          break;
+        }
+        case 'agent.reports.delete': {
+          const workspaceId = uuid(body.workspaceId); const reportId = uuid(body.reportId);
+          if (!workspaceId || !reportId) return response(failure('INVALID_REPORT', 'Entreprise et rapport requis.'), 400, origin, dependencies.allowedOrigins);
+          if (!dependencies.store.deleteAgentReport) return response(failure('AGENT_UNAVAILABLE', 'Suppression de rapport indisponible.'), 503, origin, dependencies.allowedOrigins);
+          const deleted = await dependencies.store.deleteAgentReport(userId, workspaceId, reportId);
+          if (!deleted) return response(failure('REPORT_NOT_FOUND', 'Rapport introuvable ou inaccessible.'), 404, origin, dependencies.allowedOrigins);
+          data = { deleted }; break;
+        }
+        case 'agent.task.propose': {
+          const workspaceId = uuid(body.workspaceId); const conversationId = uuid(body.conversationId);
+          const sourceId = uuid(body.sourceRecordId); const key = uuid(body.idempotencyKey);
+          const category = string(body.sourceCategory, 80);
+          if (!workspaceId || !conversationId || !sourceId || !key || !/^(growth_prospect|bg_module_[a-z0-9_]{2,60})$/.test(category)) {
+            return response(failure('INVALID_TASK_PROPOSAL', 'Entreprise, conversation et source valide sont requises.'), 400, origin, dependencies.allowedOrigins);
+          }
+          if (!dependencies.store.proposeAgentTask) return response(failure('AGENT_UNAVAILABLE', 'Propositions de tâches indisponibles.'), 503, origin, dependencies.allowedOrigins);
+          data = await dependencies.store.proposeAgentTask(userId, workspaceId, conversationId, category, sourceId, key);
+          break;
+        }
+        case 'automation.task.confirm': {
+          // Cette opération n'existe que dans le protocole scoped : aucun repli
+          // vers une création historique personnelle ou sans contrôle de source.
+          if (!scopedWorkspace) return response(failure('INVALID_WORKSPACE', 'Protocole d’entreprise requis.'), 400, origin, dependencies.allowedOrigins);
+          const playbookId = uuid(body.playbookId), sourceId = uuid(body.sourceId);
+          const category = string(body.sourceCategory, 80);
+          const expectedPlaybook = object(body.expectedPlaybook), expectedSource = object(body.expectedSource), task = object(body.task);
+          if (!playbookId || !sourceId || !validDate(body.previewDay) || ![
+            'bg_module_lead_rescue', 'bg_module_order_cart_recovery', 'bg_module_payment_recovery',
+            'bg_module_customer_recovery', 'bg_module_smart_inventory',
+          ].includes(category) || !Object.keys(expectedPlaybook).length || !Object.keys(expectedSource).length || !Object.keys(task).length) {
+            return response(failure('INVALID_AUTOMATION_TASK', 'Aperçu d’automatisation invalide.'), 400, origin, dependencies.allowedOrigins);
+          }
+          if (!dependencies.store.confirmAutomationTask) return response(failure('AGENT_UNAVAILABLE', 'Confirmation d’automatisation indisponible.'), 503, origin, dependencies.allowedOrigins);
+          data = await dependencies.store.confirmAutomationTask(userId, scopedWorkspace, playbookId, category, sourceId, body.previewDay, expectedPlaybook, expectedSource, task);
           break;
         }
         case 'modules.records': {
           const category = string(body.category, 80);
           const op = string(body.op, 20) || 'list';
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
           if (!/^bg_module_[a-z0-9_]{2,60}$/.test(category)) {
             return response(failure('INVALID_MODULE', 'Module métier inconnu.'), 400, origin, dependencies.allowedOrigins);
           }
-          if (!dependencies.store.listModuleRecords) {
-            return response(
-              failure('MODULES_UNAVAILABLE', 'Le stockage des modules métier n’est pas encore déployé.'),
-              503, origin, dependencies.allowedOrigins,
-            );
+          if (workspaceId ? !dependencies.store.listScopedModuleRecords : !dependencies.store.listModuleRecords) {
+            return response(failure('MODULES_UNAVAILABLE', 'Le stockage des modules métier n’est pas encore déployé.'), 503, origin, dependencies.allowedOrigins);
           }
           if (op === 'list') {
-            data = { records: await dependencies.store.listModuleRecords(userId, category) };
+            data = { records: workspaceId
+              ? await dependencies.store.listScopedModuleRecords!(userId, workspaceId, category)
+              : await dependencies.store.listModuleRecords!(userId, category) };
             break;
           }
           if (op === 'create') {
             const recordData = object(body.data);
-            if (!Object.keys(recordData).length || !dependencies.store.createModuleRecord) {
+            if (!Object.keys(recordData).length || (workspaceId ? !dependencies.store.createScopedModuleRecord : !dependencies.store.createModuleRecord)) {
               return response(failure('INVALID_MODULE_DATA', 'Données du module invalides.'), 400, origin, dependencies.allowedOrigins);
             }
-            const dedupeKey = body.dedupeKey == null ? null : string(body.dedupeKey, 200);
-            const recordId = await dependencies.store.createModuleRecord(userId, category, recordData, dedupeKey || null);
-            data = { recordId };
-            break;
+            const dedupeKey = body.dedupeKey == null ? null : string(body.dedupeKey, 200) || null;
+            const recordId = workspaceId
+              ? await dependencies.store.createScopedModuleRecord!(userId, workspaceId, category, recordData, dedupeKey)
+              : await dependencies.store.createModuleRecord!(userId, category, recordData, dedupeKey);
+            data = { recordId }; break;
           }
           if (op === 'update') {
-            const recordId = uuid(body.recordId);
-            const recordData = object(body.data);
-            if (!recordId || !Object.keys(recordData).length || !dependencies.store.updateModuleRecord) {
+            const recordId = uuid(body.recordId); const recordData = object(body.data);
+            if (!recordId || !Object.keys(recordData).length || (workspaceId ? !dependencies.store.updateScopedModuleRecord : !dependencies.store.updateModuleRecord)) {
               return response(failure('INVALID_MODULE_RECORD', 'Enregistrement ou données invalides.'), 400, origin, dependencies.allowedOrigins);
             }
-            const updated = await dependencies.store.updateModuleRecord(userId, recordId, recordData);
-            if (!updated) {
-              return response(failure('MODULE_RECORD_NOT_FOUND', 'Enregistrement introuvable.'), 404, origin, dependencies.allowedOrigins);
-            }
-            data = { updated };
-            break;
+            const updated = workspaceId
+              ? await dependencies.store.updateScopedModuleRecord!(userId, workspaceId, category, recordId, recordData)
+              : await dependencies.store.updateModuleRecord!(userId, recordId, recordData);
+            if (!updated) return response(failure('MODULE_RECORD_NOT_FOUND', 'Enregistrement introuvable.'), 404, origin, dependencies.allowedOrigins);
+            data = { updated }; break;
           }
           if (op === 'delete') {
             const recordId = uuid(body.recordId);
-            if (!recordId || !dependencies.store.deleteModuleRecord) {
+            if (!recordId || (workspaceId ? !dependencies.store.deleteScopedModuleRecord : !dependencies.store.deleteModuleRecord)) {
               return response(failure('INVALID_MODULE_RECORD', 'Enregistrement invalide.'), 400, origin, dependencies.allowedOrigins);
             }
-            const deleted = await dependencies.store.deleteModuleRecord(userId, recordId);
-            if (!deleted) {
-              return response(failure('MODULE_RECORD_NOT_FOUND', 'Enregistrement introuvable.'), 404, origin, dependencies.allowedOrigins);
-            }
-            data = { deleted };
-            break;
+            const deleted = workspaceId
+              ? await dependencies.store.deleteScopedModuleRecord!(userId, workspaceId, category, recordId)
+              : await dependencies.store.deleteModuleRecord!(userId, recordId);
+            if (!deleted) return response(failure('MODULE_RECORD_NOT_FOUND', 'Enregistrement introuvable.'), 404, origin, dependencies.allowedOrigins);
+            data = { deleted }; break;
           }
           return response(failure('INVALID_MODULE_OPERATION', 'Opération de module inconnue.'), 400, origin, dependencies.allowedOrigins);
         }
-        case 'conversations.list':
-          data = { conversations: await dependencies.store.listConversations(userId) };
+        case 'conversations.list': {
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.listScopedConversations) return response(failure('AGENT_UNAVAILABLE', 'Historique par entreprise indisponible.'), 503, origin, dependencies.allowedOrigins);
+          data = { conversations: workspaceId ? await dependencies.store.listScopedConversations!(userId, workspaceId) : await dependencies.store.listConversations(userId) };
           break;
+        }
         case 'conversations.create': {
           const title = string(body.title, 160) || 'Nouvelle conversation';
           const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
@@ -737,6 +893,9 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           if (!conversationId) {
             return response(failure('INVALID_CONVERSATION', 'Conversation invalide.'), 400, origin, dependencies.allowedOrigins);
           }
+          if (dependencies.store.getConversationScope && !await dependencies.store.getConversationScope(userId, conversationId)) {
+            return response(failure('CONVERSATION_NOT_FOUND', 'Conversation introuvable ou inaccessible.'), 404, origin, dependencies.allowedOrigins);
+          }
           data = { messages: await dependencies.store.listMessages(userId, conversationId) };
           break;
         }
@@ -769,34 +928,51 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               // Keep default auto routing if preference lookup fails.
             }
           }
-          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
-          if (body.workspaceId != null && !workspaceId) {
+          const requestedWorkspace = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !requestedWorkspace) {
             return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          }
+          let workspaceId = requestedWorkspace;
+          if (dependencies.store.getConversationScope) {
+            const scope = await dependencies.store.getConversationScope(userId, conversationId);
+            if (!scope) return response(failure('CONVERSATION_NOT_FOUND', 'Conversation introuvable ou inaccessible.'), 404, origin, dependencies.allowedOrigins);
+            if (requestedWorkspace && requestedWorkspace !== scope.workspaceId) {
+              return response(failure('CONVERSATION_SCOPE_MISMATCH', 'Cette conversation appartient à un autre espace. Créez une nouvelle conversation.'), 403, origin, dependencies.allowedOrigins);
+            }
+            workspaceId = scope.workspaceId;
           }
 
           const requestHash = await sha256(`${conversationId}\n${roleKey}\n${content}`);
 
-          // Ground prompt safely in consented Business Memory and authorized company context.
+          // Une conversation d'entreprise ne lit jamais la mémoire personnelle historique.
           let memorySnapshot: MemorySnapshot | null = null;
           try {
-            memorySnapshot = (await dependencies.store.getMemory(userId)) as MemorySnapshot | null;
-          } catch {
-            memorySnapshot = null;
-          }
+            memorySnapshot = (workspaceId
+              ? dependencies.store.getScopedMemory ? await dependencies.store.getScopedMemory(userId, workspaceId) : null
+              : await dependencies.store.getMemory(userId)) as MemorySnapshot | null;
+          } catch { memorySnapshot = null; }
           let workspaceContext: WorkspaceCompanyContext | null = null;
           if (workspaceId && dependencies.store.getWorkspaceContext) {
+            try { workspaceContext = await dependencies.store.getWorkspaceContext(userId, workspaceId); }
+            catch { workspaceContext = null; }
+          }
+          let diagnosticContext: string | null = null;
+          if (workspaceId) {
             try {
-              workspaceContext = await dependencies.store.getWorkspaceContext(userId, workspaceId);
+              if (!dependencies.store.getBusinessSnapshot) throw new Error('snapshot unavailable');
+              const period = defaultPeriod();
+              const snapshot = await dependencies.store.getBusinessSnapshot(userId, workspaceId);
+              diagnosticContext = reportForModel(buildBusinessReport(snapshot, 'health', period.from, period.to));
             } catch {
-              workspaceContext = null;
+              diagnosticContext = 'Données des modules indisponibles : aucun diagnostic chiffré ne peut être confirmé.';
             }
           }
-
           const systemInstruction = buildBusinessSystemInstruction({
             baseSystemMessage: systemMessage,
             roleKey,
             memory: memorySnapshot,
             workspaceContext,
+            diagnosticContext,
           });
 
           const history = chatHistory(
@@ -1048,55 +1224,56 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               : `Les fournisseurs configurés n’ont pas pu traiter la demande (code : ${lastErrorCode}). Le message est conservé; consultez le statut et réessayez.`,
           ), 503, origin, dependencies.allowedOrigins);
         }
-        case 'memory.get':
-          data = await dependencies.store.getMemory(userId);
-          break;
-        case 'memory.consent': {
-          if (typeof body.enabled !== 'boolean') {
-            return response(failure('INVALID_CONSENT', 'Le consentement doit être activé ou révoqué.'), 400, origin, dependencies.allowedOrigins);
-          }
-          data = await dependencies.store.setMemoryConsent(userId, body.enabled, 'business-grow-memory-v1');
+        case 'memory.get': {
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.getScopedMemory) return response(failure('AGENT_UNAVAILABLE', 'Mémoire par entreprise indisponible.'), 503, origin, dependencies.allowedOrigins);
+          data = workspaceId ? await dependencies.store.getScopedMemory!(userId, workspaceId) : await dependencies.store.getMemory(userId);
           break;
         }
-        case 'memory.profile.save':
-          await dependencies.store.saveMemoryProfile(userId, object(body.profile));
-          data = { saved: true };
+        case 'memory.consent': {
+          if (typeof body.enabled !== 'boolean') return response(failure('INVALID_CONSENT', 'Le consentement doit être activé ou révoqué.'), 400, origin, dependencies.allowedOrigins);
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.setScopedMemoryConsent) return response(failure('AGENT_UNAVAILABLE', 'Mémoire par entreprise indisponible.'), 503, origin, dependencies.allowedOrigins);
+          data = workspaceId
+            ? await dependencies.store.setScopedMemoryConsent!(userId, workspaceId, body.enabled, 'business-grow-workspace-memory-v1')
+            : await dependencies.store.setMemoryConsent(userId, body.enabled, 'business-grow-memory-v1');
           break;
+        }
+        case 'memory.profile.save': {
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.saveScopedMemoryProfile) return response(failure('AGENT_UNAVAILABLE', 'Mémoire par entreprise indisponible.'), 503, origin, dependencies.allowedOrigins);
+          if (workspaceId) await dependencies.store.saveScopedMemoryProfile!(userId, workspaceId, object(body.profile));
+          else await dependencies.store.saveMemoryProfile(userId, object(body.profile));
+          data = { saved: true }; break;
+        }
         case 'memory.item.put': {
-          const category = string(body.category, 80);
-          if (!category || body.content == null) {
-            return response(failure('INVALID_MEMORY_ITEM', 'La catégorie et le contenu sont obligatoires.'), 400, origin, dependencies.allowedOrigins);
-          }
+          const category = string(body.category, 80); const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (!category || body.content == null) return response(failure('INVALID_MEMORY_ITEM', 'La catégorie et le contenu sont obligatoires.'), 400, origin, dependencies.allowedOrigins);
           const itemId = body.itemId == null ? null : uuid(body.itemId);
-          if (body.itemId != null && !itemId) {
-            return response(failure('INVALID_MEMORY_ITEM', 'Identifiant mémoire invalide.'), 400, origin, dependencies.allowedOrigins);
-          }
-          try {
-            data = { itemId: await dependencies.store.putMemoryItem(userId, itemId, category, body.content) };
-          } catch (memoryError) {
-            const msg = memoryError instanceof Error ? memoryError.message : '';
-            if (msg.includes('active memory consent required')) {
-              return response(
-                failure('business_memory_consent_required', 'Activez le consentement mémoire avant d’enregistrer une note métier.'),
-                409,
-                origin,
-                dependencies.allowedOrigins,
-              );
-            }
-            if (msg.includes('memory item not found')) {
-              return response(failure('MEMORY_ITEM_NOT_FOUND', 'Note mémoire introuvable.'), 404, origin, dependencies.allowedOrigins);
-            }
-            throw memoryError;
-          }
+          if (body.itemId != null && !itemId) return response(failure('INVALID_MEMORY_ITEM', 'Identifiant mémoire invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.putScopedMemoryItem) return response(failure('AGENT_UNAVAILABLE', 'Mémoire par entreprise indisponible.'), 503, origin, dependencies.allowedOrigins);
+          data = { itemId: workspaceId
+            ? await dependencies.store.putScopedMemoryItem!(userId, workspaceId, itemId, category, body.content)
+            : await dependencies.store.putMemoryItem(userId, itemId, category, body.content) };
           break;
         }
         case 'memory.item.delete': {
-          const itemId = uuid(body.itemId);
-          if (!itemId) {
-            return response(failure('INVALID_MEMORY_ITEM', 'Identifiant mémoire invalide.'), 400, origin, dependencies.allowedOrigins);
-          }
-          data = { deleted: await dependencies.store.deleteMemoryItem(userId, itemId) };
+          const itemId = uuid(body.itemId); const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (!itemId) return response(failure('INVALID_MEMORY_ITEM', 'Identifiant mémoire invalide.'), 400, origin, dependencies.allowedOrigins);
+          if (workspaceId && !dependencies.store.deleteScopedMemoryItem) return response(failure('AGENT_UNAVAILABLE', 'Mémoire par entreprise indisponible.'), 503, origin, dependencies.allowedOrigins);
+          data = { deleted: workspaceId ? await dependencies.store.deleteScopedMemoryItem!(userId, workspaceId, itemId) : await dependencies.store.deleteMemoryItem(userId, itemId) };
           break;
+        }
+        case 'memory.legacy.import': {
+          const workspaceId = uuid(body.workspaceId);
+          if (!workspaceId || body.confirmed !== true) return response(failure('CONFIRMATION_REQUIRED', 'Confirmez explicitement l’import dans cette entreprise.'), 400, origin, dependencies.allowedOrigins);
+          if (!dependencies.store.importLegacyMemory) return response(failure('AGENT_UNAVAILABLE', 'Import indisponible.'), 503, origin, dependencies.allowedOrigins);
+          data = await dependencies.store.importLegacyMemory(userId, workspaceId); break;
         }
         default:
           return response(failure('UNKNOWN_ACTION', 'Opération Business Grow inconnue.'), 400, origin, dependencies.allowedOrigins);
@@ -1104,13 +1281,23 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
 
       return response({ data }, 200, origin, dependencies.allowedOrigins);
     } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('workspace access denied')) return response(failure('WORKSPACE_ACCESS_DENIED', 'Accès refusé à cette entreprise ou rôle insuffisant.'), 403, origin, dependencies.allowedOrigins);
+      if (message.includes('active memory consent required') || message.includes('memory consent revoked') || message.includes('memory consent required')) {
+        return response(failure('business_memory_consent_required', 'Activez le consentement mémoire de cette entreprise avant cette opération.'), 409, origin, dependencies.allowedOrigins);
+      }
+      if (message.includes('idempotency key conflict')) return response(failure('IDEMPOTENCY_CONFLICT', 'Cette clé correspond à une autre opération.'), 409, origin, dependencies.allowedOrigins);
+      if (message.includes('agent source changed')) return response(failure('AGENT_SOURCE_CHANGED', 'Les données source ont changé. Relancez le diagnostic avant de confirmer.'), 409, origin, dependencies.allowedOrigins);
+      if (message.includes('automation source changed') || message.includes('automation source no longer eligible')) return response(failure('AUTOMATION_SOURCE_CHANGED', 'La règle ou sa source a changé. Recalculez l’aperçu avant de confirmer.'), 409, origin, dependencies.allowedOrigins);
+      if (message.includes('automation preview expired')) return response(failure('AUTOMATION_PREVIEW_EXPIRED', 'La date UTC de l’aperçu a changé. Recalculez-le avant de confirmer.'), 409, origin, dependencies.allowedOrigins);
+      if (message.includes('invalid automation')) return response(failure('INVALID_AUTOMATION_TASK', 'Aperçu d’automatisation invalide. Recalculez-le.'), 400, origin, dependencies.allowedOrigins);
+      if (message.includes('already resolved')) return response(failure('TOOL_ALREADY_RESOLVED', 'Cette proposition ou sa source a déjà été traitée.'), 409, origin, dependencies.allowedOrigins);
+      if (message.includes('agent source not found') || message.includes('conversation not found') || message.includes('tool execution not found') || message.includes('memory item not found')) {
+        return response(failure('RECORD_NOT_FOUND', 'Enregistrement introuvable ou inaccessible.'), 404, origin, dependencies.allowedOrigins);
+      }
+      if (message.includes('limit reached')) return response(failure('RECORD_LIMIT_REACHED', 'Limite de stockage atteinte pour cette entreprise.'), 409, origin, dependencies.allowedOrigins);
       console.error('business-grow request failed', { action });
-      return response(
-        failure('BUSINESS_GROW_BACKEND_ERROR', 'Le service Business Grow est temporairement indisponible.'),
-        500,
-        origin,
-        dependencies.allowedOrigins,
-      );
+      return response(failure('BUSINESS_GROW_BACKEND_ERROR', 'Le service Business Grow est temporairement indisponible.'), 500, origin, dependencies.allowedOrigins);
     }
   };
 }
