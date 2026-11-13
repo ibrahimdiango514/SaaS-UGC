@@ -1,4 +1,4 @@
-// Suite 05 — Audit des privilèges d'exécution des fonctions (matrice rôle × fonction).
+// Suite 06 — Audit des privilèges d'exécution des fonctions (matrice rôle × fonction).
 //
 // Produit la matrice complète (JSON + Markdown) dans results/ et vérifie les
 // invariants de sécurité :
@@ -16,7 +16,7 @@
 //   6. Toutes les fonctions saas_business sont SECURITY DEFINER avec
 //      search_path figée (pg_catalog, saas_business).
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import path, { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeHarness } from './harness.mjs';
 
@@ -26,7 +26,7 @@ const APP_SCHEMAS = ['public', 'saas_business', 'saas_ugc', 'ugc_private', 'auth
 const CLIENT = [0, 1, 2]; // indexes anon, authenticated, service_role
 
 export async function run(ctx) {
-  const h = makeHarness({ baseUrl: 'http://127.0.0.1:1', title: '05 — Audit fonctions (matrice EXECUTE × rôles)' });
+  const h = makeHarness({ baseUrl: 'http://127.0.0.1:1', title: '06 — Audit fonctions (matrice EXECUTE × rôles)' });
   const q = (sql, params = []) => ctx.adminQuery(sql, params);
 
   const rows = await q(`
@@ -94,6 +94,9 @@ export async function run(ctx) {
     'invariant : effacement de compte → bg_erasure SEUL',
     erasureFns.map((f) => `${f.function}[edge=${f.r3},billing=${f.r4},erasure=${f.r5}]`).join(' '));
   const edgeOnly = bgPlain.filter((f) => f.r3 && !f.r4 && !f.r5);
+  // Rôle worker de maintenance (facturation + quota) : fonctions destinées à
+  // bg_billing_worker seul (événements billing + entretien des réservations).
+  const workerFns = bgPlain.filter((f) => f.r4 && !f.r3 && !f.r5 && !CLIENT.some((i) => f[`r${i}`]));
   // Sans destinataire = helper interne : appelé par d'autres fonctions
   // (SECURITY DEFINER, qui exécutent comme le propriétaire — pas d'EXECUTE
   // requis) ou par un chemin serveur documenté. Aucune ne peut être appelée
@@ -104,9 +107,9 @@ export async function run(ctx) {
   ]);
   const internal = bgPlain.filter((f) => !f.r3 && !f.r4 && !f.r5 && !CLIENT.some((i) => f[`r${i}`]) && (f.internal_ref > 0 || KNOWN_SERVER_CALLED.has(f.function)));
   const unexplained = bgPlain.filter((f) => !f.r3 && !f.r4 && !f.r5 && !CLIENT.some((i) => f[`r${i}`]) && !(f.internal_ref > 0 || KNOWN_SERVER_CALLED.has(f.function)));
-  h.check(edgeOnly.length + billingFns.length + erasureFns.length + internal.length === bgPlain.length && unexplained.length === 0,
+  h.check(edgeOnly.length + workerFns.length + erasureFns.length + internal.length === bgPlain.length && unexplained.length === 0,
     'invariant : partition saas_business sans trou ni doublon — chaque fonction (hors trigger) a un rôle serveur destinataire OU est un helper interne appelé par d\'autres fonctions (jamais accessible au client)',
-    `edge=${edgeOnly.length} billing=${billingFns.length} erasure=${erasureFns.length} helpers-internes=${internal.length} inexpliquées=${unexplained.map((f) => f.function).join(',') || 'aucune'}`);
+    `edge=${edgeOnly.length} worker=${workerFns.length} erasure=${erasureFns.length} helpers-internes=${internal.length} inexpliquées=${unexplained.map((f) => f.function).join(',') || 'aucune'}`);
   const triggerLeaks = bgTriggers.filter((f) => [f.r3, f.r4, f.r5, ...CLIENT.map((i) => f[`r${i}`])].some(Boolean));
   h.check(bgTriggers.length >= 5 && triggerLeaks.length === 0,
     `invariant : fonctions de trigger saas_business (${bgTriggers.length}) — aucun destinataire EXECUTE (elles ne s'exécutent que par le propriétaire de la table)`,

@@ -19,6 +19,7 @@ const suites = [
   ['./test-02-isolation.mjs', 'Isolation multi-entreprise A/B + identifiants falsifiés + orphelins + RPC/EXECUTE'],
   ['./test-03-revocation.mjs', 'Révocation : expiré vs révoqué vs valide ; anti-falsification par les rôles serveur'],
   ['./test-04-edge.mjs', 'Intégration Edge : business-grow réel contre gateway + PostgreSQL + IA locales'],
+  ['./test-05-credits-payments.mjs', 'Crédits & règlements : idempotence, grand livre immuable, réservations orphelines, paiements SASPAY'],
   ['./audit-functions.mjs', 'Audit des fonctions : matrice EXECUTE × rôles + invariants de partition'],
 ];
 
