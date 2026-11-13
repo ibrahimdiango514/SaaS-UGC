@@ -2,8 +2,10 @@ import {
   buildBusinessSystemInstruction,
   BUSINESS_ROLE_SPECS,
   extractToolProposals,
+  extractUserStatement,
   normalizeRoleKey,
   normalizeToolProposalArguments,
+  type AgentMemoryItem,
   type BusinessRoleKey,
   type ExtractedToolProposal,
   type MemorySnapshot,
@@ -34,6 +36,9 @@ export type BusinessAction =
   | 'memory.profile.save'
   | 'memory.item.put'
   | 'memory.item.delete'
+  | 'agentMemory.search'
+  | 'agentMemory.list'
+  | 'agentMemory.forget'
   | 'providers.verify'
   | 'models.list'
   | 'roles.list'
@@ -64,6 +69,33 @@ export interface BusinessGrowStore {
   saveMemoryProfile(userId: string, profile: Record<string, unknown>): Promise<void>;
   putMemoryItem(userId: string, itemId: string | null, category: string, content: unknown): Promise<string>;
   deleteMemoryItem(userId: string, itemId: string): Promise<boolean>;
+  /** Mémoire persistante de l'agent (saas_business.ai_memories). Optionnel :
+   *  l'Edge les utilise seulement si l'implémentation les expose. Chaque
+   *  appel est contrôlé par la fonction SECURITY DEFINER (isolation stricte
+   *  utilisateur/workspace). */
+  searchAgentMemory?(
+    userId: string,
+    workspaceId: string | null,
+    query: string,
+    limit?: number,
+  ): Promise<AgentMemoryItem[]>;
+  saveAgentMemory?(
+    userId: string,
+    workspaceId: string | null,
+    category: string,
+    title: string,
+    content: string,
+    confidence: string,
+    source: string,
+    supersedes?: string | null,
+  ): Promise<string>;
+  listAgentMemories?(
+    userId: string,
+    workspaceId: string | null,
+    category?: string | null,
+    limit?: number,
+  ): Promise<AgentMemoryItem[]>;
+  forgetAgentMemory?(userId: string, memoryId: string): Promise<boolean>;
   submitUserMessage(
     userId: string,
     conversationId: string,
@@ -677,11 +709,26 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             }
           }
 
+          // Mémoire persistante de l'agent (VYORA AI CORE) : lecture
+          // autorisée uniquement avec le consentement mémoire actif, et
+          // toujours dans le périmètre utilisateur/workspace (fonction
+          // SECURITY DEFINER). La recherche est best-effort : un échec de
+          // lecture ne doit jamais bloquer la conversation.
+          let agentMemories: AgentMemoryItem[] | null = null;
+          if (memorySnapshot?.consent === true && dependencies.store.searchAgentMemory) {
+            try {
+              agentMemories = await dependencies.store.searchAgentMemory(userId, workspaceId, content, 5);
+            } catch {
+              agentMemories = null;
+            }
+          }
+
           const systemInstruction = buildBusinessSystemInstruction({
             baseSystemMessage: systemMessage,
             roleKey,
             memory: memorySnapshot,
             workspaceContext,
+            agentMemories,
           });
 
           const history = chatHistory(
@@ -906,6 +953,36 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               createdTools.push({ id: execId, ...proposal });
             }
 
+            // Mémorisation persistante (VYORA AI CORE) : seule une DÉCLARATION
+            // explicite de l'utilisateur (entreprise/décision/préférence) est
+            // conservée — jamais la conversation entière (pas
+            // d'accumulation). Une déclaration déjà mémorisée est REMPLACÉE
+            // (versionnement), pas dupliquée. Best-effort : un échec de
+            // mémoire ne fait jamais échouer la réponse.
+            if (memorySnapshot?.consent === true && dependencies.store.saveAgentMemory) {
+              const statement = extractUserStatement(content);
+              if (statement) {
+                try {
+                  let supersedes: string | null = null;
+                  if (dependencies.store.searchAgentMemory) {
+                    const existing = await dependencies.store.searchAgentMemory(
+                      userId, workspaceId, statement.title, 1,
+                    );
+                    supersedes = existing.find((m) => m.title === statement.title)?.id ?? null;
+                  }
+                  await dependencies.store.saveAgentMemory(
+                    userId, workspaceId, statement.category,
+                    statement.title, statement.content, 'fact', 'user_statement',
+                    supersedes,
+                  );
+                } catch {
+                  // mémoire best-effort : un échec de persistance ne doit
+                  // jamais faire échouer la réponse (la mémoire est un
+                  // rappel, pas un gageur).
+                }
+              }
+            }
+
             data = {
               ...submitted,
               status: 'succeeded',
@@ -987,6 +1064,50 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             return response(failure('INVALID_MEMORY_ITEM', 'Identifiant mémoire invalide.'), 400, origin, dependencies.allowedOrigins);
           }
           data = { deleted: await dependencies.store.deleteMemoryItem(userId, itemId) };
+          break;
+        }
+        // --- Mémoire persistante de l'agent (VYORA AI CORE) -------------------
+        // Contrôle explicite par l'utilisateur : recherche, listing et
+        // effacement. Chaque appel passe par la fonction SECURITY DEFINER qui
+        // isole strictement l'utilisateur/workspace (aucun accès croisé).
+        case 'agentMemory.search': {
+          if (!dependencies.store.searchAgentMemory) {
+            return response(failure('AGENT_MEMORY_NOT_CONFIGURED', 'La mémoire agent n’est pas activée.'), 501, origin, dependencies.allowedOrigins);
+          }
+          const query = string(body.query, 400);
+          if (!query) {
+            return response(failure('INVALID_QUERY', 'Une recherche est nécessaire.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) {
+            return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const limit = Number.isFinite(Number(body.limit)) ? Math.min(20, Math.max(1, Number(body.limit))) : 8;
+          data = { memories: await dependencies.store.searchAgentMemory(userId, workspaceId, query, limit) };
+          break;
+        }
+        case 'agentMemory.list': {
+          if (!dependencies.store.listAgentMemories) {
+            return response(failure('AGENT_MEMORY_NOT_CONFIGURED', 'La mémoire agent n’est pas activée.'), 501, origin, dependencies.allowedOrigins);
+          }
+          const workspaceId = body.workspaceId == null ? null : uuid(body.workspaceId);
+          if (body.workspaceId != null && !workspaceId) {
+            return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const category = string(body.category, 40) || null;
+          const limit = Number.isFinite(Number(body.limit)) ? Math.min(50, Math.max(1, Number(body.limit))) : 20;
+          data = { memories: await dependencies.store.listAgentMemories(userId, workspaceId, category, limit) };
+          break;
+        }
+        case 'agentMemory.forget': {
+          if (!dependencies.store.forgetAgentMemory) {
+            return response(failure('AGENT_MEMORY_NOT_CONFIGURED', 'La mémoire agent n’est pas activée.'), 501, origin, dependencies.allowedOrigins);
+          }
+          const memoryId = uuid(body.memoryId);
+          if (!memoryId) {
+            return response(failure('INVALID_MEMORY_ID', 'Identifiant mémoire invalide.'), 400, origin, dependencies.allowedOrigins);
+          }
+          data = { forgotten: await dependencies.store.forgetAgentMemory(userId, memoryId) };
           break;
         }
         default:

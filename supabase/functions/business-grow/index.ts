@@ -4,7 +4,7 @@ import {
   NoVerifiedProviderRouteError,
   type BusinessGrowStore,
 } from './handler.ts';
-import type { WorkspaceCompanyContext } from './intelligence.ts';
+import type { AgentMemoryItem, WorkspaceCompanyContext } from './intelligence.ts';
 import {
   callProvider,
   listRemoteModels,
@@ -327,6 +327,53 @@ const store: BusinessGrowStore = {
       ) as deleted
     `;
     return row.deleted as boolean;
+  },
+  // --- Mémoire persistante de l'agent (VYORA AI CORE) ------------------------
+  // Chaque fonction est SECURITY DEFINER et contrôle l'appartenance
+  // utilisateur/workspace (bg_assert_workspace_access) : l'Edge ne fait que
+  // transmettre l'identifiant authentifié, jamais un périmètre arbitraire.
+  async searchAgentMemory(userId, workspaceId, query, limit = 5) {
+    const rows = await requiredSql()`
+      select id::text as id, category, title, content, confidence
+      from saas_business.ai_memory_search(
+        ${userId}::uuid, ${workspaceId}::uuid, ${query}, null, ${limit}, null
+      )
+      order by score desc
+    `;
+    return asRows(rows) as AgentMemoryItem[];
+  },
+  async saveAgentMemory(userId, workspaceId, category, title, content, confidence, source, supersedes = null) {
+    const [row] = await requiredSql()`
+      select saas_business.ai_memory_save(
+        ${userId}::uuid,
+        ${workspaceId}::uuid,
+        ${category},
+        ${title},
+        ${content},
+        ${confidence},
+        ${source},
+        ${supersedes}::uuid
+      ) as id
+    `;
+    return row.id as string;
+  },
+  async listAgentMemories(userId, workspaceId, category = null, limit = 20) {
+    const rows = await requiredSql()`
+      select id::text as id, category, title, content, confidence
+      from saas_business.ai_memory_list(
+        ${userId}::uuid, ${workspaceId}::uuid, ${category}, ${limit}
+      )
+      order by created_at desc
+    `;
+    return asRows(rows) as AgentMemoryItem[];
+  },
+  async forgetAgentMemory(userId, memoryId) {
+    const [row] = await requiredSql()`
+      select saas_business.ai_memory_forget(
+        ${userId}::uuid, ${memoryId}::uuid
+      ) as forgotten
+    `;
+    return row.forgotten as boolean;
   },
   async submitUserMessage(userId, conversationId, content, idempotencyKey, requestHash, roleKey = 'business_advisor') {
     const [row] = await requiredSql()`

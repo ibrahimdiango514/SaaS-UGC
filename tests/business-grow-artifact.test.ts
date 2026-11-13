@@ -13,13 +13,20 @@ import { LOADER, artifact, renderLoader } from '../scripts/build-business-grow-a
 describe('artefact déployable business-grow', () => {
   const loader = readFileSync(join(process.cwd(), LOADER), 'utf8');
 
+  // Le payload voyage en plusieurs constantes (PAYLOAD_N) : le canal de
+  // déploiement tronque toute CONSTANTE de plus de 20 000 caractères, tandis
+  // que la taille totale du fichier reste tolérée (chargeur prod ~23 Ko).
+  const payloadParts = (): string[] =>
+    [...loader.matchAll(/const PAYLOAD_\d = "([A-Za-z0-9+/=]+)";/g)].map((m) => m[1]);
+  const fullPayload = (): string => payloadParts().join('');
+
   it('est identique à ce que produit la compilation du dépôt', () => {
     const built = artifact();
     expect(loader).toBe(renderLoader(built));
   });
 
   it('se décompresse vers un bundle ES2022 intègre et complet', () => {
-    const payload = loader.match(/const PAYLOAD = "([A-Za-z0-9+/=]+)";/)?.[1];
+    const payload = fullPayload();
     expect(payload).toBeTruthy();
 
     const source = gunzipSync(Buffer.from(payload as string, 'base64')).toString('utf8');
@@ -40,15 +47,19 @@ describe('artefact déployable business-grow', () => {
     expect(loader).toContain('import postgres from "npm:postgres@3.4.5";');
   });
 
-  it('tient sous la limite de troncature du canal de déploiement', () => {
-    const payload = loader.match(/const PAYLOAD = "([A-Za-z0-9+/=]+)";/)?.[1] ?? '';
-    // Au-delà de 20 000 caractères, l'API de déploiement tronque la source :
-    // la fonction démarrait alors en BOOT_ERROR (503).
-    expect(payload.length).toBeLessThan(20_000);
+  it('chaque morceau de payload reste sous la limite de troncature du canal de déploiement', () => {
+    // Au-delà de 20 000 caractères, l'API de déploiement tronque une CONSTANTE :
+    // la fonction démarrait alors en BOOT_ERROR (503). La taille totale du
+    // fichier reste tolérée (le chargeur de production fait ~23 Ko), d'où le
+    // découpage en plusieurs constantes reconcaténées.
+    const parts = payloadParts();
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) expect(part.length).toBeLessThan(20_000);
+    expect(fullPayload().length).toBeGreaterThanOrEqual(parts.length * 1000);
   });
 
   it('est exécutable par new Function (aucun import) et démarre le handler', () => {
-    const payload = loader.match(/const PAYLOAD = "([A-Za-z0-9+/=]+)";/)?.[1];
+    const payload = fullPayload();
     const source = gunzipSync(Buffer.from(payload as string, 'base64')).toString('utf8');
 
     // Régression v14 : le bundle conservait `import postgres from "npm:…"`, que
@@ -75,7 +86,7 @@ describe('artefact déployable business-grow', () => {
   });
 
   it('ne contient aucun import relatif ni secret fournisseur', () => {
-    const payload = loader.match(/const PAYLOAD = "([A-Za-z0-9+/=]+)";/)?.[1];
+    const payload = fullPayload();
     const source = gunzipSync(Buffer.from(payload as string, 'base64')).toString('utf8');
 
     // Le chargeur est le seul fichier déployé : un import relatif casserait le boot.
@@ -89,7 +100,7 @@ describe('artefact déployable business-grow', () => {
   it('refuse une origine inconnue en renvoyant l’en-tête CORS explicite', () => {
     // Régression : un 403 sans en-tête CORS est vu par le navigateur comme une
     // panne réseau, affichée à tort « backend absent ou non déployé ».
-    const payload = loader.match(/const PAYLOAD = "([A-Za-z0-9+/=]+)";/)?.[1];
+    const payload = fullPayload();
     const source = gunzipSync(Buffer.from(payload as string, 'base64')).toString('utf8');
     expect(source).toContain('forceAllowOrigin');
     expect(source).toContain('ORIGIN_NOT_ALLOWED');

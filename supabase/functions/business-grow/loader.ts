@@ -8,8 +8,8 @@
 import postgres from "npm:postgres@3.4.5";
 
 const ARTIFACT_NAME = "business-grow";
-const ARTIFACT_SHA256 = "6093711eabe0b413c4c51e6efdab12849cef3b56b8371980ab98a246bf032aac";
-const ARTIFACT_CHARS = 47882;
+const ARTIFACT_SHA256 = "462afb50b39688daeafd383ba7aabbfd2eb3312785c77790eff899c0b7873831";
+const ARTIFACT_CHARS = 52062;
 
 async function readArtifact(): Promise<string> {
   const base = Deno.env.get("SUPABASE_URL") ?? "";

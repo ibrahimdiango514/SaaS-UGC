@@ -377,7 +377,11 @@ const geminiAdapter: BusinessProviderAdapter = {
 // Chaque adaptateur réutilise l'AI CORE partagé : même contrat, mêmes
 // normalisations d'erreurs, même lecture des tokens.
 // ---------------------------------------------------------------------------
-import { getAiAdapter } from '../_shared/ai-core/index.ts';
+// Import direct (pas le barrel index.ts) : le bundle Business Grow embarque
+// UNIQUEMENT les adaptateurs — le routeur/moteur du registre vit dans le
+// moteur central (vyora-ai) et reste hors de cet artefact (limite de
+// troncature du canal de déploiement : payload base64 < 20 000 caractères).
+import { getAiAdapter } from '../_shared/ai-core/adapters.ts';
 
 function mapAiCoreError(error: unknown): ProviderCallError {
   if (error instanceof ProviderCallError) return error;

@@ -111,14 +111,27 @@ export function artifact(root = process.cwd()) {
 }
 
 export function renderLoader({ payload, sha256, chars }) {
+  // Le canal de déploiement tronque toute CONSTANTE de plus de 20 000
+  // caractères (le fichier lui-même reste toléré au-delà : le chargeur de
+  // production fait ~23 Ko). Le payload voyage donc en plusieurs morceaux,
+  // chacun largement sous la limite, reconcaténés avant décompression.
+  const CHUNKS = 4;
+  const size = Math.ceil(payload.length / CHUNKS);
+  const parts = [];
+  for (let i = 0; i < payload.length; i += size) {
+    parts.push(payload.slice(i, i + size));
+  }
+  const consts = parts
+    .map((p, i) => `const PAYLOAD_${i + 1} = "${p}";`)
+    .join('\n');
+  const join = parts.map((_, i) => `PAYLOAD_${i + 1}`).join(' + ');
   return `// business-grow — artefact de déploiement autonome.
-// Généré depuis supabase/functions/business-grow/*.ts par
-// scripts/build-business-grow-artifact.mjs (esbuild --bundle --minify).
-// Le canal de déploiement n'achemine pas fidèlement une source multi-fichiers :
-// le bundle complet voyage compressé (gzip+base64) et son intégrité est vérifiée
-// par SHA-256 à froid. Le code exécuté est exactement celui du dépôt.
+// Généré par scripts/build-business-grow-artifact.mjs (esbuild --minify).
+// Bundle gzip+base64 (morceaux < 20 Ko, tronquables par le canal de déploiement),
+// intégrité vérifiée par SHA-256 à froid. Code exécuté = code du dépôt.
 import postgres from "npm:postgres@3.4.5";
-const PAYLOAD = "${payload}";
+${consts}
+const PAYLOAD = ${join};
 const ARTIFACT_SHA256 = "${sha256}";
 const ARTIFACT_CHARS = ${chars};
 const bytes = Uint8Array.from(atob(PAYLOAD), (c) => c.charCodeAt(0));

@@ -292,8 +292,6 @@ export const AI_PROVIDERS: Record<string, AiProviderAdapter> = {
   openrouter: openrouterAdapter,
 };
 
-export const AI_PROVIDER_IDS: readonly string[] = Object.keys(AI_PROVIDERS);
-
 export function getAiAdapter(providerKey: string): AiProviderAdapter | null {
   return AI_PROVIDERS[providerKey] ?? null;
 }

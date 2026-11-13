@@ -224,5 +224,39 @@ export async function run(ctx) {
     'AI CORE : la table mémoire saas_business n’est JAMAIS exposée au client (pas de schéma public, RLS deny-by-default)',
     `status=${r.status}`);
 
+  // --- 11. Mémoire agent persistante (E2E réel : consentement → déclaration) --
+  r = await edge('memory.consent', { enabled: true }, T_ALICE);
+  h.check(r.status === 200, 'mémoire agent : consentement mémoire activé', `status=${r.status}`);
+
+  r = await edge('messages.send', {
+    conversationId: convA,
+    content: 'Notre entreprise vend des savons artisanaux à Bamako.',
+    idempotencyKey: crypto.randomUUID(), roleKey: 'business_advisor',
+  }, T_ALICE);
+  h.check(r.status === 200 && r.json?.data?.status === 'succeeded', 'mémoire agent : la conversation fonctionne (réponse réelle du fournisseur)', `status=${r.status}`);
+  const memCount = (await ctx.adminQuery(
+    'select count(*)::int n from saas_business.ai_memories where user_id = $1 and deleted_at is null',
+    [users.alice.id],
+  ))[0];
+  h.check(memCount.n >= 1,
+    'mémoire agent : la DÉCLARATION explicite de l’entreprise est persistée (catégorie company, confidence fact)',
+    `n=${memCount.n}`);
+
+  r = await edge('agentMemory.list', {}, T_ALICE);
+  h.check(r.status === 200 && (r.json?.data?.memories?.length ?? 0) >= 1,
+    'mémoire agent : l’utilisateur peut LISTER ses mémoires',
+    `n=${r.json?.data?.memories?.length}`);
+  const memId = r.json?.data?.memories?.[0]?.id;
+
+  r = await edge('agentMemory.forget', { memoryId: memId }, T_ALICE);
+  h.check(r.status === 200 && r.json?.data?.forgotten === true,
+    'mémoire agent : l’utilisateur peut EFFACER une mémoire (tombstone, pas de suppression physique)',
+    `status=${r.status}`);
+
+  const bobMem = await edge('agentMemory.list', {}, T_BOB);
+  h.check(bobMem.status === 200 && (bobMem.json?.data?.memories?.length ?? 0) === 0,
+    'mémoire agent : ISOLATION stricte — bob ne voit aucune mémoire d’alice',
+    `n=${bobMem.json?.data?.memories?.length}`);
+
   return h.finish();
 }
