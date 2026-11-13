@@ -270,8 +270,10 @@ un webhook de paiement rejoué ne relivre rien.
 
 ## 5. Mise en service (dans cet ordre)
 
-État au 13/11/2026 : les étapes 2 et 3 sont faites en production (§ 10). Les
-étapes 1 et 4 (secrets, webhook côté SasPay) et l'activation restent à faire.
+État au 13/11/2026 : secrets installés, migrations appliquées, fonctions
+déployées, paiements activés en mode `live` (§ 10). Restent le contrôle du
+webhook et du mode de frais dans le tableau de bord SasPay, et la publication
+de l'interface.
 
 1. **Créer la clé SasPay de VYORA.** Les secrets `SASPAY_SECRET_KEY` et
    `SASPAY_WEBHOOK_SECRET` existants appartiennent au produit immobilier et ne
@@ -651,45 +653,59 @@ section « prix tout compris » de `e2e.mjs` (vraies Edge Functions),
 | Fonctions | `vyora-payments` v1 (`verify_jwt = true`), `vyora-saspay-webhook` v1 et `vyora-payments-reconcile` v1 (`verify_jwt = false`), toutes `ACTIVE`. |
 | Bundle | `public._edge_function_artifact`, nom `vyora-saspay`, SHA-256 `acefd467…dd690`, 56 709 caractères, copié par la base depuis le commit `6f3c8d9`. |
 | Tâche planifiée | `vyora-payments-reconcile`, toutes les 5 minutes ; jeton présent dans Vault. |
-| Configuration | `saspay_payment_config` : `enabled = false`, `mode = "test"`. Politique de prix active (provision 1 000 FCFA, « Déduits » demandé), barème vide. |
-| Secrets | `VYORA_SASPAY_SECRET_KEY` et `VYORA_SASPAY_WEBHOOK_SECRET` **absents**. |
+| Configuration | `saspay_payment_config` : `enabled = true`, `mode = "live"` (clé `sk_live_…`). Politique de prix active (provision 1 000 FCFA, « Déduits » demandé), barème vide. |
+| Secrets | `VYORA_SASPAY_SECRET_KEY` et `VYORA_SASPAY_WEBHOOK_SECRET` présents dans les secrets Supabase (installés le 13/11/2026 ; valeurs jamais écrites dans le dépôt). `SASPAY_SECRET_KEY` et `SASPAY_WEBHOOK_SECRET` (produit immobilier) non modifiés. |
 
 ### Réponses mesurées en production (sondes `pg_net`)
 
 | Appel | Réponse |
 | --- | --- |
-| Webhook, sans signature | 503 `WEBHOOK_NOT_CONFIGURED` |
-| Webhook, signature forgée | 503 `WEBHOOK_NOT_CONFIGURED` |
+| Webhook, sans signature | 401 `WEBHOOK_SIGNATURE_INVALID` (`missing`) — 503 `WEBHOOK_NOT_CONFIGURED` avant l'installation du secret |
+| Webhook, signature forgée | 401 `WEBHOOK_SIGNATURE_INVALID` (`mismatch`) |
 | Webhook, `GET` | 405 `METHOD_NOT_ALLOWED` |
 | Réconciliation, sans en-tête | 403 `CRON_FORBIDDEN` |
 | Réconciliation, mauvais jeton | 401 `CRON_UNAUTHORIZED` |
-| Réconciliation, jeton de Vault | 200 `{"ran":false,"reason":"not_configured"}` |
+| Réconciliation, jeton de Vault | 200 `{"ran":true,"status":"ok","checked":0,…}` — `not_configured` avant l'installation de la clé |
 | `vyora-payments`, sans session | 401 de la passerelle (`UNAUTHORIZED_NO_AUTH_HEADER`) |
-| `vyora_payment_quote`, pack Creator (SQL, rôle de service) | 6 000 FCFA, 27 crédits, `enabled: false` |
+| `vyora_payment_quote`, pack Creator (SQL, rôle de service) | 6 000 FCFA, 27 crédits, `enabled: true`, `mode: "live"` |
 | `vyora_payment_quote`, pack Studio Business | 36 000 FCFA, 265 crédits |
 | `vyora_payment_quote`, Business Grow | `business_billing_disabled` |
 
-Tant que les secrets manquent, aucun chemin ne peut créditer : le webhook
-répond 503 avant toute lecture, la réconciliation ne s'exécute pas, la création
-de paiement répond « service non configuré ».
+Un crédit n'est accordé qu'après relecture du paiement chez SasPay
+(`GET /payments/{id}/verify/`) : un webhook non signé, mal signé ou rejoué ne
+crédite rien.
 
-**Non mesuré** : un appel connecté à `vyora-payments`. Il exige la session d'un
-vrai compte ; aucun compte de sonde n'a été créé (aucune suppression de compte
-n'étant permise ensuite). Le même bundle démarre dans les deux autres fonctions.
+**Non mesuré**, faute de pouvoir le faire sans paiement réel ni session :
 
-### Reste à faire pour encaisser
+- un appel connecté à `vyora-payments` (il exige la session d'un vrai compte ;
+  aucun compte de sonde n'a été créé, aucune suppression de compte n'étant
+  permise ensuite). Le même bundle démarre dans les deux autres fonctions ;
+- l'acceptation de la clé par SasPay : aucun appel sortant n'a eu lieu (rien à
+  réconcilier). Une clé refusée donnerait une erreur à la création du paiement,
+  sans débit ;
+- un webhook réellement signé par SasPay.
 
-1. Installer `VYORA_SASPAY_SECRET_KEY` (`sk_live_…`) et
-   `VYORA_SASPAY_WEBHOOK_SECRET` dans Supabase → Edge Functions → Secrets.
-2. Dans le tableau de bord SasPay : créer le webhook vers
+### Reste à faire
+
+1. Tableau de bord SasPay : vérifier que le webhook VYORA pointe vers
    `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/vyora-saspay-webhook`
-   (`transaction.success`, `transaction.failed`, `transaction.cancelled`), avec
-   le secret de signature de l'étape 1 ; régler les frais sur « Déduits » ou
-   autoriser le choix du mode par l'API.
-3. Passer `mode` à `"live"` et `enabled` à `true` dans `saspay_payment_config`
-   (la clé `sk_live_…` et le mode doivent concorder, sinon tout est refusé).
-4. Administration → « Importer les tarifs du compte ».
-5. Publier l'interface (branche non fusionnée, aucun déploiement Netlify fait).
+   avec `transaction.success`, `transaction.failed`, `transaction.cancelled`.
+   Sans lui, la réconciliation rattrape le paiement en 5 minutes au plus.
+2. Tableau de bord SasPay → Paramètres → Frais : « Déduits » par défaut, ou
+   « Autoriser le choix du mode de frais par l'API ». Sinon SasPay ajoute ses
+   frais au client ; c'est signalé après coup (`fee_mode_unexpected`), pas empêché.
+3. Publier l'interface (branche non fusionnée, aucun déploiement Netlify fait).
+4. Premier paiement réel = recette : dérouler le tableau « Recette » du § 5,
+   puis Administration → « Importer les tarifs du compte ».
+5. Business Grow : fixer prix et quota d'une formule, puis `billing_enabled`.
+
+Couper les paiements sans rien redéployer :
+
+```sql
+update saas_ugc.ugc_app_settings
+   set setting_value = setting_value || '{"enabled": false}'
+ where setting_key = 'saspay_payment_config';
+```
 
 ### Publier une nouvelle version du code de paiement
 
