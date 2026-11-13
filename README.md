@@ -2,7 +2,7 @@
 
 SaaS francophone de création de contenus UGC et de croissance d'activité. Le Studio vidéo utilise MuAPI côté serveur ; Business Grow dispose de son schéma Supabase et de son Edge Function. Les fournisseurs sont présentés comme opérationnels uniquement lorsque leurs secrets et modèles sont effectivement vérifiés. Ce dépôt contient le frontend, les migrations SQL, les Edge Functions et les tests.
 
-> **État de production vérifié le 12 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour VYORA sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Les corrections de redirection et d'interface admin sont présentes dans le bundle de production ; une connexion navigateur avec les identifiants du propriétaire n'a pas été effectuée. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur ; Groq n'est pas configuré. Aucune génération payante n'a été lancée.
+> **État de production vérifié le 12 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour VYORA sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Les corrections de redirection et d'interface admin sont présentes dans le bundle de production ; une connexion navigateur avec les identifiants du propriétaire n'a pas été effectuée. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur. Groq et Gemini sont configurés et vérifiés en santé (dernier contrôle réussi le 12 novembre 2026 à 23:46 UTC : `groq/openai-gpt-oss-120b` priorité 1, repli `gemini/gemini-2.5-flash`), et la fonction Edge `business-grow` est en version 13 ACTIVE (voir `docs/incident-business-grow-prod-20261112.md`). La surveillance `pg_cron` est rétablie : l'ambiguïté de `vyora_provider_health_dispatch` est corrigée (migration `20261112001000_vyora_provider_health_dispatch_ambiguity.sql` appliquée) et les jobs `vyora-provider-health-daily` (11) et `vyora-provider-health-fresh-guard` (12) appellent explicitement `dispatch(false)` ; un cycle forcé a renouvelé les contrôles Groq et Gemini (`healthy`, 164 ms / 78 ms). Aucune génération payante n'a été lancée.
 
 ---
 
@@ -135,12 +135,15 @@ Les inscriptions suivantes reçoivent uniquement le rôle `user`. Le RPC de rôl
 
 | Slug | Version | `verify_jwt` |
 | --- | --- | --- |
-| `reelora-health` | v8 | `false` |
+| `reelora-health` | v10 | `false` |
 | `reelora-owner-bootstrap` | v1 | `false` (session, confirmation e-mail et adresse propriétaire vérifiées côté serveur) |
-| `reelora-ai` | v6 | `true` |
+| `reelora-ai` | v9 | `true` |
 | `reelora-video` | v10 | `true` |
+| `video-quote` | v4 | `true` |
 | `reelora-video-worker` | v6 | `false` (jeton Vault) |
-| `business-grow` | v6 | `true` |
+| `vyora-ai` | v3 | `true` |
+| `vyora-provider-health` | v1 | `false` (cron + secret) |
+| `business-grow` | v13 | `true` |
 
 > Le worker et les fonctions vidéo sont déployés et le cron `reelora-video-tick` est actif. Cela ne signifie pas qu'une génération payante est utilisable : le plafond reste à zéro et la tarification n'est pas configurée.
 
@@ -271,3 +274,49 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 ---
 
 © 2026 VYORA. Hébergement Supabase `eu-central-1`. Aucune donnée de démonstration ni aucun résultat de génération n'est présenté comme réel.
+
+---
+
+## Tarification des crédits Studio (migration à appliquer)
+
+La grille de crédits du **Studio uniquement** est portée par la migration
+`supabase/migrations/20261112040000_studio_credit_grid.sql`. Elle n'a pas été
+appliquée en production : sans elle, `/app/credits` affiche un état d'erreur
+explicite et aucune commande ne peut être créée.
+
+| Pack | Prix | Crédits | Prix au crédit |
+| --- | --- | --- | --- |
+| Creator | 5 000 FCFA | 27 | 185,19 FCFA |
+| Pro Creator (recommandé) | 15 000 FCFA | 95 | 157,89 FCFA |
+| Studio Business | 35 000 FCFA | 265 | 132,08 FCFA |
+
+Règles appliquées côté serveur :
+
+- Le client ne transmet **qu'une clé de pack** ; prix, crédits et prix au crédit
+  sont relus dans `ugc_app_settings.studio_pricing_config` puis figés sur
+  `saas_ugc.ugc_credit_purchases`.
+- Un achat crée une commande `pending` ; les crédits ne sont accordés qu'après
+  confirmation du paiement par un administrateur (`ugc_confirm_recharge`).
+  Aucun prélèvement automatique, aucun paiement simulé.
+- Le coût d'une génération est calculé exclusivement par l'Edge Function
+  (`calculateVideoCredits`) : coût fournisseur + coûts annexes, change
+  `usd_to_xof`, marge cible Studio, valeur du crédit. Paramètre manquant ou coût
+  non nul inconnu ⇒ `null` ⇒ génération bloquée.
+- Portefeuille, historique, grille et marge sont propres au Studio
+  (`saas_ugc.*`, `ugc_credit_ledger`). La marge de 95 % de Business Grow n'est
+  jamais réutilisée ici.
+
+### Vérifications reproductibles
+
+```bash
+npx tsc -b --pretty false          # 0 erreur
+npx vitest run                     # 44 fichiers / 478 tests
+npm run check:edge-imports         # imports Deno conformes
+npm run build                      # build de production
+npm run dev                        # puis, dans un autre terminal :
+node scripts/studio-preview.mjs --base http://127.0.0.1:4180 --out preview-studio
+```
+
+Les captures de `preview-studio/` sont obtenues avec le réseau du navigateur
+intercepté : elles ne déclenchent aucune écriture Supabase, aucun paiement et
+aucune génération. Voir `preview-studio/README.md`.

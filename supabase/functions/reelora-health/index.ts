@@ -9,8 +9,11 @@ const cors: Record<string, string> = {
 Deno.serve((req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   const configured = {
-    // Text generation (scripts, hooks, dialogues, ad copy).
-    groq: Boolean(Deno.env.get("GROQ_API_KEY")),
+    // Text generation (scripts, hooks, dialogues, ad copy). The browser talks to
+    // `vyora-ai`, whose Groq key is the BUSINESS_GROW_* secret with a GROQ_*
+    // fallback: a probe that only checked GROQ_API_KEY reported `groq:false`
+    // while the AI engine was actually serving text.
+    groq: Boolean(Deno.env.get("BUSINESS_GROW_GROQ_API_KEY") || Deno.env.get("GROQ_API_KEY")),
     // PRIMARY video generation. MUAPI_API_KEY is a Supabase Edge secret; it is
     // never a VITE_* variable and is never sent to the browser.
     muapi: Boolean(Deno.env.get("MUAPI_API_KEY")),

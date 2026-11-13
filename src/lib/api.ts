@@ -1,7 +1,7 @@
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
-  AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
+  AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
   Profile, Project, PromptTemplate, QuotaStatus, RechargeOrder, Scene, Script,
   ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
@@ -35,7 +35,7 @@ export async function rpc<T>(name: string, args: Record<string, unknown> = {}): 
   return unwrap<T>((supabase.rpc as any)(name, args));
 }
 
-async function invokeEdge<T>(name: string, body: Record<string, unknown>): Promise<T> {
+export async function invokeEdge<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) {
     let payload: { error?: { code?: string; message?: string } } | null = null;
@@ -541,6 +541,8 @@ export async function getVideoProviderQuote(modelId: string, quote?: VideoQuoteI
   if (quote?.prompt) body.prompt = quote.prompt;
   if (quote?.image_url) body.image_url = quote.image_url;
   if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
+  if (quote?.video_url) body.video_url = quote.video_url;
+  if (quote?.audio_url) body.audio_url = quote.audio_url;
   if (quote?.param_schema) body.param_schema = quote.param_schema;
   try {
     // Service de devis dédié (déployé indépendamment de la passerelle de génération).
@@ -557,6 +559,10 @@ export interface VideoQuoteInput {
   prompt?: string;
   image_url?: string;
   last_image_url?: string;
+  /** Source vidéo importée (Video→Video, Lip Sync). */
+  video_url?: string;
+  /** Source audio importée (Audio→Video, avatars parlants). */
+  audio_url?: string;
   /** Real schema fetched by model-detail; the server still validates every key. */
   param_schema?: Record<string, MuApiParamDef>;
 }
@@ -572,6 +578,8 @@ export async function estimateVideo(serviceKey: string, modelId: string, quote?:
   if (quote?.prompt) body.prompt = quote.prompt;
   if (quote?.image_url) body.image_url = quote.image_url;
   if (quote?.last_image_url) body.last_image_url = quote.last_image_url;
+  if (quote?.video_url) body.video_url = quote.video_url;
+  if (quote?.audio_url) body.audio_url = quote.audio_url;
   if (quote?.param_schema) body.param_schema = quote.param_schema;
   const estimate = await invokeEdge<VideoCostEstimate>('reelora-video', body);
   if (estimate.provider_quote) return estimate;
@@ -749,6 +757,71 @@ export async function aiEngineHealth(): Promise<AiEngineHealth> {
   return invokeEdge<AiEngineHealth>('vyora-ai', { action: 'health' });
 }
 
+/* -------------------------------------------------------------------------- */
+/* Surveillance des fournisseurs IA (job pg_cron)                              */
+/* -------------------------------------------------------------------------- */
+
+export interface ProviderHealthCronJob {
+  jobid: number;
+  jobname: string;
+  schedule: string;
+  active: boolean;
+  command: string;
+}
+
+export interface ProviderHealthCronRun {
+  jobid: number;
+  jobname: string | null;
+  status: string;
+  return_message: string | null;
+  start_time: string;
+  end_time: string | null;
+}
+
+export interface ProviderHealthCronProvider {
+  provider_key: string;
+  last_checked_at: string | null;
+  last_status: string | null;
+  last_latency_ms: number | null;
+  last_error_code: string | null;
+  consecutive_failures: number;
+  alert_open: boolean;
+  last_dispatch_at: string | null;
+  last_healthy_at: string | null;
+  verified_model: string | null;
+  provider_status: string | null;
+  provider_enabled: boolean | null;
+}
+
+export interface ProviderHealthCronHistory {
+  provider_key: string;
+  status: string;
+  attempt: number;
+  http_status: number | null;
+  latency_ms: number | null;
+  error_code: string | null;
+  provider_model_key: string | null;
+  checked_at: string | null;
+  created_at: string;
+}
+
+export interface ProviderHealthCronStatus {
+  generated_at: string;
+  jobs: ProviderHealthCronJob[];
+  last_runs: ProviderHealthCronRun[];
+  providers: ProviderHealthCronProvider[];
+  history: ProviderHealthCronHistory[];
+}
+
+/**
+ * État réel du job pg_cron de surveillance : jobs planifiés, dernières
+ * exécutions, dernière vérification de chaque fournisseur. Lecture serveur
+ * (`vyora_provider_health_status`), refusée à tout non-administrateur.
+ */
+export async function adminProviderHealthCron(): Promise<ProviderHealthCronStatus> {
+  return rpc<ProviderHealthCronStatus>('vyora_provider_health_status', {});
+}
+
 export async function adminMetrics(months = 12): Promise<AdminMetrics> {
   return rpc<AdminMetrics>('vyora_admin_metrics', { p_months: months });
 }
@@ -819,11 +892,56 @@ export function adminProviderSpendSummary(): Promise<AdminProviderSpendSummary> 
   return rpc<AdminProviderSpendSummary>('reelora_admin_provider_spend_summary');
 }
 
+/**
+ * Solde fournisseur MuAPI lu côté serveur. `balance_usd` vaut `null` quand le
+ * solde n'a PAS pu être vérifié : ce n'est jamais 0 et l'interface doit le dire
+ * explicitement plutôt que d'afficher un montant inventé.
+ */
+export function adminProviderBalance(): Promise<AdminProviderBalance> {
+  return rpc<AdminProviderBalance>('reelora_admin_provider_balance');
+}
+
+/**
+ * Force une resynchronisation réelle du solde auprès de MuAPI (appel serveur).
+ * Aucune génération n'est déclenchée : seul `GET /api/v1/account/balance` est lu.
+ */
+export async function adminRefreshProviderBalance(): Promise<AdminProviderBalance> {
+  const data = await invokeEdge<{ balance: AdminProviderBalance; spend: AdminProviderSpendSummary | null }>(
+    'reelora-video',
+    { action: 'admin-provider-balance', refresh: true },
+  );
+  return data.balance;
+}
+
 export async function adminSetProviderSpendCap(maxUsd: number, enabled: boolean): Promise<boolean> {
   return rpc<boolean>('reelora_admin_set_provider_spend_cap', {
     p_max_usd: maxUsd,
     p_enabled: enabled,
   });
+}
+
+/**
+ * Politique de budget fournisseur complète : plafond global, seuil d'alerte
+ * et plafonds par fournisseur. Les plafonds par fournisseur ne peuvent pas
+ * dépasser le plafond global ; un fournisseur sans plafond dédié reste borné
+ * par le plafond global.
+ */
+export async function adminSetProviderSpendPolicy(
+  maxUsd: number,
+  enabled: boolean,
+  alertPercent: number,
+  providerCapsUsd: Record<string, number>,
+): Promise<{ enabled: boolean; max_usd: number; alert_percent: number; provider_caps_usd: Record<string, number> }> {
+  return rpc('reelora_admin_set_provider_spend_policy', {
+    p_max_usd: maxUsd,
+    p_enabled: enabled,
+    p_alert_percent: alertPercent,
+    p_provider_caps_usd: providerCapsUsd,
+  });
+}
+
+export async function adminAckProviderSpendAlert(alertId: string): Promise<boolean> {
+  return rpc<boolean>('reelora_admin_ack_provider_spend_alert', { p_alert_id: alertId });
 }
 
 export async function adminCreatePromo(code: string, bonusCredits: number, maxRedemptions = 100) {

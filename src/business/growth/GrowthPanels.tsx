@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  ArrowUpRight, Building2, Check, Download, ExternalLink, FileText, Lightbulb, Package,
+  ArrowUpRight, Building2, Check, Clapperboard, Download, ExternalLink, FileText, Lightbulb, Package,
   Pencil, Plus, RefreshCw, Search, Target, Trash2, TrendingUp, Upload, Users, X, Link2,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { createProduct, deleteProduct, listProducts, updateProduct } from '../../lib/api';
+import { buildStudioLocationStateFromBrief } from '../../contracts/business-grow';
 import type { Product, Workspace } from '../../lib/types';
 import {
   EMPTY_COMPANY_PROFILE, GROWTH_CATEGORY, PROSPECT_STAGES, formatGrowthAmount, goalProgress,
@@ -492,6 +494,20 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
                   <ExternalLink size={10} /> Voir la fiche produit
                 </a>
               )}
+              <Link
+                to="/app/studio"
+                state={buildStudioLocationStateFromBrief({
+                  productId: product.id,
+                  product: product.name,
+                  summary: product.description ?? '',
+                  angle: (product.key_benefits ?? []).slice(0, 3).join(' · '),
+                  brandName: product.name,
+                }) ?? undefined}
+                className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] font-medium text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.12]"
+                data-testid={`catalog-to-studio-${product.id}`}
+              >
+                <Clapperboard size={11} /> Créer la vidéo UGC de ce produit
+              </Link>
             </article>
           ))}
         </div>

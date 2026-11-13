@@ -384,18 +384,39 @@ const defaultAllowedOrigins = [
   'http://localhost:4173',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:4173',
+  // Domaine de production actuel du SaaS (README, vérifié le 2026-11-12).
+  'https://vyora-ugc.netlify.app',
   'https://saas-ugc-growth.netlify.app',
   'https://deploy-preview-*--saas-ugc-growth.netlify.app',
+  // Aperçus de la branche de travail actuelle : leur nom porte le slug du
+  // site Netlify (`vyora`), absent des motifs ci-dessus.
+  'https://deploy-preview-*--vyora.netlify.app',
   'https://sbc-ai-agency-dashbord.netlify.app',
   'https://reelora.netlify.app',
-  'https://5173-iu476i6ok9qrn5o47a39w.e2b.app',
-  'https://4173-iu476i6ok9qrn5o47a39w.e2b.app',
+  // Un aperçu de travail tourne sur un hôte `{port}-{sandbox}.e2b.app` dont
+  // l'identifiant de sandbox change à chaque session : lister des identifiants
+  // figés produisait un 403 ORIGIN_NOT_ALLOWED (« backend absent ou
+  // injoignable ») dès qu'un nouvel aperçu était ouvert. CORS n'est pas une
+  // frontière d'authentification ici : chaque requête exige un JWT VYORA.
+  'https://*.e2b.app',
 ].join(',');
 
-const allowedOrigins = (env('BUSINESS_GROW_ALLOWED_ORIGINS') || defaultAllowedOrigins)
-  .split(',')
+// Le secret `BUSINESS_GROW_ALLOWED_ORIGINS` s'AJOUTE à la liste par défaut au lieu
+// de la remplacer : une valeur partielle (ou une rotation de secret) ne pouvait
+// jusqu'ici retirer la production de la liste et produisait un 403
+// ORIGIN_NOT_ALLOWED — donc « backend absent ou injoignable » côté SaaS alors que
+// la fonction répondait. CORS n'est pas la frontière d'authentification : chaque
+// requête exige encore un JWT VYORA valide.
+const productionOrigins = ['https://vyora-ugc.netlify.app', 'https://*.e2b.app'];
+
+const allowedOrigins = [
+  ...defaultAllowedOrigins.split(','),
+  ...productionOrigins,
+  ...(env('BUSINESS_GROW_ALLOWED_ORIGINS') || '').split(','),
+]
   .map((origin) => origin.trim())
-  .filter(Boolean);
+  .filter(Boolean)
+  .filter((origin, index, all) => all.indexOf(origin) === index);
 
 Deno.serve(createBusinessGrowHandler({
   store,

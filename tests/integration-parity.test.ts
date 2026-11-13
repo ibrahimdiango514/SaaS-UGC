@@ -15,10 +15,12 @@ const ai = read('supabase/functions/reelora-ai/index.ts');
 const config = read('supabase/config.toml');
 
 describe('Une seule intégration MuAPI, de bout en bout', () => {
-  it('déclare les quatre fonctions Studio, Business Grow et le bootstrap propriétaire', () => {
+  it('déclare les quatre fonctions Studio, Business Grow, le bootstrap propriétaire et les trois fonctions de paiement', () => {
     const declared = [...config.matchAll(/^\[functions\.([a-z0-9-]+)\]/gm)].map((m) => m[1]);
-    expect(declared.sort()).toEqual(['business-grow', 'reelora-ai', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker']);
+    expect(declared.sort()).toEqual(['business-grow', 'reelora-ai', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker', 'vyora-payments', 'vyora-payments-reconcile', 'vyora-provider-health', 'vyora-saspay-webhook']);
     expect(config).toMatch(/\[functions\.business-grow\]\r?\nverify_jwt = true/);
+    // Paiement : la fonction appelée par le navigateur exige un JWT.
+    expect(config).toMatch(/\[functions\.vyora-payments\]\r?\nverify_jwt = true/);
   });
 
   it('la passerelle vidéo lit uniquement le secret serveur MUAPI_API_KEY', () => {
@@ -34,14 +36,23 @@ describe('Une seule intégration MuAPI, de bout en bout', () => {
   });
 
   it('le frontend envoie des chemins Storage privés que la passerelle sait signer', () => {
-    const studio = read('src/studio/VideoStudio.tsx');
-    for (const key of ['image_storage_path', 'last_image_storage_path', 'image_url', 'last_image_url']) {
+    // Le Studio immersif est l'entrée principale : c'est lui qui porte les
+    // imports média (image, image finale, vidéo source, audio source).
+    const studio = read('src/studio/GenerationStudio.tsx');
+    for (const key of [
+      'image_storage_path', 'last_image_storage_path', 'image_url', 'last_image_url',
+      'video_storage_path', 'audio_storage_path', 'video_url', 'audio_url',
+    ]) {
       expect(studio).toContain(key);
     }
     for (const marker of ['function workspaceImagePath(', 'async function signStoragePath(', 'lastImageUrl', 'LAST_IMAGE_MISSING']) {
       expect(video).toContain(marker);
     }
-    expect(video).toContain('buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl)');
+    // Les sources média sont assemblées puis transmises à `buildMuapiBody`.
+    expect(video).toContain('buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, { videoUrl, audioUrl })');
+    for (const marker of ['VIDEO_MISSING', 'AUDIO_MISSING', 'video_storage_path', 'audio_storage_path']) {
+      expect(video).toContain(marker);
+    }
   });
 
   it('le worker enrichit result_payload avec les métadonnées affichées par la bibliothèque', () => {

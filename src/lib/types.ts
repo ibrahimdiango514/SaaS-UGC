@@ -419,9 +419,27 @@ export interface AdminProviderSpendEntry {
   completed_at: string | null;
 }
 
+export type ProviderSpendAlertState = 'ok' | 'threshold' | 'cap_reached' | 'disabled';
+
+export interface AdminProviderSpendAlert {
+  id: string;
+  provider: string | null;
+  kind: 'threshold' | 'cap_exceeded' | 'blocked_attempt' | 'cap_reached';
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  reason: string;
+  created_at: string;
+  acknowledged_at: string | null;
+}
+
 export interface AdminProviderSpendSummary {
   enabled: boolean;
   max_usd: number;
+  /** Seuil d'alerte en pourcentage du plafond global (0 = alertes désactivées). */
+  alert_percent: number;
+  /** Plafonds optionnels par fournisseur ; absent = seul le plafond global s'applique. */
+  provider_caps_usd: Record<string, number>;
+  alert_state: ProviderSpendAlertState;
   actual_spent_usd: number;
   reserved_usd: number;
   estimated_unpriced_usd: number;
@@ -429,7 +447,16 @@ export interface AdminProviderSpendSummary {
   remaining_usd: number;
   tests_count: number;
   blocked_count: number;
-  by_provider: { provider: string; actual_spent_usd: number; reserved_usd: number; committed_usd: number }[];
+  by_provider: {
+    provider: string;
+    actual_spent_usd: number;
+    reserved_usd: number;
+    committed_usd: number;
+    /** Plafond dédié au fournisseur (chaîne numérique SQL) ou null. */
+    cap_usd: string | null;
+    remaining_usd: number | null;
+  }[];
+  alerts: AdminProviderSpendAlert[];
   history: AdminProviderSpendEntry[];
 }
 
@@ -641,4 +668,29 @@ export interface AdminCreditHistory {
   balance: number;
   reserved: number;
   entries: AdminCreditHistoryEntry[];
+}
+
+/**
+ * Solde fournisseur réel (MuAPI) tel que persisté par le serveur.
+ *
+ * Règle d'affichage : `balance_usd === null` signifie « non vérifié » — il ne
+ * faut jamais l'afficher comme 0 USD ni le confondre avec le plafond VYORA, la
+ * dépense VYORA ou le budget restant, qui sont des montants distincts.
+ */
+export interface AdminProviderBalance {
+  provider: string;
+  status: 'ok' | 'error' | 'unknown';
+  balance_usd: number | null;
+  currency: string | null;
+  account_email?: string | null;
+  bonus_balances?: Record<string, number>;
+  topup_totals?: Record<string, number>;
+  http_status?: number | null;
+  /** Dernière synchronisation réussie (null si jamais vérifiée). */
+  synced_at?: string | null;
+  /** Dernière tentative de lecture, réussie ou non. */
+  checked_at?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  error?: string | null;
 }

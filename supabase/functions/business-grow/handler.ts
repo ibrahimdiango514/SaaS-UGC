@@ -204,9 +204,10 @@ function response(
   status: number,
   origin: string | null,
   allowedOrigins: string[],
+  options: { forceAllowOrigin?: boolean } = {},
 ): Response {
   const headers = new Headers(jsonHeaders);
-  if (isOriginAllowed(origin, allowedOrigins) && origin) {
+  if (origin && (options.forceAllowOrigin || isOriginAllowed(origin, allowedOrigins))) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Vary', 'Origin');
   }
@@ -297,7 +298,17 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
     }
 
     if (origin && !originAllowed) {
-      return response(failure('ORIGIN_NOT_ALLOWED', 'Origine non autorisée.'), 403, null, dependencies.allowedOrigins);
+      // Le préflight et la requête refusés renvoient l'en-tête CORS de repli :
+      // sans lui, le navigateur transforme ce 403 explicite en erreur réseau
+      // (FunctionsFetchError), que le SaaS affichait à tort comme « backend
+      // absent ou non déployé ». Le refus reste un 403, il devient seulement lisible.
+      return response(
+        failure('ORIGIN_NOT_ALLOWED', 'Origine non autorisée.'),
+        403,
+        origin,
+        dependencies.allowedOrigins,
+        { forceAllowOrigin: true },
+      );
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
     if (request.method !== 'POST') {

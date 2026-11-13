@@ -8,7 +8,11 @@ describe('Business Grow integration boundaries', () => {
   it('keeps provider endpoints and credentials out of browser code', () => {
     const api = read('src/business/api.ts');
 
-    expect(api).toContain("functions.invoke('business-grow'");
+    // La fonction est appelée directement (fetch + JWT VYORA explicite) et via
+    // les relais same-origin : jamais un SDK qui pourrait omettre l'authentification.
+    expect(api).toContain('/functions/v1/business-grow');
+    expect(api).toContain('Bearer ${accessToken}');
+    expect(api).toContain("'/api/business-grow'");
     expect(api).not.toMatch(/api\.groq\.com|generativelanguage\.googleapis\.com/i);
     expect(api).not.toMatch(/BUSINESS_GROW_.*API_KEY|GROQ_API_KEY|GEMINI_API_KEY/);
   });

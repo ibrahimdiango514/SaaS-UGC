@@ -116,7 +116,10 @@ describe('Business Grow Edge handler', () => {
     }));
 
     expect(response.status).toBe(403);
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    // Le refus est renvoyé AVEC l'en-tête d'origine : sans lui le navigateur
+    // transforme ce 403 en erreur réseau, affichée à tort « backend absent ».
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://attacker.example');
+    expect(await response.json()).toMatchObject({ error: { code: 'ORIGIN_NOT_ALLOWED' } });
   });
 
   it('derives the owner from the validated session, not a body user id', async () => {
@@ -848,7 +851,10 @@ describe('Business Grow Edge handler', () => {
       headers: { Origin: 'https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com' },
     }));
     expect(spoofedPreflight.status).toBe(403);
-    expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin')).toBeNull();
+    expect(spoofedPreflight.headers.get('Access-Control-Allow-Origin'))
+      .toBe('https://deploy-preview-4--saas-ugc-growth.netlify.app.evil.com');
+    const spoofedBody = await spoofedPreflight.json() as { error?: { code?: string } };
+    expect(spoofedBody.error?.code).toBe('ORIGIN_NOT_ALLOWED');
   });
 
   it('falls back cleanly when preferredModelKey is unavailable and allowFallback is true', async () => {
@@ -884,5 +890,43 @@ describe('Business Grow Edge handler', () => {
       },
     });
     expect(store.selectRoute).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Origines des aperçus de travail (régression CORS)', () => {
+  it('accepte un aperçu e2b de n’importe quelle session et refuse un hôte usurpé', async () => {
+    const { dependencies } = fixture();
+    const handler = createBusinessGrowHandler({
+      ...dependencies,
+      allowedOrigins: [...dependencies.allowedOrigins, 'https://*.e2b.app'],
+    });
+
+    for (const origin of [
+      'https://4180-ia19ukd7j0vjzx70dsuks.e2b.app',
+      'https://5173-iu476i6ok9qrn5o47a39w.e2b.app',
+    ]) {
+      const preflight = await handler(new Request('https://edge.test/business-grow', {
+        method: 'OPTIONS',
+        headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
+      }));
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+    }
+
+    for (const origin of [
+      'https://4180-ia19ukd7j0vjzx70dsuks.e2b.app.evil.com',
+      'http://4180-ia19ukd7j0vjzx70dsuks.e2b.app',
+    ]) {
+      const blocked = await handler(new Request('https://edge.test/business-grow', {
+        method: 'OPTIONS',
+        headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
+      }));
+      expect(blocked.status).toBe(403);
+      // Refus explicite et lisible : l'origine est renvoyée pour que le navigateur
+      // expose le 403 ORIGIN_NOT_ALLOWED au lieu d'une erreur réseau opaque.
+      expect(blocked.headers.get('Access-Control-Allow-Origin')).toBe(origin);
+      const blockedBody = await blocked.json() as { error?: { code?: string } };
+      expect(blockedBody.error?.code).toBe('ORIGIN_NOT_ALLOWED');
+    }
   });
 });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, LockKeyhole,
+  Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, Loader2, LockKeyhole,
   MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, X, Zap,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
@@ -225,6 +225,27 @@ function isVerifiedProvider(provider: BusinessProviderStatus | undefined): boole
   );
 }
 
+/** Fenêtre réelle de validité d'un contrôle fournisseur côté SQL : 24 h. */
+const PROVIDER_HEALTH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Sélectionne les fournisseurs réellement configurés côté serveur dont le
+ * dernier contrôle date de plus de 24 h (ou n'existe pas). Ce sont exactement
+ * ceux qui font échouer `messages.send` en `NO_VERIFIED_PROVIDER`.
+ */
+export function providersNeedingVerification(
+  statuses: BusinessProviderStatus[] | null,
+  now = Date.now(),
+): BusinessProviderStatus[] {
+  return (statuses ?? []).filter((provider) => {
+    if (provider.provider_key === 'muapi') return false;
+    if (provider.config_status !== 'configured') return false;
+    if (!provider.checked_at) return true;
+    const checked = Date.parse(provider.checked_at);
+    return !Number.isFinite(checked) || now - checked > PROVIDER_HEALTH_WINDOW_MS;
+  });
+}
+
 function formatProbeTime(checkedAt: string | null | undefined): string {
   if (!checkedAt) return '';
   const date = new Date(checkedAt);
@@ -327,16 +348,21 @@ function ProviderStatusList({ statuses, compact = false }: {
       <div className="min-w-0">
         <p className="text-sm font-medium text-slate-200">Assistant IA VYORA</p>
         <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-          {activeCount > 0 ? 'Les services IA sont disponibles.' : 'Les services IA sont momentanément indisponibles.'}
+          {activeCount > 0
+            ? 'Les services IA sont disponibles.'
+            : 'Le contrôle de disponibilité est en cours.'}
         </p>
       </div>
-      <Badge tone={activeCount > 0 ? 'success' : 'warning'}>{activeCount > 0 ? 'Disponible' : 'Indisponible'}</Badge>
+      <Badge tone={activeCount > 0 ? 'success' : 'warning'}>
+        {activeCount > 0 ? 'Disponible' : 'Vérification…'}
+      </Badge>
     </div>
   );
 }
 
 function AssistantView({
   backendReady,
+  backendLoading,
   providers,
   models,
   quota,
@@ -368,6 +394,7 @@ function AssistantView({
   onRetry,
 }: {
   backendReady: boolean;
+  backendLoading: boolean;
   providers: BusinessProviderStatus[] | null;
   models: BusinessModelRecord[];
   quota: BusinessQuotaStatus | null;
@@ -542,13 +569,28 @@ function AssistantView({
             </div>
           )}
           {!backendReady && (
-            <div className="m-auto w-full max-w-xl rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-left" role="status" data-testid="business-ai-unavailable">
+            <div
+              className={cn(
+                'm-auto w-full max-w-xl rounded-2xl border p-4 text-left',
+                backendLoading
+                  ? 'border-white/[0.08] bg-white/[0.02]'
+                  : 'border-amber-400/20 bg-amber-400/[0.06]',
+              )}
+              role="status"
+              data-testid={backendLoading ? 'business-ai-loading' : 'business-ai-unavailable'}
+            >
               <div className="flex gap-3">
-                <LockKeyhole size={17} className="mt-0.5 shrink-0 text-amber-300" />
+                {backendLoading
+                  ? <Loader2 size={17} className="mt-0.5 shrink-0 animate-spin text-slate-400" />
+                  : <LockKeyhole size={17} className="mt-0.5 shrink-0 text-amber-300" />}
                 <div>
-                  <p className="text-sm font-semibold text-amber-100">Backend Business Grow indisponible</p>
-                  <p className="mt-1 text-xs leading-relaxed text-amber-100/70">
-                    L’historique et la mémoire seront activés après installation du schéma et de la fonction serveur. Aucune donnée n’est enregistrée localement comme si elle était persistée.
+                  <p className={cn('text-sm font-semibold', backendLoading ? 'text-slate-200' : 'text-amber-100')}>
+                    {backendLoading ? 'Connexion à Business Grow…' : 'Business Grow ne répond pas pour le moment'}
+                  </p>
+                  <p className={cn('mt-1 text-xs leading-relaxed', backendLoading ? 'text-slate-500' : 'text-amber-100/70')}>
+                    {backendLoading
+                      ? 'L’historique et la mémoire se chargent dès que la session VYORA est confirmée.'
+                      : 'La connexion a été retentée automatiquement. Vérifiez votre connexion puis utilisez « Réessayer » : aucune donnée n’est inventée ni enregistrée localement.'}
                   </p>
                 </div>
               </div>
@@ -832,7 +874,11 @@ function AssistantView({
               <MessageSquare size={18} className="mx-auto text-slate-600" />
               <p className="mt-2 text-xs font-medium text-slate-400">Aucune conversation enregistrée</p>
               <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
-                {backendReady ? 'Créez une conversation pour commencer.' : 'Disponible après connexion au backend.'}
+                {backendReady
+                  ? 'Créez une conversation pour commencer.'
+                  : backendLoading
+                    ? 'Chargement de vos conversations…'
+                    : 'Réessayez quand la connexion est rétablie.'}
               </p>
             </div>
           )}
@@ -845,7 +891,9 @@ function AssistantView({
           </div>
           <ProviderStatusList statuses={providers} compact />
           <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
-            {availableProviders.length === 0 ? 'Aucun service IA disponible pour le moment.' : 'Disponibilité vérifiée côté serveur.'}
+            {availableProviders.length === 0
+              ? 'Aucun service IA vérifié pour le moment. La vérification se relance automatiquement.'
+              : 'Disponibilité vérifiée côté serveur.'}
           </p>
         </section>
 
@@ -986,6 +1034,7 @@ function MemoryView({
 
 function ProvidersView({
   backendReady,
+  backendLoading,
   statuses,
   models,
   requests,
@@ -997,6 +1046,7 @@ function ProvidersView({
   onSaveRouting,
 }: {
   backendReady: boolean;
+  backendLoading: boolean;
   statuses: BusinessProviderStatus[] | null;
   models: BusinessModelRecord[];
   requests: Array<Record<string, unknown>>;
@@ -1064,6 +1114,11 @@ function ProvidersView({
               {verifyBanner.message}
             </p>
             {verifyBanner.hint && <p className="mt-1 text-[11px] opacity-85">Réessayez plus tard ou contactez le support VYORA.</p>}
+          </div>
+        )}
+        {!backendReady && backendLoading && (
+          <div className="mb-3 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-xs text-slate-400" role="status">
+            Connexion au registre des fournisseurs…
           </div>
         )}
         <div className="space-y-3">
@@ -1342,6 +1397,8 @@ export default function BusinessGrowWorkspace() {
   const [messages, setMessages] = useState<BusinessMessage[]>([]);
   const [memory, setMemory] = useState<BusinessMemory | null>(null);
   const [backendReady, setBackendReady] = useState(false);
+  /** Premier appel encore en vol : ne jamais présenter cela comme une panne. */
+  const [backendLoading, setBackendLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingMemory, setLoadingMemory] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1390,6 +1447,7 @@ export default function BusinessGrowWorkspace() {
     setMessages([]);
     setMemory(null);
     setBackendReady(false);
+    setBackendLoading(true);
     setLoadingMessages(false);
     setLoadingMemory(false);
     setBusy(false);
@@ -1445,6 +1503,7 @@ export default function BusinessGrowWorkspace() {
     const requestScope = accountScope;
     if (!hasSession) {
       setBackendReady(false);
+      setBackendLoading(false);
       setProviders(null);
       setConversations([]);
       setSelectedConversationId(null);
@@ -1454,9 +1513,19 @@ export default function BusinessGrowWorkspace() {
     }
     setBackendReady(false);
     setError(null);
-    const [statusResult, conversationsResult] = await Promise.allSettled([loadStatus(), loadConversations()]);
+    setBackendLoading(true);
+    let [statusResult, conversationsResult] = await Promise.allSettled([loadStatus(), loadConversations()]);
     if (requestId !== workspaceLoadSequence.current || accountScopeRef.current !== requestScope) return;
-    if (statusResult.status === 'fulfilled' && conversationsResult.status === 'fulfilled') {
+    // Un seul aller-retour supplémentaire : un incident réseau transitoire au
+    // montage ne doit pas figer la page en « backend indisponible ».
+    if (statusResult.status === 'rejected' && conversationsResult.status === 'rejected') {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      if (requestId !== workspaceLoadSequence.current || accountScopeRef.current !== requestScope) return;
+      [statusResult, conversationsResult] = await Promise.allSettled([loadStatus(), loadConversations()]);
+      if (requestId !== workspaceLoadSequence.current || accountScopeRef.current !== requestScope) return;
+    }
+    setBackendLoading(false);
+    if (statusResult.status === 'fulfilled' || conversationsResult.status === 'fulfilled') {
       setBackendReady(true);
       void loadOperationalDetails();
       return;
@@ -1466,7 +1535,7 @@ export default function BusinessGrowWorkspace() {
       ? statusResult.reason instanceof Error ? statusResult.reason.message : 'Le registre IA est indisponible.'
       : conversationsResult.status === 'rejected' && conversationsResult.reason instanceof Error
         ? conversationsResult.reason.message
-        : 'Le backend Business Grow n’est pas encore installé ou accessible.');
+        : 'Business Grow ne répond pas pour le moment. Réessayez dans quelques instants.');
   }, [accountScope, hasSession, loadConversations, loadOperationalDetails, loadStatus, sessionToken]);
 
   useEffect(() => {
@@ -1664,7 +1733,13 @@ export default function BusinessGrowWorkspace() {
         'BG_INSUFFICIENT_QUOTA',
       ].includes(code)) {
         const errorMessage = humanizeError(code, 'Impossible de traiter votre demande. Réessayez.');
-        setError(errorMessage);
+        // Un service réel non vérifié depuis 24 h donne exactement ce code :
+        // on guide vers la vérification plutôt que d'afficher une panne générique.
+        setError(
+          code === 'NO_VERIFIED_PROVIDER'
+            ? 'Aucun service IA n’est vérifié pour le moment. Ouvrez « Services IA » puis lancez « Vérifier la connexion » sur un fournisseur configuré : votre message reste enregistré et aucun crédit n’a été débité.'
+            : errorMessage,
+        );
         await Promise.allSettled([
           loadConversations(),
           conversationId
@@ -1703,38 +1778,77 @@ export default function BusinessGrowWorkspace() {
     }
   }, [accountScope, selectedConversationId]);
 
-  const verifyProvider = useCallback(async (providerKey: string, modelKey?: string) => {
+  const verifyProvider = useCallback(async (
+    providerKey: string,
+    modelKey?: string,
+    options: { silent?: boolean } = {},
+  ) => {
     const requestScope = accountScope;
     if (!businessGrowApi.verifyProvider) return;
     setVerifyingKey(providerKey);
-    setVerifyBanner(null);
+    // Une sonde silencieuse (auto-réparation) ne doit jamais effacer un message
+    // explicite déjà affiché : sinon un échec diagnostiqué devenait « succès ».
+    if (!options.silent) setVerifyBanner(null);
     try {
       const result: BusinessVerificationResult = modelKey
         ? await businessGrowApi.verifyProvider(providerKey, modelKey)
         : await businessGrowApi.verifyProvider(providerKey);
       if (accountScopeRef.current !== requestScope) return;
-      const discoveredCount = Array.isArray(result.availableModels) ? result.availableModels.length : 0;
-      setVerifyBanner({
-        tone: 'success',
-        message: `Connexion vérifiée avec succès · ${result.latencyMs} ms.`,
-        hint: discoveredCount > 0 ? `${discoveredCount} modèle(s) actif(s).` : null,
-      });
+      if (!options.silent) {
+        const discoveredCount = Array.isArray(result.availableModels) ? result.availableModels.length : 0;
+        setVerifyBanner({
+          tone: 'success',
+          message: `Connexion vérifiée avec succès · ${result.latencyMs} ms.`,
+          hint: discoveredCount > 0 ? `${discoveredCount} modèle(s) actif(s).` : null,
+        });
+      }
       await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
     } catch (verifyError) {
       if (accountScopeRef.current === requestScope) {
         const errorCode = verifyError instanceof BusinessGrowApiError ? verifyError.code : null;
-        setVerifyBanner({
-          tone: 'error',
-          code: errorCode,
-          message: 'Impossible de vérifier la connexion au service IA. Réessayez plus tard.',
-          hint: errorCode ? describeProviderFailureHint(errorCode) : null,
-        });
+        if (!options.silent || errorCode) {
+          setVerifyBanner({
+            tone: 'error',
+            code: errorCode,
+            message: 'Impossible de vérifier la connexion au service IA.',
+            hint: errorCode ? describeProviderFailureHint(errorCode) : null,
+          });
+        }
         await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
       }
     } finally {
       if (accountScopeRef.current === requestScope) setVerifyingKey(null);
     }
   }, [accountScope, loadOperationalDetails, loadStatus]);
+
+  // Auto-réparation des fournisseurs : un fournisseur configuré dont le contrôle
+  // est expiré n'est plus routable, et la page se figeait en « aucun service IA
+  // vérifié » jusqu'à un clic manuel. On relance le contrôle une seule fois par
+  // fournisseur et par session de page (garde `autoProbeRef`) : la sonde est
+  // gratuite (aucune génération, aucun crédit consommé).
+  const autoProbeRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!backendReady || verifyingKey) return;
+    const pending = providersNeedingVerification(providers)
+      .filter((provider) => !autoProbeRef.current.has(provider.provider_key))
+      .slice(0, 1);
+    const target = pending[0];
+    if (!target) return;
+    autoProbeRef.current.add(target.provider_key);
+    let cancelled = false;
+    void (async () => {
+      setVerifyingKey(target.provider_key);
+      try {
+        await verifyProvider(target.provider_key, undefined, { silent: true });
+        if (!cancelled) await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
+      } catch {
+        // Échec silencieux : le diagnostic reste dans la carte « Services IA VYORA ».
+      } finally {
+        if (!cancelled) setVerifyingKey(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [backendReady, providers, verifyProvider, verifyingKey]);
 
   const saveRouting = useCallback(async (pref: BusinessRoutingPreference) => {
     const requestScope = accountScope;
@@ -1833,6 +1947,11 @@ export default function BusinessGrowWorkspace() {
   const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
   const ActiveIcon = activeSection.icon;
   const availableProviderCount = (providers ?? []).filter((provider) => isVerifiedProvider(provider)).length;
+  // Un contrôle fournisseur expire au bout de 24 h côté SQL : sans nouveau
+  // sondage explicite, l'envoi de messages échoue en NO_VERIFIED_PROVIDER.
+  const staleProviders = providersNeedingVerification(providers);
+  const showStaleNotice = backendReady && staleProviders.length > 0;
+  const noVerifiedProvider = availableProviderCount === 0;
   const providerStatusTone = availableProviderCount
     ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100'
     : backendReady
@@ -1863,10 +1982,38 @@ export default function BusinessGrowWorkspace() {
           </div>
           <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium', providerStatusTone)} data-testid="business-overall-status">
             <span className={cn('h-1.5 w-1.5 rounded-full', providerStatusDot)} />
-            {availableProviderCount ? `${availableProviderCount} service(s) IA vérifié(s)` : backendReady ? 'IA non disponible' : 'Backend en attente'}
+            {availableProviderCount
+              ? `${availableProviderCount} service(s) IA vérifié(s)`
+              : backendReady
+                ? 'IA non disponible'
+                : backendLoading
+                  ? 'Connexion…'
+                  : 'Backend en attente'}
           </span>
         </div>
       </header>
+
+      {showStaleNotice && (
+        <section
+          className={cn(
+            'flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-3 text-xs leading-relaxed',
+            noVerifiedProvider
+              ? 'border-amber-400/25 bg-amber-400/[0.06] text-amber-100'
+              : 'border-white/[0.08] bg-white/[0.02] text-slate-300',
+          )}
+          role="status"
+          data-testid="business-stale-providers"
+        >
+          <span className="min-w-0">
+            {noVerifiedProvider
+              ? 'Le contrôle de disponibilité de vos services IA a expiré (validité serveur : 24 h). Aucune réponse ne sera simulée tant qu’un service n’aura pas été re-vérifié.'
+              : `Le secours automatique est dégradé : ${staleProviders.length} service(s) configuré(s) n’a plus de contrôle valide (24 h). Vérifiez-le pour garantir les réponses en cas d’indisponibilité du service principal.`}
+          </span>
+          <Button size="sm" variant="outline" icon={<RefreshCw size={12} />} onClick={() => setSection('providers')}>
+            Ouvrir les services IA
+          </Button>
+        </section>
+      )}
 
       <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
@@ -1921,6 +2068,7 @@ export default function BusinessGrowWorkspace() {
           {section === 'chat' && (
             <AssistantView
               backendReady={backendReady}
+              backendLoading={backendLoading}
               providers={providers}
               models={models}
               quota={quota}
@@ -1963,6 +2111,7 @@ export default function BusinessGrowWorkspace() {
               onOpenAssistant={() => setSection('chat')}
               onOpenIntegrations={() => setSection('integrations')}
               onOpenProviders={() => setSection('providers')}
+              initialTab={entryIntent?.growthTab ?? null}
             />
           )}
           {section === 'company' && <CompanyContextView workspace={workspace} />}
@@ -1982,6 +2131,7 @@ export default function BusinessGrowWorkspace() {
           {section === 'providers' && (
             <ProvidersView
               backendReady={backendReady}
+              backendLoading={backendLoading}
               statuses={providers}
               models={models}
               requests={requests}

@@ -99,7 +99,15 @@ describe('architecture modulaire et espaces préparés', () => {
   it('déclare les espaces livrés et préparés sans ambiguity', () => {
     const live = STUDIO_SECTIONS.filter((s) => s.status === 'live').map((s) => s.id);
     expect(live).toEqual(expect.arrayContaining(['video', 'generations', 'projects', 'saved']));
-    for (const id of ['image', 'avatar', 'video-to-video', 'audio', 'lip-sync', 'workflows', 'storyboarding']) {
+    // Video→Video et Lip Sync sont désormais livrés : leur capacité réelle
+    // existe côté fournisseur et le Studio les ouvre sur `?mode=`.
+    for (const id of ['video-to-video', 'lip-sync']) {
+      const section = STUDIO_SECTIONS.find((s) => s.id === id);
+      expect(section?.status).toBe('live');
+      expect(section?.route).toMatch(/^\/app\/studio\?mode=/);
+    }
+    // Ce qui n'a réellement aucun moteur connecté reste marqué « préparé ».
+    for (const id of ['image', 'avatar', 'audio', 'workflows', 'storyboarding']) {
       expect(STUDIO_SECTIONS.find((s) => s.id === id)?.status).toBe('prepared');
     }
     expect(NAV_SECTIONS.every((s) => s.group !== 'roadmap')).toBe(true);

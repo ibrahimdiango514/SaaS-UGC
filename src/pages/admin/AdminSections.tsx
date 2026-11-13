@@ -15,7 +15,13 @@ import { Badge, Button, Card, CardHeader, EmptyState, Input, LoadingState, Selec
 import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { formatDate } from '../../lib/format';
-import { adminVideoCatalog, aiEngineHealth, type AiEngineHealth } from '../../lib/api';
+import {
+  adminProviderHealthCron,
+  adminVideoCatalog,
+  aiEngineHealth,
+  type AiEngineHealth,
+  type ProviderHealthCronStatus,
+} from '../../lib/api';
 import type { AdminMetrics, AdminVideoCatalogResponse, MuApiModel } from '../../lib/types';
 import { BarChart, LineChart, Sparkline } from './AdminCharts';
 
@@ -437,6 +443,125 @@ export function ModelsSection() {
 /* Fournisseurs IA                                                            */
 /* -------------------------------------------------------------------------- */
 
+const CRON_STATUS_LABELS: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' }> = {
+  healthy: { label: 'Sain', tone: 'success' },
+  collected: { label: 'Reçu', tone: 'success' },
+  dispatched: { label: 'Envoyé', tone: 'neutral' },
+  failed: { label: 'Échec', tone: 'danger' },
+  no_response: { label: 'Sans réponse', tone: 'danger' },
+  degraded: { label: 'Dégradé', tone: 'warning' },
+  skipped: { label: 'Ignoré', tone: 'neutral' },
+};
+
+function cronLabel(status: string | null | undefined) {
+  if (!status) return { label: 'Jamais exécuté', tone: 'neutral' as const };
+  return CRON_STATUS_LABELS[status] ?? { label: status, tone: 'neutral' as const };
+}
+
+/**
+ * État réel du job pg_cron de surveillance des fournisseurs : jobs planifiés,
+ * dernières exécutions planifiées et dernière vérification de chaque
+ * fournisseur. Aucune valeur n'est estimée côté navigateur.
+ */
+export function ProviderHealthCronCard() {
+  const [status, setStatus] = useState<ProviderHealthCronStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try { setStatus(await adminProviderHealthCron()); }
+    catch (err) { setError(asAppError(err).message); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const jobs = status?.jobs ?? [];
+  const providers = status?.providers ?? [];
+  const lastRuns = status?.last_runs ?? [];
+
+  return (
+    <Card>
+      <CardHeader
+        title="Surveillance automatique des fournisseurs"
+        description="Job pg_cron qui re-vérifie Groq et Gemini avant l’expiration des contrôles de 24 h. Données lues en base."
+        action={<Button variant="ghost" size="sm" onClick={() => void load()} loading={loading} icon={<RefreshCw size={14} />}>Rafraîchir</Button>}
+      />
+      <div className="space-y-4" data-testid="provider-health-cron">
+        {error ? <div className="rounded-xl border border-rose-400/30 bg-rose-400/[0.06] p-4 text-sm text-rose-200">{error}</div> : null}
+        {loading && !status ? <LoadingState label="Lecture de la planification…" /> : null}
+
+        {!loading && !error && jobs.length === 0 ? (
+          <div className="rounded-xl border border-amber-400/30 bg-amber-400/[0.06] p-4 text-sm text-amber-200">
+            Aucun job de surveillance planifié : les contrôles de santé expirent au bout de 24 h et le routage refusera les fournisseurs.
+          </div>
+        ) : null}
+
+        {jobs.length > 0 ? (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Job</th><th>jobid</th><th>Fréquence (UTC)</th><th>État</th></tr></thead>
+              <tbody>
+                {jobs.map((job) => (
+                  <tr key={job.jobid}>
+                    <td className="font-medium text-white">{job.jobname}</td>
+                    <td>{job.jobid}</td>
+                    <td className="font-mono text-xs">{job.schedule}</td>
+                    <td><Badge tone={job.active ? 'success' : 'danger'}>{job.active ? 'actif' : 'inactif'}</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {providers.length > 0 ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {providers.map((provider) => {
+              const state = cronLabel(provider.last_status);
+              return (
+                <div key={provider.provider_key} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium text-white">{provider.provider_key === 'gemini' ? 'Gemini' : 'Groq'}</p>
+                    <Badge tone={state.tone}>{state.label}</Badge>
+                  </div>
+                  <dl className="mt-3 space-y-1 text-xs text-slate-400">
+                    <div className="flex justify-between gap-3"><dt>Dernier contrôle réussi</dt><dd className="text-slate-200">{provider.last_healthy_at ? formatDate(provider.last_healthy_at, true) : '—'}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Dernier envoi</dt><dd className="text-slate-200">{provider.last_dispatch_at ? formatDate(provider.last_dispatch_at, true) : '—'}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Latence</dt><dd className="text-slate-200">{provider.last_latency_ms === null ? '—' : `${provider.last_latency_ms} ms`}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Modèle vérifié</dt><dd className="text-slate-200">{provider.verified_model ?? '—'}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Échecs consécutifs</dt><dd className={provider.consecutive_failures > 0 ? 'text-amber-300' : 'text-slate-200'}>{provider.consecutive_failures}</dd></div>
+                    <div className="flex justify-between gap-3"><dt>Alerte ouverte</dt><dd className={provider.alert_open ? 'text-rose-300' : 'text-slate-200'}>{provider.alert_open ? 'oui' : 'non'}</dd></div>
+                  </dl>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {lastRuns.length > 0 ? (
+          <div className="table-wrap">
+            <table className="table">
+              <thead><tr><th>Exécution</th><th>Statut</th><th>Début</th><th>Message</th></tr></thead>
+              <tbody>
+                {lastRuns.map((run, index) => (
+                  <tr key={`${run.jobid}-${run.start_time}-${index}`}>
+                    <td className="font-medium text-white">{run.jobname ?? `job ${run.jobid}`}</td>
+                    <td><Badge tone={run.status === 'succeeded' ? 'success' : 'danger'}>{run.status}</Badge></td>
+                    <td className="text-xs text-slate-400">{formatDate(run.start_time, true)}</td>
+                    <td className="max-w-[22rem] truncate text-xs text-slate-400" title={run.return_message ?? ''}>{run.return_message ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) {
   const [health, setHealth] = useState<AiEngineHealth | null>(null);
   const [loading, setLoading] = useState(true);
@@ -470,6 +595,8 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
         <StatCard label="Gemini" value={gemini ? (gemini.configured ? 'configuré' : 'non configuré') : '—'} icon={<Sparkles size={19} />} tone={gemini?.configured ? 'emerald' : 'brand'} hint={gemini?.model ?? 'modèle inconnu'} />
         <StatCard label="MuAPI" value={metrics ? `${metrics.models.total} modèles` : '—'} icon={<Video size={19} />} tone="cyan" hint={metrics?.models.synced_at ? `synchronisé le ${formatDate(metrics.models.synced_at, true)}` : 'jamais synchronisé'} />
       </div>
+
+      <ProviderHealthCronCard />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>

@@ -23,6 +23,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Modules', items: [
     { to: '/app/studio', label: 'Studio UGC', icon: Clapperboard },
     { to: '/app/business', label: 'Business Grow', icon: Brain },
+    { to: '/app/business/abonnement', label: 'Formules Business Grow', icon: CreditCard },
   ] },
   { label: 'Ressources', items: [
     { to: '/app/avatars', label: 'Avatars', icon: Users },
@@ -56,7 +57,10 @@ export default function Layout() {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const studioMobileShell = location.pathname === '/app/studio';
+  // Le Studio est un canvas immersif : sur cette route, la navigation globale
+  // (barre latérale + en-tête) est remplacée par la barre de catégories du
+  // Studio, à toutes les tailles d'écran. Les autres pages gardent la coque.
+  const studioCanvas = location.pathname === '/app/studio';
   const navGroups = isAdmin
     ? [{ label: 'Administration', items: [{ to: '/admin', label: 'Administration', icon: Shield, end: true }] }]
     : NAV_GROUPS;
@@ -154,8 +158,8 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen lg:flex">
-      {/* Desktop sidebar */}
-      <aside className="relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex">
+      {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}
+      <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', studioCanvas && 'lg:hidden')}>
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
         <div className="relative px-2 pb-6">
@@ -193,7 +197,7 @@ export default function Layout() {
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-white/[0.06] bg-[#05080e]/80 px-4 backdrop-blur-2xl sm:px-6', studioMobileShell && 'hidden lg:flex')}>
+        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-white/[0.06] bg-[#05080e]/80 px-4 backdrop-blur-2xl sm:px-6', studioCanvas && 'hidden')}>
           <button className="btn btn-ghost btn-icon lg:hidden" onClick={() => setDrawerOpen(true)} aria-label="Ouvrir le menu"><Menu size={20} /></button>
           <div className="lg:hidden"><Logo compact to={isAdmin ? '/admin' : '/app'} /></div>
 
@@ -274,7 +278,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className={cn('relative flex-1 px-4 sm:px-6 lg:pb-10 lg:pt-8', studioMobileShell ? 'pb-0 pt-0' : 'pb-28 pt-6')}>
+        <main className={cn('relative flex-1 px-4 sm:px-6 lg:pb-10 lg:pt-8', studioCanvas ? 'pb-0 pt-0' : 'pb-28 pt-6')}>
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_50%_-20%,rgba(34,211,238,0.07),transparent_70%)]" />
           <div className="relative mx-auto w-full max-w-[1400px]"><Outlet /></div>
         </main>
@@ -309,7 +313,7 @@ export default function Layout() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', studioMobileShell ? 'hidden' : 'lg:hidden')}>
+      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', studioCanvas ? 'hidden' : 'lg:hidden')}>
         {mobileNav.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end}
             className={({ isActive }) => cn('flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition', isActive ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500')}>

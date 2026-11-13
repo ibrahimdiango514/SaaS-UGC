@@ -5,7 +5,7 @@ import { PageHeader, Card, CardHeader, Button, Badge, Select, LoadingState, Erro
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
-import { formatDate, statusLabel } from '../lib/format';
+import { formatDate, statusLabel, ledgerOperationLabel } from '../lib/format';
 import { cancelGeneration, listJobEvents, listJobs, listLedger } from '../lib/api';
 import type { GenerationJob, LedgerEntry } from '../lib/types';
 import { paramsSummary, type ParamValue } from '../studio/model';
@@ -219,7 +219,7 @@ export default function History({ embedded = false }: { embedded?: boolean }) {
             <div className="table-wrap"><table className="table"><thead><tr><th>Date</th><th>Opération</th><th>Disponible</th><th>Réservé</th><th>Description</th></tr></thead>
               <tbody>{ledger.map((l) => <tr key={l.id}>
                 <td className="whitespace-nowrap text-xs">{formatDate(l.created_at, true)}</td>
-                <td><Badge tone={l.available_delta > 0 ? 'success' : 'neutral'}>{l.operation_type}</Badge></td>
+                <td><Badge tone={l.available_delta > 0 ? 'success' : 'neutral'}>{ledgerOperationLabel(l.operation_type)}</Badge></td>
                 <td className={l.available_delta > 0 ? 'text-emerald-300' : l.available_delta < 0 ? 'text-rose-300' : ''}>{l.available_delta > 0 ? '+' : ''}{l.available_delta}</td>
                 <td className="text-slate-400">{l.reserved_delta}</td>
                 <td className="text-xs text-slate-400">{l.description || '—'}</td>

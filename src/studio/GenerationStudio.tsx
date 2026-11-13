@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertCircle, ArrowRight, CheckCircle2, Clapperboard, Coins, Database, Info,
-  Layers3, Plus, RefreshCw, Scissors, Square,
+  AlertCircle, ArrowRight, Clapperboard, Info, RefreshCw, Scissors, Square,
 } from 'lucide-react';
-import { Banner, Button, ErrorState, LoadingState, Modal, Select, cn } from '../components/ui';
+import { Banner, Button, ErrorState, LoadingState, Modal } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
   cancelGeneration, createProject, estimateVideo, generateScript, getJob, getVideoProviderQuote,
   healthCheck, getVideoCatalog, getVideoModelDetail, listAvatars, listProjects, listServices,
-  newGenerationIdempotencyKey, signedStorageUrl, startGeneration, uploadReferenceImage,
+  newGenerationIdempotencyKey, signedStorageUrl, startGeneration, uploadEditorMedia, uploadReferenceImage,
   videoStart, videoStatus,
 } from '../lib/api';
 import { asAppError } from '../lib/errors';
@@ -31,8 +30,7 @@ import {
   MODE_LABELS, modeFromModel, paramLabel, type ParamValue,
 } from './model';
 import {
-  QUALITY_TIERS, buildCompatibleParams, defaultSettingsFor, modelForQuality,
-  qualityTierSummary, serviceForQuality,
+  QUALITY_TIERS, buildCompatibleParams, defaultSettingsFor, modelForQuality, serviceForQuality,
 } from './quality';
 import { creditSummary } from './catalog';
 import {
@@ -41,7 +39,8 @@ import {
 } from './plan';
 import { loadLocalDraft, saveLocalDraft as createLocalEditorDraft } from './editor/persistence';
 import {
-  extractUgcHandoffBriefFromLocationState, formatUgcPromptFromBrief,
+  buildBusinessGrowLocationStateFromStudio, extractUgcHandoffBriefFromLocationState,
+  formatUgcPromptFromBrief,
 } from '../contracts/business-grow';
 
 const ACTIVE = ['queued', 'reserved', 'processing'];
@@ -58,6 +57,12 @@ interface SignedReference {
   lastPath?: string;
   lastUrl?: string;
   avatarId?: string;
+  /** Source vidéo importée (Video→Video, Lip Sync). */
+  videoPath?: string;
+  videoUrl?: string;
+  /** Source audio importée (Audio→Video, avatars parlants). */
+  audioPath?: string;
+  audioUrl?: string;
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -92,12 +97,17 @@ export default function GenerationStudio() {
   const [healthError, setHealthError] = useState('');
   const [form, setForm] = useState<GenerationFormState>(() => {
     const base = initialFormState();
-    if (!handedOffBrief) return base;
+    // Deep link depuis la barre de navigation du Studio (`?mode=…`) : ouvre
+    // directement la capacité demandée (Video→Video, Audio→Video).
+    const requestedMode = CREATION_MODES.find((m) => m.id === search.get('mode'))?.id;
+    const withMode = requestedMode ? { ...base, mode: requestedMode } : base;
+    if (!handedOffBrief) return withMode;
     const formattedPrompt = formatUgcPromptFromBrief(handedOffBrief);
     return {
-      ...base,
+      ...withMode,
       ...(formattedPrompt ? { prompt: formattedPrompt } : {}),
       ...(handedOffBrief.summary ? { script: handedOffBrief.summary } : {}),
+      ...(handedOffBrief.product && !formattedPrompt ? { prompt: handedOffBrief.product } : {}),
       ...(handedOffBrief.preferredRatio ? { ratio: handedOffBrief.preferredRatio } : {}),
     };
   });
@@ -113,8 +123,11 @@ export default function GenerationStudio() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [estimateError, setEstimateError] = useState('');
+  /** Code fournisseur expliquant un devis en attente (ex. PROMPT_REQUIRED). */
+  const [quotePendingCode, setQuotePendingCode] = useState<string | null>(null);
   const [reference, setReference] = useState<SignedReference | null>(null);
-  const [projectId, setProjectId] = useState(search.get('projet') ?? '');
+  // Projet demandé par le chemin d'arrivée : Business Grow (brief transféré) ou ?projet=.
+  const [projectId, setProjectId] = useState(search.get('projet') ?? handedOffBrief?.projectId ?? '');
   const [projectModal, setProjectModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [estimate, setEstimate] = useState<VideoCostEstimate | null>(null);
@@ -204,7 +217,7 @@ export default function GenerationStudio() {
       setModels(c.models ?? []); setCatalog(c.catalog ?? null);
       setCatalogError(c.catalog?.error ? 'Le catalogue vidéo est temporairement indisponible.' : '');
       setAvatars(av);
-      setProjectId((current) => current || p[0]?.id || '');
+      setProjectId((current) => (p.some((project) => project.id === current) ? current : p[0]?.id ?? ''));
     } catch (err) {
       setLoadError('Impossible de charger le Studio pour le moment. Vérifiez votre connexion puis réessayez.');
     } finally { setLoading(false); }
@@ -296,14 +309,28 @@ export default function GenerationStudio() {
     const declaredLastImage = Boolean(model?.input_fields.includes('last_image'));
     const wantsImage = requiredImage || declaredImage || form.mode === 'product' || form.mode === 'avatar';
     const wantsLastImage = declaredLastImage && !!form.lastReferenceFile;
-    if (!wantsImage && !wantsLastImage) return;
-    if ((form.referenceFile || form.lastReferenceFile) && !workspaceId) {
-      toast.error('Espace de travail indisponible : import de référence impossible.');
+    const declaredVideo = Boolean(model?.input_fields.some((f) => f === 'video_url' || f === 'input_video'));
+    const declaredAudio = Boolean(model?.input_fields.includes('audio_url'));
+    const wantsVideo = declaredVideo && !!form.sourceVideoFile;
+    const wantsAudio = declaredAudio && !!form.sourceAudioFile;
+    if (!wantsImage && !wantsLastImage && !wantsVideo && !wantsAudio) return;
+    if ((form.referenceFile || form.lastReferenceFile || form.sourceVideoFile || form.sourceAudioFile) && !workspaceId) {
+      toast.error('Espace de travail indisponible : import de média impossible.');
       return;
     }
     void (async () => {
       try {
         const next: SignedReference = {};
+        if (wantsVideo && form.sourceVideoFile && workspaceId) {
+          const videoPath = await uploadEditorMedia(workspaceId, form.sourceVideoFile);
+          next.videoPath = videoPath;
+          next.videoUrl = await signedStorageUrl(videoPath, 86400);
+        }
+        if (wantsAudio && form.sourceAudioFile && workspaceId) {
+          const audioPath = await uploadEditorMedia(workspaceId, form.sourceAudioFile);
+          next.audioPath = audioPath;
+          next.audioUrl = await signedStorageUrl(audioPath, 86400);
+        }
         if (wantsLastImage && form.lastReferenceFile && workspaceId) {
           const lastPath = await uploadReferenceImage(workspaceId, form.lastReferenceFile);
           next.lastPath = lastPath;
@@ -327,8 +354,13 @@ export default function GenerationStudio() {
       } catch (err) { if (active) toast.error(asAppError(err).message); }
     })();
     return () => { active = false; };
-  }, [form.referenceFile, form.lastReferenceFile, form.avatarId, form.mode, model?.model_id, requiredKey,
+  }, [form.referenceFile, form.lastReferenceFile, form.sourceVideoFile, form.sourceAudioFile,
+    form.avatarId, form.mode, model?.model_id, requiredKey,
     inputFieldsKey, workspaceId, avatars, toast]);
+
+  // Ce modèle exige-t-il une instruction ? (déterminé par son schéma serveur)
+  const promptRequiredByModel = (model?.required_fields ?? [])
+    .some((field) => field.toLowerCase() === 'prompt');
 
   // Quote is computed EXCLUSIVELY by the backend, with exact model + params.
   useEffect(() => {
@@ -338,13 +370,22 @@ export default function GenerationStudio() {
       return;
     }
     let active = true;
-    setEstimate(null); setEstimateError('');
+    setEstimate(null); setEstimateError(''); setQuotePendingCode(null);
     setProviderQuote(null); setProviderQuoteError('');
+    // Modèle exigeant une instruction et champ vide : inutile d'appeler le
+    // backend, le devis est impossible par construction. On évite un aller-retour
+    // réseau et un faux message d'erreur « backend indisponible ».
+    if (promptRequiredByModel && !form.prompt.trim()) {
+      setQuoteBusy(false);
+      setQuotePendingCode('PROMPT_REQUIRED');
+      return;
+    }
     const timer = window.setTimeout(() => {
       setQuoteBusy(true);
       void estimateVideo(service.service_key, model.model_id, {
         params: compatible, prompt: form.prompt.trim(),
         image_url: reference?.url, last_image_url: reference?.lastUrl,
+        video_url: reference?.videoUrl, audio_url: reference?.audioUrl,
         param_schema: model.param_schema,
       })
         .then((e) => {
@@ -352,7 +393,16 @@ export default function GenerationStudio() {
           setEstimate(e);
           setProviderQuote(e.provider_quote ?? null);
           setProviderQuoteError(e.provider_quote ? '' : 'Le serveur n’a pas renvoyé de devis fournisseur pour ces paramètres.');
-          setEstimateError(e.pricing_error ?? (!e.pricing_available ? 'Le coût en crédits est temporairement indisponible.' : ''));
+          // Un devis non disponible n'est pas toujours une panne : le code
+          // fournisseur permet de distinguer « il manque une instruction »
+          // (état normal) d'une vraie indisponibilité serveur.
+          const quoteCode = e.provider_quote?.error_code ?? null;
+          setQuotePendingCode(quoteCode === 'PROMPT_REQUIRED' ? quoteCode : null);
+          setEstimateError(
+            quoteCode === 'PROMPT_REQUIRED'
+              ? 'Renseignez une instruction vidéo pour obtenir un devis exact.'
+              : (e.pricing_error ?? (!e.pricing_available ? 'Le coût en crédits est temporairement indisponible.' : '')),
+          );
         })
         .catch(() => {
           if (!active) return;
@@ -364,7 +414,7 @@ export default function GenerationStudio() {
         .finally(() => { if (active) setQuoteBusy(false); });
     }, 350);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [service?.service_key, model?.model_id, schemaKey, inputFieldsKey, paramsKey, form.prompt,
+  }, [service?.service_key, model?.model_id, promptRequiredByModel, schemaKey, inputFieldsKey, paramsKey, form.prompt,
     reference?.url, reference?.lastUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshProviderQuote = useCallback(async () => {
@@ -375,6 +425,7 @@ export default function GenerationStudio() {
       const result = await getVideoProviderQuote(model.model_id, {
         params: compatible, prompt: form.prompt.trim(),
         image_url: reference?.url, last_image_url: reference?.lastUrl,
+        video_url: reference?.videoUrl, audio_url: reference?.audioUrl,
         param_schema: model.param_schema,
       });
       setProviderQuote(result.quote);
@@ -390,10 +441,6 @@ export default function GenerationStudio() {
   const requiresExactQuote = Boolean(model?.dynamic_pricing);
   const summary = creditSummary(estimate, balance, requiresExactQuote);
   const cost = summary.creditsCost;
-  const tierSummary = useMemo(
-    () => qualityTierSummary(models, services, modeDef.mode),
-    [models, services, modeDef.mode],
-  );
   const issues = useMemo(() => {
     const out: string[] = [];
     if (!model) out.push('Aucun modèle vidéo compatible disponible pour ce mode.');
@@ -406,7 +453,13 @@ export default function GenerationStudio() {
     if (estimateError) out.push(estimateError);
     if (form.prompt.trim().length < 20) out.push('Décrivez votre vidéo en au moins 20 caractères.');
     if (!projectId) out.push('Sélectionnez ou créez un projet.');
-    if (!estimate) out.push('Calcul du coût en crédits en cours…');
+    // Sans instruction, le devis n'est pas « en cours » : il ne démarrera
+    // qu'une fois la description saisie.
+    if (!estimate) {
+      out.push(promptRequiredByModel && !form.prompt.trim()
+        ? 'Renseignez une instruction vidéo pour obtenir un devis exact.'
+        : 'Calcul du coût en crédits en cours…');
+    }
     else {
       if (!estimate.service_active) out.push('Le service de crédits est inactif.');
       if (!estimate.model_available) out.push('Le modèle sélectionné n’est plus disponible.');
@@ -417,14 +470,19 @@ export default function GenerationStudio() {
     }
     const needsImage = (model?.required_fields ?? []).some((f) => f.toLowerCase() === 'image_url');
     if (needsImage && !reference?.url) out.push('Importez une image de référence pour ce modèle.');
+    const needsVideo = (model?.required_fields ?? []).some((f) => ['video_url', 'input_video'].includes(f.toLowerCase()));
+    if (needsVideo && !reference?.videoUrl) out.push('Importez une vidéo source pour ce modèle.');
+    const needsAudio = (model?.required_fields ?? []).some((f) => f.toLowerCase() === 'audio_url');
+    if (needsAudio && !reference?.audioUrl) out.push('Importez un fichier audio source pour ce modèle.');
     if (form.mode === 'product' && !form.referenceFile) out.push('Importez une image de produit.');
     if (form.mode === 'avatar' && !form.avatarId) out.push('Choisissez un avatar existant.');
     if (form.referenceFile && form.referenceFile.size > MAX_REFERENCE_BYTES) out.push('Image trop volumineuse (8 Mo maximum).');
     if (form.lastReferenceFile && form.lastReferenceFile.size > MAX_REFERENCE_BYTES) out.push('Image finale trop volumineuse (8 Mo maximum).');
     if (starting || (jobId && ACTIVE.includes(status))) out.push('Une génération est déjà en cours.');
     return out;
-  }, [model, service, catalog, catalogError, health, detailLoading, quoteBusy, estimateError,
+  }, [model, service, catalog, catalogError, health, detailLoading, quoteBusy, estimateError, promptRequiredByModel,
     form.prompt, form.mode, form.referenceFile, form.lastReferenceFile, form.avatarId, projectId,
+    form.sourceVideoFile, form.sourceAudioFile,
     estimate, balance, reference, starting, jobId, status, requiresExactQuote,
     summary.exactQuote, summary.quoteToConfirm, cost]);
   const blockedReason = issues[0] ?? '';
@@ -507,6 +565,10 @@ export default function GenerationStudio() {
           ...(reference.lastUrl ? { last_image_url: reference.lastUrl } : {}),
           ...(reference.lastPath ? { last_image_storage_path: reference.lastPath } : {}),
           ...(reference.avatarId ? { avatar_id: reference.avatarId } : {}),
+          ...(reference.videoUrl ? { video_url: reference.videoUrl } : {}),
+          ...(reference.videoPath ? { video_storage_path: reference.videoPath } : {}),
+          ...(reference.audioUrl ? { audio_url: reference.audioUrl } : {}),
+          ...(reference.audioPath ? { audio_storage_path: reference.audioPath } : {}),
         };
       } else if (form.mode === 'product' && form.referenceFile && workspaceId) {
         const path = await uploadReferenceImage(workspaceId, form.referenceFile);
@@ -650,137 +712,85 @@ export default function GenerationStudio() {
 
   const tracking = trackingState(status, providerState);
   const showEmpty = !form.prompt.trim() && !jobId && !result;
-  const catalogSummary = catalog ? `${catalog.active} modèles disponibles` : 'Actualisation en cours…';
   const catalogModel = selectedModel;
 
+  // Contexte réel transmis à Business Grow pour poursuivre le travail sans ressaisie.
+  // Le lien est déplacé dans le pied de page du studio : il ne doit pas occuper
+  // l'espace de création (exigence de la refonte immersive).
+  const activeProject = projects.find((p) => p.id === projectId) ?? null;
+  const businessContinuityState = buildBusinessGrowLocationStateFromStudio({
+    projectId: activeProject?.id ?? null,
+    projectTitle: activeProject?.title ?? null,
+    campaignObjective: activeProject?.campaign_objective ?? null,
+    targetAudience: activeProject?.target_audience ?? null,
+    platform: activeProject?.platform ?? null,
+    brief: activeProject?.brief ?? form.prompt.slice(0, 800),
+    scriptText: form.script || null,
+    productName: plan.product || null,
+  }, { growthTab: 'strategy', section: 'growth' });
+
+  // Le devis attend une instruction : ce n'est pas une panne backend.
+  const promptPending = quotePendingCode === 'PROMPT_REQUIRED';
+  // Les médias de référence sont-ils fournis (image/vidéo/audio selon le modèle) ?
+  const referenceReady = Boolean(reference?.url || reference?.videoUrl || reference?.audioUrl);
+
   return (
-    <div className="studio-v2 animate-fadeUp pb-2">
+    <div className="studio-canvas studio-v2 animate-fadeUp pb-2">
       <StudioTopBar />
 
-      <section className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4" aria-label="État du studio">
-        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
-          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Catalogue vidéo</p>
-          <p className="mt-1 text-sm font-semibold text-white">{models.length} modèle(s)</p>
-          <p className={cn('mt-0.5 flex items-center gap-1 text-[10px]', catalog?.verified ? 'text-emerald-300' : 'text-amber-200')}>
-            <span className={cn('h-1.5 w-1.5 rounded-full', catalog?.verified ? 'bg-emerald-300' : 'bg-amber-300')} />
-            {catalog?.verified ? 'Vérifié côté serveur' : 'Vérification en cours'}
-          </p>
+      {/* Alertes compactes : uniquement en cas de problème réel, jamais de contenu permanent. */}
+      {(catalogError || catalog?.verified === false || health?.muapi === false || estimateError) && (
+        <div className="mx-auto mt-3 max-w-3xl space-y-2 px-3 sm:px-6">
+          {catalogError && <Banner tone="danger" title="Catalogue vidéo partiellement indisponible">{catalogError}</Banner>}
+          {catalog?.verified === false && (
+            <Banner tone="warning" title="Service vidéo indisponible">
+              Aucune génération ne sera lancée tant que le service n’est pas rétabli.
+            </Banner>
+          )}
+          {health?.muapi === false && (
+            <Banner tone="warning" title="Service vidéo indisponible">
+              La génération ne peut pas aboutir pour le moment. Réessayez plus tard.
+            </Banner>
+          )}
+          {/* Un devis qui attend une instruction n'est PAS une panne : le dire
+              « Devis backend indisponible » en rouge faisait croire à une casse
+              serveur alors que le champ est simplement vide. */}
+          {estimateError && !promptPending && (
+            <Banner tone="danger" title="Devis backend indisponible">{estimateError}</Banner>
+          )}
+          {promptPending && estimateError && referenceReady && (
+            <Banner tone="info" title="Instruction vidéo requise">{estimateError}</Banner>
+          )}
         </div>
-        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
-          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Devis fournisseur</p>
-          <p className="mt-1 text-sm font-semibold text-white">
-            {providerQuoteBusy ? 'Calcul…' : providerQuote?.available ? 'Disponible en USD' : 'Non vérifié'}
-          </p>
-          <p className="mt-0.5 text-[10px] text-slate-500">
-            {providerQuote?.available ? `${providerQuote.cost_usd?.toFixed(2)} $ · avant génération` : 'Aucun prix inventé'}
-          </p>
-        </div>
-        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
-          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Crédits Studio</p>
-          <p className="mt-1 text-sm font-semibold text-white">{balance}</p>
-          <p className="mt-0.5 text-[10px] text-slate-500">Réservation uniquement après confirmation</p>
-        </div>
-        <div className="rounded-xl border border-white/[0.08] bg-[#080d14] p-3">
-          <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Projet actif</p>
-          <p className="mt-1 truncate text-sm font-semibold text-white">
-            {projects.find((p) => p.id === projectId)?.title ?? 'Aucun projet sélectionné'}
-          </p>
-          <div className="mt-1 flex flex-wrap gap-2 text-[10px]">
-            <Link to="/app/projets" className="text-cyan-200 transition hover:text-white">Projets</Link>
-            <Link to="/app/historique" className="text-cyan-200 transition hover:text-white">Historique</Link>
-            <Link to="/app/bibliotheque" className="text-cyan-200 transition hover:text-white">Bibliothèque</Link>
-            <Link to="/app/scripts" className="text-cyan-200 transition hover:text-white">Scripts</Link>
-          </div>
-        </div>
-      </section>
-
-      <div className="hidden flex-wrap items-center justify-between gap-2 sm:flex">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1.5 text-[11px] text-cyan-200">
-            <Database size={12} /> Catalogue vidéo VYORA · {catalogSummary}
-          </span>
-          <Link to="/app/studio/classique" className="studio-icon-link">Parcours détaillé</Link>
-          <Link to="/app/studio/avance" className="studio-icon-link hidden sm:inline-flex">Parcours 5 étapes</Link>
-          <Link to="/app/studio/montage" className="studio-icon-link"><Scissors size={12} /> Montage vidéo</Link>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select id="studio-project" value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-auto min-w-[160px] text-xs" aria-label="Projet">
-            <option value="">Choisir un projet…</option>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
-          </Select>
-          <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => setProjectModal(true)}>Nouveau</Button>
-        </div>
-      </div>
+      )}
 
       {handedOffBrief && (
-        <div className="mt-3" data-testid="studio-handoff-banner">
+        <div className="mx-auto mt-3 max-w-3xl px-3 sm:px-6" data-testid="studio-handoff-banner">
           <Banner tone="info" title={`Brief importé depuis Business Grow${handedOffBrief.product ? ` · ${handedOffBrief.product}` : ''}`}>
             {handedOffBrief.targetAudience ? `Cible : ${handedOffBrief.targetAudience}. ` : ''}
-            Aucun crédit Studio consommé lors du transfert : relisez le prompt puis obtenez un devis avant tout lancement.
+            Aucun crédit Studio consommé lors du transfert.
           </Banner>
         </div>
       )}
-      {catalogError && (
-        <div className="mt-3"><Banner tone="danger" title="Catalogue vidéo partiellement indisponible">{catalogError}</Banner></div>
-      )}
-      {catalog?.verified === false && (
-        <div className="mt-3"><Banner tone="warning" title="Service vidéo indisponible">
-          Certains modèles ne peuvent pas être utilisés pour le moment. Aucune génération ne sera lancée tant que le service n’est pas rétabli.
-        </Banner></div>
-      )}
-      {catalog?.verified === true && (
-        <p className="mt-2 hidden items-center gap-1.5 text-[11px] text-emerald-300 sm:flex"><CheckCircle2 size={12} /> Le service vidéo est disponible.</p>
-      )}
-      {health?.muapi === false && (
-        <div className="mt-3"><Banner tone="warning" title="Service vidéo indisponible">
-          La génération ne peut pas aboutir pour le moment. Réessayez plus tard.
-        </Banner></div>
-      )}
-      {estimateError && (
-        <div className="mt-3"><Banner tone="danger" title="Devis backend indisponible">{estimateError}</Banner></div>
-      )}
 
-      <section data-testid="studio-tier-summary" className="mt-3 rounded-2xl border border-white/[0.08] bg-[#080d14] p-3 sm:p-4" aria-label="Correspondance des niveaux de qualité">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">Rapide · Standard · Premium</p>
-            <h2 className="mt-0.5 text-sm font-semibold text-white">Options de création disponibles</h2>
-          </div>
-          <span className="rounded-lg border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[10px] text-slate-500">{models.length} modèles disponibles</span>
-        </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          {tierSummary.map((tier) => (
-            <div key={tier.tier} className={cn('rounded-xl border p-3', form.quality === tier.tier ? 'border-cyan-400/35 bg-cyan-400/[0.06]' : 'border-white/[0.07] bg-white/[0.02]')}>
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-xs font-bold text-white">{tier.label}</p>
-                <span className={cn('rounded-md px-1.5 py-0.5 text-[9px]', tier.available ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-200')}>{tier.available ? 'Disponible' : 'Indisponible'}</span>
-              </div>
-              <p className="mt-1 text-[10px] leading-snug text-slate-500">{tier.description}</p>
-              <p className="mt-2 text-[11px] font-semibold text-amber-300">Devis avant création</p>
-              <p className="mt-0.5 truncate text-[10px] text-slate-400">{tier.available ? 'Modèle vidéo VYORA' : 'Aucun modèle compatible pour le moment'}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
+      <div className="studio-stage">
       {showEmpty && (
-        <div className="mt-4">
-          <GenerationEmptyState onExample={onExample} onStart={() => document.getElementById('studio-prompt')?.focus()}
-            onSector={setSelectedSector} selectedSector={selectedSector} />
-        </div>
+        <GenerationEmptyState onExample={onExample} onStart={() => document.getElementById('studio-prompt')?.focus()}
+          onSector={setSelectedSector} selectedSector={selectedSector} />
       )}
 
       {!showEmpty && (
-        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="rounded-2xl border border-white/[0.08] bg-[#080d14] p-4 sm:p-5">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <p className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">Plan de production · {plan.source === 'ai' ? 'IA validée' : 'préparé à partir de votre brief'}</p>
-                <h2 className="mt-1 text-lg font-semibold text-white">{plan.product || 'Votre publicité UGC'}</h2>
-                <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-400 line-clamp-2">{form.prompt}</p>
-              </div>
-              <span className="rounded-lg border border-cyan-400/25 bg-cyan-400/[0.07] px-2.5 py-1 text-[11px] text-cyan-200">{plan.scenes.length} scènes · {plan.totalDuration.toFixed(0)} s · {plan.ratio}</span>
-            </div>
+        <div className="mx-auto mt-3 grid max-w-[1400px] gap-4 px-3 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <details className="studio-sheet p-4 sm:p-5" open={false}>
+            <summary className="cursor-pointer list-none">
+              <span className="text-[10px] uppercase tracking-[0.18em] text-cyan-300">Plan de production · {plan.source === 'ai' ? 'IA validée' : 'préparé à partir de votre brief'}</span>
+              <span className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-lg font-semibold text-white">{plan.product || 'Votre publicité UGC'}</span>
+                <span className="rounded-lg border border-cyan-400/25 bg-cyan-400/[0.07] px-2.5 py-1 text-[11px] text-cyan-200">{plan.scenes.length} scènes · {plan.totalDuration.toFixed(0)} s · {plan.ratio}</span>
+              </span>
+              <span className="mt-1 block max-w-xl text-xs leading-relaxed text-slate-400 line-clamp-2">{form.prompt}</span>
+              <span className="mt-2 inline-block text-[10px] text-slate-500">Voir / masquer le détail des scènes</span>
+            </summary>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
               {plan.scenes.map((s, i) => (
                 <div key={`${s.role}-${i}`} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
@@ -803,9 +813,11 @@ export default function GenerationStudio() {
               <Button size="sm" variant="outline" icon={<Scissors size={13} />} onClick={() => openEditor(false)}>Ouvrir le plan dans l’éditeur</Button>
               {aiPlan && <Button size="sm" variant="ghost" icon={<RefreshCw size={13} />} onClick={() => { setAiPlan(null); setAiMessage(''); }}>Revenir au plan local</Button>}
             </div>
-          </div>
-
-          <div className="space-y-3">
+          </details>
+          <details className="space-y-3" open={false}>
+            <summary className="mb-2 cursor-pointer list-none text-[11px] font-medium text-slate-500 transition hover:text-slate-300">
+              Devis détaillé, paramètres réels et devis fournisseur
+            </summary>
             <div className="rounded-2xl border border-white/[0.08] bg-[#080d14] p-4">
               <p className="text-[11px] font-semibold text-white">Devis serveur</p>
               <div className="mt-3 space-y-2 text-[11px]">
@@ -833,7 +845,7 @@ export default function GenerationStudio() {
               </div>
               <p className="mt-2 text-[10px] text-slate-600">Les options affichées correspondent aux paramètres disponibles pour ce modèle.</p>
             </div>
-          </div>
+          </details>
         </div>
       )}
 
@@ -891,12 +903,16 @@ export default function GenerationStudio() {
         <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Ex. Campagne Sérum Éclat" className="studio-input" />
       </Modal>
 
-      <p className="mt-4 hidden flex-wrap items-center gap-1.5 text-[10px] text-slate-600 sm:flex">
-        <Clapperboard size={11} /> Les cartes de secteur sont des inspirations visuelles, pas des médias générés.
-        <Coins size={11} className="ml-2" /> Crédits UGC uniquement : le Business Growth Workspace n’est pas concerné.
-        <Layers3 size={11} className="ml-2" /> Aucun moteur Image / Audio / Lip Sync n’est présenté comme connecté.
-        <Link to="/app/historique" className="ml-2 inline-flex items-center gap-1 text-cyan-400/70 hover:text-cyan-300">Historique <ArrowRight size={10} /></Link>
-      </p>
+      <footer className="mx-auto mt-2 flex w-full max-w-[1400px] flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2 text-[10px] text-slate-600 sm:px-6">
+        <span className="inline-flex items-center gap-1"><Clapperboard size={11} /> Crédits Studio uniquement</span>
+        <Link to="/app/historique" className="inline-flex items-center gap-1 text-cyan-400/70 hover:text-cyan-300">Historique <ArrowRight size={10} /></Link>
+        {businessContinuityState && (
+          <Link to="/app/business" state={businessContinuityState} className="inline-flex items-center gap-1 text-violet-300/70 hover:text-violet-200">
+            Poursuivre dans Business Grow <ArrowRight size={10} />
+          </Link>
+        )}
+      </footer>
+      </div>
     </div>
   );
 }
