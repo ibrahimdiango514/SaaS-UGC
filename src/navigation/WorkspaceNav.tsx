@@ -100,7 +100,7 @@ export function WorkspaceNav({ scope, onNavigate, onRequestClose }: {
             <button
               type="button"
               onClick={() => { setQuery(''); searchRef.current?.focus(); }}
-              className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white"
               aria-label="Effacer la recherche"
             >
               <X size={13} />
@@ -150,7 +150,7 @@ export function WorkspaceNav({ scope, onNavigate, onRequestClose }: {
               for (const group of groups) state[group.id] = next;
               setOpen(state);
             }}
-            className="min-h-8 rounded px-1.5 text-[9.5px] font-medium text-slate-500 transition hover:text-slate-200"
+            className="min-h-11 rounded px-2 text-[9.5px] font-medium text-slate-500 transition hover:text-slate-200"
           >
             {allOpen ? 'Replier' : 'Tout déplier'}
           </button>
@@ -175,7 +175,7 @@ export function WorkspaceNav({ scope, onNavigate, onRequestClose }: {
                 onClick={() => setOpen((current) => ({ ...current, [group.id]: !current[group.id] }))}
                 aria-expanded={expanded}
                 className={cn(
-                  'group flex min-h-10 w-full items-center gap-2 rounded-lg px-2.5 text-left transition',
+                  'group flex min-h-11 w-full items-center gap-2 rounded-lg px-2.5 text-left transition',
                   hasActive ? 'text-white' : 'text-slate-400 hover:bg-white/[0.03] hover:text-slate-200',
                 )}
               >
@@ -197,7 +197,7 @@ export function WorkspaceNav({ scope, onNavigate, onRequestClose }: {
                         aria-current={isActive ? 'page' : undefined}
                         title={item.description}
                         className={cn(
-                          'group/item relative flex min-h-10 items-center gap-2 rounded-lg px-2.5 text-[12px] transition-all duration-200',
+                          'group/item relative flex min-h-11 items-center gap-2 rounded-lg px-2.5 text-[12px] transition-all duration-200',
                           isActive
                             ? 'bg-gradient-to-r from-cyan-400/[0.12] to-transparent font-semibold text-white'
                             : 'text-slate-400 hover:bg-white/[0.035] hover:text-white',

@@ -37,8 +37,8 @@
   .btn-ghost { @apply bg-transparent text-slate-300 hover:bg-white/[0.08] hover:text-white; }
   .btn-outline { @apply border border-line bg-transparent text-slate-200 hover:border-brand-400/50 hover:bg-brand-500/10 hover:text-white; }
   .btn-danger { @apply bg-rose-500/15 text-rose-200 border border-rose-500/25 hover:bg-rose-500/25; }
-  .btn-sm { @apply px-3 py-1.5 text-xs; }
-  .btn-md { @apply px-4 py-2.5 text-sm; }
+  .btn-sm { @apply min-h-11 px-3 py-1.5 text-xs; }
+  .btn-md { @apply min-h-11 px-4 py-2.5 text-sm; }
   .btn-lg { @apply px-6 py-3 text-base; }
   .btn-icon { @apply h-11 w-11 p-0; }
 
