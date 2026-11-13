@@ -367,3 +367,23 @@ aucune modification CORS ne peut rétablir la connexion : il faut autoriser le
 réseau ou utiliser le site de production avec son relais Netlify. Le frontend
 de production doit être publié séparément pour recevoir les changements d'UI
 et de transport ; déployer l'Edge Function ne met pas à jour le bundle Netlify.
+
+### Publication et vérifications du 13 novembre
+
+- Source `b21b2193c09d14c94e8a35899b87ae6585e67f0c` ; bundle
+  `908af379b0eebc8ea89f35d1f912c38bfa59b7ef309ef86118af2f988b417952`
+  (43 683 caractères) ; Edge Function `business-grow` **v22 ACTIVE**,
+  `verify_jwt=true`.
+- Avec une session de test réelle : `status` et `conversations.list` en direct
+  depuis l'origine de l'aperçu : 200 ; `status` via le relais Netlify de
+  production : 200, Groq et Gemini disponibles ; création de conversation puis
+  `messages.send` via ce relais : 200, réponse réelle Groq `succeeded` ;
+  `messages.list` retrouve les deux messages persistés.
+- Origine non autorisée : POST refusé 403, sans création de conversation ;
+  JWT invalide : 401. Le compte temporaire et sa conversation ont été
+  supprimés et leur absence vérifiée. Aucun paiement n'a été lancé.
+- Le préflight de l'origine e2b a été mesuré à 204 **avant** la publication ;
+  le nouveau comportement OPTIONS/POST pour les origines refusées est couvert
+  par les tests du handler. L'URL de l'aperçu reste à vérifier depuis l'appareil
+  de l'utilisateur : le sandbox de développement ne dispose pas lui-même
+  d'une sortie réseau vers Supabase.

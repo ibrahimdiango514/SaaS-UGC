@@ -2,14 +2,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getSession, invoke } = vi.hoisted(() => ({
+const { getSession, invoke, publicConfig } = vi.hoisted(() => ({
   getSession: vi.fn(),
   invoke: vi.fn(),
+  publicConfig: { url: 'https://xbuuhfwobrafcbgtdgjx.supabase.co' },
 }));
 
 vi.mock('../src/lib/supabase', () => ({
   SUPABASE_PUBLISHABLE_KEY: 'test-publishable-key',
-  SUPABASE_URL: 'https://xbuuhfwobrafcbgtdgjx.supabase.co',
+  get SUPABASE_URL() { return publicConfig.url; },
   supabase: {
     auth: { getSession },
     functions: { invoke },
@@ -21,6 +22,7 @@ import { BusinessGrowApiError, businessGrowApi } from '../src/business/api';
 describe('Business Grow browser API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    publicConfig.url = 'https://xbuuhfwobrafcbgtdgjx.supabase.co';
     getSession.mockResolvedValue({
       data: { session: { access_token: 'test-session-token' } },
       error: null,
@@ -161,6 +163,37 @@ describe('Business Grow browser API', () => {
       expect(fetcher).not.toHaveBeenCalled();
       expect(invoke).not.toHaveBeenCalled();
       expect(error).toMatchObject({ code: 'INVALID_LOCAL_FUNCTION_URL' });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('never sends another Supabase project’s JWT to the canonical Netlify relay', async () => {
+    publicConfig.url = 'https://other-project.supabase.co';
+    vi.stubGlobal('window', { location: { hostname: 'vyora-ugc.netlify.app' } });
+    const fetcher = vi.fn(async (_input: RequestInfo | URL) => { throw new TypeError('Blocked'); });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'BUSINESS_GROW_UNREACHABLE' });
+      expect(fetcher.mock.calls).toHaveLength(1);
+      expect(String(fetcher.mock.calls[0][0])).toBe('https://other-project.supabase.co/functions/v1/business-grow');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    'http://127.0.0.1:54321/functions/v1/business-grow?redirect=evil',
+    'http://user:password@127.0.0.1:54321/functions/v1/business-grow',
+    'http://localhost:1234/functions/v1/business-grow',
+  ])('rejects an unsafe local function override before sending a token: %s', async (url) => {
+    vi.stubEnv('VITE_BUSINESS_GROW_FUNCTION_URL', url);
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'INVALID_LOCAL_FUNCTION_URL' });
+      expect(fetcher).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
       vi.unstubAllGlobals();
