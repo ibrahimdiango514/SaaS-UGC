@@ -145,13 +145,42 @@ Comportements préservés et vérifiés : filtres et recherche du catalogue, lie
 par module (`/app/business/modules/:key`), contrôle de rôle administrateur, contenus
 « préparés » toujours étiquetés comme non opérationnels.
 
-## 7. Reste à faire (proposé, non commencé)
+## 7. Troisième tranche (livrée)
+
+| Étape | Contenu | Fichiers |
+|---|---|---|
+| A | **Garde-fou « aucun secret »** : test qui échoue si une signature de clé (Google, OpenAI/DeepSeek, OpenRouter, Groq, xAI, Mistral, JWT, `sb_secret_`, clé PEM) apparaît dans `src/`, `supabase/`, `docs/`, `scripts/`, `netlify/`, `tests/` ou `.env.example` ; vérifie aussi qu'aucun code de `src/` n'accède à l'environnement serveur et qu'aucune Edge Function ne contient de clé en littéral. Validé par une sonde temporaire (clé factice détectée puis supprimée). | `tests/secrets-guard.test.ts` |
+| B | **Intérieur Business Growth** : en-tête violet à liseré, badge « Espace pilotage », indicateurs en tuiles premium, bandeau modules et onglets de section accentués, 11 panneaux internes passés sur la même surface de verre. | `src/business/BusinessGrowWorkspace.tsx` |
+| C | **Catalogue vidéo Studio** : en-tête de modèle (tuile d'icône), carte sélectionnée avec liseré et relief, survol cohérent, états indisponible conservés. | `src/studio/components/CatalogBrowser.tsx` |
+
+Aucune logique touchée : 94 tests Business Growth + modules restent verts sans
+modification, 1182 tests au total.
+
+## 8. Intégration des fournisseurs IA — état d'attente
+
+Décision du propriétaire (2026-11-14) : **intégration groupee, après réception des
+cinq fiches** (Mistral, DeepSeek, OpenRouter, Cloudflare Workers AI, xAI). Aucun
+fournisseur n'est activé en attendant.
+
+Ce qui est déjà prêt, et ne dépend pas des fiches :
+
+- 7 adaptateurs, routeur, moteur, registre, journal, mémoire, budgets (voir
+  `docs/architecture-moteur-ia.md`) ;
+- cinq fournisseurs présents au registre en `enabled = false` / `unverified` ;
+- garde-fou de secrets (ci-dessus) et procédure Supabase Secrets documentée ;
+- **point à trancher à la réception** : la table `ai_providers` du registre ne
+  contient aujourd'hui que `gemini`, `groq`, `deepseek`, `mistral`, `grok`,
+  `openrouter`, `cloudflare`. Pour intégrer un fournisseur hors de cette liste, il
+  faudra une migration additive (ligne fournisseur + modèles) et les variables
+  d'environnement correspondantes — le moteur n'a besoin d'aucune autre couche.
+
+## 9. Reste à faire (proposé, non commencé)
 
 | Étape | Contenu | Dépend de |
 |---|---|---|
-| D | Refonte visuelle de l'intérieur Business Growth (sections assistant / croissance / entreprise / mémoire / services IA) | — |
-| E | Refonte visuelle de l'intérieur Studio (générateur, catalogue vidéo, montage) | — |
-| F | Intégration des fournisseurs IA au fur et à mesure des fiches reçues | vos informations |
+| D | Approfondir l'assistant Business (fil de conversation, états de chargement, reprise d'une conversation) | — |
+| E | Refonte visuelle du générateur Studio et du montage (timeline, export) | — |
+| F | Intégration des cinq fournisseurs IA, en une passe, après réception des fiches | vos informations |
 | G | Captures d'écran de validation (ordinateur / tablette / mobile) | navigateur disponible |
 
 **Aucune fusion vers `main`, aucun déploiement Netlify** n'a été déclenché : la
