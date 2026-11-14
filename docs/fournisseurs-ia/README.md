@@ -16,6 +16,7 @@
 | **Aucun fournisseur fictif** | Rien n'est pré-enregistré « au cas où ». Une fiche existe seulement pour un fournisseur réellement transmis. |
 | **Aucune intégration avant l'autorisation** | Même avec des informations complètes : réception, examen, documentation. Pas de clé, pas d'appel réseau, pas de sonde, pas de ligne de registre activée. |
 | **Aucun secret dans ces fichiers** | Une clé reçue n'est **jamais** recopiée ici, ni dans un journal, ni dans un rapport. Seuls les **noms** de variables sont mentionnés. |
+| **Dépôt des secrets par le développeur** | Le jour de l'autorisation, les clés sont déposées par le développeur VYORA dans les Edge Function Secrets, puis vérifiées par leur **nom** uniquement. |
 | **Aucune invention** | Un tarif, une limite ou un identifiant de modèle absent de la documentation officielle est noté « non publié » ou « à confirmer ». Jamais une valeur plausible. |
 | **Mistral reporté** | Offre payante : aucune démarche sur Mistral pour l'instant. |
 
@@ -52,7 +53,15 @@ Pour chaque fournisseur reçu, une fiche est créée dans ce dossier
 
 ---
 
-## 4. Où atterrit un fournisseur, le jour de l'autorisation
+## 4. Inventaire tenu à jour
+
+Le tableau §3 est la **source de vérité de la collecte**. Il est mis à jour à
+chaque réception, avec : nom du fournisseur, fichier de fiche, date de réception,
+état (`reçu` → `documenté` → `prêt`), et informations manquantes. Aucune ligne
+n'est supprimée : un fournisseur reçu reste inventorié, même s'il n'est pas
+intégré.
+
+## 5. Où atterrit un fournisseur, le jour de l'autorisation
 
 Pour information — **rien de ceci n'est exécuté aujourd'hui** :
 
@@ -63,5 +72,8 @@ Pour information — **rien de ceci n'est exécuté aujourd'hui** :
 2. Un secret Edge portant la clé (jamais dans Git, jamais dans une migration).
 3. Une sonde réelle (`providers.verify`) qui, seule, peut le rendre `available`.
 4. Ses modèles déclarés, chacun restant `unverified` jusqu'à preuve réelle.
+
+5. Le dépôt de la clé dans les Edge Function Secrets est fait **par le
+   développeur**, pas par le propriétaire du produit.
 
 Aucune de ces étapes n'est déclenchée par ce document.
