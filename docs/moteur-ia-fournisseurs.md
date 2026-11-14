@@ -56,12 +56,19 @@ servent qu'à la compatibilité, la convention `BUSINESS_GROW_*` prime.
 > fournisseur n'exige donc aucune modification de code — seulement une ligne de
 > registre et un secret.
 
-### Où déposer la clé, concrètement
+### Où dépose-t-on la clé, concrètement
+
+**C'est le développeur VYORA qui dépose les secrets** (décision du 2026-11-14),
+via le connecteur Supabase de l'espace de travail :
 
 ```
-Supabase Dashboard → Project (xbuuhfwobrafcbgtdgjx) → Edge Functions → Secrets
+Edge Functions Secrets du projet (xbuuhfwobrafcbgtdgjx)
   BUSINESS_GROW_<FOURNISSEUR>_API_KEY = <valeur>      (jamais dans Git)
 ```
+
+La valeur est transmise une fois, déposée directement dans les secrets, puis
+**vérifiée par son seul nom** (jamais réaffichée, jamais relue, jamais recopiée).
+Le dépôt n'a lieu qu'après l'autorisation d'intégration.
 
 Après ajout d'une clé : **le fournisseur reste inactif** tant que son modèle n'a pas
 passé une **sonde API réelle** (voir § « Cycle de vérification »). C'est volontaire :
