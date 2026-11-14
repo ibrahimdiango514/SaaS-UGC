@@ -80,7 +80,10 @@ créé `enabled = false` / `unverified` : il n'est servi qu'après une sonde ré
 2. **`gemini`** — protocole natif : `models/{model}:generateContent`,
    lecture `candidates[0].content.parts`, en-tête `x-goog-api-key`.
 3. **`cloudflare`** — conversation au format OpenAI mais URL par compte
-   (`accounts/{id}/ai/v1/chat`), donc `accountId` obligatoire.
+   (`accounts/{id}/ai/v1/chat/completions`), donc `accountId` obligatoire.
+   La voie d'appel vient du registre (`transport`) : `rest` (jeton Workers AI,
+   en-tête `Authorization`) ou `gateway` (passerelle AI Gateway, en-tête
+   `cf-aig-authorization` + identifiant de passerelle obligatoire).
 
 Les intégrations historiques (Groq, Gemini, Cloudflare) conservent un adaptateur
 dédié qui reproduit **exactement** leur comportement de production ; il est
