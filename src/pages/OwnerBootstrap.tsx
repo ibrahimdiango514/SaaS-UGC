@@ -1,13 +1,22 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, EyeOff, ShieldCheck, UserPlus } from 'lucide-react';
+import { CheckCircle2, LockKeyhole, ShieldCheck, UserPlus } from 'lucide-react';
 import AuthShell from '../components/AuthShell';
-import { Button, Card, ErrorState, Input, LoadingState } from '../components/ui';
+import { AuthField, AuthNotice, AuthSubmit, PasswordMeter, type AuthSubmitState } from '../components/auth/AuthForm';
+import { ErrorState, LoadingState } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { claimFirstOwnerAdmin, getOwnerBootstrapStatus, type OwnerBootstrapStatus } from '../lib/api';
 import { asAppError } from '../lib/errors';
 import { SITE_URL, supabase } from '../lib/supabase';
 
+/**
+ * Initialisation du premier compte propriétaire.
+ *
+ * **Règles d'accès strictement inchangées** : l'attribution du rôle est décidée
+ * par le serveur (`claimFirstOwnerAdmin`), jamais par ce formulaire ; la page se
+ * ferme dès que l'initialisation est terminée ; une session ordinaire ne peut
+ * pas s'auto-promouvoir. Seul l'habillage adopte le parcours d'authentification.
+ */
 export default function OwnerBootstrap() {
   const { user, loading, isAdmin, refreshAll } = useAuth();
   const navigate = useNavigate();
@@ -16,8 +25,8 @@ export default function OwnerBootstrap() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [state, setState] = useState<AuthSubmitState>('idle');
   const [error, setError] = useState('');
   const [needConfirmation, setNeedConfirmation] = useState(false);
 
@@ -50,6 +59,7 @@ export default function OwnerBootstrap() {
     }
 
     setSubmitting(true);
+    setState('loading');
     try {
       const { data, error: signupError } = await supabase.auth.signUp({
         email: email.trim(),
@@ -62,12 +72,15 @@ export default function OwnerBootstrap() {
       if (signupError) throw signupError;
       if (data.session) {
         await claimFirstOwnerAdmin();
+        setState('success');
         await refreshAll();
         navigate('/admin', { replace: true });
       } else {
+        setState('idle');
         setNeedConfirmation(true);
       }
     } catch (cause) {
+      setState('idle');
       setError(asAppError(cause, 'Création du compte administrateur impossible.').message);
     } finally {
       setSubmitting(false);
@@ -77,11 +90,14 @@ export default function OwnerBootstrap() {
   const finishExistingSession = async () => {
     setError('');
     setSubmitting(true);
+    setState('loading');
     try {
       await claimFirstOwnerAdmin();
+      setState('success');
       await refreshAll();
       navigate('/admin', { replace: true });
     } catch (cause) {
+      setState('idle');
       setError(asAppError(cause, 'Initialisation du compte administrateur impossible.').message);
       try {
         setStatus(await getOwnerBootstrapStatus());
@@ -99,87 +115,142 @@ export default function OwnerBootstrap() {
 
   if (statusError) {
     return (
-      <AuthShell title="Création du compte administrateur" subtitle="Initialisation sécurisée du premier compte propriétaire.">
-        <Card className="p-6">
+      <AuthShell variant="secure" eyebrow="Accès propriétaire" title="Création du compte administrateur" subtitle="Initialisation sécurisée du premier compte propriétaire.">
+        <div className="vy-auth-card p-5 sm:p-6">
           <ErrorState message={`Vérification serveur impossible : ${statusError}`} />
-          <Link to="/" className="mt-5 block text-center text-sm text-brand-300">Retour à l’accueil</Link>
-        </Card>
+          <Link to="/" className="vy-btn vy-btn-ghost-accent mt-5 flex min-h-11 w-full text-[12.5px]">Retour à l’accueil</Link>
+        </div>
       </AuthShell>
     );
   }
 
   if (status?.initialized) {
     return (
-      <AuthShell title="Espace propriétaire" subtitle="L’initialisation du premier administrateur est déjà terminée.">
-        <Card className="p-6 text-center">
-          <CheckCircle2 className="mx-auto text-emerald-400" size={36} />
-          <p className="mt-4 text-sm text-slate-300">La création d’un administrateur supplémentaire depuis cette page est fermée.</p>
-          <Link to="/proprietaire/connexion" className="btn btn-primary btn-md mt-6 w-full">Connexion administrateur</Link>
-        </Card>
+      <AuthShell variant="secure" eyebrow="Accès propriétaire" title="Espace propriétaire" subtitle="L’initialisation du premier administrateur est déjà terminée.">
+        <div className="vy-auth-card p-6 text-center sm:p-8">
+          <span className="vy-in-scale mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-emerald-400/25 bg-emerald-400/[0.09] text-emerald-300">
+            <CheckCircle2 size={30} />
+          </span>
+          <p className="mt-5 text-sm leading-relaxed text-slate-300">La création d’un administrateur supplémentaire depuis cette page est fermée.</p>
+          <Link to="/proprietaire/connexion" className="vy-btn vy-btn-accent mt-6 flex min-h-12 w-full text-[14px]">Connexion administrateur</Link>
+        </div>
       </AuthShell>
     );
   }
 
   if (!status?.configured) {
     return (
-      <AuthShell title="Création du compte administrateur" subtitle="Initialisation réservée au propriétaire du projet.">
-        <Card className="p-6">
+      <AuthShell variant="secure" eyebrow="Accès propriétaire" title="Création du compte administrateur" subtitle="Initialisation réservée au propriétaire du projet.">
+        <div className="vy-auth-card p-5 sm:p-6">
           <ErrorState message="Le bootstrap propriétaire n’est pas encore configuré côté serveur. Aucun compte ne peut être promu depuis cette page." />
-          <Link to="/" className="mt-5 block text-center text-sm text-brand-300">Retour à l’accueil</Link>
-        </Card>
+          <Link to="/" className="vy-btn vy-btn-ghost-accent mt-5 flex min-h-11 w-full text-[12.5px]">Retour à l’accueil</Link>
+        </div>
       </AuthShell>
     );
   }
 
   if (user) {
     return (
-      <AuthShell title="Création du compte administrateur" subtitle="Le serveur vérifiera l’identité propriétaire et la confirmation de l’adresse avant toute attribution de rôle.">
-        <Card className="p-6">
-          <div className="mb-5 flex items-center gap-3 rounded-xl border border-line bg-white/[0.03] p-3">
-            <ShieldCheck className="shrink-0 text-brand-300" size={20} />
-            <p className="text-sm text-slate-300">Session ouverte pour <strong className="text-white">{user.email}</strong></p>
+      <AuthShell variant="secure" eyebrow="Accès propriétaire" title="Création du compte administrateur" subtitle="Le serveur vérifiera l’identité propriétaire et la confirmation de l’adresse avant toute attribution de rôle.">
+        <div className="vy-auth-card p-5 sm:p-6">
+          <div className="mb-5 flex items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+            <ShieldCheck className="shrink-0 text-cyan-300" size={20} />
+            <p className="text-[12.5px] text-slate-300">Session ouverte pour <strong className="text-white">{user.email}</strong></p>
           </div>
-          {error && <div className="mb-4"><ErrorState message={error} /></div>}
-          <Button className="w-full" size="lg" loading={submitting} onClick={() => void finishExistingSession()}>
-            Finaliser le compte propriétaire
-          </Button>
-          <p className="mt-4 text-center text-xs text-slate-500">Un compte ordinaire ne peut pas s’attribuer le rôle administrateur.</p>
-        </Card>
+          <form onSubmit={(event) => { event.preventDefault(); void finishExistingSession(); }}>
+            {error && <div className="mb-4"><AuthNotice>{error}</AuthNotice></div>}
+            <AuthSubmit
+              state={state}
+              disabled={submitting}
+              loadingLabel="Vérification serveur…"
+              successLabel="Rôle vérifié"
+              icon={<ShieldCheck size={16} />}
+              className="w-full"
+            >
+              Finaliser le compte propriétaire
+            </AuthSubmit>
+          </form>
+          <p className="mt-4 text-center text-[10.5px] leading-relaxed text-slate-500">Un compte ordinaire ne peut pas s’attribuer le rôle administrateur.</p>
+        </div>
       </AuthShell>
     );
   }
 
   if (needConfirmation) {
     return (
-      <AuthShell title="Confirmez votre adresse e-mail" subtitle="Le rôle administrateur ne sera attribué qu’après confirmation.">
-        <Card className="p-6 text-center">
-          <CheckCircle2 className="mx-auto text-emerald-400" size={36} />
-          <p className="mt-4 text-sm leading-relaxed text-slate-300">
+      <AuthShell variant="secure" eyebrow="Accès propriétaire" title="Confirmez votre adresse e-mail" subtitle="Le rôle administrateur ne sera attribué qu’après confirmation.">
+        <div className="vy-auth-card p-6 text-center sm:p-8">
+          <span className="vy-in-scale mx-auto grid h-16 w-16 place-items-center rounded-2xl border border-emerald-400/25 bg-emerald-400/[0.09] text-emerald-300">
+            <CheckCircle2 size={30} />
+          </span>
+          <p className="mt-5 text-sm leading-relaxed text-slate-300">
             Un lien de confirmation a été envoyé à <strong className="text-white">{email}</strong>. Ouvrez-le pour terminer l’initialisation sécurisée.
           </p>
-          <Link to="/" className="mt-6 inline-block text-sm text-brand-300">Retour à l’accueil</Link>
-        </Card>
+          <Link to="/" className="mt-6 inline-block text-[12.5px] text-cyan-300 hover:text-cyan-200">Retour à l’accueil</Link>
+        </div>
       </AuthShell>
     );
   }
 
   return (
-    <AuthShell title="Création du compte administrateur" subtitle="Ce formulaire est ouvert uniquement pour l’initialisation du premier compte propriétaire.">
-      <Card className="p-6">
+    <AuthShell variant="secure" eyebrow="Accès propriétaire" title="Création du compte administrateur" subtitle="Ce formulaire est ouvert uniquement pour l’initialisation du premier compte propriétaire.">
+      <div className="vy-auth-card p-5 sm:p-7" data-state={state === 'success' ? 'success' : error ? 'error' : undefined}>
         <form onSubmit={(event) => void submitOwnerSignup(event)} className="space-y-4" noValidate>
-          <Input label="Adresse e-mail" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="vous@exemple.com" />
-          <div className="relative">
-            <Input label="Mot de passe" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required value={password} onChange={(event) => setPassword(event.target.value)} hint="Au moins 8 caractères." />
-            <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-[36px] text-slate-500 hover:text-white" aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
-              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
+          <AuthField
+            label="Adresse e-mail"
+            type="email"
+            autoComplete="email"
+            required
+            autoFocus
+            inputMode="email"
+            spellCheck={false}
+            value={email}
+            onChange={(event) => { setEmail(event.target.value); if (error) setError(''); }}
+            placeholder="vous@exemple.com"
+            icon={<ShieldCheck size={15} />}
+          />
+          <div>
+            <AuthField
+              label="Mot de passe"
+              autoComplete="new-password"
+              required
+              revealable
+              value={password}
+              onChange={(event) => { setPassword(event.target.value); if (error) setError(''); }}
+              placeholder="8 caractères minimum"
+              icon={<LockKeyhole size={15} />}
+              hint="Au moins 8 caractères."
+            />
+            <PasswordMeter value={password} />
           </div>
-          <Input label="Confirmation du mot de passe" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required value={confirm} onChange={(event) => setConfirm(event.target.value)} />
-          {error && <ErrorState message={error} />}
-          <Button type="submit" className="w-full" size="lg" loading={submitting} icon={<UserPlus size={16} />}>Créer mon compte administrateur</Button>
+          <AuthField
+            label="Confirmation du mot de passe"
+            autoComplete="new-password"
+            required
+            revealable
+            value={confirm}
+            onChange={(event) => { setConfirm(event.target.value); if (error) setError(''); }}
+            placeholder="••••••••"
+            icon={<LockKeyhole size={15} />}
+          />
+          {error && <AuthNotice>{error}</AuthNotice>}
+          <AuthSubmit
+            state={state}
+            disabled={submitting}
+            loadingLabel="Création du compte…"
+            successLabel="Compte administrateur prêt"
+            icon={<UserPlus size={16} />}
+          >
+            Créer mon compte administrateur
+          </AuthSubmit>
         </form>
-        <p className="mt-4 text-center text-xs text-slate-500">L’attribution du rôle est vérifiée côté serveur et n’est jamais effectuée par ce formulaire.</p>
-      </Card>
+        <p className="mt-4 text-center text-[10.5px] leading-relaxed text-slate-500">
+          L’attribution du rôle est vérifiée côté serveur et n’est jamais effectuée par ce formulaire.
+        </p>
+      </div>
+      <div className="mt-4 text-center">
+        <Link to="/connexion" className="text-[11.5px] text-slate-400 transition hover:text-white">Je possède déjà un compte</Link>
+      </div>
     </AuthShell>
   );
 }

@@ -133,16 +133,26 @@ renseigner** par vos soins. Les clés ne sont jamais demandées dans Git : seuls
 
 ---
 
-## 6. Reste à faire (proposé, non commencé)
+## 6. Deuxième tranche (livrée)
+
+| Étape | Contenu | Fichiers |
+|---|---|---|
+| A | **Écrans propriétaire** alignés sur le parcours d'authentification (`variant="secure"`), champs et boutons à états. Règles d'accès **inchangées** et désormais verrouillées par un test : une session sans rôle est fermée (`signOut`), la promotion reste impossible depuis l'interface. | `OwnerLogin.tsx`, `OwnerBootstrap.tsx`, `OwnerConfirmation.tsx`, `tests/owner-access.test.tsx` |
+| B | **Catalogue des modules Business Growth** refondu : en-tête d'espace violet, filtres en pastilles avec accent par catégorie, recherche avec effacement, cartes entièrement cliquables, compteur « prêts / total » calculé sur `isModuleKey`. | `src/business/modules/BusinessModules.tsx` |
+| C | **Coquille Studio** : en-tête cyan avec liseré lumineux, badge « Espace création », onglets accentués. | `src/studio/components/StudioShell.tsx` |
+
+Comportements préservés et vérifiés : filtres et recherche du catalogue, liens réels
+par module (`/app/business/modules/:key`), contrôle de rôle administrateur, contenus
+« préparés » toujours étiquetés comme non opérationnels.
+
+## 7. Reste à faire (proposé, non commencé)
 
 | Étape | Contenu | Dépend de |
 |---|---|---|
-| A | Appliquer `AuthShell` `variant` aux écrans propriétaire (`/proprietaire*`) | — |
-| B | Refonte visuelle de l'intérieur Business Growth (sections, cartes, en-têtes) | — |
-| C | Refonte visuelle de l'intérieur Studio (générateur, catalogue, montage) | — |
-| D | Catalogue de fonctionnalités Business (page d'accueil des modules par catégorie) | — |
-| E | Intégration des fournisseurs IA au fur et à mesure des fiches reçues | vos informations |
-| F | Captures d'écran de validation (ordinateur / tablette / mobile) | navigateur disponible |
+| D | Refonte visuelle de l'intérieur Business Growth (sections assistant / croissance / entreprise / mémoire / services IA) | — |
+| E | Refonte visuelle de l'intérieur Studio (générateur, catalogue vidéo, montage) | — |
+| F | Intégration des fournisseurs IA au fur et à mesure des fiches reçues | vos informations |
+| G | Captures d'écran de validation (ordinateur / tablette / mobile) | navigateur disponible |
 
 **Aucune fusion vers `main`, aucun déploiement Netlify** n'a été déclenché : la
 livraison s'arrête à `develop`, comme demandé.
