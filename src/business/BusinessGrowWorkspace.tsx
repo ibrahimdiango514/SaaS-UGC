@@ -26,8 +26,8 @@ import {
   type BusinessToolExecution, type BusinessVerificationResult, type BusinessRecommendation, type BusinessReport,
 } from './api';
 import {
-  BUSINESS_PROVIDERS, BUSINESS_ROLES, EXTENSIBLE_PROVIDER_ADAPTERS,
-  type BusinessCapability, type BusinessRoleKey, type RoutingSelectionMode,
+  BUSINESS_ROLES, capabilitiesOf,
+  type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
 
 type BusinessSection = 'chat' | 'growth' | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
@@ -200,21 +200,6 @@ const PROMPT_IDEAS = [
   { label: 'Situation financière', text: 'Analyse les mouvements financiers disponibles sur les 30 derniers jours, en séparant faits et limites.', icon: TrendingUp, categories: ['bg_module_finance_intelligence'] },
 ];
 
-const CAPABILITY_LABELS: Record<BusinessCapability, string> = {
-  writing: 'Rédaction',
-  images: 'Images',
-  documents: 'Documents',
-  scripts: 'Scripts',
-  hooks: 'Hooks',
-  reasoning: 'Raisonnement',
-  analysis: 'Analyse',
-  'economic-routing': 'Routage économique',
-  fallback: 'Secours',
-  'specialized-models': 'Modèles spécialisés',
-  'model-comparison': 'Comparaison de modèles',
-  experimentation: 'Expérimentation',
-  'video-generation': 'Génération vidéo',
-};
 
 const TOOL_LABELS: Record<string, string> = {
   propose_memory_save: 'Enregistrer dans la mémoire métier',
@@ -352,14 +337,15 @@ function providerStatus(provider: BusinessProviderStatus | undefined): {
   };
 }
 
-function ProviderStatusList({ statuses, compact = false, loading = false }: {
+function ProviderStatusList({ statuses, compact: _compact = false, loading = false }: {
   statuses: BusinessProviderStatus[] | null;
   compact?: boolean;
   loading?: boolean;
 }) {
-  const providers = compact ? BUSINESS_PROVIDERS.filter((provider) => provider.id !== 'muapi').slice(0, 3) : BUSINESS_PROVIDERS;
-  const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
-  const activeCount = providers.filter((provider) => isVerifiedProvider(byKey.get(provider.id))).length;
+  // La liste vient du service (registre serveur), jamais d'un catalogue figé
+  // côté navigateur : un fournisseur ajouté côté serveur apparaît ici seul.
+  const providers = statuses ?? [];
+  const activeCount = providers.filter((status) => isVerifiedProvider(status)).length;
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
@@ -1147,15 +1133,15 @@ function ProvidersView({
   onVerifyProvider: (providerKey: string, modelKey?: string) => Promise<void>;
   onSaveRouting: (pref: BusinessRoutingPreference) => Promise<void>;
 }) {
-  const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
   const [routingRole, setRoutingRole] = useState<BusinessRoleKey>('business_advisor');
   const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
   const [routingProvider, setRoutingProvider] = useState('');
   const [routingModel, setRoutingModel] = useState('');
   const [routingAllowFallback, setRoutingAllowFallback] = useState(true);
 
+  // Servables = ceux que le serveur considère configurés (registre + secret).
   const configurableProviders = (statuses ?? []).filter(
-    (status) => status.provider_key !== 'muapi' && (status.config_status === 'configured' || status.enabled),
+    (status) => status.config_status === 'configured' || status.enabled,
   );
   const modelsForSelectedProvider = models.filter(
     (model) => model.enabled && (!routingProvider || model.provider_key === routingProvider),
@@ -1212,16 +1198,20 @@ function ProvidersView({
           </div>
         )}
         <div className="space-y-3">
-          {BUSINESS_PROVIDERS.map((provider, providerIndex) => {
-            const rawStatus = byKey.get(provider.id);
-            const status = providerStatus(rawStatus);
-            const providerModels = models.filter((model) => model.provider_key === provider.id);
-            const canProbe = backendReady && provider.id !== 'muapi' && (rawStatus?.config_status === 'configured' || provider.id === 'groq' || provider.id === 'gemini');
+          {(statuses ?? []).length === 0 ? (
+            <p className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5 text-xs text-slate-400" role="status">
+              Aucun service IA n’est encore déclaré. L’administrateur peut en ajouter depuis l’espace Admin ; ils
+              apparaîtront ici dès qu’ils seront configurés.
+            </p>
+          ) : (statuses ?? []).map((provider) => {
+            const status = providerStatus(provider);
+            const providerModels = models.filter((model) => model.provider_key === provider.provider_key);
+            const canProbe = backendReady && provider.config_status === 'configured';
             return (
-              <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
+              <article key={provider.provider_key} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.provider_key}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold text-white">Moteur VYORA {providerIndex + 1}</h3>
+                    <h3 className="font-semibold text-white">{provider.display_name || provider.provider_key}</h3>
                     <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.label === 'Vérifié' ? 'Disponibilité confirmée.' : 'Disponibilité non confirmée.'}</p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1230,21 +1220,14 @@ function ProvidersView({
                       <Button
                         size="sm"
                         variant="outline"
-                        loading={verifyingKey === provider.id}
+                        loading={verifyingKey === provider.provider_key}
                         disabled={Boolean(verifyingKey)}
-                        onClick={() => { void onVerifyProvider(provider.id); }}
+                        onClick={() => { void onVerifyProvider(provider.provider_key); }}
                       >
                         Vérifier la connexion
                       </Button>
                     )}
                   </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {provider.proposedCapabilities.map((capability) => (
-                    <span key={capability} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-400">
-                      {CAPABILITY_LABELS[capability]}
-                    </span>
-                  ))}
                 </div>
                 {providerModels.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
@@ -1254,6 +1237,7 @@ function ProvidersView({
                         : model.verification_status === 'unavailable'
                           ? 'Indisponible'
                           : 'Non vérifié';
+                      const capabilities = capabilitiesOf(model.capabilities);
                       return (
                         <button
                           key={model.model_key}
@@ -1261,7 +1245,7 @@ function ProvidersView({
                           disabled={!canProbe || Boolean(verifyingKey)}
                           title={canProbe ? 'Vérifier ce modèle IA VYORA' : undefined}
                           onClick={() => {
-                            if (canProbe) void onVerifyProvider(provider.id, model.provider_model_key);
+                            if (canProbe) void onVerifyProvider(provider.provider_key, model.provider_model_key);
                           }}
                           className={cn(
                             'rounded-md border px-2 py-0.5 text-[10px] transition',
@@ -1273,7 +1257,8 @@ function ProvidersView({
                             (!canProbe || Boolean(verifyingKey)) && 'cursor-default opacity-80',
                           )}
                         >
-                          Modèle VYORA {providerModels.indexOf(model) + 1} ({modelStateLabel})
+                          {model.display_name || model.model_key} ({modelStateLabel})
+                          {capabilities.length > 0 ? ` · ${capabilities.slice(0, 2).join(', ')}` : ''}
                         </button>
                       );
                     })}
@@ -1288,22 +1273,13 @@ function ProvidersView({
       <section className="vy-surface p-5 sm:p-7">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal size={16} className="text-brand-300" />
-          <h3 className="text-sm font-semibold text-white">Adaptateurs extensibles préparés</h3>
+          <h3 className="text-sm font-semibold text-white">Comment VYORA choisit un service IA</h3>
         </div>
-        <p className="mb-4 text-xs text-slate-400">
-          Ces adaptateurs disposent d’une interface prête côté serveur, sans clé ni exécution distante active tant qu’ils ne sont pas configurés et vérifiés.
+        <p className="text-xs leading-relaxed text-slate-400">
+          Le catalogue des services n’est pas figé : la plateforme lit le registre central, qui décrit pour chaque
+          fournisseur son protocole, son URL et le nom de son secret. Un service ajouté par l’administrateur apparaît
+          donc dans cette liste sans mise à jour de l’application — et n’est utilisé qu’après une vérification réelle.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {EXTENSIBLE_PROVIDER_ADAPTERS.map((adapter) => (
-            <article key={adapter.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-3.5" data-testid={`adapter-${adapter.id}`}>
-              <div className="flex items-center justify-between gap-2">
-                <h4 className="text-sm font-medium text-white">Service VYORA à venir</h4>
-                <Badge tone="neutral">À venir</Badge>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-400">Cette capacité pourra être activée après vérification côté serveur.</p>
-            </article>
-          ))}
-        </div>
       </section>
 
       {backendReady && (
@@ -1345,15 +1321,11 @@ function ProvidersView({
                   className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
                 >
                   <option value="">Service IA…</option>
-                  {(configurableProviders.length > 0
-                    ? configurableProviders
-                    : BUSINESS_PROVIDERS.filter((p) => p.id !== 'muapi').map((p) => ({
-                        provider_key: p.id,
-                        display_name: p.name,
-                      }))
-                  ).map((provider) => (
+                  {configurableProviders.length === 0 ? (
+                    <option value="" disabled>Aucun service configuré</option>
+                  ) : configurableProviders.map((provider) => (
                     <option key={provider.provider_key} value={provider.provider_key}>
-                        {`Moteur VYORA ${configurableProviders.findIndex((entry) => entry.provider_key === provider.provider_key) + 1}`}
+                      {provider.display_name || provider.provider_key}
                     </option>
                   ))}
                 </select>
@@ -1366,7 +1338,7 @@ function ProvidersView({
                   <option value="">Modèle par défaut</option>
                   {modelsForSelectedProvider.map((model) => (
                     <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>
-                      {`Modèle VYORA ${modelsForSelectedProvider.indexOf(model) + 1}`}
+                      {model.display_name || model.model_key}
                     </option>
                   ))}
                 </select>

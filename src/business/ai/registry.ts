@@ -1,13 +1,12 @@
-export type BusinessProviderId =
-  | 'gemini'
-  | 'groq'
-  | 'gonka'
-  | 'kilo'
-  | 'openrouter'
-  | 'llm7'
-  | 'muapi';
-
-export type ExtensibleAdapterId = 'openai' | 'anthropic' | 'deepseek' | 'mistral';
+/**
+ * VYORA — définitions partagées de l'espace Business.
+ *
+ * AUCUN fournisseur n'est listé ici : la liste des services IA vient du
+ * registre serveur (`ai_providers`). Ajouter un fournisseur est une opération
+ * d'administration (ligne de registre + secret), jamais une modification de
+ * code ou de ce fichier.
+ */
+export type BusinessProviderId = string;
 
 export type BusinessCapability =
   | 'writing'
@@ -22,7 +21,8 @@ export type BusinessCapability =
   | 'specialized-models'
   | 'model-comparison'
   | 'experimentation'
-  | 'video-generation';
+  | 'video-generation'
+  | string;
 
 export type ProviderConnectionState =
   | 'unverified'
@@ -31,6 +31,7 @@ export type ProviderConnectionState =
   | 'available'
   | 'unavailable';
 
+/** Fournisseur tel qu'il doit être AFFICHÉ, construit depuis le registre. */
 export interface BusinessProviderDefinition {
   id: BusinessProviderId;
   name: string;
@@ -39,16 +40,6 @@ export interface BusinessProviderDefinition {
   statusLabel: string;
   statusDescription: string;
   note?: string;
-}
-
-export interface ExtensibleAdapterDefinition {
-  id: ExtensibleAdapterId;
-  name: string;
-  proposedCapabilities: readonly BusinessCapability[];
-  connectionState: 'unverified';
-  statusLabel: string;
-  statusDescription: string;
-  envKeyHint: string;
 }
 
 export type BusinessRoleKey =
@@ -68,106 +59,6 @@ export interface BusinessRoleDefinition {
   description: string;
 }
 
-export const BUSINESS_PROVIDERS: readonly BusinessProviderDefinition[] = [
-  {
-    id: 'gemini',
-    name: 'Gemini',
-    proposedCapabilities: ['writing', 'images', 'documents'],
-    connectionState: 'unverified',
-    statusLabel: 'Non vérifié',
-    statusDescription: 'Aucune connexion ni capacité de modèle vérifiée.',
-  },
-  {
-    id: 'groq',
-    name: 'Groq',
-    proposedCapabilities: ['scripts', 'hooks', 'reasoning'],
-    connectionState: 'unverified',
-    statusLabel: 'Non vérifié',
-    statusDescription: 'La disponibilité côté serveur n’est pas vérifiée dans Business Grow.',
-    note: 'Le Studio conserve son intégration distincte.',
-  },
-  {
-    id: 'gonka',
-    name: 'Gonka',
-    proposedCapabilities: ['analysis', 'reasoning'],
-    connectionState: 'unverified',
-    statusLabel: 'Non vérifié',
-    statusDescription: 'Aucune connexion ni capacité de modèle vérifiée.',
-  },
-  {
-    id: 'kilo',
-    name: 'Kilo',
-    proposedCapabilities: ['economic-routing', 'fallback'],
-    connectionState: 'unverified',
-    statusLabel: 'Non vérifié',
-    statusDescription: 'Aucun routage économique ou secours activé.',
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    proposedCapabilities: ['specialized-models', 'model-comparison'],
-    connectionState: 'unverified',
-    statusLabel: 'Non vérifié',
-    statusDescription: 'Aucun modèle spécialisé ou comparatif disponible.',
-  },
-  {
-    id: 'llm7',
-    name: 'LLM7',
-    proposedCapabilities: ['experimentation'],
-    connectionState: 'unverified',
-    statusLabel: 'Non vérifié',
-    statusDescription: 'Aucune connexion ni capacité de modèle vérifiée.',
-  },
-  {
-    id: 'muapi',
-    name: 'MuAPI',
-    proposedCapabilities: ['video-generation'],
-    connectionState: 'unverified',
-    statusLabel: 'Non vérifié',
-    statusDescription: 'La génération vidéo reste dans le Studio UGC.',
-    note: 'Hors du routage conversationnel Business Grow.',
-  },
-];
-
-export const EXTENSIBLE_PROVIDER_ADAPTERS: readonly ExtensibleAdapterDefinition[] = [
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    proposedCapabilities: ['writing', 'reasoning', 'analysis'],
-    connectionState: 'unverified',
-    statusLabel: 'Adaptateur prêt',
-    statusDescription: 'Interface serveur préparée dans le registre central (aucune clé configurée).',
-    envKeyHint: 'BUSINESS_GROW_OPENAI_API_KEY',
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic Claude',
-    proposedCapabilities: ['writing', 'reasoning', 'analysis'],
-    connectionState: 'unverified',
-    statusLabel: 'Adaptateur prêt',
-    statusDescription: 'Interface serveur préparée dans le registre central (aucune clé configurée).',
-    envKeyHint: 'BUSINESS_GROW_ANTHROPIC_API_KEY',
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    proposedCapabilities: ['reasoning', 'economic-routing'],
-    connectionState: 'unverified',
-    statusLabel: 'Adaptateur prêt',
-    statusDescription: 'Interface serveur préparée dans le registre central (aucune clé configurée).',
-    envKeyHint: 'BUSINESS_GROW_DEEPSEEK_API_KEY',
-  },
-  {
-    id: 'mistral',
-    name: 'Mistral AI',
-    proposedCapabilities: ['writing', 'reasoning'],
-    connectionState: 'unverified',
-    statusLabel: 'Adaptateur prêt',
-    statusDescription: 'Interface serveur préparée dans le registre central (aucune clé configurée).',
-    envKeyHint: 'BUSINESS_GROW_MISTRAL_API_KEY',
-  },
-];
-
 export const BUSINESS_ROLES: readonly BusinessRoleDefinition[] = [
   { roleKey: 'business_advisor', label: 'Conseil business', description: 'Pilotage global et réponses contextualisées' },
   { roleKey: 'business_analysis', label: 'Analyse entreprise', description: 'Diagnostic offre, positionnement et leviers' },
@@ -180,6 +71,37 @@ export const BUSINESS_ROLES: readonly BusinessRoleDefinition[] = [
 
 export function isBusinessProviderAvailable(provider: BusinessProviderDefinition): boolean {
   return provider.connectionState === 'available';
+}
+
+/**
+ * Projette une ligne du registre serveur en définition affichable.
+ * Aucune capability n'est inventée : seules celles des modèles vérifiés du
+ * fournisseur sont reprises.
+ */
+export function describeRegistryProvider(row: {
+  key: string;
+  name?: string | null;
+  status: string;
+  aggregator: boolean;
+  capabilities?: readonly BusinessCapability[];
+}): BusinessProviderDefinition {
+  const available = row.status === 'available';
+  return {
+    id: row.key,
+    name: row.name?.trim() || row.key,
+    proposedCapabilities: row.capabilities ?? [],
+    connectionState: available ? 'available' : 'unverified',
+    statusLabel: available ? 'Vérifié' : 'Non vérifié',
+    statusDescription: available
+      ? 'Disponibilité confirmée par une sonde réelle.'
+      : 'Aucune disponibilité confirmée pour ce service.',
+    ...(row.aggregator ? { note: 'Agrégateur : recours, jamais un doublon de facturation.' } : {}),
+  };
+}
+
+/** Capacités lisibles d'un modèle, dans l'ordre de leurs libellés connus. */
+export function capabilitiesOf(capabilities: Record<string, unknown> | null | undefined): string[] {
+  return describeModelCapabilities(capabilities ?? {});
 }
 
 export const MODEL_CAPABILITY_LABELS: Record<string, string> = {

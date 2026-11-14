@@ -8,7 +8,7 @@
 //   - délai par appel (défaut 25 s) ;
 //   - l'agrégateur n'est un recours que s'il reste dans la chaîne.
 
-import { getAiAdapter } from './adapters.ts';
+import { resolveAiAdapter } from './adapters.ts';
 import { AiRegistrySnapshot } from './registry.ts';
 import { buildAiChain, estimateCostUsd, AiChainStep } from './router.ts';
 import { AiCallOptions, AiChatMessage, AiCredentials, AiProviderError } from './types.ts';
@@ -68,10 +68,21 @@ export interface AiCallLogEntry {
 export interface AiEngineDeps {
   /** Charge le registre (snapshot). null = indisponible → chemin de secours. */
   loadRegistry(): Promise<AiRegistrySnapshot | null>;
-  /** Fournisseurs CONFIGURÉS (clé présente) : le routeur ne les propose que tels. */
+  /**
+   * Fournisseurs configurés hors registre (compatibilité des intégrations
+   * historiques). Le moteur y AJOUTE tout fournisseur du registre dont la clé
+   * se résout : la liste des fournisseurs servis n'est donc jamais figée ici.
+   */
   configuredProviders(): ReadonlySet<string>;
   /** Clés par fournisseur — jamais sérialisées, jamais renvoyées au client. */
   credentials(providerKey: string): AiCredentials;
+  /**
+   * Optionnel : variables d'environnement réellement présentes côté Edge
+   * (noms seulement). Sert aux fournisseurs dont le nom de variable est fourni
+   * par le registre : le moteur peut ainsi résoudre une clé sans qu'aucun nom
+   * de fournisseur ne soit écrit dans le code.
+   */
+  env?(name: string): string | null;
   fetcher: typeof fetch;
   /** Journalisation (une entrée par exécution, avec TOUTES les tentatives).
    *  Doit être non bloquante : un échec de journalisation ne doit jamais
@@ -120,6 +131,32 @@ function statusError(status: number): AiProviderError {
   return new AiProviderError('AI_INVALID_RESPONSE', true);
 }
 
+/**
+ * Fournisseurs réellement configurables pour CE snapshot.
+ *
+ * Un fournisseur est retenu dès que sa clé se résout — par le nom de variable
+ * déclaré au registre (`api_key_env`) ou par le fournisseur de credentials des
+ * intégrations historiques. Aucune clé en dur, aucune liste en dur : ajouter
+ * une ligne de registre + un secret suffit à rendre un fournisseur disponible.
+ * Un fournisseur exigeant un identifiant de compte (`account_id_env`) n'est
+ * retenu que si cet identifiant est lui aussi présent.
+ */
+function resolveConfiguredProviders(
+  snapshot: AiRegistrySnapshot,
+  deps: AiEngineDeps,
+  credentialsFor: (providerKey: string) => AiCredentials,
+): Set<string> {
+  const configured = new Set<string>(deps.configuredProviders());
+  for (const provider of snapshot.providers) {
+    if (provider.status === 'disabled') continue;
+    const credentials = credentialsFor(provider.key);
+    if (!credentials.apiKey) continue;
+    if (provider.accountIdEnv && !credentials.accountId) continue;
+    configured.add(provider.key);
+  }
+  return configured;
+}
+
 export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Promise<AiCallOutcome> {
   const startedAt = Date.now();
   const maxAttempts = Math.max(1, Math.min(5, deps.maxAttempts ?? 3));
@@ -135,7 +172,27 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
     };
   }
 
-  const { steps, skipReason } = buildAiChain(snapshot, request, deps.configuredProviders());
+  // Modèle de référence pour le coût estimé : le modèle réellement servi.
+  const modelIndex = new Map(snapshot.models.map((m) => [`${m.provider}|${m.key}`, m]));
+  const providerIndex = new Map(snapshot.providers.map((p) => [p.key, p]));
+
+  /** Clé du fournisseur : d'abord le descripteur du registre, sinon le deps. */
+  const credentialsFor = (providerKey: string): AiCredentials => {
+    const descriptor = providerIndex.get(providerKey);
+    const envName = descriptor?.apiKeyEnv;
+    if (envName && deps.env) {
+      const apiKey = deps.env(envName);
+      const accountId = descriptor?.accountIdEnv ? deps.env(descriptor.accountIdEnv) : null;
+      if (apiKey) return { apiKey, accountId: accountId ?? null };
+    }
+    return deps.credentials(providerKey);
+  };
+
+  const { steps, skipReason } = buildAiChain(
+    snapshot,
+    request,
+    resolveConfiguredProviders(snapshot, deps, credentialsFor),
+  );
   if (skipReason) {
     return {
       ok: false, code: skipReason, content: null,
@@ -145,15 +202,25 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
     };
   }
 
-  // Modèle de référence pour le coût estimé : le modèle réellement servi.
-  const modelIndex = new Map(snapshot.models.map((m) => [`${m.provider}|${m.key}`, m]));
-
   const attempts: AiAttemptRecord[] = [];
   let lastError: AiProviderError | null = null;
 
   for (let i = 0; i < Math.min(steps.length, maxAttempts); i += 1) {
     const step: AiChainStep = steps[i];
-    const adapter = getAiAdapter(step.providerKey);
+    // L'adaptateur est construit À PARTIR DU REGISTRE : aucun fournisseur n'est
+    // nommé dans le code, seule la ligne du registre décrit son protocole.
+    const provider = providerIndex.get(step.providerKey);
+    const adapter = resolveAiAdapter(provider
+      ? {
+          key: provider.key,
+          kind: provider.adapterKind,
+          baseUrl: provider.baseUrl ?? '',
+          apiKeyEnv: provider.apiKeyEnv,
+          accountIdEnv: provider.accountIdEnv,
+          modelsUrl: provider.modelsUrl,
+          headers: provider.headers,
+        }
+      : null);
     if (!adapter) {
       attempts.push({
         attempt: i + 1, providerKey: step.providerKey, modelKey: step.modelKey,
@@ -167,7 +234,7 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
     const attemptStart = Date.now();
     try {
       const transport = adapter.buildRequest({
-        credentials: deps.credentials(step.providerKey),
+        credentials: credentialsFor(step.providerKey),
         model: step.providerModelKey,
         messages: request.messages,
         options: request.options,

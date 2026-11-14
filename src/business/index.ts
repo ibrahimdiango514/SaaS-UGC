@@ -1,11 +1,11 @@
 export { businessGrowBridge } from './bridge';
 export {
-  BUSINESS_PROVIDERS,
   BUSINESS_ROLES,
   BUSINESS_ROUTING_DEFAULTS,
-  EXTENSIBLE_PROVIDER_ADAPTERS,
   MODEL_CAPABILITY_LABELS,
+  capabilitiesOf,
   describeModelCapabilities,
+  describeRegistryProvider,
   isBusinessProviderAvailable,
 } from './ai/registry';
 export type {
@@ -14,8 +14,6 @@ export type {
   BusinessProviderId,
   BusinessRoleDefinition,
   BusinessRoleKey,
-  ExtensibleAdapterDefinition,
-  ExtensibleAdapterId,
   ProviderConnectionState,
   RoutingSelectionMode,
 } from './ai/registry';

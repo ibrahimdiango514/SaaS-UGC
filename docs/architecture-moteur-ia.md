@@ -5,6 +5,7 @@
 > nouveaux fournisseurs, sans réécrire les intégrations en production.
 >
 > Fiche de renseignement des fournisseurs : [`moteur-ia-fournisseurs.md`](./moteur-ia-fournisseurs.md).
+> Dossiers de réception des fournisseurs (documentation seule) : [`fournisseurs-ia/`](./fournisseurs-ia/README.md).
 
 ---
 
@@ -20,7 +21,7 @@ Supabase Edge Functions
   ├── reelora-ai / video  ← espace Studio (génération vidéo MuAPI)
   └── _shared/ai-core/    ← cœur partagé : adaptateurs, routeur, moteur, journal
         │
-        ├── adapters.ts   protocoles par fournisseur (7 aujourd'hui)
+        ├── adapters.ts   gabarits de protocole (aucun fournisseur nommé)
         ├── router.ts     sélection de la chaîne de modèles
         ├── engine.ts     exécution, secours, journalisation des appels
         ├── registry.ts   lecture du registre (fournisseurs, modèles, règles, budget)
@@ -43,33 +44,52 @@ présente ne suffit jamais : il faut un fournisseur `available`, une configurati
 | Fichier | Rôle | Contraintes tenues |
 |---|---|---|
 | `types.ts` | `AiProviderAdapter`, `AiProviderError` (codes), `AiLevel`, `AiCredentials` | aucune I/O |
-| `adapters.ts` | un adaptateur par fournisseur : `buildRequest`, `parse`, `modelsUrl`, `parseModelList` | fonctions **pures**, testables sans réseau |
+| `adapters.ts` | gabarits de protocole (`openai`, `gemini`, `cloudflare`, `none`) + `resolveAiAdapter(descripteur)` | fonctions **pures**, testables sans réseau |
 | `router.ts` | `buildAiChain()` : construit une chaîne ordonnée de modèles pour une tâche | déterministe, plafonnée, anti-double-routage |
 | `engine.ts` | `runAiCall()` : exécution HTTP, secours, `fetch` injecté, journalisation | aucune clé écrite hors secrets |
 | `registry.ts` | `parseRegistrySnapshot()` : lecture typée du JSON servi par `bg_ai_registry_snapshot()` | tolérant aux champs absents |
 
-### 2.1 Adaptateurs disponibles
+### 2.1 Aucune liste de fournisseurs dans le code
 
-| Fournisseur | Clé de registre | Protocole | Particularité |
-|---|---|---|---|
-| Groq | `groq` | OpenAI-compatible | production, vérifié |
-| Gemini | `gemini` | **natif** (`:generateContent`) | production, vérifié |
-| DeepSeek | `deepseek` | OpenAI-compatible | adaptateur prêt, non vérifié |
-| Mistral | `mistral` | OpenAI-compatible | adaptateur prêt, non vérifié |
-| xAI (Grok) | `grok` | OpenAI-compatible | adaptateur prêt, non vérifié |
-| OpenRouter | `openrouter` | OpenAI-compatible | **agrégateur**, en-têtes d'attribution |
-| Cloudflare Workers AI | `cloudflare` | conversation + URL par compte | exige `accountId` + jeton |
+Le code ne nomme **aucun** fournisseur : il ne connaît que des **gabarits de
+protocole**. Chaque fournisseur est décrit par sa ligne du registre central
+(`saas_business.ai_providers`) :
 
-**Ajouter un fournisseur** = ajouter un objet dans `AI_PROVIDERS` (`adapters.ts`) +
-les variables d'environnement + une ligne au registre. Aucune autre couche ne change.
+| Colonne | Rôle |
+|---|---|
+| `provider_key` | identifiant (`^[a-z][a-z0-9_-]{1,39}$`) |
+| `display_name` | nom affiché dans les interfaces |
+| `adapter_kind` | gabarit : `openai` (chat/completions), `gemini` (natif), `cloudflare` (URL par compte), `none` (protocole dédié, jamais appelé) |
+| `default_base_url` | URL de base ; le moteur en déduit `/chat/completions` et `/models` |
+| `models_url` | URL de liste des modèles (facultative) |
+| `default_headers` | en-têtes supplémentaires (attribution d'agrégateur, version d'API) — **jamais un secret** |
+| `api_key_env` | **nom** de la variable portant la clé (la valeur reste un secret Edge) |
+| `account_id_env` | **nom** de la variable portant l'identifiant de compte, si le protocole l'exige |
+| `is_aggregator` | agrégateur : recours, jamais un doublon de facturation |
 
-### 2.2 Trois familles de protocoles
+**Ajouter un fournisseur** = une ligne de registre (via
+`public.vyora_ai_admin_provider_upsert`) + un secret Edge. Aucun fichier de code,
+aucune migration, aucun déploiement de code n'est nécessaire. Le fournisseur est
+créé `enabled = false` / `unverified` : il n'est servi qu'après une sonde réelle.
 
-1. **OpenAI-compatible** (Groq, DeepSeek, Mistral, Grok, OpenRouter, Cloudflare) :
-   une seule fabrique `createOpenAiCompatibleAdapter(urlChat, urlModèles)`.
-2. **Natif Gemini** : URL `models/{model}:generateContent`, lecture `candidates[0].content.parts`.
-3. **Futurs protocoles** (Anthropic Messages, Cohere, etc.) : nouvel adaptateur dédié,
-   même interface.
+### 2.2 Trois gabarits de protocole
+
+1. **`openai`** — un seul constructeur (`resolveAiAdapter`) dérive
+   `${base}/chat/completions` et `${base}/models`. Couvre tout fournisseur
+   compatible OpenAI, y compris inconnu du code.
+2. **`gemini`** — protocole natif : `models/{model}:generateContent`,
+   lecture `candidates[0].content.parts`, en-tête `x-goog-api-key`.
+3. **`cloudflare`** — conversation au format OpenAI mais URL par compte
+   (`accounts/{id}/ai/v1/chat`), donc `accountId` obligatoire.
+
+Les intégrations historiques (Groq, Gemini, Cloudflare) conservent un adaptateur
+dédié qui reproduit **exactement** leur comportement de production ; il est
+sélectionné par le registre (`adapter_kind` + `provider_key`), jamais par une
+liste écrite dans l'application.
+
+Un gabarit `none` permet de déclarer un fournisseur au registre dont le
+protocole n'est pas encore modélisé : il est **listé mais jamais appelé**, et le
+moteur journalise `UNSUPPORTED_PROVIDER` au lieu d'envoyer une requête mal formée.
 
 ---
 
@@ -216,12 +236,33 @@ en-têtes, corps), un test de parsing (tokens, contenu vide, erreur), et un test
 
 ## 9. État réel au 2026-11-14 (à ne pas surinterpréter)
 
-- ✅ Sept adaptateurs écrits, testés hors réseau.
-- ✅ Registre, budget, plafonds, journal, santé, interface admin.
+- ✅ **Le catalogue de fournisseurs n'est plus écrit dans le code** : il est lu
+  dans le registre (`ai_providers`). Ajouter un fournisseur = une ligne de
+  registre + un secret Edge (`vyora_ai_admin_provider_upsert`).
+- ✅ Un gabarit de protocole `openai` suffit pour tout fournisseur
+  OpenAI-compatible, connu ou non du code.
+- ✅ Registre, budget, plafonds, journal, santé, interface admin, mémoire
+  persistante : en place et testés.
 - ✅ Groq et Gemini vérifiés en production (dernier contrôle : 2026-11-12).
-- ⚠️ Cinq fournisseurs (Mistral, DeepSeek, OpenRouter, Cloudflare, xAI) : **adaptateurs
-  prêts mais non vérifiés**, aucune clé déposée → jamais routés.
-- ⚠️ Les identifiants de modèles listés dans les migrations proviennent de la
-  documentation officielle consultée à la date indiquée : **à reconfirmer** avec les
-  fiches que vous compléterez, avant toute activation.
-- ⚠️ Aucun test de production payant n'a été exécuté pour ces cinq fournisseurs.
+- ⛔ **Aucune intégration de fournisseur n'est en cours.** La consigne du
+  2026-11-14 est explicite : réception et documentation seulement, jusqu'à la
+  phrase d'autorisation « COMMENCE L'INTÉGRATION DES FOURNISSEURS IA. »
+- ⛔ **Mistral est reporté** (offre payante) : aucune démarche, aucune clé, aucune
+  vérification. Sa ligne de registre reste telle quelle, inactive.
+- ⚠️ Les identifiants de modèles déjà présents au catalogue proviennent de la
+  documentation officielle consultée à la date indiquée : **à reconfirmer** avec
+  les fiches de réception avant toute activation.
+- ⚠️ Aucun test de production payant n'a été exécuté pour les fournisseurs non
+  vérifiés.
+
+### 9.1 Procédure de réception d'un fournisseur (sans intégration)
+
+1. **Réception** : nom, informations d'accès (sans jamais recopier une clé),
+   documentation officielle, précisions utiles.
+2. **Identification** : fiche créée dans [`fournisseurs-ia/`](./fournisseurs-ia/README.md).
+3. **Examen** : protocole, authentification, URL de base, modèle de coût,
+   régions, limites *annoncées* (ou « non publié » — jamais deviné).
+4. **Documentation** : caractéristiques, modèles annoncés, capacités annoncées,
+   informations manquantes, état de préparation.
+5. **Aucune intégration** : pas de ligne de registre activée, pas de clé, pas
+   d'appel réseau, pas de sonde.

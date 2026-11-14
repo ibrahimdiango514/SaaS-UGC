@@ -1,8 +1,17 @@
 # VYORA — Fiche de renseignement des fournisseurs d'IA
 
-> **Document de travail.** Il sert à recueillir les informations officielles de chaque
-> fournisseur avant intégration dans le moteur IA de VYORA. Les cases marquées
-> « à renseigner » sont vides volontairement : **aucune valeur n'est inventée**.
+> **Document de travail — réception et documentation uniquement.**
+> Il sert à recueillir les informations officielles de chaque fournisseur avant
+> intégration dans le moteur IA de VYORA. Les cases marquées « à renseigner » sont
+> vides volontairement : **aucune valeur n'est inventée**.
+>
+> - La **liste des fournisseurs n'est pas figée** : elle vit dans le registre
+>   (`saas_business.ai_providers`), pas dans ce document ni dans le code.
+> - **Aucune intégration n'est en cours.** Elle ne démarrera qu'à la phrase
+>   « COMMENCE L'INTÉGRATION DES FOURNISSEURS IA. »
+> - **Mistral est reporté** (offre payante) : aucune démarche.
+> - Les fiches des **nouveaux** fournisseurs reçus vivent dans
+>   [`fournisseurs-ia/`](./fournisseurs-ia/README.md).
 >
 > Dernière mise à jour du document : 2026-11-14.
 
@@ -37,9 +46,15 @@
 | Jeton OAuth (si requis) | `BUSINESS_GROW_<FOURNISSEUR>_AUTH_TOKEN` | `BUSINESS_GROW_CLOUDFLARE_AUTH_TOKEN` |
 | Ordre de secours | `BUSINESS_GROW_PROVIDER_ORDER` | `groq,gemini,deepseek` |
 
-Les alias historiques (`GROQ_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`,
-`MISTRAL_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`) restent acceptés en repli :
-ils ne servent qu'à la compatibilité, la convention `BUSINESS_GROW_*` prime.
+Les alias courts (`<FOURNISSEUR>_API_KEY`) restent acceptés en repli : ils ne
+servent qu'à la compatibilité, la convention `BUSINESS_GROW_*` prime.
+
+> **Depuis le 2026-11-14, ces noms ne sont plus écrits dans le code.** Chaque
+> fournisseur déclare ses variables dans le registre (`api_key_env`,
+> `account_id_env`) ; le moteur les construit par convention
+> (`BUSINESS_GROW_<CLÉ>_API_KEY`) pour les fournisseurs déjà intégrés. Un nouveau
+> fournisseur n'exige donc aucune modification de code — seulement une ligne de
+> registre et un secret.
 
 ### Où déposer la clé, concrètement
 
@@ -263,17 +278,19 @@ Dupliquez ce bloc pour chaque nouveau fournisseur :
 
 ---
 
-## 10. Récapitulatif à renseigner en priorité
+## 10. Point de situation (2026-11-14)
 
-| Fournisseur | Clé déposée ? | Modèle cible | Vérifié par sonde ? | Routage actif ? |
+| Fournisseur | Clé déposée ? | Vérifié par sonde ? | Routage actif ? | Remarque |
 |---|---|---|---|---|
-| Google Gemini | oui (prod) | `gemini-2.5-flash` | oui | oui |
-| Groq | oui (prod) | `openai/gpt-oss-120b` | oui | oui |
-| Mistral AI | non | à renseigner | non | non |
-| DeepSeek | non | à renseigner | non | non |
-| OpenRouter | non | à renseigner | non | non |
-| Cloudflare Workers AI | non | à renseigner | non | non |
-| xAI (Grok) | non | à renseigner | non | non |
+| Google Gemini | oui (prod) | oui | oui | intégration de production |
+| Groq | oui (prod) | oui | oui | intégration de production |
+| Lignes de registre antérieures, inactives | non | non | non | conservées telles quelles, aucun travail en cours |
+| **Mistral AI** | non | non | non | **reporté** (offre payante) — aucune démarche |
+| Toute nouvelle réception | — | — | — | ouvre une fiche dans [`fournisseurs-ia/`](./fournisseurs-ia/README.md) |
 
 > **Rappel :** une clé déposée ne suffit pas. Sans sonde réussie, le fournisseur
 > reste listé « Non vérifié » et n'est jamais utilisé par le routeur.
+>
+> **Aucune intégration n'est en cours.** Elle ne démarrera qu'à la phrase
+> « COMMENCE L'INTÉGRATION DES FOURNISSEURS IA. », fournisseur par fournisseur,
+> avec test et vérification à chaque étape.

@@ -103,8 +103,12 @@ describe('artefact déployable business-grow', () => {
     expect(source).not.toMatch(/from\s*["']\.\.?\//);
     // Aucune clé n'est inlinée : les valeurs restent lues via env(...).
     expect(source).not.toMatch(/gsk_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}/);
-    expect(source).toContain('BUSINESS_GROW_GROQ_API_KEY');
-    expect(source).toContain('BUSINESS_GROW_GEMINI_API_KEY');
+    // Plus aucun catalogue de fournisseurs dans l'artefact : le nom des
+    // variables est CONSTRUIT depuis la clé du registre (convention), et la
+    // liste elle-même est lue en base.
+    expect(source).toContain('_API_KEY');
+    expect(source).toContain('saas_business.ai_providers');
+    expect(source).not.toMatch(/BUSINESS_GROW_(GROQ|GEMINI|DEEPSEEK|MISTRAL|GROK|OPENROUTER|CLOUDFLARE)_/);
   });
 
   it('refuse une origine inconnue en renvoyant l’en-tête CORS explicite', () => {

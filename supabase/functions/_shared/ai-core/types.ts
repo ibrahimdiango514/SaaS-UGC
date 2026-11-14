@@ -68,8 +68,45 @@ export interface AiParsedResult {
  * protocole en particulier (OpenAI-compatible, Gemini, Workers AI, agrégateur).
  * Chaque adaptateur décrit sa requête transport et interprète sa réponse.
  */
+/**
+ * Gabarit de protocole d'un fournisseur, stocké DANS LE REGISTRE
+ * (`ai_providers.adapter_kind` + `default_base_url`).
+ *
+ * Conséquence : ajouter un fournisseur compatible OpenAI ne demande AUCUN code
+ * — une ligne de registre et un secret suffisent. Le code ne contient aucune
+ * liste fermée de fournisseurs : il ne connaît que des protocoles.
+ *
+ *  - `openai`     : /chat/completions au format OpenAI (le plus courant) ;
+ *  - `gemini`     : protocole natif Google (generateContent) ;
+ *  - `cloudflare` : conversation par compte + liste `result[]` ;
+ *  - `none`       : protocole exotique → adaptateur dédié à écrire (le moteur
+ *                   refuse proprement le fournisseur en attendant).
+ */
+export type AiAdapterKind = 'openai' | 'gemini' | 'cloudflare' | 'none';
+
+export const AI_ADAPTER_KINDS: readonly AiAdapterKind[] = ['openai', 'gemini', 'cloudflare', 'none'];
+
+/** Décrit UN fournisseur sans figer son identité dans le code. */
+export interface AiProviderDescriptor {
+  key: string;
+  kind: AiAdapterKind;
+  /** URL de base, ex. `https://api.exemple.com/v1`. */
+  baseUrl: string;
+  /** Nom de la variable d'environnement qui porte la clé (jamais la valeur). */
+  apiKeyEnv: string | null;
+  /** Variable portant l'identifiant de compte (Cloudflare), si nécessaire. */
+  accountIdEnv?: string | null;
+  /** URL de base de la liste des modèles (défaut : déduite de `baseUrl`). */
+  modelsUrl?: string | null;
+  /** En-têtes supplémentaires (attribution d'un agrégateur, version d'API…). */
+  headers?: Record<string, string> | undefined;
+  aggregator?: boolean;
+}
+
 export interface AiProviderAdapter {
   readonly id: string;
+  /** Gabarit de protocole effectivement utilisé (diagnostic/administration). */
+  readonly kind?: AiAdapterKind;
   /** Construit la requête HTTP. Lève AiProviderError si non configuré. */
   buildRequest(params: {
     credentials: AiCredentials;

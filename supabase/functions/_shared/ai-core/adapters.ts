@@ -1,13 +1,18 @@
-// VYORA AI CORE — adaptateurs fournisseurs (7 fournisseurs).
+// VYORA AI CORE — adaptateurs de FOURNISSEURS, construits depuis le registre.
 //
-// Couche d'abstraction commune : chaque fournisseur décrit sa propre requête
-// et sa propre réponse. Cinq fournisseurs partagent un protocole
-// OpenAI-compatible (Groq, DeepSeek, Mistral, Grok/xAI, OpenRouter — l'agrégateur
-// expose le même protocole) ; Cloudflare Workers AI expose un point de
-// conversation au même format mais sur une URL par compte ; Gemini conserve
-// son protocole natif. Les intégrations Groq et Gemini reproduisent EXACTEMENT
-// le protocole déjà en production (URLs, en-têtes, corps, lecture des tokens) —
-// aucune réécriture de leur comportement.
+// Il n'existe ici AUCUNE liste de fournisseurs : le module ne connaît que des
+// gabarits de protocole (`openai`, `gemini`, `cloudflare`, `none`). Chaque
+// fournisseur est décrit par sa ligne du registre central
+// (`saas_business.ai_providers` : `adapter_kind`, `default_base_url`,
+// `models_url`, `default_headers`, `api_key_env`) et par son secret côté Edge ;
+// `resolveAiAdapter()` assemble l'adaptateur correspondant.
+//
+// Trois fournisseurs conservent un adaptateur DÉDIÉ parce que leur protocole
+// n'est pas strictement OpenAI (Groq et Cloudflare Workers AI : URL et lecture
+// des modèles spécifiques ; Gemini : protocole natif). Ces adaptateurs
+// reproduisent EXACTEMENT le comportement déjà en production — aucune
+// réécriture. Un nouveau fournisseur OpenAI-compatible s'ajoute donc par une
+// ligne de registre + un secret, sans modifier ce fichier.
 //
 // Aucune I/O ici : buildRequest/parse sont purs. L'exécution HTTP est dans
 // engine.ts (fetch injecté) — ce qui permet des tests unitaires complets.
@@ -18,6 +23,7 @@ import {
   AiCredentials,
   AiParsedResult,
   AiProviderAdapter,
+  AiProviderDescriptor,
   AiProviderError,
 } from './types.ts';
 
@@ -82,7 +88,7 @@ function parseModelIds(payload: unknown): string[] {
 }
 
 /** Fabrique un adaptateur OpenAI-compatible (le protocole, pas l'identité). */
-function createOpenAiCompatibleAdapter(
+export function createOpenAiCompatibleAdapter(
   id: string,
   chatUrl: string,
   modelsUrl: string | null = null,
@@ -181,39 +187,18 @@ const geminiAdapter: AiProviderAdapter = {
     const data = rec(payload);
     const rows = Array.isArray(data.models) ? data.models : [];
     return rows
+      // Quand l'API annonce les méthodes supportées, seuls les modèles de
+      // conversation sont retenus (jamais un modèle d'embedding).
+      .filter((item) => {
+        const methods = rec(item).supportedGenerationMethods;
+        return !Array.isArray(methods) || methods.includes('generateContent');
+      })
       .map((item) => rec(item).name)
       .filter((name): name is string => typeof name === 'string')
       .map((name) => name.replace(/^models\//, ''))
       .sort();
   },
 };
-
-// ---------------------------------------------------------------------------
-// DEEPSEEK — protocole OpenAI (api.deepseek.com).
-// ---------------------------------------------------------------------------
-const deepseekAdapter = createOpenAiCompatibleAdapter(
-  'deepseek',
-  'https://api.deepseek.com/chat/completions',
-  'https://api.deepseek.com/models',
-);
-
-// ---------------------------------------------------------------------------
-// MISTRAL — protocole OpenAI (api.mistral.ai/v1).
-// ---------------------------------------------------------------------------
-const mistralAdapter = createOpenAiCompatibleAdapter(
-  'mistral',
-  'https://api.mistral.ai/v1/chat/completions',
-  'https://api.mistral.ai/v1/models',
-);
-
-// ---------------------------------------------------------------------------
-// GROK (xAI) — protocole OpenAI (api.x.ai/v1).
-// ---------------------------------------------------------------------------
-const grokAdapter = createOpenAiCompatibleAdapter(
-  'grok',
-  'https://api.x.ai/v1/chat/completions',
-  'https://api.x.ai/v1/models',
-);
 
 // ---------------------------------------------------------------------------
 // CLOUDFLARE WORKERS AI — point de conversation par compte (Bearer jeton API).
@@ -255,45 +240,99 @@ const cloudflareAdapter: AiProviderAdapter = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// OPENROUTER — AGRÉGATEUR (protocole OpenAI). Ajoute les en-têtes
-// HTTP-Referer / X-Title requis par le service (attribution).
-// ---------------------------------------------------------------------------
-const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
-
-const openrouterAdapter: AiProviderAdapter = {
-  id: 'openrouter',
-  buildRequest({ credentials, model, messages, options }) {
-    requireConfigured(credentials, model, messages);
-    return {
-      url: OPENROUTER_CHAT_URL,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${credentials.apiKey}`,
-        'HTTP-Referer': 'https://vyora-ugc.netlify.app',
-        'X-Title': 'VYORA',
-      },
-      body: openAiBody(model, messages, options),
-    };
-  },
-  parse: parseOpenAi,
-  modelsUrl: (credentials) => (credentials.apiKey ? OPENROUTER_MODELS_URL : null),
-  parseModelList: parseModelIds,
-};
-
-export const AI_PROVIDERS: Record<string, AiProviderAdapter> = {
+/**
+ * ---------------------------------------------------------------------------
+ * REGISTRE DE PROTOCOLES (et non de fournisseurs)
+ * ---------------------------------------------------------------------------
+ * Le code ne référence AUCUN fournisseur par son nom : il ne connaît que des
+ * gabarits de protocole. Les fournisseurs eux-mêmes sont décrits par les lignes
+ * du registre central (`saas_business.ai_providers` → `adapter_kind`,
+ * `default_base_url`, `models_url`, `default_headers`) et par la présence de
+ * leur secret côté Edge.
+ *
+ * Conséquence concrète : un nouveau fournisseur compatible OpenAI s'ajoute par
+ * une ligne de registre + une variable d'environnement, sans redéploiement de
+ * code et sans toucher à cette liste.
+ *
+ * Trois fournisseurs conservent un adaptateur DÉDIÉ (protocole natif non
+ * strictement générique, écrit et vérifié en production) : Groq, Gemini et
+ * Cloudflare Workers AI.
+ */
+export const NATIVE_ADAPTERS: Record<string, AiProviderAdapter> = {
   groq: groqAdapter,
   gemini: geminiAdapter,
-  deepseek: deepseekAdapter,
-  mistral: mistralAdapter,
-  grok: grokAdapter,
   cloudflare: cloudflareAdapter,
-  openrouter: openrouterAdapter,
 };
 
+/** Fournisseur décrivant son propre protocole (adaptateur natif). */
+function adapterFromNative(descriptor: AiProviderDescriptor): AiProviderAdapter | null {
+  const native = NATIVE_ADAPTERS[descriptor.key];
+  if (!native) return null;
+  return native;
+}
+
+/** Construit un adaptateur à partir d'un gabarit + d'une URL de base. */
+function adapterFromDescriptor(descriptor: AiProviderDescriptor): AiProviderAdapter | null {
+  if (descriptor.kind === 'none') return null;
+  if (NATIVE_ADAPTERS[descriptor.key]) return adapterFromNative(descriptor);
+
+  const base = descriptor.baseUrl.replace(/\/+$/, '');
+  if (!base) return null;
+
+  if (descriptor.kind === 'openai') {
+    const chatUrl = `${base}/chat/completions`;
+    const modelsUrl = descriptor.modelsUrl ?? `${base}/models`;
+    const extraHeaders = descriptor.headers ?? {};
+    return {
+      id: descriptor.key,
+      kind: 'openai',
+      buildRequest({ credentials, model, messages, options }) {
+        requireConfigured(credentials, model, messages);
+        return {
+          url: chatUrl,
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${credentials.apiKey}`,
+            ...extraHeaders,
+          },
+          body: openAiBody(model, messages, options),
+        };
+      },
+      parse: parseOpenAi,
+      modelsUrl: (credentials) => (credentials.apiKey ? modelsUrl : null),
+      parseModelList: parseModelIds,
+    };
+  }
+
+  // Gabarit connu mais URL incompatible avec ce protocole : on refuse
+  // proprement plutôt que d'envoyer une requête mal formée au fournisseur.
+  return null;
+}
+
+/**
+ * Résout l'adaptateur d'un fournisseur.
+ *
+ * Ordre : gabarit explicite (`ai_providers.adapter_kind`) → nom historique
+ * (compatibilité des intégrations déjà en production) → inconnu (le moteur
+ * journalise `UNSUPPORTED_PROVIDER`, jamais de réponse inventée).
+ */
+export function resolveAiAdapter(descriptor: AiProviderDescriptor | null | undefined): AiProviderAdapter | null {
+  if (!descriptor) return null;
+  if (descriptor.kind === 'none') return null;
+  return adapterFromDescriptor(descriptor);
+}
+
+/**
+ * Adaptateur « sans registre » pour les intégrations historiques.
+ *
+ * Utilisé par les chemins de secours (Business Grow) qui ne chargent pas le
+ * snapshot. Les appels de production passent par `resolveAiAdapter()` avec la
+ * ligne de registre du fournisseur — donc par le même code.
+ */
 export function getAiAdapter(providerKey: string): AiProviderAdapter | null {
-  return AI_PROVIDERS[providerKey] ?? null;
+  const native = NATIVE_ADAPTERS[providerKey];
+  if (native) return native;
+  return null;
 }
 
 /** Nom de base normalisé d'un modèle (déduplication agrégateur/direct). */
