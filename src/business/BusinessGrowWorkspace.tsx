@@ -814,7 +814,7 @@ function AssistantView({
       </section>
 
       <aside className="space-y-4">
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        <section className="vy-surface p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-white">Conversations</h2>
             <span className="text-[10px] text-slate-500">{conversationsLoaded ? `${conversations.length} enregistrée(s)` : '—'}</span>
@@ -931,7 +931,7 @@ function AssistantView({
           )}
         </section>
 
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        <section className="vy-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <Zap size={15} className="text-cyan-300" />
             <h2 className="text-sm font-semibold text-white">Services IA VYORA</h2>
@@ -948,7 +948,7 @@ function AssistantView({
           </p>
         </section>
 
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        <section className="vy-surface p-4">
           <div className="flex items-center gap-2">
             <ShieldCheck size={15} className="text-emerald-300" />
             <h2 className="text-sm font-semibold text-white">Données privées</h2>
@@ -1034,7 +1034,7 @@ function MemoryView({
   };
 
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+    <section className="vy-surface p-5 sm:p-7">
       <div className="max-w-2xl">
         <h2 className="text-lg font-semibold text-white">Mémoire métier privée</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
@@ -1175,7 +1175,7 @@ function ProvidersView({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+      <section className="vy-surface p-5 sm:p-7">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-white">Services IA VYORA</h2>
@@ -1285,7 +1285,7 @@ function ProvidersView({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+      <section className="vy-surface p-5 sm:p-7">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal size={16} className="text-brand-300" />
           <h3 className="text-sm font-semibold text-white">Adaptateurs extensibles préparés</h3>
@@ -1307,7 +1307,7 @@ function ProvidersView({
       </section>
 
       {backendReady && (
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+        <section className="vy-surface p-5 sm:p-7">
           <h3 className="text-sm font-semibold text-white">Préférence de routage par rôle</h3>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <select
@@ -1454,7 +1454,7 @@ function IntegrationsView({
     }
   }
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="business-integrations">
+    <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">
       <div className="mb-5 max-w-3xl">
         <h2 className="text-lg font-semibold text-white">Intégrations et connexions sécurisées</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
@@ -1600,7 +1600,7 @@ function AiControlCenterView({
   return (
     <div className="space-y-4">
       {/* Mémoire de l'agent */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-memory-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-memory-panel">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-white">Mémoire de l’agent</h2>
@@ -1687,7 +1687,7 @@ function AiControlCenterView({
       </section>
 
       {/* Règles de routage */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-routing-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-routing-panel">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <SlidersHorizontal size={16} className="text-brand-300" />
@@ -1719,7 +1719,7 @@ function AiControlCenterView({
       </section>
 
       {/* Activité IA récente */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-activity-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-activity-panel">
         <div className="mb-4 flex items-center gap-2">
           <Activity size={16} className="text-cyan-300" />
           <h3 className="text-sm font-semibold text-white">Activité IA récente</h3>
@@ -2644,17 +2644,20 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
 
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
-      <header className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#080d15] px-5 py-6 sm:px-7">
+      <header className="relative overflow-hidden rounded-[1.6rem] border border-violet-200/[0.14] bg-[#080a12] px-5 py-6 sm:px-7">
         <img src="/brand/vyora-growth.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 [mask-image:linear-gradient(to_right,transparent,black)]" />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#080d15_20%,rgba(8,13,21,0.4))]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-brand-500/25 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-violet-500/25 blur-[90px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 right-0 h-56 w-56 rounded-full bg-cyan-400/15 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/50 to-transparent" />
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-200">
-              <Brain size={14} /> VYORA · Business Grow
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-400/15 text-violet-200 ring-1 ring-violet-300/25"><Brain size={14} /></span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-200/90">VYORA · Business Grow</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-slate-400">Espace pilotage</span>
             </div>
-            <h1 className="vyora-display text-2xl tracking-tight text-white sm:text-3xl">Votre copilote business</h1>
+            <h1 className="vy-title text-[1.75rem] leading-tight sm:text-[2.15rem]">Votre copilote business</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
               Intelligence, stratégie et croissance, reliées à votre contexte métier.
             </p>
@@ -2674,10 +2677,10 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
 
       <Link
         to="/app/business/modules"
-        className="group flex flex-col gap-3 rounded-2xl border border-brand-400/20 bg-brand-500/[0.06] px-4 py-4 transition hover:border-brand-400/40 hover:bg-brand-500/[0.1] sm:flex-row sm:items-center sm:justify-between"
+        className="group flex flex-col gap-3 rounded-2xl border border-violet-300/20 bg-violet-400/[0.06] px-4 py-4 transition hover:border-violet-300/40 hover:bg-violet-400/[0.1] sm:flex-row sm:items-center sm:justify-between"
       >
         <span className="flex min-w-0 items-start gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/15 text-brand-200"><Package size={19} /></span>
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-violet-300/25 bg-violet-400/12 text-violet-200"><Package size={19} /></span>
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-white">13 modules métier opérationnels</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
@@ -2685,7 +2688,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
             </span>
           </span>
         </span>
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-brand-200">
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-violet-200">
           Ouvrir les modules <ArrowUpRight size={15} className="transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </span>
       </Link>
@@ -2713,19 +2716,31 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
       )}
 
       <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><MessageSquare size={14} className="text-cyan-300" /> Conversations</div>
-          <p className="mt-2 text-xl font-semibold text-white">{conversationsLoaded ? conversations.length : '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Conversations</p>
+            <span className="vy-icon-tile h-8 w-8"><MessageSquare size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">{conversationsLoaded ? conversations.length : '—'}</p>
           <p className="mt-1 text-[11px] text-slate-500">Historique de votre espace métier</p>
         </div>
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><Zap size={14} className="text-emerald-300" /> Services vérifiés</div>
-          <p className="mt-2 text-xl font-semibold text-white">{providers ? availableProviderCount : '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Services vérifiés</p>
+            <span className="vy-icon-tile h-8 w-8"><Zap size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">
+            {providers ? availableProviderCount : '—'}
+            <span className="ml-1 text-[11px] font-normal text-slate-500">service(s)</span>
+          </p>
           <p className="mt-1 text-[11px] text-slate-500">Disponibilité contrôlée côté serveur</p>
         </div>
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><Brain size={14} className="text-violet-300" /> Quota métier</div>
-          <p className="mt-2 text-xl font-semibold text-white">{quota?.available_units ?? '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Quota métier</p>
+            <span className="vy-icon-tile h-8 w-8"><Brain size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">{quota?.available_units ?? '—'}</p>
           <p className="mt-1 text-[11px] text-slate-500">
             {quota
               ? `Unités disponibles · crédits Studio ${quota.studio_ugc_untouched ? 'intacts' : 'distincts'}`
@@ -2734,8 +2749,8 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="Navigation Business Grow" className="flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
+      <div className="grid gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
+        <nav aria-label="Navigation Business Grow" className="no-scrollbar flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -2745,7 +2760,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
               className={cn(
                 'relative flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
                 section === id
-                  ? 'bg-gradient-to-r from-brand-500/25 to-cyan-500/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]'
+                  ? 'bg-gradient-to-r from-violet-400/20 to-cyan-400/[0.06] text-white shadow-[inset_0_0_0_1px_rgba(196,181,253,0.18)]'
                   : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
               )}
             >
