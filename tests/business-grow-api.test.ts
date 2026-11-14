@@ -2,14 +2,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getSession, invoke } = vi.hoisted(() => ({
+const { getSession, invoke, publicConfig } = vi.hoisted(() => ({
   getSession: vi.fn(),
   invoke: vi.fn(),
+  publicConfig: { url: 'https://xbuuhfwobrafcbgtdgjx.supabase.co' },
 }));
 
 vi.mock('../src/lib/supabase', () => ({
   SUPABASE_PUBLISHABLE_KEY: 'test-publishable-key',
-  SUPABASE_URL: 'https://xbuuhfwobrafcbgtdgjx.supabase.co',
+  get SUPABASE_URL() { return publicConfig.url; },
   supabase: {
     auth: { getSession },
     functions: { invoke },
@@ -21,6 +22,7 @@ import { BusinessGrowApiError, businessGrowApi } from '../src/business/api';
 describe('Business Grow browser API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    publicConfig.url = 'https://xbuuhfwobrafcbgtdgjx.supabase.co';
     getSession.mockResolvedValue({
       data: { session: { access_token: 'test-session-token' } },
       error: null,
@@ -74,10 +76,12 @@ describe('Business Grow browser API', () => {
       expect(error).toMatchObject({ code: 'BUSINESS_GROW_UNREACHABLE' });
       // Aucune affirmation d'absence de déploiement : ce serait un diagnostic inventé.
       expect((error as BusinessGrowApiError).message).not.toMatch(/absent|déployée|pas encore installé/i);
-      // Les deux transports ont réellement été tentés (direct puis relais same-origin).
+      // Sur Vite, le relais same-origin constitue le secours du chemin direct.
       const targets = fetcher.mock.calls.map((call) => String(call[0]));
       expect(targets[0]).toContain('/functions/v1/business-grow');
-      expect(targets).toContain('/api/business-grow');
+      expect(targets[1]).toBe('/api/business-grow');
+      expect(targets).not.toContain('/.netlify/functions/business-grow');
+      expect((error as BusinessGrowApiError).message).not.toMatch(/JSON invalide|404/);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -124,7 +128,7 @@ describe('Business Grow browser API', () => {
     }
   });
 
-  it('can target only the local Supabase Edge endpoint in development', async () => {
+  it('routes local Supabase development through the same-origin relay', async () => {
     vi.stubEnv(
       'VITE_BUSINESS_GROW_FUNCTION_URL',
       'http://127.0.0.1:54321/functions/v1/business-grow',
@@ -137,7 +141,7 @@ describe('Business Grow browser API', () => {
     try {
       await expect(businessGrowApi.listConversations()).resolves.toEqual({ conversations: [] });
       const [url, init] = fetcher.mock.calls[0];
-      expect(String(url)).toBe('http://127.0.0.1:54321/functions/v1/business-grow');
+      expect(String(url)).toBe('/api/business-grow');
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-session-token');
       expect(new Headers(init?.headers).get('apikey')).toBe('test-publishable-key');
       expect(invoke).not.toHaveBeenCalled();
@@ -159,6 +163,63 @@ describe('Business Grow browser API', () => {
       expect(fetcher).not.toHaveBeenCalled();
       expect(invoke).not.toHaveBeenCalled();
       expect(error).toMatchObject({ code: 'INVALID_LOCAL_FUNCTION_URL' });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['vyora-ugc.netlify.app', 'staging.example.test', '4173-demo.e2b.app'])(
+    'ne transmet pas le JWT d’un autre projet au relais canonique depuis %s',
+    async (hostname) => {
+      publicConfig.url = 'https://other-project.supabase.co';
+      vi.stubGlobal('window', { location: { hostname } });
+      const fetcher = vi.fn(async (_input: RequestInfo | URL) => { throw new TypeError('Blocked'); });
+      vi.stubGlobal('fetch', fetcher);
+      try {
+        await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'BUSINESS_GROW_UNREACHABLE' });
+        expect(fetcher.mock.calls).toHaveLength(1);
+        expect(String(fetcher.mock.calls[0][0])).toBe('https://other-project.supabase.co/functions/v1/business-grow');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('ne bascule jamais une mutation d’un autre projet vers le relais en cas de réponse perdue', async () => {
+    publicConfig.url = 'https://other-project.supabase.co';
+    vi.stubGlobal('window', { location: { hostname: 'staging.example.test' } });
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { action: string };
+      if (body.action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.createModuleRecord('bg_module_lead_rescue', { name: 'Test' }, null, 'ws-1'))
+        .rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(fetcher.mock.calls).toHaveLength(2);
+      expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+        'https://other-project.supabase.co/functions/v1/business-grow',
+        'https://other-project.supabase.co/functions/v1/business-grow',
+      ]);
+      expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body)).action).toBe('v3.modules.records');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    'http://127.0.0.1:54321/functions/v1/business-grow?redirect=evil',
+    'http://user:password@127.0.0.1:54321/functions/v1/business-grow',
+    'http://localhost:1234/functions/v1/business-grow',
+  ])('rejects an unsafe local function override before sending a token: %s', async (url) => {
+    vi.stubEnv('VITE_BUSINESS_GROW_FUNCTION_URL', url);
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'INVALID_LOCAL_FUNCTION_URL' });
+      expect(fetcher).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
       vi.unstubAllGlobals();
@@ -211,13 +272,26 @@ describe('Business Grow browser API', () => {
       await businessGrowApi.listIntegrations();
       expect(bodies.at(-1)).toEqual({ action: 'integrations.list' });
 
+      await businessGrowApi.listIntegrations('ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.list', workspaceId: 'ws-1' });
+      await businessGrowApi.requestIntegration('shopify', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.request', connectorKey: 'shopify', workspaceId: 'ws-1' });
+      await businessGrowApi.cancelIntegration('shopify', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.cancel', connectorKey: 'shopify', workspaceId: 'ws-1' });
+      await businessGrowApi.disconnectIntegration('shopify', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.disconnect', connectorKey: 'shopify', workspaceId: 'ws-1' });
+      await businessGrowApi.resolveTool('tool-1', 'approved', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.tools.resolve', executionId: 'tool-1', decision: 'approved', workspaceId: 'ws-1' });
+      await businessGrowApi.listMessages('conv-1', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.messages.list', conversationId: 'conv-1', workspaceId: 'ws-1' });
+
       await businessGrowApi.sendMessage('conv-1', 'Hello', 'idem-1', {
         roleKey: 'marketing_campaign',
         workspaceId: 'ws-1',
         routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
       });
       expect(bodies.at(-1)).toEqual({
-        action: 'messages.send',
+        action: 'v3.messages.send',
         conversationId: 'conv-1',
         content: 'Hello',
         idempotencyKey: 'idem-1',
@@ -228,6 +302,95 @@ describe('Business Grow browser API', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('refuse sans écriture le protocole entreprise sur une Edge historique', async () => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push(action);
+      return action === 'status'
+        ? new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 })
+        : new Response(JSON.stringify({ error: { code: 'UNKNOWN_ACTION', message: 'Opération inconnue.' } }), { status: 400 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('window', { location: { hostname: '5173-demo.e2b.app' } });
+    try {
+      await expect(businessGrowApi.listConversations('ws-1')).rejects.toMatchObject({ code: 'BUSINESS_GROW_UPGRADE_REQUIRED' });
+      await expect(businessGrowApi.createModuleRecord('bg_module_lead_rescue', { name: 'test' }, null, 'ws-1'))
+        .rejects.toMatchObject({ code: 'BUSINESS_GROW_UPGRADE_REQUIRED' });
+      expect(calls).toEqual(['v3.conversations.list', 'status', 'v3.modules.records']);
+      expect(calls).not.toContain('modules.records'); // aucun rejeu vers l'ancienne écriture globale
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('préfixe la confirmation d’automatisation et ne la rejoue pas après une réponse perdue', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-automation.e2b.app' } });
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(body);
+      if (body.action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    }));
+    const confirmation = { playbookId: 'rule', sourceCategory: 'bg_module_order_cart_recovery', sourceId: 'cart', previewDay: '2026-11-13',
+      expectedPlaybook: { status: 'actif' }, expectedSource: { status: 'panier' }, task: { status: 'a_faire' } };
+    try {
+      await expect(businessGrowApi.confirmAutomationTask('ws-1', confirmation)).rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(calls).toEqual([{ action: 'status' }, { action: 'v3.automation.task.confirm', workspaceId: 'ws-1', ...confirmation }]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('traite les aperçus et historiques de rapports comme lectures et les bascule sans prévol', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-report.e2b.app' } });
+    const calls: Array<{ target: string; body: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input); const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ target, body });
+      if (target.includes('supabase.co')) throw new TypeError('lecture bloquée');
+      return new Response(JSON.stringify({ data: body.action === 'v3.agent.report' ? { report: {}, saved: false } : { reports: [] } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.generateReport('ws-1', 'health', '2026-01-01', '2026-01-30');
+      await businessGrowApi.listReports('ws-1');
+      expect(calls.map((call) => call.body.action)).toEqual(['v3.agent.report', 'v3.agent.report', 'v3.agent.reports.list']);
+      expect(calls[1].target).toBe('/api/business-grow');
+      expect(calls[1].body).toMatchObject({ workspaceId: 'ws-1', reportType: 'health', save: false });
+      expect(calls[2].body).toEqual({ action: 'v3.agent.reports.list', workspaceId: 'ws-1' });
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('ne rejoue pas un enregistrement de rapport dont la réponse est inconnue', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-report-save.e2b.app' } });
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push(action);
+      if (action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.generateReport('ws-1', 'health', '2026-01-01', '2026-01-30', true, 'idem'))
+        .rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(calls).toEqual(['status', 'v3.agent.report']);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('ne rejoue pas une suppression de rapport dont la réponse est inconnue', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-report-delete.e2b.app' } });
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(body);
+      if (body.action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    }));
+    try {
+      await expect(businessGrowApi.deleteReport('ws-1', 'report-1')).rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(calls).toEqual([{ action: 'status' }, { action: 'v3.agent.reports.delete', workspaceId: 'ws-1', reportId: 'report-1' }]);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('routes Netlify Deploy Preview calls directly through /api/business-grow with function fallback', async () => {
@@ -297,6 +460,122 @@ describe('Business Grow browser API', () => {
       await expect(businessGrowApi.getStatus()).resolves.toEqual({ providers: [{ provider_key: 'groq' }] });
       expect(String(fetcher.mock.calls[0][0])).toBe('/api/business-grow');
       expect(String(fetcher.mock.calls[1][0])).toBe('/.netlify/functions/business-grow');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('selects the working Vite relay before issuing a mutation', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-demo.e2b.app' } });
+    const calls: Array<{ target: string; action: string }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push({ target, action });
+      if (target.includes('supabase.co')) throw new TypeError('Network blocked');
+      return new Response(JSON.stringify({ data: action === 'status'
+        ? { providers: [] } : { conversationId: 'created-once' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.getStatus();
+      await expect(businessGrowApi.createConversation('Essai', null)).resolves.toEqual({ conversationId: 'created-once' });
+      expect(calls.map(({ target, action }) => [target.includes('supabase.co') ? 'direct' : target, action])).toEqual([
+        ['direct', 'status'], ['/api/business-grow', 'status'],
+        ['/api/business-grow', 'status'], ['/api/business-grow', 'conversations.create'],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rechecks the channel with a read when the network changes before a mutation', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-changing.e2b.app' } });
+    let directBlocked = true;
+    let relayBlocked = false;
+    const calls: Array<{ target: string; action: string }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push({ target, action });
+      if (target.includes('supabase.co') && directBlocked) throw new TypeError('Blocked');
+      if (target === '/api/business-grow' && relayBlocked) {
+        return new Response(JSON.stringify({ error: { code: 'BUSINESS_GROW_RELAY_UNAVAILABLE' } }), { status: 502 });
+      }
+      return new Response(JSON.stringify({ data: action === 'status'
+        ? { providers: [] } : { conversationId: 'one-conversation' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.getStatus();
+      directBlocked = false;
+      relayBlocked = true;
+      await expect(businessGrowApi.createConversation('Essai', null)).resolves.toEqual({ conversationId: 'one-conversation' });
+      expect(calls.filter((call) => call.action === 'conversations.create')).toEqual([
+        { target: 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/business-grow', action: 'conversations.create' },
+      ]);
+      expect(calls.slice(2).map(({ target, action }) => [target.includes('supabase.co') ? 'direct' : target, action])).toEqual([
+        ['/api/business-grow', 'status'], ['direct', 'status'], ['direct', 'conversations.create'],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['network', 'relay-error', 'html'] as const)(
+    'never replays a mutation when the result is ambiguous (%s)', async (failure) => {
+      vi.stubGlobal('window', { location: { hostname: 'vyora-ugc.netlify.app' } });
+      const calls: Array<{ target: string; action: string }> = [];
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input);
+        const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+        calls.push({ target, action });
+        if (action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+        if (failure === 'network') throw new TypeError('response lost');
+        if (failure === 'relay-error') {
+          return new Response(JSON.stringify({ error: { code: 'BUSINESS_GROW_UNAVAILABLE' } }), { status: 502 });
+        }
+        return new Response('<html>réponse illisible</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+      });
+      vi.stubGlobal('fetch', fetcher);
+      try {
+        const error = await businessGrowApi.createConversation('Ne pas dupliquer', null).catch((caught: unknown) => caught);
+        expect(error).toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+        expect((error as Error).message).toMatch(/vérifiez son résultat/i);
+        expect(calls.filter((call) => call.action === 'conversations.create')).toEqual([
+          { target: '/api/business-grow', action: 'conversations.create' },
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('shows an expired gateway JWT as an authentication error without retrying another transport', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-auth.e2b.app' } });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      code: 'UNAUTHORIZED_INVALID_JWT_FORMAT', message: 'Invalid JWT',
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const error = await businessGrowApi.getStatus().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'UNAUTHENTICATED', status: 401 });
+      expect((error as Error).message).toMatch(/session.*reconnectez/i);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('propagates an explicit CORS denial instead of claiming a network failure', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-denied.e2b.app' } });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: {
+      code: 'ORIGIN_NOT_ALLOWED', message: 'Origine non autorisée.',
+    } }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'ORIGIN_NOT_ALLOWED', status: 403 });
+      expect(fetcher).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
     }

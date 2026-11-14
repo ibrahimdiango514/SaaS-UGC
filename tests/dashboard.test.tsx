@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const mocks = vi.hoisted(() => ({
@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   countAssets: vi.fn(),
   healthCheck: vi.fn(),
   refreshQuota: vi.fn(),
-  getBusinessSnapshot: vi.fn(),
 }));
 
 vi.mock('../src/lib/api', () => ({
@@ -19,9 +18,6 @@ vi.mock('../src/lib/api', () => ({
   healthCheck: mocks.healthCheck,
 }));
 
-vi.mock('../src/business', () => ({
-  businessGrowBridge: { getSnapshot: mocks.getBusinessSnapshot },
-}));
 
 vi.mock('../src/context/AuthContext', () => ({
   useAuth: () => ({
@@ -60,17 +56,17 @@ describe('espace client Reelora', () => {
 
   afterEach(cleanup);
 
-  it('présente les modules dans le même espace et garde les crédits UGC distincts', async () => {
+  it('reste strictement dans l’espace Studio et n’affiche aucune fonctionnalité Business Growth', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
 
-    const studio = await screen.findByRole('link', { name: /Studio UGC/ });
-    const business = screen.getByRole('link', { name: /Business Grow/ });
+    const studio = await screen.findByRole('link', { name: /Créer avec Studio/ });
+    const projects = screen.getByRole('link', { name: /Mes projets/ });
 
     expect(studio.getAttribute('href')).toBe('/app/studio');
-    expect(studio.textContent).toContain('Crédits Studio');
-    expect(studio.textContent).toContain('87');
-    expect(business.getAttribute('href')).toBe('/app/business');
-    expect(within(business).getByText('Quota métier distinct des crédits Studio')).toBeTruthy();
-    expect(within(business).queryByText(/87/)).toBeNull();
+    expect(projects.getAttribute('href')).toBe('/app/projets');
+    expect(screen.getByText('87')).toBeTruthy();
+    expect(screen.queryByText(/Business Grow/i)).toBeNull();
+    expect(screen.queryByText(/Quota métier/i)).toBeNull();
+    expect(screen.queryByRole('link', { name: /Business/i })).toBeNull();
   });
 });

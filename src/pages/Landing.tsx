@@ -161,6 +161,13 @@ export default function Landing() {
 
   return (
     <div className="relative min-h-screen overflow-hidden">
+      <a
+        href="#contenu"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-cyan-400 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-[#03131a]"
+      >
+        Aller au contenu
+      </a>
+
       {/* Nav */}
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#05080e]/70 backdrop-blur-2xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">

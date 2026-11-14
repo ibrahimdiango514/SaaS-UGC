@@ -51,7 +51,7 @@ describe('parcours public', () => {
 
   it('navigue vers l’inscription et affiche le formulaire complet', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('link', { name: /Commencer/ }));
+    fireEvent.click(screen.getAllByRole('link', { name: /Créer mon compte/ })[0]);
     await waitFor(() => expect(window.location.pathname).toBe('/inscription'));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte'), { timeout: 5000 });
     expect(screen.getByLabelText('Nom complet')).toBeTruthy();

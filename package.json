@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:edge-imports": "node scripts/check-edge-imports.mjs",
+    "audit:business-rls": "node supabase/tests/business-agent/rls-ownership.mjs",
     "preview:studio": "node scripts/studio-preview.mjs"
   },
   "dependencies": {

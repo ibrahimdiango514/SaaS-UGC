@@ -5,6 +5,8 @@ import {
   type BusinessGrowStore,
 } from './handler.ts';
 import type { AgentMemoryItem, WorkspaceCompanyContext } from './intelligence.ts';
+import type { WorkspaceCompanyContext } from './intelligence.ts';
+import type { BusinessSnapshot } from './diagnostics.ts';
 import {
   callProvider,
   listRemoteModels,
@@ -233,6 +235,9 @@ const store: BusinessGrowStore = {
   async listRecentRequests(userId, limit = 25) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_recent_requests(${userId}::uuid, ${limit})`);
   },
+  async listScopedRecentRequests(userId, workspaceId, limit = 25) {
+    return asRows(await requiredSql()`select * from saas_business.bg_list_scoped_recent_requests(${userId}::uuid, ${workspaceId}::uuid, ${limit})`);
+  },
   async getWorkspaceContext(userId, workspaceId) {
     if (!workspaceId) return null;
     const [row] = await requiredSql()`
@@ -279,6 +284,162 @@ const store: BusinessGrowStore = {
   },
   async listIntegrationConnections(userId) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_integration_connections(${userId}::uuid)`);
+  },
+  async requestIntegrationConnection(userId, connectorKey, workspaceId) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_request_integration_connection(
+        ${userId}::uuid, ${connectorKey}, ${workspaceId}::uuid
+      ) as status
+    `;
+    return row.status as string;
+  },
+  async cancelIntegrationRequest(userId, connectorKey) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_cancel_integration_request(${userId}::uuid, ${connectorKey}) as cancelled
+    `;
+    return row.cancelled as boolean;
+  },
+  async disconnectIntegrationConnection(userId, connectorKey) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_disconnect_integration_connection(${userId}::uuid, ${connectorKey}) as disconnected
+    `;
+    return row.disconnected as boolean;
+  },
+  async getWorkspaceProtocol(userId, workspaceId) {
+    const [row] = await requiredSql()`select saas_business.bg_workspace_protocol(${userId}::uuid, ${workspaceId}::uuid) as protocol`;
+    return row.protocol as string;
+  },
+  async resolveScopedAgentTool(userId, workspaceId, executionId, decision) {
+    const [row] = await requiredSql()`select saas_business.bg_agent_resolve_scoped_tool(${userId}::uuid, ${workspaceId}::uuid, ${executionId}::uuid, ${decision}) as resolved`;
+    return row.resolved;
+  },
+  async listScopedIntegrationConnections(userId, workspaceId) {
+    return asRows(await requiredSql()`select * from saas_business.bg_list_scoped_integration_connections(${userId}::uuid, ${workspaceId}::uuid)`);
+  },
+  async requestScopedIntegrationConnection(userId, workspaceId, connectorKey) {
+    const [row] = await requiredSql()`select saas_business.bg_request_scoped_integration_connection(${userId}::uuid, ${workspaceId}::uuid, ${connectorKey}) as status`;
+    return row.status as string;
+  },
+  async cancelScopedIntegrationRequest(userId, workspaceId, connectorKey) {
+    const [row] = await requiredSql()`select saas_business.bg_cancel_scoped_integration_request(${userId}::uuid, ${workspaceId}::uuid, ${connectorKey}) as cancelled`;
+    return row.cancelled as boolean;
+  },
+  async disconnectScopedIntegrationConnection(userId, workspaceId, connectorKey) {
+    const [row] = await requiredSql()`select saas_business.bg_disconnect_scoped_integration_connection(${userId}::uuid, ${workspaceId}::uuid, ${connectorKey}) as disconnected`;
+    return row.disconnected as boolean;
+  },
+  async getConversationScope(userId, conversationId) {
+    const [row] = await requiredSql()`select saas_business.bg_conversation_scope(${userId}::uuid, ${conversationId}::uuid) as scope`;
+    return row.scope as { workspaceId: string | null } | null;
+  },
+  async listScopedConversations(userId, workspaceId) {
+    return asRows(await requiredSql()`select * from saas_business.bg_list_scoped_conversations(${userId}::uuid, ${workspaceId}::uuid, 50)`);
+  },
+  async getScopedMemory(userId, workspaceId) {
+    const [row] = await requiredSql()`select saas_business.bg_get_scoped_memory(${userId}::uuid, ${workspaceId}::uuid) as memory`;
+    return row.memory;
+  },
+  async setScopedMemoryConsent(userId, workspaceId, enabled, policy) {
+    const [row] = await requiredSql()`select * from saas_business.bg_set_scoped_memory_consent(${userId}::uuid, ${workspaceId}::uuid, ${enabled}, ${policy})`;
+    return row;
+  },
+  async saveScopedMemoryProfile(userId, workspaceId, profile) {
+    const db = requiredSql();
+    await db`select saas_business.bg_upsert_scoped_memory_profile(${userId}::uuid, ${workspaceId}::uuid, ${db.json(asJsonValue(profile))})`;
+  },
+  async putScopedMemoryItem(userId, workspaceId, itemId, category, content) {
+    const db = requiredSql();
+    const [row] = await db`select saas_business.bg_put_scoped_memory_item(${userId}::uuid, ${workspaceId}::uuid, ${itemId}::uuid, ${category}, ${db.json(asJsonValue(content))}, 'manual', null) as id`;
+    return row.id as string;
+  },
+  async deleteScopedMemoryItem(userId, workspaceId, itemId) {
+    const [row] = await requiredSql()`select saas_business.bg_delete_scoped_memory_item(${userId}::uuid, ${workspaceId}::uuid, ${itemId}::uuid) as deleted`;
+    return row.deleted as boolean;
+  },
+  async importLegacyMemory(userId, workspaceId) {
+    const [row] = await requiredSql()`select saas_business.bg_import_legacy_memory(${userId}::uuid, ${workspaceId}::uuid) as result`;
+    return row.result;
+  },
+  async listScopedModuleRecords(userId, workspaceId, category) {
+    return asRows(await requiredSql()`select * from saas_business.bg_list_scoped_module_records(${userId}::uuid, ${workspaceId}::uuid, ${category})`);
+  },
+  async createScopedModuleRecord(userId, workspaceId, category, data, dedupeKey) {
+    const db = requiredSql();
+    const [row] = await db`select saas_business.bg_create_scoped_module_record(${userId}::uuid, ${workspaceId}::uuid, ${category}, ${db.json(asJsonValue(data))}, ${dedupeKey}) as id`;
+    return row.id as string;
+  },
+  async updateScopedModuleRecord(userId, workspaceId, category, recordId, data) {
+    const db = requiredSql();
+    const [row] = await db`select saas_business.bg_update_scoped_module_record(${userId}::uuid, ${workspaceId}::uuid, ${recordId}::uuid, ${category}, ${db.json(asJsonValue(data))}) as updated`;
+    return row.updated as boolean;
+  },
+  async deleteScopedModuleRecord(userId, workspaceId, category, recordId) {
+    const [row] = await requiredSql()`select saas_business.bg_delete_scoped_module_record(${userId}::uuid, ${workspaceId}::uuid, ${recordId}::uuid, ${category}) as deleted`;
+    return row.deleted as boolean;
+  },
+  async confirmAutomationTask(userId, workspaceId, playbookId, sourceCategory, sourceId, previewDay, expectedPlaybook, expectedSource, task) {
+    const db = requiredSql();
+    const [row] = await db`select saas_business.bg_confirm_automation_task(
+      ${userId}::uuid, ${workspaceId}::uuid, ${playbookId}::uuid, ${sourceCategory}, ${sourceId}::uuid,
+      ${previewDay}::date, ${db.json(asJsonValue(expectedPlaybook))}, ${db.json(asJsonValue(expectedSource))}, ${db.json(asJsonValue(task))}
+    ) as result`;
+    return row.result as { taskId: string; created: boolean };
+  },
+  async getBusinessSnapshot(userId, workspaceId) {
+    const [row] = await requiredSql()`select saas_business.bg_business_snapshot(${userId}::uuid, ${workspaceId}::uuid) as snapshot`;
+    return row.snapshot as BusinessSnapshot;
+  },
+  async saveAgentReport(userId, workspaceId, type, from, to, idempotencyKey, report) {
+    const db = requiredSql();
+    const [row] = await db`select saas_business.bg_save_agent_report(${userId}::uuid, ${workspaceId}::uuid, ${type}, ${from}::date, ${to}::date, ${idempotencyKey}::uuid, ${db.json(asJsonValue(report))}) as result`;
+    return row.result;
+  },
+  async listAgentReports(userId, workspaceId) {
+    return asRows(await requiredSql()`select * from saas_business.bg_list_agent_reports(${userId}::uuid, ${workspaceId}::uuid)`);
+  },
+  async deleteAgentReport(userId, workspaceId, reportId) {
+    const [row] = await requiredSql()`select saas_business.bg_delete_agent_report(${userId}::uuid, ${workspaceId}::uuid, ${reportId}::uuid) as deleted`;
+    return row.deleted as boolean;
+  },
+  async proposeAgentTask(userId, workspaceId, conversationId, category, sourceId, idempotencyKey) {
+    const [row] = await requiredSql()`select saas_business.bg_agent_propose_task(${userId}::uuid, ${workspaceId}::uuid, ${conversationId}::uuid, ${category}, ${sourceId}::uuid, ${idempotencyKey}::uuid) as result`;
+    return row.result;
+  },
+  async resolveAgentTool(userId, executionId, decision) {
+    const [row] = await requiredSql()`select saas_business.bg_agent_resolve_tool(${userId}::uuid, ${executionId}::uuid, ${decision}) as result`;
+    return row.result;
+  },
+  async listModuleRecords(userId, category) {
+    return asRows(await requiredSql()`
+      select * from saas_business.bg_list_module_records(${userId}::uuid, ${category})
+    `);
+  },
+  async createModuleRecord(userId, category, data, dedupeKey = null) {
+    const db = requiredSql();
+    const [row] = await db`
+      select saas_business.bg_create_module_record(
+        ${userId}::uuid,
+        ${category},
+        ${db.json(asJsonValue(data))},
+        ${dedupeKey}
+      ) as id
+    `;
+    return row.id as string;
+  },
+  async updateModuleRecord(userId, recordId, data) {
+    const db = requiredSql();
+    const [row] = await db`
+      select saas_business.bg_update_module_record(
+        ${userId}::uuid, ${recordId}::uuid, ${db.json(asJsonValue(data))}
+      ) as updated
+    `;
+    return row.updated as boolean;
+  },
+  async deleteModuleRecord(userId, recordId) {
+    const [row] = await requiredSql()`
+      select saas_business.bg_delete_module_record(${userId}::uuid, ${recordId}::uuid) as deleted
+    `;
+    return row.deleted as boolean;
   },
   async listConversations(userId) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_conversations(${userId}::uuid, 50)`);
@@ -401,7 +562,7 @@ const store: BusinessGrowStore = {
   },
   async submitUserMessage(userId, conversationId, content, idempotencyKey, requestHash, roleKey = 'business_advisor') {
     const [row] = await requiredSql()`
-      select * from saas_business.bg_submit_user_message(
+      select * from saas_business.bg_submit_scoped_user_message(
         ${userId}::uuid, ${conversationId}::uuid, ${content},
         ${idempotencyKey}, ${requestHash}, ${roleKey}
       )

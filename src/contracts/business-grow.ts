@@ -54,7 +54,8 @@ export type BusinessGrowWorkspaceSection =
   | 'company'
   | 'memory'
   | 'providers'
-  | 'integrations';
+  | 'integrations'
+  | 'ai';
 
 /** Onglets réels du cockpit croissance Business Grow. */
 export type BusinessGrowGrowthTab =
@@ -282,7 +283,7 @@ export function formatUgcPromptFromBrief(brief: BusinessGrowUgcHandoffBrief): st
 }
 
 const VALID_SECTIONS = new Set<BusinessGrowWorkspaceSection>([
-  'chat', 'growth', 'company', 'memory', 'providers', 'integrations',
+  'chat', 'growth', 'company', 'memory', 'providers', 'integrations', 'ai',
 ]);
 
 const VALID_ROLES = new Set<BusinessRoleKey>([

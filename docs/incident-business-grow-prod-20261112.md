@@ -332,3 +332,58 @@ Compte sonde `bg-verify@vyora.test` supprimé après les mesures (6 comptes).
   toute façon rien faire sans la base.
 - `bootstrap.ts` (variante inline) reste générée pour un canal fiable
   (`supabase functions deploy`) ; ce n'est **pas** ce qui tourne en production.
+
+## Diagnostic complémentaire — aperçu Vite du 13 novembre 2026
+
+L'erreur affichée dans l'aperçu `:5173` associait une exception réseau du
+transport direct à deux 404 de relais. Elle ne prouve pas que la fonction de
+production est absente ni que la passerelle JWT bloque le préflight.
+
+Contrôles réels avant correctif :
+
+- un préflight `OPTIONS` de l'origine `https://5173-ixvau0x17mxgbrve22xk3.e2b.app`
+  vers la fonction active répond **204** avec `Access-Control-Allow-Origin` et
+  les en-têtes demandés ;
+- un `POST` avec JWT invalide répond **401** avec CORS `*` au niveau de la
+  passerelle ; le déploiement conserve donc `verify_jwt=true`, et le handler
+  vérifie en plus le jeton avec GoTrue avant toute action métier ;
+- les deux relais de `https://vyora-ugc.netlify.app` répondent **401 JSON**
+  sans session, donc sont présents. L'aperçu Vite, lui, n'avait pas de relais
+  `/api/business-grow` et renvoyait 404.
+
+Correctifs : Vite et `vite preview` disposent maintenant d'un relais
+same-origin vers le projet configuré, qui ne transmet ni cookies, ni origine,
+ni secret serveur. Les lectures peuvent basculer entre les transports ; avant
+une écriture, une lecture vérifie le canal, puis l'écriture n'est **jamais**
+rejouée automatiquement après une réponse incertaine. Le statut IA inconnu et
+l'historique non chargé ne sont plus présentés comme des résultats vides.
+Pour une origine refusée, le préflight réussit seulement la négociation CORS ;
+le `POST` reste refusé par un 403 `ORIGIN_NOT_ALLOWED` avant authentification
+et accès au stockage, désormais lisible dans le navigateur.
+
+Limites : le relais Vite exige lui-même une sortie réseau vers Supabase. Si
+l'appareil **et** le serveur de prévisualisation ne peuvent joindre Supabase,
+aucune modification CORS ne peut rétablir la connexion : il faut autoriser le
+réseau ou utiliser le site de production avec son relais Netlify. Le frontend
+de production doit être publié séparément pour recevoir les changements d'UI
+et de transport ; déployer l'Edge Function ne met pas à jour le bundle Netlify.
+
+### Publication et vérifications du 13 novembre
+
+- Source `b21b2193c09d14c94e8a35899b87ae6585e67f0c` ; bundle
+  `908af379b0eebc8ea89f35d1f912c38bfa59b7ef309ef86118af2f988b417952`
+  (43 683 caractères) ; Edge Function `business-grow` **v22 ACTIVE**,
+  `verify_jwt=true`.
+- Avec une session de test réelle : `status` et `conversations.list` en direct
+  depuis l'origine de l'aperçu : 200 ; `status` via le relais Netlify de
+  production : 200, Groq et Gemini disponibles ; création de conversation puis
+  `messages.send` via ce relais : 200, réponse réelle Groq `succeeded` ;
+  `messages.list` retrouve les deux messages persistés.
+- Origine non autorisée : POST refusé 403, sans création de conversation ;
+  JWT invalide : 401. Le compte temporaire et sa conversation ont été
+  supprimés et leur absence vérifiée. Aucun paiement n'a été lancé.
+- Le préflight de l'origine e2b a été mesuré à 204 **avant** la publication ;
+  le nouveau comportement OPTIONS/POST pour les origines refusées est couvert
+  par les tests du handler. L'URL de l'aperçu reste à vérifier depuis l'appareil
+  de l'utilisateur : le sandbox de développement ne dispose pas lui-même
+  d'une sortie réseau vers Supabase.

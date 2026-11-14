@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VYORA — Vérification visuelle de la page d’accueil</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #04070d;
+    --panel: #080d16;
+    --line: rgba(255,255,255,.09);
+    --text: #e6edf6;
+    --muted: #94a3b8;
+    --cyan: #22d3ee;
+    --violet: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background:
+      radial-gradient(ellipse at 12% 0%, rgba(34,211,238,.12), transparent 42%),
+      radial-gradient(ellipse at 88% 6%, rgba(139,92,246,.12), transparent 42%),
+      var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .shell { width: min(1240px, calc(100% - 40px)); margin: 0 auto; }
+  header.top { padding: 54px 0 30px; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .mark {
+    width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center;
+    background: linear-gradient(150deg, rgba(34,211,238,.22), rgba(139,92,246,.18));
+    border: 1px solid rgba(255,255,255,.14); color: #cffafe; font-weight: 800; font-size: 22px;
+    box-shadow: 0 18px 50px -24px rgba(34,211,238,.65);
+  }
+  .brand strong { display: block; letter-spacing: .18em; font-size: 16px; }
+  .brand span { display: block; color: var(--muted); font-size: 9px; letter-spacing: .26em; margin-top: 3px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px; margin-top: 34px;
+    border: 1px solid rgba(34,211,238,.22); background: rgba(34,211,238,.06);
+    color: #a5f3fc; border-radius: 999px; padding: 7px 12px;
+    font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  }
+  h1 { font-size: clamp(30px, 4.4vw, 54px); line-height: 1.02; letter-spacing: -.04em; margin: 18px 0 14px; max-width: 900px; }
+  h1 em { font-style: normal; background: linear-gradient(100deg, #a5f3fc, #ffffff 45%, #ddd6fe); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { color: var(--muted); max-width: 820px; line-height: 1.7; font-size: 14px; margin: 0; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .meta span { border: 1px solid var(--line); background: rgba(255,255,255,.03); border-radius: 999px; padding: 6px 10px; font-size: 11px; color: #cbd5e1; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 26px 0 4px; }
+  .stat { border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015)); border-radius: 16px; padding: 16px; }
+  .stat strong { display: block; font-size: 24px; letter-spacing: -.03em; }
+  .stat span { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; line-height: 1.45; }
+  .stat:nth-child(1) strong { color: #a5f3fc; }
+  .stat:nth-child(4) strong { color: #ddd6fe; }
+  nav.toc { position: sticky; top: 0; z-index: 5; backdrop-filter: blur(16px); background: rgba(4,7,13,.86); border-bottom: 1px solid var(--line); }
+  nav.toc div { display: flex; gap: 4px; overflow-x: auto; padding: 10px 0; }
+  nav.toc a { flex: 0 0 auto; text-decoration: none; color: #cbd5e1; font-size: 12px; font-weight: 600; padding: 8px 11px; border-radius: 9px; }
+  nav.toc a:hover { background: rgba(255,255,255,.06); color: #fff; }
+  section.block { padding: 46px 0 8px; }
+  .section-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .section-head h2 { font-size: clamp(20px, 2.4vw, 28px); letter-spacing: -.03em; margin: 0; }
+  .section-head p { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; max-width: 720px; }
+  .section-head .count { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: #67e8f9; border: 1px solid rgba(34,211,238,.22); padding: 6px 9px; border-radius: 999px; white-space: nowrap; }
+  .grid { display: grid; gap: 14px; }
+  .grid.desktop { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid.phones { grid-template-columns: repeat(auto-fill, minmax(214px, 1fr)); align-items: start; }
+  .grid.tablets { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .grid.details { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; }
+  .shot { margin: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #060a11; }
+  .shot a { position: relative; display: block; text-decoration: none; background: #000; }
+  .shot img { display: block; width: 100%; height: auto; transition: transform .35s ease, opacity .35s ease; }
+  .shot a:hover img { transform: scale(1.012); opacity: .93; }
+  .zoom { position: absolute; right: 10px; top: 10px; opacity: 0; transform: translateY(-3px); transition: .25s ease; background: rgba(3,8,14,.85); border: 1px solid rgba(255,255,255,.18); color: #e2e8f0; font-size: 10px; font-weight: 700; padding: 5px 8px; border-radius: 7px; }
+  .shot a:hover .zoom, .shot a:focus-visible .zoom { opacity: 1; transform: none; }
+  figcaption { padding: 11px 12px 13px; border-top: 1px solid rgba(255,255,255,.06); }
+  figcaption strong { display: block; font-size: 12px; letter-spacing: -.01em; }
+  figcaption span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .shot.phone { border-radius: 22px; }
+  .shot.phone a { padding: 8px; }
+  .shot.phone img { border-radius: 15px; border: 1px solid rgba(255,255,255,.07); }
+  .overview { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(180px, .65fr); gap: 14px; align-items: start; }
+  .scroll-frame { max-height: 760px; overflow-y: auto; overscroll-behavior: contain; background: #000; scrollbar-color: rgba(103,232,249,.45) transparent; scrollbar-width: thin; }
+  .scroll-frame img { display: block; width: 100%; height: auto; }
+  .scroll-frame::-webkit-scrollbar { width: 8px; }
+  .scroll-frame::-webkit-scrollbar-thumb { background: rgba(103,232,249,.35); border-radius: 99px; }
+  .hint { display: inline-flex; align-items: center; gap: 5px; color: #67e8f9; font-size: 10px; margin-top: 6px; }
+  .verify { border: 1px solid var(--line); border-radius: 18px; overflow: hidden; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.06); vertical-align: top; }
+  th { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #94a3b8; background: rgba(255,255,255,.03); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { color: #cbd5e1; width: 42%; }
+  td strong { color: #fff; }
+  .ok { color: #6ee7b7; font-weight: 700; }
+  .warn { color: #fcd34d; }
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
+  .note { border: 1px solid var(--line); background: rgba(255,255,255,.022); border-radius: 14px; padding: 15px; }
+  .note strong { display: block; font-size: 12px; margin-bottom: 6px; }
+  .note p { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #a5f3fc; background: rgba(34,211,238,.08); border: 1px solid rgba(34,211,238,.14); padding: 1px 5px; border-radius: 5px; }
+  footer { margin-top: 56px; border-top: 1px solid var(--line); padding: 26px 0 44px; color: #64748b; font-size: 11px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  @media (max-width: 860px) {
+    .overview { grid-template-columns: 1fr; }
+    .grid.desktop { grid-template-columns: 1fr; }
+    .scroll-frame { max-height: 520px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .shot img, .zoom { transition: none; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="shell">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">V</div>
+      <div><strong>VYORA</strong><span>CREATE. EVOLVE. GROW.</span></div>
+    </div>
+    <div class="eyebrow">Vérification visuelle · Refonte de la page d’accueil</div>
+    <h1>Une vitrine pour <em>deux espaces distincts</em>, un seul écosystème.</h1>
+    <p class="lede">
+      Captures réelles de la page d’accueil reconstruite : Studio (création vidéo UGC) et Business Growth
+      (pilotage, analyse, automatisation). Contenu en français, CTA vers les routes existantes, prix issus du
+      serveur et animations respectant <code>prefers-reduced-motion</code>.
+    </p>
+    <div class="meta">
+      <span>13 novembre 2026</span>
+      <span>Branche <code>arena/ada94e4c-saas-ugc</code></span>
+      <span>Base <code>5b6bc24</code></span>
+      <span>Vite + React 18 + Tailwind</span>
+      <span>27 captures</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><strong>982 / 982</strong><span>tests verts · 65 fichiers<br>dont 9 tests dédiés à la landing</span></div>
+      <div class="stat"><strong>4</strong><span>viewports vérifiés<br>1440 · 820 · 390 · 360</span></div>
+      <div class="stat"><strong>0</strong><span>débordement horizontal<br>0 texte coupé · 0 image cassée</span></div>
+      <div class="stat"><strong>0</strong><span>erreur page ou console<br>hors Google Fonts bloqué dans le sandbox</span></div>
+    </div>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sommaire des captures">
+  <div class="shell">
+    <a href="#apercu">Vue d’ensemble</a>
+    <a href="#desktop">Desktop 1440</a>
+    <a href="#mobile">Mobile 390</a>
+    <a href="#mobile360">Mobile 360</a>
+    <a href="#tablette">Tablette 820</a>
+    <a href="#details">Contrôles</a>
+    <a href="#verifications">Vérifications</a>
+    <a href="#limites">Méthode &amp; limites</a>
+  </div>
+</nav>
+
+<main class="shell">
+  <section class="block" id="apercu">
+    <div class="section-head">
+      <div><h2>Vue d’ensemble</h2><p>La page complète, du hero au footer. Les aperçus sont défilables ; les captures de section sont en pleine résolution.</p></div>
+      <span class="count">02 · 13</span>
+    </div>
+    <div class="overview">
+      <figure class="shot">
+        <div class="scroll-frame"><img src="screenshots/02-page-complete-desktop.jpg" alt="Page d’accueil complète desktop" loading="eager" decoding="async"></div>
+        <figcaption><strong>Page complète — desktop</strong><span>Échelle 0,5 pour éviter le bug de tuilage du Chromium headless au-delà de 8 000 px. Aperçu défilable — cliquez pour ouvrir l’image.</span><span class="hint">↕ défiler dans l’aperçu</span></figcaption>
+      </figure>
+      <figure class="shot phone">
+        <div class="scroll-frame"><img src="screenshots/13-page-complete-mobile.jpg" alt="Page d’accueil complète mobile" loading="eager" decoding="async"></div>
+        <figcaption><strong>Page complète — mobile</strong><span>Même page à 390 px, échelle 0,5. Les sections détaillées suivent ci-dessous.</span><span class="hint">↕ défiler dans l’aperçu</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="block" id="desktop">
+    <div class="section-head">
+      <div><h2>Desktop — 1440 × 1000</h2><p>Hero, deux univers, Studio, Business Growth, douleurs, écosystème, tarifs, FAQ, conversion et footer. Barre de navigation masquée uniquement pour les captures de section, afin d’éviter tout chevauchement.</p></div>
+      <span class="count">10 captures</span>
+    </div>
+    <div class="grid desktop"><figure class="shot ">
+  <a href="screenshots/01-hero-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 01-hero-desktop.jpg">
+    <img src="screenshots/01-hero-desktop.jpg" alt="Hero desktop 1440×1000" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Hero desktop 1440×1000</strong><span>Titre sur 3 lignes, dégradé cyan → violet, double console Studio / Business Growth équilibrée.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/03-deux-univers-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 03-deux-univers-desktop.jpg">
+    <img src="screenshots/03-deux-univers-desktop.jpg" alt="Deux univers, un compte" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Deux univers, un compte</strong><span>Cartes Studio / Business Growth et CTA réels.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/04-studio-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 04-studio-desktop.jpg">
+    <img src="screenshots/04-studio-desktop.jpg" alt="Section VYORA Studio" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Section VYORA Studio</strong><span>Aperçu Studio (image, produit, prompt, timeline) + 6 capacités et CTA.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/05-business-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 05-business-desktop.jpg">
+    <img src="screenshots/05-business-desktop.jpg" alt="Section Business Growth" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Section Business Growth</strong><span>Dashboard illustratif, pipeline, agent IA, actions — aucun droit Studio modifié.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/06-problemes-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 06-problemes-desktop.jpg">
+    <img src="screenshots/06-problemes-desktop.jpg" alt="Douleurs résolues" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Douleurs résolues</strong><span>Six situations concrètes + “Ce que VYORA apporte”, sans promesse de résultat.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/07-ecosysteme-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 07-ecosysteme-desktop.jpg">
+    <img src="screenshots/07-ecosysteme-desktop.jpg" alt="Deux espaces, un écosystème" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Deux espaces, un écosystème</strong><span>Passerelle brief → Studio, crédits et fichiers séparés, périmètre inchangé.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/08-tarifs-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 08-tarifs-desktop.jpg">
+    <img src="screenshots/08-tarifs-desktop.jpg" alt="Tarifs Studio" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Tarifs Studio</strong><span>Formules issues du serveur, “Gratuit” pour Découverte, badge aligné, aucun prix inventé.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/09-faq-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 09-faq-desktop.jpg">
+    <img src="screenshots/09-faq-desktop.jpg" alt="FAQ" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>FAQ</strong><span>Accordéon accessible, réponse ouverte lisible, sept questions.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/10-cta-final-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 10-cta-final-desktop.jpg">
+    <img src="screenshots/10-cta-final-desktop.jpg" alt="Conversion finale" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Conversion finale</strong><span>“Votre prochaine étape commence avec VYORA.” + 3 CTA.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/11-footer-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 11-footer-desktop.jpg">
+    <img src="screenshots/11-footer-desktop.jpg" alt="Footer" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Footer</strong><span>Logo, deux espaces, navigation complète, legal existant, espace propriétaire.</span></figcaption>
+</figure></div>
+  </section>
+
+  <section class="block" id="mobile">
+    <div class="section-head">
+      <div><h2>Mobile — 390 × 844</h2><p>Compositions adaptées : CTA pleine largeur, console compacte, visuels empilés, menu avec backdrop. Aucun texte masqué.</p></div>
+      <span class="count">8 captures</span>
+    </div>
+    <div class="grid phones"><figure class="shot phone">
+  <a href="screenshots/12-hero-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 12-hero-mobile.jpg">
+    <img src="screenshots/12-hero-mobile.jpg" alt="Hero mobile 390×844" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Hero mobile 390×844</strong><span>Titre, texte, CTA pleine largeur, trust strip 2 colonnes.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/14-studio-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 14-studio-mobile.jpg">
+    <img src="screenshots/14-studio-mobile.jpg" alt="Studio mobile" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Studio mobile</strong><span>Une colonne, visuel Studio pleine largeur, cartes produit / prompt lisibles.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/15-business-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 15-business-mobile.jpg">
+    <img src="screenshots/15-business-mobile.jpg" alt="Business Growth mobile" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Business Growth mobile</strong><span>Dashboard empilé, textes non coupés, CTA pleine largeur.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/16-problemes-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 16-problemes-mobile.jpg">
+    <img src="screenshots/16-problemes-mobile.jpg" alt="Douleurs mobile" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Douleurs mobile</strong><span>Six cartes empilées, lecture confortable.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/17-ecosysteme-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 17-ecosysteme-mobile.jpg">
+    <img src="screenshots/17-ecosysteme-mobile.jpg" alt="Écosystème mobile" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Écosystème mobile</strong><span>Deux espaces + hub central + cinq étapes + périmètre.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/18-tarifs-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 18-tarifs-mobile.jpg">
+    <img src="screenshots/18-tarifs-mobile.jpg" alt="Tarifs mobile" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Tarifs mobile</strong><span>Quatre formules empilées, “Gratuit”, limites et boutons pleine largeur.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/19-menu-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 19-menu-mobile.jpg">
+    <img src="screenshots/19-menu-mobile.jpg" alt="Menu mobile ouvert" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Menu mobile ouvert</strong><span>Cinq liens, deux CTA, backdrop, fermeture au clic extérieur et à Échap.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/20-faq-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 20-faq-mobile.jpg">
+    <img src="screenshots/20-faq-mobile.jpg" alt="FAQ mobile" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>FAQ mobile</strong><span>Accordéon lisible, cibles ≥ 44 px.</span></figcaption>
+</figure></div>
+  </section>
+
+  <section class="block" id="mobile360">
+    <div class="section-head">
+      <div><h2>Contrôle 360 px</h2><p>Le viewport le plus étroit testé : titre sur quatre lignes, boutons pleine largeur, trust strip qui passe sur deux lignes sans débordement.</p></div>
+      <span class="count">1 capture</span>
+    </div>
+    <div class="grid phones"><figure class="shot phone">
+  <a href="screenshots/21-hero-mobile-360.jpg" target="_blank" rel="noopener" title="Ouvrir 21-hero-mobile-360.jpg">
+    <img src="screenshots/21-hero-mobile-360.jpg" alt="Hero 360×800" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Hero 360×800</strong><span>Aucun débordement à 360 px ; titre sur 4 lignes.</span></figcaption>
+</figure></div>
+  </section>
+
+  <section class="block" id="tablette">
+    <div class="section-head">
+      <div><h2>Tablette — 820 × 1100</h2><p>Passage en une colonne, console pleine largeur sous le texte et visuel Studio plafonné à 600 px pour garder un rythme lisible.</p></div>
+      <span class="count">2 captures</span>
+    </div>
+    <div class="grid tablets"><figure class="shot ">
+  <a href="screenshots/22-hero-tablet.jpg" target="_blank" rel="noopener" title="Ouvrir 22-hero-tablet.jpg">
+    <img src="screenshots/22-hero-tablet.jpg" alt="Hero tablette 820×1100" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Hero tablette 820×1100</strong><span>Console affichée sous le texte, boutons 48 px.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/23-studio-tablet.jpg" target="_blank" rel="noopener" title="Ouvrir 23-studio-tablet.jpg">
+    <img src="screenshots/23-studio-tablet.jpg" alt="Studio tablette" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Studio tablette</strong><span>Visuel plafonné à 600 px, features en 2 colonnes.</span></figcaption>
+</figure></div>
+  </section>
+
+  <section class="block" id="details">
+    <div class="section-head">
+      <div><h2>Contrôles rapprochés</h2><p>Hero mobile complet, console mobile compacte, console desktop après correction et état <code>prefers-reduced-motion</code>.</p></div>
+      <span class="count">4 captures</span>
+    </div>
+    <div class="grid details"><figure class="shot phone">
+  <a href="screenshots/25-hero-mobile-full.jpg" target="_blank" rel="noopener" title="Ouvrir 25-hero-mobile-full.jpg">
+    <img src="screenshots/25-hero-mobile-full.jpg" alt="Hero mobile complet" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Hero mobile complet</strong><span>Section entière avec la double carte compacte.</span></figcaption>
+</figure><figure class="shot phone">
+  <a href="screenshots/26-hero-console-mobile.jpg" target="_blank" rel="noopener" title="Ouvrir 26-hero-console-mobile.jpg">
+    <img src="screenshots/26-hero-console-mobile.jpg" alt="Console mobile compacte" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Console mobile compacte</strong><span>328 px de haut, deux cartes lisibles, liens réels vers #studio / #business.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/27-hero-console-desktop.jpg" target="_blank" rel="noopener" title="Ouvrir 27-hero-console-desktop.jpg">
+    <img src="screenshots/27-hero-console-desktop.jpg" alt="Console desktop — contrôle" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>Console desktop — contrôle</strong><span>Panneaux remplis, aucun texte masqué, footer de console aligné.</span></figcaption>
+</figure><figure class="shot ">
+  <a href="screenshots/24-hero-reduced-motion.jpg" target="_blank" rel="noopener" title="Ouvrir 24-hero-reduced-motion.jpg">
+    <img src="screenshots/24-hero-reduced-motion.jpg" alt="prefers-reduced-motion" loading="lazy" decoding="async">
+    <span class="zoom">Ouvrir</span>
+  </a>
+  <figcaption><strong>prefers-reduced-motion</strong><span>Contenu visible sans animation : opacités à 1.</span></figcaption>
+</figure></div>
+  </section>
+
+  <section class="block" id="verifications">
+    <div class="section-head">
+      <div><h2>Résultats des vérifications</h2><p>Exécutées le 13 novembre 2026 dans le sandbox, sur la branche de travail.</p></div>
+      <span class="count">preuves</span>
+    </div>
+    <div class="verify">
+      <table>
+        <thead><tr><th>Contrôle</th><th>Résultat</th></tr></thead>
+        <tbody>
+          <tr><td>Tests existants + nouveaux</td><td><strong class="ok">65 fichiers / 982 tests — 0 échec</strong><br><span style="color:var(--muted)">dont 9 tests landing (contenu, routes, visuels, assets)</span></td></tr>
+          <tr><td>TypeScript</td><td><code>npx tsc -b</code> — <strong class="ok">0 erreur</strong></td></tr>
+          <tr><td>Build de production</td><td><code>npm run build</code> — <strong class="ok">OK</strong>, <code>index-*.js</code> 583 ko / 162 ko gzip, chunks par page conservés</td></tr>
+          <tr><td>Débordement horizontal</td><td><strong class="ok">0</strong> à 1440, 820, 390 et 360 px (<code>scrollWidth = clientWidth</code>)</td></tr>
+          <tr><td>Texte coupé / masqué</td><td><strong class="ok">0</strong> élément texte hors viewport ; aucun <code>line-clamp</code> sur les textes de contenu</td></tr>
+          <tr><td>Images</td><td><strong class="ok">10 images chargées</strong>, 0 cassée sur chaque viewport</td></tr>
+          <tr><td>Erreurs page / console</td><td><strong class="ok">0</strong> — seul échec réseau : Google Fonts (<code>ERR_CONNECTION_CLOSED</code>, réseau sandbox), fallback système</td></tr>
+          <tr><td>Mouvement réduit</td><td><strong class="ok">h1, ligne dégradée, CTA et lead à opacity 1</strong> ; textes figés sur la première expression</td></tr>
+          <tr><td>Routes internes</td><td><strong class="ok">12 / 12 en HTTP 200</strong> — <code>/</code>, <code>/connexion</code>, <code>/inscription</code>, <code>/app/studio</code>, <code>/app/business</code>, <code>/app/business/abonnement</code>, <code>/app/projets</code>, <code>/app/bibliotheque</code>, <code>/app/parametres</code>, <code>/confidentialite</code>, <code>/conditions</code>, <code>/proprietaire</code>. Les espaces protégés affichent l’écran d’accès sans session.</td></tr>
+          <tr><td>Ancres</td><td><strong class="ok">19 / 19</strong> résolues (#contenu, #univers, #studio, #business, #problemes, #ecosysteme, #tarifs, #faq)</td></tr>
+          <tr><td>Menu mobile</td><td><strong class="ok">ouverture / fermeture</strong> par bouton, clic extérieur et Échap ; backdrop visible ; <code>aria-expanded</code> et <code>aria-controls</code></td></tr>
+          <tr><td>Cibles tactiles</td><td><strong class="ok">aucun bouton interactif &lt; 44 px</strong> détecté sur les 4 viewports</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="block" id="limites">
+    <div class="section-head">
+      <div><h2>Méthode &amp; limites</h2><p>Ce qui a été vérifié réellement, et ce qui reste hors du périmètre de ce sandbox.</p></div>
+      <span class="count">transparence</span>
+    </div>
+    <div class="notes">
+      <div class="note"><strong>Captures par section</strong><p>Chromium headless (<code>@sparticuz/chromium</code>) avec les bibliothèques AL2023. La barre fixe est masquée pour les captures de section afin qu’elle ne recouvre pas le titre de la section ; le hero, le menu et les vues complètes la conservent.</p></div>
+      <div class="note"><strong>Vues complètes réduites</strong><p>Au-delà de ~8 000 px, la capture pleine page du Chromium headless produit un doublon de tuilage. Les vues complètes sont donc prises à <code>deviceScaleFactor 0.5</code> (720×4426 et 195×7696) ; les captures de section restent en pleine résolution.</p></div>
+      <div class="note"><strong>Données &amp; paiements</strong><p>Les formules sont mockées dans le navigateur pour l’audit visuel ; aucune écriture Supabase, aucun appel SasPay, aucun paiement réel. Les secrets et clés n’ont pas été modifiés.</p></div>
+      <div class="note"><strong>Polices</strong><p>Google Fonts est inaccessible depuis le sandbox. La page utilise la pile de secours système ; un contrôle sur un réseau autorisant <code>fonts.googleapis.com</code> reste à faire pour valider le rendu exact de Space Grotesk / DM Sans.</p></div>
+      <div class="note"><strong>Comptes protégés</strong><p>Les routes <code>/app/*</code> répondent 200 puis affichent l’écran d’accès sans session. Aucune donnée Studio ou Business Growth n’a été lue ni modifiée.</p></div>
+      <div class="note"><strong>État Git</strong><p>Modifications présentes dans le working tree de <code>arena/ada94e4c-saas-ugc</code>, non commitées et non poussées. Aucun merge dans <code>main</code>, aucun déploiement Netlify.</p></div>
+    </div>
+  </section>
+</main>
+
+<footer class="shell">
+  <span>VYORA — vérification visuelle de la refonte · 13 novembre 2026</span>
+  <span>Captures : <code>preview-landing/screenshots/</code> · Métriques : <code>preview-landing/verification.json</code></span>
+</footer>
+</body>
+</html>
