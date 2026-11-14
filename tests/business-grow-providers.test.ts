@@ -205,7 +205,9 @@ describe('Business Grow provider clients', () => {
       messages,
       fetcher,
     );
-    expect(cfUrl).toBe('https://api.cloudflare.com/client/v4/accounts/acct-42/ai/v1/chat');
+    // Endpoint OpenAI-compatible DOCUMENTÉ par Cloudflare (Workers AI) :
+    // `/ai/v1/chat/completions` — et non `/ai/v1/chat`, qui n'existe pas.
+    expect(cfUrl).toBe('https://api.cloudflare.com/client/v4/accounts/acct-42/ai/v1/chat/completions');
     expect(result.content).toBe('Réponse CF.');
 
     const noAccount = vi.fn();

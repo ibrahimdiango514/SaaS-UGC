@@ -25,6 +25,7 @@ import {
   type AiCallLogEntry,
   type AiEngineDeps,
   type AiRegistrySnapshot,
+  type AiRoutingLogEntry,
 } from "../_shared/ai-core/index.ts";
 
 type Json = Record<string, unknown>;
@@ -476,6 +477,82 @@ async function providerHealth(): Promise<Record<string, { configured: boolean; m
   return out;
 }
 
+/** Appel d'une RPC PostgREST — jamais bloquant pour l'appel IA. */
+async function callRpc(name: string, body: unknown, timeoutMs = 4_000): Promise<unknown> {
+  const url = SUPABASE_URL();
+  const key = SERVICE_KEY();
+  if (!url || !key) return null;
+  try {
+    const res = await fetch(`${url}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text) return null;
+    try { return JSON.parse(text); } catch { return null; }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Idempotence : réserve la clé d'appel. Refus = l'appel ne part PAS chez le
+ * fournisseur (anti-double-facturation). Si la RPC est indisponible, on laisse
+ * passer : la disponibilité du service prime, l'appel reste journalisé.
+ */
+async function claimAiCall(
+  requestKey: string,
+  meta: { space: 'business' | 'studio' | 'system'; userId?: string | null; workspaceId?: string | null },
+): Promise<{ claimed: boolean; status: string; providerKey: string | null; modelKey: string | null; outcomeCode: string | null }> {
+  const body = {
+    p_request_key: requestKey,
+    p_space: meta.space,
+    p_user_id: meta.userId && meta.userId !== "service" ? meta.userId : null,
+    p_workspace_id: meta.workspaceId ?? null,
+  };
+  const payload = await callRpc("vyora_ai_claim_call", body, 5_000);
+  if (payload && typeof payload === "object") {
+    const row = rec(payload);
+    if (typeof row.claimed === "boolean") {
+      return {
+        claimed: row.claimed,
+        status: typeof row.status === "string" ? row.status : "in_flight",
+        providerKey: typeof row.provider_key === "string" ? row.provider_key : null,
+        modelKey: typeof row.model_key === "string" ? row.model_key : null,
+        outcomeCode: typeof row.outcome_code === "string" ? row.outcome_code : null,
+      };
+    }
+  }
+  // RPC indisponible : on ne bloque pas, on n'enregistre rien non plus.
+  return { claimed: true, status: "in_flight", providerKey: null, modelKey: null, outcomeCode: null };
+}
+
+async function releaseAiCall(params: {
+  requestKey: string;
+  status: 'succeeded' | 'failed';
+  providerKey: string | null;
+  modelKey: string | null;
+  outcomeCode: string | null;
+  contentChars: number | null;
+}): Promise<void> {
+  await callRpc("vyora_ai_release_call", {
+    p_request_key: params.requestKey,
+    p_status: params.status,
+    p_provider_key: params.providerKey,
+    p_model_key: params.modelKey,
+    p_outcome_code: params.outcomeCode,
+    p_content_chars: params.contentChars,
+  });
+}
+
+/** Journal de la DÉCISION de routage : chaîne + scores + raison, aucun secret. */
+async function logAiRouting(entry: AiRoutingLogEntry): Promise<void> {
+  await callRpc("vyora_ai_log_routing", { p_payload: entry });
+}
+
 function aiEngineDeps(): AiEngineDeps {
   return {
     loadRegistry: loadRegistrySnapshot,
@@ -486,6 +563,9 @@ function aiEngineDeps(): AiEngineDeps {
     env: (name) => env(name) || null,
     fetcher: fetch,
     logCall: logAiCall,
+    logRouting: logAiRouting,
+    claimCall: (requestKey, meta) => claimAiCall(requestKey, meta),
+    releaseCall: releaseAiCall,
   };
 }
 
@@ -503,9 +583,9 @@ interface CompleteResultEx extends ProviderResult {
 async function completeViaCore(
   messages: ProviderMessage[],
   options: CompleteOptions,
-  meta: { routeModel: string | null; roleKey: string | null; userId: string | null },
+  meta: { routeModel: string | null; roleKey: string | null; userId: string | null; requestKey: string | null },
 ): Promise<CompleteResultEx> {
-  if (meta.routeModel || meta.roleKey) {
+  if (meta.routeModel || meta.roleKey || meta.requestKey) {
     const outcome = await runAiCall(aiEngineDeps(), {
       messages,
       options: {
@@ -517,6 +597,7 @@ async function completeViaCore(
       space: "business",
       userId: meta.userId,
       taskKey: meta.roleKey,
+      requestKey: meta.requestKey,
     });
     if (outcome.ok && outcome.content && outcome.providerKey && outcome.providerModelKey) {
       return {
@@ -526,6 +607,10 @@ async function completeViaCore(
         tokenUsage: { input_tokens: outcome.inputTokens, output_tokens: outcome.outputTokens },
         costUsd: outcome.estimatedCostUsd,
       };
+    }
+    // Rejeu d'un appel déjà en vol : aucune dépense, aucune seconde requête.
+    if (outcome.code === "AI_DUPLICATE_IN_FLIGHT") {
+      throw new Error("AI_DUPLICATE_IN_FLIGHT");
     }
     // Au moins UNE tentative réelle a échoué : on ne relance PAS le chemin
     // historique (les mêmes fournisseurs seraient double sollicités/facturés).
@@ -538,6 +623,13 @@ async function completeViaCore(
   const result = await complete(messages, options);
   return { ...result, tokenUsage: null, costUsd: null };
 }
+
+// Exposé pour le chargeur de production (`new Function`) : le bundle n'a pas
+// d'exports ES, il publie donc le handler sur l'objet global avant Deno.serve.
+const runtimeGlobal = globalThis as unknown as {
+  __vyoraAiHandler?: (req: Request) => Promise<Response>;
+  Deno?: { serve?: (fn: (req: Request) => Promise<Response>) => void };
+};
 
 export async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -692,6 +784,12 @@ export async function handler(req: Request): Promise<Response> {
           routeModel: str(body.model, 120) || null,
           roleKey: str(body.role_key, 40) || null,
           userId: internal ? null : userId,
+          // Clé d'idempotence fournie par l'appelant (rejeu réseau) : un même
+          // appel ne repart jamais deux fois chez le fournisseur.
+          requestKey: (() => {
+            const raw = str(body.request_key, 120);
+            return /^[A-Za-z0-9._:-]{8,120}$/.test(raw) ? raw : null;
+          })(),
         },
       );
       return json({
@@ -709,14 +807,19 @@ export async function handler(req: Request): Promise<Response> {
   } catch (error) {
     if (!internal) await refund(quotaKind, projectId, userId);
     const message = redact(error instanceof Error ? error.message : String(error));
-    const code = message.includes("NOT_CONFIGURED") ? "AI_NOT_CONFIGURED"
+    const status = message.includes("DUPLICATE") ? 409 : 502;
+    const code = message.includes("DUPLICATE") ? "AI_DUPLICATE_IN_FLIGHT"
+      : message.includes("NOT_CONFIGURED") ? "AI_NOT_CONFIGURED"
       : message.includes("BUDGET") ? "AI_BUDGET_EXHAUSTED"
         : message.includes("TIMEOUT") ? "AI_TIMEOUT"
           : message.includes("SAFETY") ? "AI_SAFETY_BLOCKED"
             : "AI_PROVIDER_ERROR";
-    return fail(code, `Le fournisseur IA n’a pas pu répondre : ${message}. Aucun texte n’a été inventé.`, 502);
+    if (code === "AI_DUPLICATE_IN_FLIGHT") {
+      return fail(code, "Cet appel IA est déjà en cours ou déjà terminé : aucune seconde requête n’a été envoyée au fournisseur.", status);
+    }
+    return fail(code, `Le fournisseur IA n’a pas pu répondre : ${message}. Aucun texte n’a été inventé.`, status);
   }
 }
 
-const runtime = globalThis as unknown as { Deno?: { serve?: (fn: (req: Request) => Promise<Response>) => void } };
-if (runtime.Deno?.serve) runtime.Deno.serve(handler);
+runtimeGlobal.__vyoraAiHandler = handler;
+runtimeGlobal.Deno?.serve?.(handler);

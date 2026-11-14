@@ -201,44 +201,97 @@ const geminiAdapter: AiProviderAdapter = {
 };
 
 // ---------------------------------------------------------------------------
-// CLOUDFLARE WORKERS AI — point de conversation par compte (Bearer jeton API).
-// Le modèle est préfixé “@cf/…”. La requête suit le format de chat standard.
+// CLOUDFLARE WORKERS AI — deux voies d'accès, décidées par le REGISTRE
 // ---------------------------------------------------------------------------
-const cloudflareAdapter: AiProviderAdapter = {
-  id: 'cloudflare',
-  buildRequest({ credentials, model, messages, options }) {
-    if (!credentials.apiKey || !credentials.accountId || !model) {
-      throw new AiProviderError('AI_NOT_CONFIGURED', false);
-    }
-    if (!messages.length || messages.some((m) => !m.content.trim())) {
-      throw new AiProviderError('AI_INVALID_RESPONSE', false);
-    }
-    return {
-      url: `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(credentials.accountId)}/ai/v1/chat`,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${credentials.apiKey}` },
-      body: openAiBody(model, messages, options),
-    };
-  },
-  parse: parseOpenAi,
-  modelsUrl: (credentials) =>
-    credentials.apiKey && credentials.accountId
-      ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(credentials.accountId)}/ai/models`
-      : null,
-  parseModelList: (payload) => {
-    const data = rec(payload);
-    const rows = Array.isArray(data.result) && Array.isArray(rec(data.result).models)
-      ? (rec(data.result).models as unknown[])
-      : Array.isArray(data.result) ? (data.result as unknown[])
-      : [];
-    const out: string[] = [];
-    for (const row of rows) {
-      const r = rec(row);
-      const id = typeof r.id === 'string' ? r.id : typeof r.name === 'string' ? r.name : null;
-      if (id && !out.includes(id)) out.push(id);
-    }
-    return out.sort();
-  },
-};
+//
+// `transport = 'rest'` (défaut) : API officielle Cloudflare.
+//   POST {base}/accounts/{account}/ai/v1/chat/completions
+//   Authorization: Bearer <jeton Workers AI (Workers AI › Read)>
+//
+// `transport = 'gateway'` : passerelle AI Gateway authentifiée.
+//   POST https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/{modele}
+//   cf-aig-authorization: Bearer <jeton de passerelle (AI Gateway › Run)>
+//
+// Les deux jetons ne sont PAS interchangeables : un jeton de passerelle renvoie
+// 401 sur l'API REST, et un jeton Workers AI renvoie 401 sur une passerelle
+// authentifiée. Le registre choisit donc la voie, et l'absence des identifiants
+// requis produit une erreur explicite — jamais une requête mal formée.
+const CLOUDFLARE_GATEWAY_BASE = 'https://gateway.ai.cloudflare.com/v1';
+
+function cloudflareGatewayUrl(baseUrl: string, credentials: AiCredentials, model: string): string {
+  // `base_url` du registre décrit l'API REST (c'est là que vit le catalogue) :
+  // la voie passerelle a sa propre racine, documentée par Cloudflare.
+  const base = (baseUrl && /gateway\.ai\.cloudflare\.com/.test(baseUrl)
+    ? baseUrl
+    : CLOUDFLARE_GATEWAY_BASE).replace(/\/+$/, '');
+  const account = encodeURIComponent(credentials.accountId ?? '');
+  const gateway = encodeURIComponent(credentials.gatewayId ?? '');
+  // Le préfixe `workers-ai/` route vers Workers AI ; un modèle `@cf/...` est
+  // encodé segment par segment (les `/` du nom restent lisibles côté passerelle).
+  // `@` reste littéral : c'est la forme publiée par Cloudflare (`@cf/…`).
+  const modelPath = model
+    .split('/')
+    .map((segment) => encodeURIComponent(segment).replace(/%40/g, '@'))
+    .join('/');
+  return `${base}/${account}/${gateway}/workers-ai/${modelPath}`;
+}
+
+function createCloudflareAdapter(transport: 'rest' | 'gateway' = 'rest', baseUrl = ''): AiProviderAdapter {
+  return {
+    id: 'cloudflare',
+    kind: 'cloudflare',
+    buildRequest({ credentials, model, messages, options }) {
+      requireConfigured(credentials, model, messages);
+      if (!credentials.accountId) throw new AiProviderError('AI_ACCOUNT_NOT_CONFIGURED', false);
+      if (transport === 'gateway') {
+        if (!credentials.gatewayId) throw new AiProviderError('AI_ACCOUNT_NOT_CONFIGURED', false);
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'cf-aig-authorization': `Bearer ${credentials.apiKey}`,
+        };
+        return {
+          url: cloudflareGatewayUrl(baseUrl, credentials, model),
+          headers,
+          body: openAiBody(model, messages, options),
+        };
+      }
+      const base = (baseUrl || 'https://api.cloudflare.com/client/v4').replace(/\/+$/, '');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credentials.apiKey}`,
+      };
+      return {
+        url: `${base}/accounts/${encodeURIComponent(credentials.accountId)}/ai/v1/chat/completions`,
+        headers,
+        body: openAiBody(model, messages, options),
+      };
+    },
+    // Les deux voies renvoient une réponse au format OpenAI (choices + usage).
+    parse: parseOpenAi,
+    modelsUrl: (credentials) =>
+      credentials.apiKey && credentials.accountId
+        ? `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(credentials.accountId)}/ai/models`
+        : null,
+    parseModelList: (payload) => {
+      const data = rec(payload);
+      const rows = Array.isArray(data.result) && Array.isArray(rec(data.result).models)
+        ? (rec(data.result).models as unknown[])
+        : Array.isArray(data.result) ? (data.result as unknown[])
+        : Array.isArray(data.data) ? (data.data as unknown[])
+        : [];
+      const out: string[] = [];
+      for (const row of rows) {
+        const r = rec(row);
+        const id = typeof r.id === 'string' ? r.id : typeof r.name === 'string' ? r.name : null;
+        if (id && !out.includes(id)) out.push(id);
+      }
+      return out.sort();
+    },
+  };
+}
+
+/** Adaptateur Cloudflare historique (voie REST) — comportement inchangé. */
+const cloudflareAdapter: AiProviderAdapter = createCloudflareAdapter('rest');
 
 /**
  * ---------------------------------------------------------------------------
@@ -274,6 +327,12 @@ function adapterFromNative(descriptor: AiProviderDescriptor): AiProviderAdapter 
 /** Construit un adaptateur à partir d'un gabarit + d'une URL de base. */
 function adapterFromDescriptor(descriptor: AiProviderDescriptor): AiProviderAdapter | null {
   if (descriptor.kind === 'none') return null;
+
+  // Cloudflare : la VOIE d'appel vient du registre (`transport`), pas du code.
+  if (descriptor.kind === 'cloudflare') {
+    return createCloudflareAdapter(descriptor.transport === 'gateway' ? 'gateway' : 'rest', descriptor.baseUrl);
+  }
+
   if (NATIVE_ADAPTERS[descriptor.key]) return adapterFromNative(descriptor);
 
   const base = descriptor.baseUrl.replace(/\/+$/, '');

@@ -279,6 +279,9 @@ function mapAiCoreError(error: unknown): ProviderCallError {
       : 'PROVIDER_UNAVAILABLE';
   const map: Record<string, [string, boolean]> = {
     AI_NOT_CONFIGURED: ['PROVIDER_NOT_CONFIGURED', false],
+    // Identifiant de compte/passerelle manquant (Cloudflare) : le fournisseur
+    // n'est pas configuré, ce n'est pas une panne passagère.
+    AI_ACCOUNT_NOT_CONFIGURED: ['PROVIDER_NOT_CONFIGURED', false],
     AI_AUTH_FAILED: ['PROVIDER_AUTH_FAILED', false],
     AI_RATE_LIMITED: ['PROVIDER_RATE_LIMITED', true],
     AI_TIMEOUT: ['PROVIDER_TIMEOUT', true],

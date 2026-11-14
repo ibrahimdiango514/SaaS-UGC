@@ -10,7 +10,7 @@
 
 import { resolveAiAdapter } from './adapters.ts';
 import { AiRegistrySnapshot } from './registry.ts';
-import { buildAiChain, estimateCostUsd, AiChainStep } from './router.ts';
+import { buildAiChain, estimateCostUsd, estimatePromptTokens, AiChainStep } from './router.ts';
 import { AiCallOptions, AiChatMessage, AiCredentials, AiProviderError } from './types.ts';
 
 export interface AiAttemptRecord {
@@ -23,6 +23,10 @@ export interface AiAttemptRecord {
   latencyMs: number;
   inputTokens: number | null;
   outputTokens: number | null;
+  /** Score de routage de cette étape (pourquoi elle a été essayée). */
+  score?: number;
+  /** Origine de l'étape : règle du rôle ou catalogue. */
+  routedBy?: 'role_rule' | 'catalog';
 }
 
 export interface AiCallRequest {
@@ -32,6 +36,20 @@ export interface AiCallRequest {
   level?: 'fast' | 'economy' | 'advanced' | 'specialized' | 'fallback' | 'auto' | null;
   requireCapabilities?: string[];
   preferProvider?: string | null;
+  /** Fournisseurs à écarter pour cet appel (ex. dernier échec connu). */
+  avoidProviders?: string[];
+  /**
+   * Contexte minimal exigible (jetons d'entrée). Par défaut : taille estimée
+   * du prompt, pour ne jamais router vers un modèle trop court.
+   */
+  minContextTokens?: number | null;
+  /** Plafond de coût d'entrée publié (USD / million de jetons). */
+  maxCostInPerMtok?: number | null;
+  /**
+   * Clé d'idempotence : un même appel rejoué (timeout réseau, retry client) ne
+   * rappelle JAMAIS le fournisseur — le moteur rend le résultat déjà obtenu.
+   */
+  requestKey?: string | null;
   /** Provenance de l'appel (Business Grow, Studio UGC, système). */
   space?: 'business' | 'studio' | 'system';
   userId?: string | null;
@@ -53,6 +71,8 @@ export interface AiCallOutcome {
   estimatedCostUsd: number | null;
   latencyMs: number;
   attempts: AiAttemptRecord[];
+  /** Vrai si l'appel a été refusé par le verrou d'idempotence (aucune dépense). */
+  duplicate?: boolean;
 }
 
 export interface AiCallLogEntry {
@@ -88,8 +108,50 @@ export interface AiEngineDeps {
    *  Doit être non bloquante : un échec de journalisation ne doit jamais
    *  faire échouer l'appel IA. */
   logCall(entry: AiCallLogEntry): Promise<void> | void;
+  /**
+   * Optionnel : journal de la DÉCISION de routage (chaîne ordonnée, score,
+   * raison). Non bloquant, jamais de secret.
+   */
+  logRouting?(entry: AiRoutingLogEntry): Promise<void> | void;
+  /**
+   * Optionnel : idempotence. `claim` réserve la clé (false = déjà en cours ou
+   * déjà terminée) ; `release` enregistre l'issue. Sans ces fonctions, le
+   * moteur fonctionne normalement mais sans protection anti-rejeu.
+   */
+  claimCall?(
+    requestKey: string,
+    meta: { space: 'business' | 'studio' | 'system'; userId: string | null; workspaceId: string | null },
+  ): Promise<{ claimed: boolean; status: string; providerKey: string | null; modelKey: string | null; outcomeCode: string | null }>;
+  releaseCall?(params: {
+    requestKey: string;
+    status: 'succeeded' | 'failed';
+    providerKey: string | null;
+    modelKey: string | null;
+    outcomeCode: string | null;
+    contentChars: number | null;
+  }): Promise<void> | void;
   maxAttempts?: number;
   requestTimeoutMs?: number;
+}
+
+export interface AiRoutingLogEntry {
+  space: 'business' | 'studio' | 'system';
+  taskKey: string | null;
+  roleKey: string | null;
+  level: string | null;
+  requestKey: string | null;
+  chain: Array<{
+    provider: string;
+    model: string;
+    score: number;
+    reason: 'role_rule' | 'catalog';
+    costIn: number | null;
+    costOut: number | null;
+  }>;
+  chosenProvider: string | null;
+  chosenModel: string | null;
+  attempts: number;
+  skipReason: string | null;
 }
 
 async function fetchJsonWithTimeout(
@@ -151,7 +213,10 @@ function resolveConfiguredProviders(
     if (provider.status === 'disabled') continue;
     const credentials = credentialsFor(provider.key);
     if (!credentials.apiKey) continue;
+    // Un identifiant de compte/passerelle requis mais absent laisse le
+    // fournisseur hors jeu : il n'est pas tenté avec une requête incomplète.
     if (provider.accountIdEnv && !credentials.accountId) continue;
+    if (provider.transport === 'gateway' && provider.gatewayIdEnv && !credentials.gatewayId) continue;
     configured.add(provider.key);
   }
   return configured;
@@ -183,17 +248,93 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
     if (envName && deps.env) {
       const apiKey = deps.env(envName);
       const accountId = descriptor?.accountIdEnv ? deps.env(descriptor.accountIdEnv) : null;
-      if (apiKey) return { apiKey, accountId: accountId ?? null };
+      const gatewayId = descriptor?.gatewayIdEnv ? deps.env(descriptor.gatewayIdEnv) : null;
+      if (apiKey) {
+        const base = deps.credentials(providerKey);
+        return {
+          apiKey,
+          accountId: accountId ?? base.accountId ?? null,
+          gatewayId: gatewayId ?? base.gatewayId ?? null,
+        };
+      }
     }
     return deps.credentials(providerKey);
   };
 
+  /** Journalise la DÉCISION (jamais bloquant, jamais de secret). */
+  const logDecision = (params: {
+    steps: AiChainStep[];
+    chosenProvider: string | null;
+    chosenModel: string | null;
+    attempts: number;
+    skipReason: string | null;
+  }): void => {
+    if (!deps.logRouting) return;
+    void safeLogRouting(deps, {
+      space: request.space ?? 'system',
+      taskKey: request.taskKey ?? request.role ?? null,
+      roleKey: request.role ?? null,
+      level: request.level ?? null,
+      requestKey: request.requestKey ?? null,
+      chain: params.steps.map((step) => ({
+        provider: step.providerKey,
+        model: step.modelKey,
+        score: step.score,
+        reason: step.reason,
+        costIn: step.costIn,
+        costOut: step.costOut,
+      })),
+      chosenProvider: params.chosenProvider,
+      chosenModel: params.chosenModel,
+      attempts: params.attempts,
+      skipReason: params.skipReason,
+    });
+  };
+
+  // — Idempotence : un appel déjà en cours ou déjà terminé ne repart PAS chez
+  //   le fournisseur. C'est la protection contre la double facturation.
+  if (request.requestKey && deps.claimCall) {
+    try {
+      const claim = await deps.claimCall(request.requestKey, {
+        space: request.space ?? 'system',
+        userId: request.userId ?? null,
+        workspaceId: request.workspaceId ?? null,
+      });
+      if (!claim.claimed && claim.status === 'in_flight') {
+        return {
+          ok: false, code: 'AI_DUPLICATE_IN_FLIGHT', content: null,
+          providerKey: claim.providerKey, modelKey: claim.modelKey, providerModelKey: null,
+          inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+          latencyMs: Date.now() - startedAt, attempts: [], duplicate: true,
+        };
+      }
+    } catch {
+      // Un registre d'idempotence indisponible ne doit jamais bloquer l'appel.
+    }
+  }
+
+  const contextTokens = estimatePromptTokens(request.messages);
   const { steps, skipReason } = buildAiChain(
     snapshot,
-    request,
+    {
+      role: request.role ?? null,
+      level: request.level ?? null,
+      requireCapabilities: request.requireCapabilities,
+      preferProvider: request.preferProvider ?? null,
+      avoidProviders: request.avoidProviders,
+      minContextTokens: request.minContextTokens ?? contextTokens,
+      maxCostInPerMtok: request.maxCostInPerMtok ?? null,
+    },
     resolveConfiguredProviders(snapshot, deps, credentialsFor),
   );
   if (skipReason) {
+    logDecision({ steps, chosenProvider: null, chosenModel: null, attempts: 0, skipReason });
+    if (request.requestKey && deps.releaseCall) {
+      void deps.releaseCall({
+        requestKey: request.requestKey, status: 'failed',
+        providerKey: null, modelKey: null, outcomeCode: skipReason, contentChars: null,
+      });
+    }
     return {
       ok: false, code: skipReason, content: null,
       providerKey: null, modelKey: null, providerModelKey: null,
@@ -217,6 +358,8 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
           baseUrl: provider.baseUrl ?? '',
           apiKeyEnv: provider.apiKeyEnv,
           accountIdEnv: provider.accountIdEnv,
+          gatewayIdEnv: provider.gatewayIdEnv,
+          transport: provider.transport,
           modelsUrl: provider.modelsUrl,
           headers: provider.headers,
         }
@@ -226,6 +369,7 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
         attempt: i + 1, providerKey: step.providerKey, modelKey: step.modelKey,
         providerModelKey: step.providerModelKey, status: 'error',
         errorCode: 'UNSUPPORTED_PROVIDER', latencyMs: 0, inputTokens: null, outputTokens: null,
+        score: step.score, routedBy: step.reason,
       });
       lastError = new AiProviderError('AI_UNAVAILABLE', true);
       continue;
@@ -252,6 +396,7 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
         attempt: i + 1, providerKey: step.providerKey, modelKey: step.modelKey,
         providerModelKey: step.providerModelKey, status: 'success', errorCode: null,
         latencyMs, inputTokens: parsed.inputTokens, outputTokens: parsed.outputTokens,
+        score: step.score, routedBy: step.reason,
       });
 
       void safeLog(deps, {
@@ -263,6 +408,23 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
         costInputUsd: parsed.inputTokens !== null && costIn !== null ? Math.round((parsed.inputTokens / 1e6) * costIn * 1e6) / 1e6 : null,
         costOutputUsd: parsed.outputTokens !== null && costOut !== null ? Math.round((parsed.outputTokens / 1e6) * costOut * 1e6) / 1e6 : null,
       });
+      logDecision({
+        steps,
+        chosenProvider: step.providerKey,
+        chosenModel: step.modelKey,
+        attempts: attempts.length,
+        skipReason: null,
+      });
+      if (request.requestKey && deps.releaseCall) {
+        void deps.releaseCall({
+          requestKey: request.requestKey,
+          status: 'succeeded',
+          providerKey: step.providerKey,
+          modelKey: step.modelKey,
+          outcomeCode: null,
+          contentChars: parsed.content.length,
+        });
+      }
 
       return {
         ok: true, code: null, content: parsed.content,
@@ -278,6 +440,7 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
         providerModelKey: step.providerModelKey,
         status: providerError.code === 'AI_TIMEOUT' ? 'timeout' : 'error',
         errorCode: providerError.code, latencyMs, inputTokens: null, outputTokens: null,
+        score: step.score, routedBy: step.reason,
       });
       lastError = providerError;
       // Secours : la chaîne n'est jamais plus longue que le plafond ; chaque
@@ -294,6 +457,23 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
     costInputUsd: null,
     costOutputUsd: null,
   });
+  logDecision({
+    steps,
+    chosenProvider: null,
+    chosenModel: null,
+    attempts: attempts.length,
+    skipReason: lastError ? lastError.code : 'NO_MATCHING_MODEL',
+  });
+  if (request.requestKey && deps.releaseCall) {
+    void deps.releaseCall({
+      requestKey: request.requestKey,
+      status: 'failed',
+      providerKey: attempts[attempts.length - 1]?.providerKey ?? null,
+      modelKey: attempts[attempts.length - 1]?.modelKey ?? null,
+      outcomeCode: lastError ? lastError.code : 'NO_MATCHING_MODEL',
+      contentChars: null,
+    });
+  }
 
   return {
     ok: false,
@@ -302,6 +482,14 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
     inputTokens: null, outputTokens: null, estimatedCostUsd: null,
     latencyMs: Date.now() - startedAt, attempts,
   };
+}
+
+async function safeLogRouting(deps: AiEngineDeps, entry: AiRoutingLogEntry): Promise<void> {
+  try {
+    await deps.logRouting?.(entry);
+  } catch {
+    // La traçabilité ne doit jamais faire échouer l'appel IA.
+  }
 }
 
 async function safeLog(deps: AiEngineDeps, entry: AiCallLogEntry): Promise<void> {

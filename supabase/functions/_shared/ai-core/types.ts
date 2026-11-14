@@ -21,6 +21,8 @@ export interface AiCredentials {
   apiKey?: string | null;
   /** Cloudflare Workers AI : identifiant de compte (non secret à lui seul). */
   accountId?: string | null;
+  /** Cloudflare AI Gateway : identifiant de la passerelle (non secret). */
+  gatewayId?: string | null;
 }
 
 export type AiErrorCode =
@@ -30,7 +32,9 @@ export type AiErrorCode =
   | 'AI_UNAVAILABLE'
   | 'AI_TIMEOUT'
   | 'AI_INVALID_RESPONSE'
-  | 'AI_EMPTY_RESPONSE';
+  | 'AI_EMPTY_RESPONSE'
+  /** Identifiant de compte ou de passerelle requis mais absent des secrets. */
+  | 'AI_ACCOUNT_NOT_CONFIGURED';
 
 export class AiProviderError extends Error {
   readonly code: AiErrorCode;
@@ -84,6 +88,11 @@ export interface AiParsedResult {
  */
 export type AiAdapterKind = 'openai' | 'gemini' | 'cloudflare' | 'none';
 
+/** Voie d'accès à un fournisseur (registre), pas son identité. */
+export type AiProviderTransport = 'rest' | 'gateway';
+
+export const AI_PROVIDER_TRANSPORTS: readonly AiProviderTransport[] = ['rest', 'gateway'];
+
 export const AI_ADAPTER_KINDS: readonly AiAdapterKind[] = ['openai', 'gemini', 'cloudflare', 'none'];
 
 /** Décrit UN fournisseur sans figer son identité dans le code. */
@@ -96,6 +105,16 @@ export interface AiProviderDescriptor {
   apiKeyEnv: string | null;
   /** Variable portant l'identifiant de compte (Cloudflare), si nécessaire. */
   accountIdEnv?: string | null;
+  /** Variable portant l'identifiant de passerelle (Cloudflare AI Gateway). */
+  gatewayIdEnv?: string | null;
+  /**
+   * Voie d'appel du fournisseur :
+   *  - `rest`     : API officielle du fournisseur (défaut) ;
+   *  - `gateway`  : passerelle du fournisseur (Cloudflare AI Gateway), qui
+   *                 exige un jeton dédié et un identifiant de passerelle.
+   * Aucune autre valeur n'est acceptée : le registre décide, le code se tait.
+   */
+  transport?: AiProviderTransport | null;
   /** URL de base de la liste des modèles (défaut : déduite de `baseUrl`). */
   modelsUrl?: string | null;
   /** En-têtes supplémentaires (attribution d'un agrégateur, version d'API…). */

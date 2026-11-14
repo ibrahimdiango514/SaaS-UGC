@@ -20,6 +20,10 @@ export interface AiRegistryProvider {
   accountIdEnv: string | null;
   /** En-têtes supplémentaires déclarés au registre (attribution, version). */
   headers: Record<string, string>;
+  /** Voie d'appel déclarée au registre : API officielle ou passerelle. */
+  transport: 'rest' | 'gateway';
+  /** Variable portant l'identifiant de passerelle (Cloudflare), si requise. */
+  gatewayIdEnv: string | null;
 }
 
 export interface AiRegistryModel {
@@ -146,6 +150,8 @@ export function parseRegistrySnapshot(raw: unknown): AiRegistrySnapshot | null {
           modelsUrl: strOrNull(r.models_url),
           apiKeyEnv: strOrNull(r.api_key_env),
           accountIdEnv: strOrNull(r.account_id_env),
+          gatewayIdEnv: strOrNull(r.gateway_id_env),
+          transport: String(r.transport ?? '').toLowerCase() === 'gateway' ? 'gateway' : 'rest',
           headers: headerMap(r.headers),
         }];
       })
