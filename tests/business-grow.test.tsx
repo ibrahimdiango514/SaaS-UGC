@@ -7,7 +7,7 @@ import { BusinessGrowApiError, type BusinessIntegrationConnection } from '../src
 import type { ReactNode } from 'react';
 import type { Brand, Product } from '../src/lib/types';
 import {
-  BUSINESS_PROVIDERS, isBusinessProviderAvailable,
+  describeRegistryProvider, isBusinessProviderAvailable,
 } from '../src/business/ai/registry';
 import { buildBusinessGrowLocationState } from '../src/contracts/business-grow';
 
@@ -119,7 +119,10 @@ const businessMocks = vi.hoisted(() => {
       throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
     }),
     verifyProvider: vi.fn(async (providerKey: string) => verifyProviderImpl.current(providerKey)),
-    listModels: vi.fn(async () => ({ models: [], remoteModels: {} })),
+    listModels: vi.fn(async (): Promise<{
+      models: import('../src/business/api').BusinessModelRecord[];
+      remoteModels: Record<string, string[]>;
+    }> => ({ models: [], remoteModels: {} })),
     getQuota: vi.fn(async (): Promise<{
       domain: 'business_grow';
       studio_ugc_untouched: boolean;
@@ -295,7 +298,31 @@ describe('Business Grow', () => {
     expect(await screen.findByText(/1 note\(s\) importée\(s\)/)).toBeTruthy();
   });
 
-  it('charge la mémoire consentie et affiche les statuts vérifiables des services IA', async () => {
+  it('charge la mémoire consentie et affiche les services IA RÉELLEMENT déclarés', async () => {
+    // Le registre serveur est la seule source : on y déclare deux services, et
+    // c'est exactement ce que l'écran doit montrer — rien de plus.
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [
+        {
+          provider_key: 'groq', display_name: 'Groq', enabled: true, status: 'available',
+          config_status: 'configured', checked_at: '2026-11-09T00:00:00Z',
+        },
+        {
+          provider_key: 'fournisseur-nouveau', display_name: 'Fournisseur nouveau', enabled: false,
+          status: 'unverified', config_status: 'missing', checked_at: null,
+        },
+      ],
+    });
+    businessMocks.listModels.mockResolvedValue({
+      models: [{
+        provider_key: 'groq', model_key: 'gpt-oss', provider_model_key: 'openai/gpt-oss-120b',
+        display_name: 'GPT-OSS 120B', capabilities: { writing: true, reasoning: true },
+        enabled: true, verification_status: 'verified', max_input_tokens: 128000, max_output_tokens: 8000,
+        verified_at: '2026-11-09T00:00:00Z',
+      }],
+      remoteModels: {},
+    });
+
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
     expect(screen.getByText('Mémoire métier privée')).toBeTruthy();
@@ -303,10 +330,13 @@ describe('Business Grow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
     expect(screen.getByText('Services IA VYORA')).toBeTruthy();
-    expect(screen.getByTestId('provider-gemini')).toBeTruthy();
     expect(screen.getByTestId('provider-groq')).toBeTruthy();
-    expect(screen.getByText('Rédaction')).toBeTruthy();
-    expect(screen.getByTestId('provider-muapi').textContent).toContain('Génération vidéo');
+    // Un fournisseur inconnu du code apparaît parce qu'il est au registre…
+    expect(screen.getByTestId('provider-fournisseur-nouveau')).toBeTruthy();
+    // …et un service absent du registre n'est jamais affiché.
+    expect(screen.queryByTestId('provider-muapi')).toBeNull();
+    // Les capacités affichées viennent des modèles, pas d'un catalogue figé.
+    await waitFor(() => expect(screen.getByText(/Rédaction/)).toBeTruthy());
   });
 
   it('affiche les marques et produits persistés dans le même espace VYORA', async () => {
@@ -712,18 +742,31 @@ describe('Business Grow', () => {
     expect(businessMocks.deleteConversation).toHaveBeenCalledWith(id, 'workspace-1');
   });
 
-  it('enregistre les rôles initiaux comme propositions et aucun fournisseur comme disponible', () => {
-    expect(BUSINESS_PROVIDERS.map((provider) => provider.id)).toEqual([
-      'gemini', 'groq', 'gonka', 'kilo', 'openrouter', 'llm7', 'muapi',
-    ]);
-    expect(BUSINESS_PROVIDERS.every((provider) => provider.connectionState === 'unverified')).toBe(true);
-    expect(BUSINESS_PROVIDERS.every((provider) => !isBusinessProviderAvailable(provider))).toBe(true);
-    expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'gemini')?.proposedCapabilities)
-      .toEqual(['writing', 'images', 'documents']);
-    expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'groq')?.proposedCapabilities)
-      .toEqual(['scripts', 'hooks', 'reasoning']);
-    expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'kilo')?.proposedCapabilities)
-      .toEqual(['economic-routing', 'fallback']);
+  it('projette le registre serveur en définitions affichables, sans catalogue figé', () => {
+    // Aucun fournisseur n'est écrit dans le code : la définition vient de la
+    // ligne de registre, y compris pour un fournisseur totalement inconnu.
+    const unknown = describeRegistryProvider({
+      key: 'fournisseur-nouveau',
+      name: null,
+      status: 'unverified',
+      aggregator: false,
+      capabilities: ['writing'],
+    });
+    expect(unknown).toMatchObject({
+      id: 'fournisseur-nouveau',
+      name: 'fournisseur-nouveau',
+      connectionState: 'unverified',
+      statusLabel: 'Non vérifié',
+    });
+    expect(isBusinessProviderAvailable(unknown)).toBe(false);
+
+    // Un agrégateur disponible est signalé comme tel, jamais comme un doublon.
+    const aggregator = describeRegistryProvider({
+      key: 'agregateur', name: 'Agrégateur', status: 'available', aggregator: true,
+    });
+    expect(aggregator.connectionState).toBe('available');
+    expect(isBusinessProviderAvailable(aggregator)).toBe(true);
+    expect(aggregator.note).toContain('Agrégateur');
   });
 
   it('transmet le rôle, le mode manuel de routage et affiche le quota Business Grow isolé', async () => {
@@ -802,7 +845,7 @@ describe('Business Grow', () => {
     await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-handoff-1', 'approved', 'workspace-1'));
   });
 
-  it('permet de vérifier un service réel et présente les services en préparation sans les simuler', async () => {
+  it('permet de vérifier un service réel et n’annonce aucun service non déclaré', async () => {
     businessMocks.getStatus.mockResolvedValue({
       providers: [{
         provider_key: 'groq',
@@ -818,10 +861,10 @@ describe('Business Grow', () => {
     await screen.findByTestId('business-grow');
     fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
 
-    expect(screen.getByTestId('adapter-openai').textContent).toContain('Service VYORA à venir');
-    expect(screen.getByTestId('adapter-anthropic')).toBeTruthy();
-    expect(screen.getByTestId('adapter-deepseek')).toBeTruthy();
-    expect(screen.getByTestId('adapter-mistral')).toBeTruthy();
+    // Aucun « adaptateur préparé » fictif : la section explique seulement que
+    // la liste des services vient du registre.
+    expect(screen.getByText('Comment VYORA choisit un service IA')).toBeTruthy();
+    expect(screen.queryByTestId('adapter-openai')).toBeNull();
 
     const groqCard = screen.getByTestId('provider-groq');
     const verifyBtn = groqCard.querySelector('button');

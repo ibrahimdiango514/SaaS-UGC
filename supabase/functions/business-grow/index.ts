@@ -10,8 +10,11 @@ import type { BusinessSnapshot } from './diagnostics.ts';
 import {
   callProvider,
   listRemoteModels,
+  primeProviderRegistry,
   probeProvider,
+  providerConfigFor,
   providerOrder,
+  registeredProviderKeys,
   type BusinessProvider,
   type ProviderConfig,
 } from './providers.ts';
@@ -27,41 +30,49 @@ const anonKey = env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY');
 const databaseUrl = env('BUSINESS_GROW_DATABASE_URL') || env('SUPABASE_DB_URL');
 
 // Secrets Business Grow strictement séparés du Studio UGC.
-// Les 5 nouveaux fournisseurs (VYORA AI CORE) restent INACTIFS tant que leur
-// clé n'est pas présente : le registre ne les autorise qu'une fois configurés
-// ET vérifiés par un test API réel.
-const providerConfigs: Partial<Record<BusinessProvider, ProviderConfig>> = {
-  groq: {
-    apiKey: env('BUSINESS_GROW_GROQ_API_KEY'),
-    model: env('BUSINESS_GROW_GROQ_MODEL'),
-  },
-  gemini: {
-    apiKey: env('BUSINESS_GROW_GEMINI_API_KEY'),
-    model: env('BUSINESS_GROW_GEMINI_MODEL'),
-  },
-  deepseek: {
-    apiKey: env('BUSINESS_GROW_DEEPSEEK_API_KEY'),
-    model: env('BUSINESS_GROW_DEEPSEEK_MODEL'),
-  },
-  mistral: {
-    apiKey: env('BUSINESS_GROW_MISTRAL_API_KEY'),
-    model: env('BUSINESS_GROW_MISTRAL_MODEL'),
-  },
-  grok: {
-    apiKey: env('BUSINESS_GROW_GROK_API_KEY'),
-    model: env('BUSINESS_GROW_GROK_MODEL'),
-  },
-  cloudflare: {
-    apiKey: env('BUSINESS_GROW_CLOUDFLARE_API_TOKEN'),
-    model: env('BUSINESS_GROW_CLOUDFLARE_MODEL'),
-    accountId: env('BUSINESS_GROW_CLOUDFLARE_ACCOUNT_ID'),
-  },
-  openrouter: {
-    apiKey: env('BUSINESS_GROW_OPENROUTER_API_KEY'),
-    model: env('BUSINESS_GROW_OPENROUTER_MODEL'),
-  },
+//
+// AUCUNE liste de fournisseurs ici : elle est lue dans le registre central
+// (`saas_business.ai_providers`), qui décrit pour chacun son gabarit de
+// protocole, son URL de base et le NOM de la variable portant sa clé. Un
+// fournisseur sans clé reste inactif (dormant) ; aucun modèle non vérifié
+// n'est jamais servi.
+const providerConfigs = (): Record<string, ProviderConfig | null> => {
+  const out: Record<string, ProviderConfig | null> = {};
+  for (const key of registeredProviderKeys()) out[key] = providerConfigFor(key);
+  return out;
 };
-const configuredProviderOrder = providerOrder(env('BUSINESS_GROW_PROVIDER_ORDER') || 'groq,gemini');
+
+/**
+ * Charge les descripteurs du registre (une lecture courte, mise en cache) :
+ * c'est la SEULE source de la liste des fournisseurs, de leur gabarit de
+ * protocole et de leur URL de base. Aucune clé n'est lue ici.
+ */
+let registryLoadedAt = 0;
+const REGISTRY_TTL_MS = 60_000;
+async function ensureProviderRegistry(): Promise<void> {
+  if (Date.now() - registryLoadedAt < REGISTRY_TTL_MS) return;
+  if (!sql) return;
+  try {
+    const rows = await sql`
+      select provider_key, display_name, adapter_kind, default_base_url,
+             models_url, default_headers, account_id_env, is_aggregator
+      from saas_business.ai_providers
+      where enabled
+    `;
+    primeProviderRegistry(asRows(rows));
+    registryLoadedAt = Date.now();
+  } catch {
+    // Registre illisible : on conserve le cache précédent, jamais de liste inventée.
+  }
+}
+
+// Ordre de secours : celui déclaré par l'exploitant, sinon l'ordre des
+// fournisseurs RÉELLEMENT configurés (aucun fournisseur nommé par défaut).
+const configuredProviderOrder = (): BusinessProvider[] => {
+  const explicit = providerOrder(env('BUSINESS_GROW_PROVIDER_ORDER') || '');
+  if (explicit.length) return explicit;
+  return registeredProviderKeys().filter((key) => Boolean(providerConfigFor(key)?.apiKey));
+};
 
 const sql = databaseUrl
   ? postgres(databaseUrl, {
@@ -105,7 +116,9 @@ const store: BusinessGrowStore = {
     // Synchronise l'état de configuration de TOUS les fournisseurs de la pile
     // VYORA AI CORE (pas seulement les historiques). Un fournisseur sans clé
     // passe à 'missing' et reste inactif (enabled=false) — comportement dormant.
-    for (const [key, cfg] of Object.entries(providerConfigs)) {
+    await ensureProviderRegistry();
+    const configs = providerConfigs();
+    for (const [key, cfg] of Object.entries(configs)) {
       const status = cfg?.apiKey && cfg?.model ? 'configured' : 'missing';
       try {
         await db`select saas_business.bg_sync_provider_config(${key}, ${status}, ${cfg?.model || null})`;
@@ -116,8 +129,8 @@ const store: BusinessGrowStore = {
 
     const providers = await db`select * from saas_business.bg_list_providers()`;
     return providers.map((provider: Record<string, unknown>) => {
-      const key = provider.provider_key;
-      const config = providerConfigs[key as BusinessProvider] ?? null;
+      const key = String(provider.provider_key);
+      const config = configs[key] ?? null;
       const verifiedModelKeys = Array.isArray(provider.verified_model_keys)
         ? provider.verified_model_keys as string[]
         : [];
@@ -134,7 +147,8 @@ const store: BusinessGrowStore = {
   },
   async recordHealthCheck(result) {
     const db = requiredSql();
-    const cfgStatus = providerConfigs[result.providerKey as BusinessProvider]?.apiKey ? 'configured' : 'missing';
+    await ensureProviderRegistry();
+    const cfgStatus = providerConfigs()[result.providerKey]?.apiKey ? 'configured' : 'missing';
     try {
       await db`select saas_business.bg_sync_provider_config(${result.providerKey}, ${cfgStatus}, ${result.modelKey || null})`;
     } catch {
@@ -680,6 +694,7 @@ Deno.serve(createBusinessGrowHandler({
   getUserId: authUserId,
   allowedOrigins,
   providerConfigs,
+  // L'ordre est résolu à chaque requête (registre + secrets), jamais figé.
   providerOrder: configuredProviderOrder,
   complete: (provider, config, messages, meta) => callProvider(provider, config, messages, fetch, undefined, meta),
   probe: probeProvider,

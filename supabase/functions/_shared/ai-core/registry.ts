@@ -1,13 +1,25 @@
 // VYORA AI CORE — lecture du registre (snapshot JSON produit par
 // saas_business.bg_ai_registry_snapshot(), réservé au service_role).
 
-import { AI_LEVELS, AiLevel } from './types.ts';
+import { AI_ADAPTER_KINDS, AI_LEVELS, AiAdapterKind, AiLevel } from './types.ts';
 
 export interface AiRegistryProvider {
   key: string;
   name: string;
   status: string;
   aggregator: boolean;
+  /** Gabarit de protocole (`openai` | `gemini` | `cloudflare` | `none`). */
+  adapterKind: AiAdapterKind;
+  /** URL de base de l'API, fournie par le registre (jamais par le code). */
+  baseUrl: string | null;
+  /** URL de la liste des modèles (facultative). */
+  modelsUrl: string | null;
+  /** Nom de la variable d'environnement portant la clé (jamais la valeur). */
+  apiKeyEnv: string | null;
+  /** Nom de la variable portant l'identifiant de compte, si requis. */
+  accountIdEnv: string | null;
+  /** En-têtes supplémentaires déclarés au registre (attribution, version). */
+  headers: Record<string, string>;
 }
 
 export interface AiRegistryModel {
@@ -64,6 +76,16 @@ function strOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/**
+ * Clé de fournisseur valide — même règle que la contrainte SQL
+ * (`provider_key ~ ^[a-z][a-z0-9_-]{1,39}$`). Une clé mal formée est écartée :
+ * elle servirait à construire une URL et un nom de variable d'environnement.
+ */
+function providerKeyOrNull(value: unknown): string | null {
+  const key = strOrNull(value);
+  return key && /^[a-z][a-z0-9_-]{1,39}$/.test(key) ? key : null;
+}
+
 function capMap(value: unknown): Record<string, boolean> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
   const out: Record<string, boolean> = {};
@@ -78,6 +100,29 @@ function tierOf(value: unknown): AiLevel | 'standard' {
 }
 
 /**
+ * Gabarit de protocole d'un fournisseur.
+ *
+ * Le registre peut ne pas le fournir (ligne antérieure à son introduction) :
+ * on retombe alors sur `openai`, protocole majoritaire, et le moteur vérifie
+ * l'URL avant d'envoyer quoi que ce soit. `none` reste possible pour déclarer
+ * un protocole exotique : le fournisseur est alors listé mais jamais appelé.
+ */
+function adapterKindOf(value: unknown): AiAdapterKind {
+  const raw = String(value ?? '').toLowerCase();
+  return (AI_ADAPTER_KINDS as readonly string[]).includes(raw) ? (raw as AiAdapterKind) : 'openai';
+}
+
+/** En-têtes supplémentaires : uniquement des chaînes non vides. */
+function headerMap(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof val === 'string' && val.trim()) out[key] = val;
+  }
+  return out;
+}
+
+/**
  * Valide et normalise un snapshot. Totalement défensif : tout ce qui n'est
  * pas au format attendu est écarté (le moteur ne doit jamais planter sur un
  * registre partiel — il retombe alors sur son chemin de secours).
@@ -89,13 +134,19 @@ export function parseRegistrySnapshot(raw: unknown): AiRegistrySnapshot | null {
   const providers: AiRegistryProvider[] = Array.isArray(root.providers)
     ? root.providers.flatMap((p): AiRegistryProvider[] => {
         const r = (p ?? {}) as Record<string, unknown>;
-        const key = strOrNull(r.key);
+        const key = providerKeyOrNull(r.key);
         if (!key) return [];
         return [{
           key,
           name: strOrNull(r.name) ?? key,
           status: strOrNull(r.status) ?? 'unverified',
           aggregator: r.aggregator === true,
+          adapterKind: adapterKindOf(r.adapter_kind),
+          baseUrl: strOrNull(r.base_url),
+          modelsUrl: strOrNull(r.models_url),
+          apiKeyEnv: strOrNull(r.api_key_env),
+          accountIdEnv: strOrNull(r.account_id_env),
+          headers: headerMap(r.headers),
         }];
       })
     : [];

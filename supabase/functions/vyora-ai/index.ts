@@ -47,16 +47,16 @@ const GROQ_KEY = () => env("BUSINESS_GROW_GROQ_API_KEY") || env("GROQ_API_KEY");
 const GEMINI_KEY = () => env("BUSINESS_GROW_GEMINI_API_KEY") || env("GEMINI_API_KEY");
 const GROQ_MODEL = () => env("BUSINESS_GROW_GROQ_MODEL") || env("GROQ_MODEL") || "llama-3.3-70b-versatile";
 const GEMINI_MODEL = () => env("BUSINESS_GROW_GEMINI_MODEL") || env("GEMINI_MODEL") || "gemini-2.0-flash";
-// VYORA AI CORE — 5 nouveaux fournisseurs. Tous restent INACTIFS tant que
-// leur clé n'est pas présente ET que leur modèle n'a pas passé un test API
-// réel (registre Supabase) : aucun modèle non vérifié n'est jamais servi.
-const DEEPSEEK_KEY = () => env("BUSINESS_GROW_DEEPSEEK_API_KEY") || env("DEEPSEEK_API_KEY");
-const MISTRAL_KEY = () => env("BUSINESS_GROW_MISTRAL_API_KEY") || env("MISTRAL_API_KEY");
-const GROK_KEY = () => env("BUSINESS_GROW_GROK_API_KEY") || env("XAI_API_KEY");
-const OPENROUTER_KEY = () => env("BUSINESS_GROW_OPENROUTER_API_KEY") || env("OPENROUTER_API_KEY");
-const CLOUDFLARE_TOKEN = () => env("BUSINESS_GROW_CLOUDFLARE_API_TOKEN");
-const CLOUDFLARE_ACCOUNT = () => env("BUSINESS_GROW_CLOUDFLARE_ACCOUNT_ID");
-const CLOUDFLARE_MODEL = () => env("BUSINESS_GROW_CLOUDFLARE_MODEL");
+// VYORA AI CORE — fournisseurs additionnels : AUCUNE liste en dur ici.
+// Le registre central (`saas_business.ai_providers`) déclare, pour chaque
+// fournisseur, le NOM de la variable d'environnement de sa clé
+// (`api_key_env`) et, si nécessaire, celle de son identifiant de compte
+// (`account_id_env`). Les conventions ci-dessous ne servent qu'au repli
+// historique des intégrations déjà en production — elles ne nomment aucun
+// fournisseur. Un fournisseur reste inactif tant que sa clé est absente ET
+// que son modèle n'a pas passé un test API réel : aucun modèle non vérifié
+// n'est jamais servi.
+const MODEL_ENV_SUFFIX = "_MODEL";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -77,12 +77,55 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
   const n = Number(value);
   return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : fallback;
 }
+/** Noms de variables de repli (conventions, aucun fournisseur nommé). */
+function legacyEnvNames(providerKey: string): { apiKey: string[]; accountId: string[] } {
+  const upper = providerKey.replace(/[^a-z0-9]+/gi, "_").toUpperCase();
+  return {
+    apiKey: [
+      `BUSINESS_GROW_${upper}_API_KEY`,
+      `BUSINESS_GROW_${upper}_API_TOKEN`,
+      `${upper}_API_KEY`,
+      `${upper}_API_TOKEN`,
+    ],
+    accountId: [`BUSINESS_GROW_${upper}_ACCOUNT_ID`, `${upper}_ACCOUNT_ID`],
+  };
+}
+
+function firstEnv(names: string[]): string | null {
+  for (const name of names) {
+    const value = env(name);
+    if (value) return value;
+  }
+  return null;
+}
+
+/**
+ * Credentials d'un fournisseur, SANS liste de fournisseurs dans le code.
+ *
+ * L'ordre est celui du moteur : le registre d'abord (via `deps.env`), puis les
+ * conventions historiques ci-dessus. Un fournisseur inconnu du code mais
+ * déclaré au registre fonctionne donc immédiatement.
+ */
+function credentialsForProvider(providerKey: string): { apiKey: string | null; accountId: string | null } {
+  const names = legacyEnvNames(providerKey);
+  return { apiKey: firstEnv(names.apiKey), accountId: firstEnv(names.accountId) };
+}
+
+/** Rédaction : toute valeur de secret réellement présente côté Edge. */
 function redact(text: string): string {
   let out = text;
-  for (const key of [
-    GROQ_KEY(), GEMINI_KEY(), DEEPSEEK_KEY(), MISTRAL_KEY(), GROK_KEY(),
-    OPENROUTER_KEY(), CLOUDFLARE_TOKEN(), SERVICE_KEY(),
-  ]) if (key) out = out.split(key).join("[REDACTED]");
+  const secrets = new Set<string>();
+  const serviceKey = SERVICE_KEY();
+  if (serviceKey) secrets.add(serviceKey);
+  // Les secrets connus sont collectés par NOM, jamais par fournisseur :
+  // on parcourt l'environnement à la recherche des variables de credentials.
+  const g = globalThis as unknown as { Deno?: { env?: { toObject?: () => Record<string, string> } } };
+  const all = g.Deno?.env?.toObject?.() ?? {};
+  for (const [name, value] of Object.entries(all)) {
+    if (!value || value.length < 12) continue;
+    if (/(_API_KEY|_API_TOKEN|_SECRET_KEY|SERVICE_ROLE_KEY)$/.test(name)) secrets.add(value);
+  }
+  for (const secret of secrets) out = out.split(secret).join("[REDACTED]");
   return out;
 }
 
@@ -96,12 +139,14 @@ const SYSTEM = {
   scenes: "Tu es réalisateur UGC. Décris des scènes tournables, cohérentes et sobres. Réponds en JSON valide.",
 };
 
-export type ProviderName =
-  | "groq" | "gemini" | "deepseek" | "mistral" | "grok" | "cloudflare" | "openrouter";
-
-export const PROVIDER_NAMES: readonly ProviderName[] = [
-  "groq", "gemini", "deepseek", "mistral", "grok", "cloudflare", "openrouter",
-];
+/**
+ * Identifiant de fournisseur : une CHAÎNE, pas une union fermée.
+ *
+ * La liste des fournisseurs servis vient du registre (`ai_providers`), jamais
+ * de ce fichier : un fournisseur ajouté au registre est immédiatement
+ * acceptable ici, sans modification de code.
+ */
+export type ProviderName = string;
 export type MessageRole = "system" | "user" | "assistant";
 
 type ProviderMessage = { role: MessageRole; content: string };
@@ -322,27 +367,15 @@ function readHistory(body: Json): ProviderMessage[] {
 /* jamais de clé. Un appel interne (moteur BG) n'est pas double-facturé.       */
 /* -------------------------------------------------------------------------- */
 
-function aiCoreCredentials(): Record<string, { apiKey: string | null; accountId: string | null }> {
-  return {
-    groq: { apiKey: GROQ_KEY() || null, accountId: null },
-    gemini: { apiKey: GEMINI_KEY() || null, accountId: null },
-    deepseek: { apiKey: DEEPSEEK_KEY() || null, accountId: null },
-    mistral: { apiKey: MISTRAL_KEY() || null, accountId: null },
-    grok: { apiKey: GROK_KEY() || null, accountId: null },
-    cloudflare: { apiKey: CLOUDFLARE_TOKEN() || null, accountId: CLOUDFLARE_ACCOUNT() || null },
-    openrouter: { apiKey: OPENROUTER_KEY() || null, accountId: null },
-  };
-}
-
-function aiCoreConfiguredProviders(): Set<string> {
-  const creds = aiCoreCredentials();
-  const out = new Set<string>();
-  for (const [key, c] of Object.entries(creds)) {
-    if (!c.apiKey) continue;
-    if (key === "cloudflare" && !c.accountId) continue;
-    out.add(key);
-  }
-  return out;
+/**
+ * Fournisseurs configurables : liste construite À L'EXÉCUTION.
+ *
+ * Le moteur complète lui-même cet ensemble avec les fournisseurs du registre
+ * dont la clé se résout (`api_key_env`), y compris ceux que ce fichier ne
+ * connaît pas. On n'énumère donc ici aucun fournisseur.
+ */
+function aiCoreConfiguredProviders(): ReadonlySet<string> {
+  return new Set<string>();
 }
 
 // Cache court du registre : la base n'est pas relue à chaque appel.
@@ -411,12 +444,46 @@ async function logAiCall(entry: AiCallLogEntry): Promise<void> {
   }
 }
 
+/**
+ * État de configuration, fournisseur par fournisseur, SANS liste en dur.
+ *
+ * La source est le registre : chaque ligne `ai_providers` donne le nom de la
+ * variable de sa clé (`api_key_env`) et, si besoin, de son identifiant de
+ * compte (`account_id_env`). Aucune valeur de secret ne sort d'ici — seulement
+ * « configuré ou non » et, éventuellement, le nom du modèle configuré.
+ */
+async function providerHealth(): Promise<Record<string, { configured: boolean; model: string | null }>> {
+  const snapshot = await loadRegistrySnapshot();
+  const keys = new Set<string>((snapshot?.providers ?? []).map((p) => p.key));
+  // Repli sans registre : les fournisseurs dont un secret existe déjà.
+  const conventions = Object.keys(
+    (globalThis as unknown as { Deno?: { env?: { toObject?: () => Record<string, string> } } })
+      .Deno?.env?.toObject?.() ?? {},
+  )
+    .map((name) => name.match(/^([A-Z0-9]+)_(?:API_KEY|API_TOKEN|AUTH_TOKEN)$/)?.[1] ?? "")
+    .filter((key) => key && key !== "SUPABASE" && key !== "ANON" && key !== "SERVICE");
+  for (const key of conventions) keys.add(key.toLowerCase());
+
+  const out: Record<string, { configured: boolean; model: string | null }> = {};
+  for (const key of keys) {
+    const credentials = credentialsForProvider(key);
+    const model = firstEnv([
+      ...legacyEnvNames(key).apiKey.map((name) => name.replace(/_API_KEY$|_API_TOKEN$/, MODEL_ENV_SUFFIX)),
+      `${key.replace(/[^a-z0-9]+/gi, "_").toUpperCase()}${MODEL_ENV_SUFFIX}`,
+    ]);
+    out[key] = { configured: Boolean(credentials.apiKey), model };
+  }
+  return out;
+}
+
 function aiEngineDeps(): AiEngineDeps {
-  const creds = aiCoreCredentials();
   return {
     loadRegistry: loadRegistrySnapshot,
     configuredProviders: aiCoreConfiguredProviders,
-    credentials: (providerKey) => creds[providerKey] ?? { apiKey: null, accountId: null },
+    credentials: (providerKey) => credentialsForProvider(providerKey),
+    // Noms uniquement : le registre fournit `api_key_env` / `account_id_env`,
+    // le moteur lit leur VALEUR ici, côté serveur, sans jamais la journaliser.
+    env: (name) => env(name) || null,
     fetcher: fetch,
     logCall: logAiCall,
   };
@@ -485,10 +552,10 @@ export async function handler(req: Request): Promise<Response> {
   let body: Json;
   try { body = rec(await req.json()); } catch { return fail("INVALID_BODY", "Corps de requête JSON invalide.", 400); }
   const action = str(body.action, 40) || "complete";
-  const preferRaw = str(body.prefer, 20).toLowerCase();
-  const prefer: ProviderName | undefined = (PROVIDER_NAMES as readonly string[]).includes(preferRaw)
-    ? (preferRaw as ProviderName)
-    : undefined;
+  // Aucune liste d'autorisation ici : un identifiant bien formé est accepté,
+  // et le moteur ne sert que les fournisseurs réellement configurés.
+  const preferRaw = str(body.prefer, 40).toLowerCase();
+  const prefer: ProviderName | undefined = /^[a-z][a-z0-9_-]{1,39}$/.test(preferRaw) ? preferRaw : undefined;
   const projectId = str(body.project_id, 80) || null;
   const temperature = Number.isFinite(Number(body.temperature)) ? clamp(body.temperature, 0, 2, 0.7) : undefined;
 
@@ -497,15 +564,7 @@ export async function handler(req: Request): Promise<Response> {
       service: "vyora-ai",
       status: "ok",
       internal,
-      providers: {
-        groq: { configured: Boolean(GROQ_KEY()), model: GROQ_MODEL() },
-        gemini: { configured: Boolean(GEMINI_KEY()), model: GEMINI_MODEL() },
-        deepseek: { configured: Boolean(DEEPSEEK_KEY()) },
-        mistral: { configured: Boolean(MISTRAL_KEY()) },
-        grok: { configured: Boolean(GROK_KEY()) },
-        openrouter: { configured: Boolean(OPENROUTER_KEY()) },
-        cloudflare: { configured: Boolean(CLOUDFLARE_TOKEN() && CLOUDFLARE_ACCOUNT()) },
-      },
+      providers: await providerHealth(),
     });
   }
 

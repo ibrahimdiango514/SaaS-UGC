@@ -19,7 +19,7 @@
 | Isolation | crédits Studio jamais lus/débités par Business Growth ; RLS par workspace ; admin sans workspace client |
 | Moteur IA | `supabase/functions/_shared/ai-core/` : 7 adaptateurs, routeur, registre, mémoire, budgets |
 | Composants réutilisables préexistants | `Button`, `Card`, `StatCard`, `Badge`, `Modal`, `EmptyState`, `Reveal`, `BrandLockup`, `HeroScene` |
-| Tests | 75 fichiers / 1146 tests verts au démarrage de la phase |
+| Tests | 75 fichiers / 1146 tests verts au démarrage de la phase → **80 fichiers / 1189 tests** en fin de quatrième tranche |
 
 **Aucune règle d'accès n'a été modifiée.** `ProtectedRoute` et `AdminRoute` sont
 inchangés ; les redirections (`isAdmin` → `/admin`, `from` → `/app`) sont identiques.
@@ -125,10 +125,10 @@ implémentée.
 | Fiche de renseignement par fournisseur | `docs/moteur-ia-fournisseurs.md` |
 | Architecture, routage, sécurité, procédure d'ajout | `docs/architecture-moteur-ia.md` |
 
-Aucun endpoint, modèle ou tarif n'a été inventé : le document distingue explicitement
-ce qui est **vérifié en production** (Groq, Gemini), ce qui est **écrit mais non
-vérifié** (Mistral, DeepSeek, OpenRouter, Cloudflare, xAI) et ce qui **reste à
-renseigner** par vos soins. Les clés ne sont jamais demandées dans Git : seuls les
+Aucun endpoint, modèle ou tarif n'a été inventé : le document distingue
+explicitement ce qui est **vérifié en production** (Groq, Gemini), ce qui est
+**documenté mais non vérifié**, et ce qui **reste à renseigner** par vos soins.
+La liste elle-même n'est pas figée : elle vit dans le registre (§8). Les clés ne sont jamais demandées dans Git : seuls les
 **noms de variables** figurent dans la documentation, avec la procédure Supabase Secrets.
 
 ---
@@ -156,23 +156,42 @@ par module (`/app/business/modules/:key`), contrôle de rôle administrateur, co
 Aucune logique touchée : 94 tests Business Growth + modules restent verts sans
 modification, 1182 tests au total.
 
-## 8. Intégration des fournisseurs IA — état d'attente
+## 8. Fournisseurs IA — réception seulement, catalogue NON figé
 
-Décision du propriétaire (2026-11-14) : **intégration groupee, après réception des
-cinq fiches** (Mistral, DeepSeek, OpenRouter, Cloudflare Workers AI, xAI). Aucun
-fournisseur n'est activé en attendant.
+Deux décisions du propriétaire (2026-11-14) encadrent cette section :
 
-Ce qui est déjà prêt, et ne dépend pas des fiches :
+1. **Mistral est reporté** (offre payante) : aucune démarche, aucune clé.
+2. **La liste des fournisseurs ne doit jamais être figée.** L'intégration ne
+   démarrera qu'à la phrase « COMMENCE L'INTÉGRATION DES FOURNISSEURS IA. »
 
-- 7 adaptateurs, routeur, moteur, registre, journal, mémoire, budgets (voir
-  `docs/architecture-moteur-ia.md`) ;
-- cinq fournisseurs présents au registre en `enabled = false` / `unverified` ;
-- garde-fou de secrets (ci-dessus) et procédure Supabase Secrets documentée ;
-- **point à trancher à la réception** : la table `ai_providers` du registre ne
-  contient aujourd'hui que `gemini`, `groq`, `deepseek`, `mistral`, `grok`,
-  `openrouter`, `cloudflare`. Pour intégrer un fournisseur hors de cette liste, il
-  faudra une migration additive (ligne fournisseur + modèles) et les variables
-  d'environnement correspondantes — le moteur n'a besoin d'aucune autre couche.
+### 8.1 Ce qui a été livré pour rendre la liste évolutive
+
+| Élément | Avant | Après |
+|---|---|---|
+| Catalogue des fournisseurs | listes écrites dans `adapters.ts`, `vyora-ai/index.ts`, `business-grow/providers.ts`, `src/business/ai/registry.ts` | **aucune** : tout vient de `saas_business.ai_providers` |
+| Ajout d'un fournisseur | nouveau code + redéploiement | **ligne de registre + secret Edge** |
+| Protocole | un adaptateur écrit par fournisseur | 4 gabarits (`openai`, `gemini`, `cloudflare`, `none`) résolus par `resolveAiAdapter()` |
+| Clé API | variables nommées en dur | **nom** de variable déclaré par le registre (`api_key_env`) |
+| Interface admin | lecture seule | déclaration (`vyora_ai_admin_provider_upsert`) et désactivation (`..._disable`) |
+| Espace Business (UI) | catalogue figé côté navigateur | liste servie par le registre, vide tant que rien n'est déclaré |
+
+Conséquence concrète : un fournisseur **inconnu du code** fonctionne dès qu'une
+ligne de registre décrit son protocole et qu'un secret porte sa clé — vérifié par
+test (`tests/ai-core.test.ts`, fournisseur fictif `fournisseur-nouveau`).
+
+### 8.2 Ce qui n'a PAS été fait, volontairement
+
+- ❌ Aucune clé déposée, aucune sonde réelle lancée.
+- ❌ Aucun fournisseur ajouté au registre (pas de fournisseur fictif).
+- ❌ Aucune intégration Mistral.
+- ❌ Aucune modification des règles d'accès ni des données existantes.
+
+### 8.3 Dossier de réception
+
+Les fiches sont créées dans [`docs/fournisseurs-ia/`](./fournisseurs-ia/README.md),
+une par fournisseur transmis, avec la trame : identification, accès (noms de
+variables seulement), documentation, caractéristiques, modèles annoncés,
+capacités annoncées, tarification, informations manquantes, état de préparation.
 
 ## 9. Reste à faire (proposé, non commencé)
 
@@ -180,7 +199,7 @@ Ce qui est déjà prêt, et ne dépend pas des fiches :
 |---|---|---|
 | D | Approfondir l'assistant Business (fil de conversation, états de chargement, reprise d'une conversation) | — |
 | E | Refonte visuelle du générateur Studio et du montage (timeline, export) | — |
-| F | Intégration des cinq fournisseurs IA, en une passe, après réception des fiches | vos informations |
+| F | Intégration des fournisseurs IA, **progressivement et fournisseur par fournisseur**, après la phrase d'autorisation | vos informations + votre autorisation |
 | G | Captures d'écran de validation (ordinateur / tablette / mobile) | navigateur disponible |
 
 **Aucune fusion vers `main`, aucun déploiement Netlify** n'a été déclenché : la
