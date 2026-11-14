@@ -16,6 +16,7 @@ import {
   BUSINESS_MOBILE_NAV, STUDIO_MOBILE_NAV, isNavItemActive,
 } from '../navigation/config';
 import { Badge, Button, cn, LoadingState } from './ui';
+import { WorkspaceDock } from './WorkspaceDock';
 
 const ADMIN_NAV = [{ to: '/admin', label: 'Administration', icon: Shield }];
 
@@ -34,6 +35,9 @@ export default function Layout() {
   const location = useLocation();
   const isHub = location.pathname === '/app';
   const isBusiness = location.pathname === '/app/business' || location.pathname.startsWith('/app/business/');
+  // Périmètre visuel : chaque espace possède sa propre identité chromatique,
+  // héritée par toute l'arborescence via `data-vy-scope` (variables CSS).
+  const scope: 'studio' | 'business' | 'hub' | 'admin' = isAdmin ? 'admin' : isHub ? 'hub' : isBusiness ? 'business' : 'studio';
   const mobileNav = isAdmin
     ? ADMIN_NAV
     : isHub
@@ -133,20 +137,33 @@ export default function Layout() {
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Mon compte';
 
   return (
-    <div className="min-h-screen lg:flex">
+    <div
+      className={cn('min-h-screen lg:flex', scope === 'business' && 'vy-scope-business', scope === 'studio' && 'vy-scope-studio')}
+      data-vy-scope={scope === 'admin' ? 'admin' : scope}
+    >
       {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}
       <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', isHub && 'lg:hidden')}>
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
+        {/* Liseré d'identité : cyan en Studio, violet en Business Growth. */}
+        {!isHub && (
+          <div
+            aria-hidden="true"
+            className={cn(
+              'pointer-events-none absolute inset-y-0 left-0 w-[2px] bg-gradient-to-b from-transparent to-transparent',
+              isBusiness ? 'via-violet-400/70' : 'via-cyan-400/70',
+            )}
+          />
+        )}
         <div className="relative px-2 pb-4">
           <Logo to={isAdmin ? '/admin' : '/app'} />
         </div>
         {!isAdmin && (
           <Link
             to="/app"
-            className="relative mb-4 flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-3 py-2 text-[11px] font-semibold text-slate-300 transition hover:border-cyan-300/25 hover:text-white"
+            className="relative mb-4 flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-3 py-2 text-[11px] font-semibold text-slate-300 transition hover:border-white/25 hover:text-white"
           >
-            <ArrowLeftRight size={13} className="text-cyan-300" />
+            <ArrowLeftRight size={13} className={isBusiness ? 'text-violet-300' : 'text-cyan-300'} />
             Tous les espaces
             <span className="ml-auto text-[9px] font-normal uppercase tracking-[0.12em] text-slate-600">
               {isBusiness ? 'Business' : 'Studio'}
@@ -163,6 +180,7 @@ export default function Layout() {
           </nav>
         ) : (
           <div className="relative mt-1 flex min-h-0 flex-1 flex-col">
+            <WorkspaceDock scope={isBusiness ? 'business' : 'studio'} currentPath={location.pathname} />
             <WorkspaceNav scope={isBusiness ? 'business' : 'studio'} />
           </div>
         )}
@@ -307,11 +325,14 @@ export default function Layout() {
                 ))}
               </nav>
             ) : (
+              <>
+              <WorkspaceDock scope={isBusiness ? 'business' : 'studio'} currentPath={location.pathname} />
               <WorkspaceNav
                 scope={isBusiness ? 'business' : 'studio'}
                 onNavigate={() => setDrawerOpen(false)}
                 onRequestClose={() => setDrawerOpen(false)}
               />
+              </>
             )}
             {!isAdmin && !isBusiness && !isHub && <div className="mt-6 rounded-2xl border border-cyan-300/15 bg-cyan-400/[0.06] p-3 text-sm">
               <p className="text-xs text-slate-400">Crédits Studio UGC</p>
