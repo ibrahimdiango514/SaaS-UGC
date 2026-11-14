@@ -1,4 +1,4 @@
-import { ArrowUpRight, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { SECTORS, type SectorId } from '../plan';
 
 interface HomeCard {
@@ -7,6 +7,10 @@ interface HomeCard {
   image: string;
 }
 
+/**
+ * Quatre visuels de démonstration, étiquetés « Démo ».
+ * Ils illustrent des secteurs ; ce ne sont PAS des médias générés par VYORA.
+ */
 const HOME_CARDS: HomeCard[] = [
   { sector: 'cosmetique', label: 'Beauté', image: '/studio-examples/cosmetique.jpg' },
   { sector: 'food', label: 'Food', image: '/studio-examples/food.jpg' },
@@ -15,12 +19,21 @@ const HOME_CARDS: HomeCard[] = [
 ];
 
 const CHIPS: { sector: SectorId; label: string }[] = [
-  { sector: 'cosmetique', label: 'Cosmétique' },
+  { sector: 'cosmetique', label: 'Beauté' },
   { sector: 'food', label: 'Food' },
   { sector: 'ecommerce', label: 'E-commerce' },
   { sector: 'fitness', label: 'Fitness' },
 ];
 
+/**
+ * Écran d'accueil du Studio.
+ *
+ * Reproduit la composition de la référence : une rangée de visuels en éventail,
+ * un titre sur deux lignes avec la seconde accentuée, une seule ligne de
+ * consigne, puis des puces de secteur. Aucun paragraphe explicatif, aucun
+ * bandeau commercial, aucun modèle affiché en permanence : tout cela vit dans
+ * les panneaux (catalogue, réglages) et dans le composer docké.
+ */
 export function GenerationEmptyState({ onExample, onStart, onSector, selectedSector }: {
   onExample: (sector: SectorId, example: string) => void;
   onStart: () => void;
@@ -34,51 +47,72 @@ export function GenerationEmptyState({ onExample, onStart, onSector, selectedSec
   };
 
   return (
-    <section data-testid="studio-hero" className="studio-v2 relative overflow-hidden rounded-[28px] border border-white/[0.06] bg-[#04070b] px-4 pb-32 pt-3 sm:px-8 sm:pb-10 sm:pt-12">
-      <div aria-hidden="true" className="pointer-events-none absolute -left-32 -top-40 h-80 w-80 rounded-full bg-cyan-400/[0.08] blur-[110px]" />
-      <div aria-hidden="true" className="pointer-events-none absolute -right-32 top-10 h-72 w-72 rounded-full bg-fuchsia-500/[0.06] blur-[110px]" />
-
+    <section data-testid="studio-hero" className="relative px-3 pb-2 pt-6 sm:px-6 sm:pt-12">
       <div className="relative mx-auto max-w-3xl text-center">
-        <div className="mx-auto mb-3 flex w-full max-w-[440px] items-end justify-center gap-1.5 sm:mb-9 sm:gap-2" aria-label="Inspirations par secteur">
-          {HOME_CARDS.map((card) => (
-            <button key={card.sector} type="button" onClick={() => pick(card.sector)}
-              className="group relative h-20 w-1/4 max-w-[110px] overflow-hidden rounded-2xl border border-white/10 bg-[#111821] shadow-[0_18px_45px_rgba(0,0,0,0.45)] transition duration-300 hover:z-10 hover:scale-105 sm:h-36"
-              aria-label={`Exemple ${card.label}`}>
-              <img src={card.image} alt="" className="absolute inset-0 h-full w-full object-cover opacity-75 transition duration-500 group-hover:scale-110 group-hover:opacity-100" />
-              <span className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/10" />
-              <span className="absolute left-2 top-2 rounded-md bg-black/40 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-white/90 backdrop-blur">Démo</span>
-              <span className="absolute inset-x-1 bottom-2 truncate text-[10px] font-bold text-white drop-shadow sm:text-xs">{card.label}</span>
-              <ArrowUpRight size={11} className="absolute right-2 top-2 text-white/80 opacity-0 transition group-hover:opacity-100" />
+        {/* Éventail de visuels, comme la référence : léger décalage vertical et inclinaison. */}
+        <div
+          className="mx-auto mb-6 flex w-full max-w-[520px] items-end justify-center gap-1 sm:mb-9 sm:gap-2"
+          aria-label="Inspirations par secteur"
+        >
+          {HOME_CARDS.map((card, index) => (
+            <button
+              key={card.sector}
+              type="button"
+              onClick={() => pick(card.sector)}
+              className="group relative h-[74px] w-1/4 max-w-[120px] overflow-hidden rounded-[14px] border border-white/12 bg-[#111] shadow-[0_16px_40px_rgba(0,0,0,0.6)] transition duration-300 hover:z-10 hover:-translate-y-1 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 sm:h-[118px] sm:rounded-2xl"
+              style={{ transform: `rotate(${(index - 1.5) * 3}deg)` }}
+              aria-label={`Exemple ${card.label} (image de démonstration)`}
+            >
+              <img
+                src={card.image}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover opacity-80 transition duration-500 group-hover:scale-105 group-hover:opacity-100"
+              />
+              <span className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+              <span className="absolute left-1.5 top-1.5 rounded bg-black/55 px-1 py-0.5 text-[7px] uppercase tracking-wide text-white/90 backdrop-blur-sm sm:text-[8px]">
+                Démo
+              </span>
+              <span className="absolute inset-x-1 bottom-1.5 truncate text-[9px] font-semibold text-white drop-shadow sm:text-[11px]">
+                {card.label}
+              </span>
             </button>
           ))}
         </div>
 
-        <p className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/20 bg-cyan-400/[0.06] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.22em] text-cyan-200">
-          <Sparkles size={10} />           VYORA · Studio UGC
-        </p>
-        <h1 className="mt-3 text-[24px] font-black uppercase leading-[1.05] tracking-tight text-white sm:mt-5 sm:text-5xl">
-          Votre prochain<br /><span className="text-cyan-300">film commence ici</span>
+        <h1 className="text-[26px] font-black uppercase leading-[1.02] tracking-[-0.02em] text-white sm:text-[46px]">
+          Créez votre vidéo
+          <br />
+          <span className="text-cyan-300">avec VYORA</span>
         </h1>
-        <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-slate-400 sm:mt-3 sm:text-base">Décrivez votre pub, on crée la vidéo.</p>
 
-        <div className="mt-3 flex flex-wrap justify-center gap-2 sm:mt-6" aria-label="Secteurs">
+        <p className="mx-auto mt-2.5 max-w-md text-[12.5px] leading-relaxed text-slate-400 sm:mt-4 sm:text-[14.5px]">
+          Décrivez une scène, un produit, un ton — et générez votre publicité.
+        </p>
+
+        <div className="mt-4 flex flex-wrap justify-center gap-1.5 sm:mt-6 sm:gap-2" aria-label="Secteurs">
           {CHIPS.map((chip) => (
-            <button key={chip.sector} type="button" onClick={() => pick(chip.sector)}
-              className={`rounded-full border px-4 py-2 text-xs font-medium transition sm:text-[13px] ${
+            <button
+              key={chip.sector}
+              type="button"
+              onClick={() => pick(chip.sector)}
+              className={`rounded-full border px-3.5 py-1.5 text-[11.5px] font-medium transition sm:text-[12.5px] ${
                 selectedSector === chip.sector
-                  ? 'border-cyan-400/50 bg-cyan-400/15 text-white'
-                  : 'border-white/[0.09] bg-white/[0.02] text-slate-300 hover:border-cyan-400/35 hover:text-white'
+                  ? 'border-cyan-400/55 bg-cyan-400/15 text-white'
+                  : 'border-white/[0.10] bg-white/[0.03] text-slate-300 hover:border-white/25 hover:text-white'
               }`}
-              aria-pressed={selectedSector === chip.sector}>
+              aria-pressed={selectedSector === chip.sector}
+            >
               {chip.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={onStart}
+            className="inline-flex items-center gap-1.5 rounded-full border border-transparent px-3 py-1.5 text-[11.5px] font-medium text-cyan-300 transition hover:text-cyan-200 sm:text-[12.5px]"
+          >
+            <Sparkles size={12} /> Écrire
+          </button>
         </div>
-
-        <button type="button" onClick={onStart}
-          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-cyan-400/25 bg-cyan-400/[0.08] px-4 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-400/[0.14] sm:mt-7">
-          Écrire mon instruction <ArrowUpRight size={13} />
-        </button>
       </div>
     </section>
   );

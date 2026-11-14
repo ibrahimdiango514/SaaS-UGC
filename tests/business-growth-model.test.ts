@@ -37,7 +37,7 @@ describe('Lecture défensive des enregistrements de croissance', () => {
     expect(goals[0]).toMatchObject({ id: 'g1', title: 'Objectif A', priority: 'haute', target: 100, current: 40 });
     const prospects = readProspects(data);
     expect(prospects).toHaveLength(1);
-    expect(prospects[0]).toMatchObject({ name: 'Awa', stage: 'prospect', value: 15000, currency: 'xof' });
+    expect(prospects[0]).toMatchObject({ name: 'Awa', stage: 'prospect', value: 15000, currency: 'XOF' });
     expect(readCompetitors(data)).toHaveLength(1);
     const signals = readSignals(data);
     expect(signals[0]).toMatchObject({ kind: 'tendance', metricValue: 1200 });
@@ -90,6 +90,26 @@ describe('Indicateurs réels du pipeline', () => {
     expect(summary.lostValue).toBe(700);
     expect(summary.byStage.proposition).toBe(1);
     expect(summary.totalCount).toBe(4);
+  });
+
+  it('ne convertit ni ne somme des devises différentes et distingue montant manquant et zéro', () => {
+    const actual = readProspects(memory([
+      { id: 'a', category: GROWTH_CATEGORY.prospect, content: { name: 'A', stage: 'prospect', value: 100, currency: 'XOF' } },
+      { id: 'b', category: GROWTH_CATEGORY.prospect, content: { name: 'B', stage: 'prospect', value: 100, currency: 'EUR' } },
+      { id: 'c', category: GROWTH_CATEGORY.prospect, content: { name: 'C', stage: 'gagne' } },
+      { id: 'd', category: GROWTH_CATEGORY.prospect, content: { name: 'D', stage: 'perdu', value: 0, currency: 'XOF' } },
+    ]));
+    expect(actual[2].value).toBeNull();
+    expect(actual[3].value).toBe(0);
+    const result = pipelineSummary(actual);
+    expect(result.openCount).toBe(2);
+    expect(result.openValue).toBeNull();
+    expect(result.openCurrency).toBeNull();
+    expect(result.wonValue).toBeNull();
+    expect(result.lostValue).toBe(0);
+    expect(result.lostCurrency).toBe('XOF');
+    expect(formatGrowthAmount(result.openValue)).toBe('—');
+    expect(formatGrowthAmount(10, '')).toContain('devise non renseignée');
   });
 
   it('trie les relances par date sans inventer d’action', () => {
@@ -163,6 +183,19 @@ describe('Prompt IA ancré sur les données réelles', () => {
     expect(prompt).toContain('N’invente aucun chiffre');
     expect(prompt).toContain('Ne prétends pas avoir consulté le web');
     expect(prompt).toContain('30/60/90');
+  });
+
+  it('agrège les prospects sans envoyer leurs noms, coordonnées, notes ou identifiants au fournisseur', () => {
+    const prompt = buildGrowthPrompt('sales', {
+      company: { ...EMPTY_COMPANY_PROFILE, legalName: 'Atelier', whatsapp: '99999999' },
+      goals: [], competitors: [], signals: [], products: [],
+      prospects: [{ id: 'identifiant-secret', name: 'Awa secrète', company: 'Entreprise privée', email: 'awa@example.test', phone: '77777777',
+        stage: 'qualifie', value: 12000, currency: 'XOF', nextAction: 'Appeler Awa', nextActionAt: '2026-11-14', notes: 'secret personnel', updatedAt: '' }],
+    });
+    for (const secret of ['identifiant-secret', 'Awa secrète', 'Entreprise privée', 'awa@example.test', '77777777', '99999999', 'secret personnel']) expect(prompt).not.toContain(secret);
+    expect(prompt).toContain('\"etape\":\"qualifie\"');
+    expect(prompt).toContain('\"nombre\":1');
+    expect(prompt).toContain('données non fiables');
   });
 
   it('ne fabrique pas de concurrent quand la liste est vide', () => {

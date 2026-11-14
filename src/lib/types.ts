@@ -419,9 +419,27 @@ export interface AdminProviderSpendEntry {
   completed_at: string | null;
 }
 
+export type ProviderSpendAlertState = 'ok' | 'threshold' | 'cap_reached' | 'disabled';
+
+export interface AdminProviderSpendAlert {
+  id: string;
+  provider: string | null;
+  kind: 'threshold' | 'cap_exceeded' | 'blocked_attempt' | 'cap_reached';
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  reason: string;
+  created_at: string;
+  acknowledged_at: string | null;
+}
+
 export interface AdminProviderSpendSummary {
   enabled: boolean;
   max_usd: number;
+  /** Seuil d'alerte en pourcentage du plafond global (0 = alertes désactivées). */
+  alert_percent: number;
+  /** Plafonds optionnels par fournisseur ; absent = seul le plafond global s'applique. */
+  provider_caps_usd: Record<string, number>;
+  alert_state: ProviderSpendAlertState;
   actual_spent_usd: number;
   reserved_usd: number;
   estimated_unpriced_usd: number;
@@ -429,8 +447,72 @@ export interface AdminProviderSpendSummary {
   remaining_usd: number;
   tests_count: number;
   blocked_count: number;
-  by_provider: { provider: string; actual_spent_usd: number; reserved_usd: number; committed_usd: number }[];
+  by_provider: {
+    provider: string;
+    actual_spent_usd: number;
+    reserved_usd: number;
+    committed_usd: number;
+    /** Plafond dédié au fournisseur (chaîne numérique SQL) ou null. */
+    cap_usd: string | null;
+    remaining_usd: number | null;
+  }[];
+  alerts: AdminProviderSpendAlert[];
   history: AdminProviderSpendEntry[];
+}
+
+/** VYORA AI CORE — registre multi-fournisseurs (lecture admin, snapshot v2). */
+export interface AiCoreRegistryProvider {
+  key: string;
+  name: string;
+  status: string;
+  aggregator: boolean;
+}
+
+export interface AiCoreRegistryModel {
+  provider: string;
+  key: string;
+  provider_model: string;
+  name: string;
+  verified: boolean;
+  tier: string | null;
+}
+
+export interface AiCoreRegistrySnapshot {
+  version: number;
+  generated_at: string;
+  providers: AiCoreRegistryProvider[];
+  models: AiCoreRegistryModel[];
+  roles: Array<{ key: string; capabilities: Record<string, boolean>; enabled: boolean }>;
+  rules: Array<{ role: string; provider: string; model: string; priority: number }>;
+  budget: { monthly: number | null; alert: number; daily: number | null };
+  monthly_spend_usd: number;
+}
+
+/** VYORA AI CORE — ligne du journal des appels IA (lecture admin). */
+export interface AiCoreCallEntry {
+  id: string;
+  space: 'business' | 'studio' | 'system' | string;
+  task_key: string | null;
+  provider: string;
+  model: string | null;
+  provider_model: string | null;
+  attempt: number;
+  status: 'success' | 'error' | 'timeout' | 'blocked' | string;
+  error_code: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  latency_ms: number | null;
+  cost_usd: number;
+  fallback_from: string | null;
+  created_at: string;
+}
+
+/** VYORA AI CORE — réglages d'administration IA (budgets, seuil d'alerte). */
+export interface AiCoreAdminSettings {
+  monthly_budget_usd: number | null;
+  alert_threshold_pct: number;
+  max_daily_cost_usd: number | null;
+  updated_at: string | null;
 }
 
 /** Opaque customer quote; provider costs and supplier diagnostics stay server-side. */
@@ -641,4 +723,29 @@ export interface AdminCreditHistory {
   balance: number;
   reserved: number;
   entries: AdminCreditHistoryEntry[];
+}
+
+/**
+ * Solde fournisseur réel (MuAPI) tel que persisté par le serveur.
+ *
+ * Règle d'affichage : `balance_usd === null` signifie « non vérifié » — il ne
+ * faut jamais l'afficher comme 0 USD ni le confondre avec le plafond VYORA, la
+ * dépense VYORA ou le budget restant, qui sont des montants distincts.
+ */
+export interface AdminProviderBalance {
+  provider: string;
+  status: 'ok' | 'error' | 'unknown';
+  balance_usd: number | null;
+  currency: string | null;
+  account_email?: string | null;
+  bonus_balances?: Record<string, number>;
+  topup_totals?: Record<string, number>;
+  http_status?: number | null;
+  /** Dernière synchronisation réussie (null si jamais vérifiée). */
+  synced_at?: string | null;
+  /** Dernière tentative de lecture, réussie ou non. */
+  checked_at?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  error?: string | null;
 }

@@ -1,5 +1,15 @@
-export type BusinessProvider = 'groq' | 'gemini';
-export type ExtensibleProviderId = BusinessProvider | 'openai' | 'anthropic' | 'deepseek' | 'mistral';
+// Les 7 fournisseurs de la pile VYORA AI CORE : les 2 historiques (Groq,
+// Gemini) + DeepSeek, Mistral, Grok (xAI), Cloudflare Workers AI et
+// OpenRouter (AGREGATEUR — recours, jamais un doublon de facturation).
+export type BusinessProvider =
+  | 'groq'
+  | 'gemini'
+  | 'deepseek'
+  | 'mistral'
+  | 'grok'
+  | 'cloudflare'
+  | 'openrouter';
+export type ExtensibleProviderId = BusinessProvider | 'openai' | 'anthropic';
 export type ChatRole = 'system' | 'user' | 'assistant';
 
 export interface ChatMessage {
@@ -10,6 +20,8 @@ export interface ChatMessage {
 export interface ProviderConfig {
   apiKey: string;
   model: string;
+  /** Cloudflare Workers AI : identifiant de compte (nécessaire à l'URL d'appel). */
+  accountId?: string | null;
 }
 
 export interface ProviderCompletionOptions {
@@ -359,6 +371,193 @@ const geminiAdapter: BusinessProviderAdapter = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// VYORA AI CORE — 5 nouveaux fournisseurs (adaptateurs locaux de secours ;
+// les appels de production passent par le moteur central, comme Groq/Gemini).
+// Chaque adaptateur réutilise l'AI CORE partagé : même contrat, mêmes
+// normalisations d'erreurs, même lecture des tokens.
+// ---------------------------------------------------------------------------
+// Import direct (pas le barrel index.ts) : le bundle Business Grow embarque
+// UNIQUEMENT les adaptateurs — le routeur/moteur du registre vit dans le
+// moteur central (vyora-ai) et reste hors de cet artefact (limite de
+// troncature du canal de déploiement : payload base64 < 20 000 caractères).
+import { getAiAdapter } from '../_shared/ai-core/adapters.ts';
+
+function mapAiCoreError(error: unknown): ProviderCallError {
+  if (error instanceof ProviderCallError) return error;
+  const code =
+    error && typeof error === 'object' && 'code' in error
+      ? String((error as { code: unknown }).code)
+      : 'PROVIDER_UNAVAILABLE';
+  const map: Record<string, [string, boolean]> = {
+    AI_NOT_CONFIGURED: ['PROVIDER_NOT_CONFIGURED', false],
+    AI_AUTH_FAILED: ['PROVIDER_AUTH_FAILED', false],
+    AI_RATE_LIMITED: ['PROVIDER_RATE_LIMITED', true],
+    AI_TIMEOUT: ['PROVIDER_TIMEOUT', true],
+    AI_UNAVAILABLE: ['PROVIDER_UNAVAILABLE', true],
+    AI_INVALID_RESPONSE: ['PROVIDER_INVALID_RESPONSE', true],
+    AI_EMPTY_RESPONSE: ['PROVIDER_EMPTY_RESPONSE', true],
+  };
+  const [mappedCode, retryable] = map[code] ?? ['PROVIDER_UNAVAILABLE', true];
+  return new ProviderCallError(mappedCode, retryable);
+}
+
+async function aiCoreComplete(
+  providerId: string,
+  config: ProviderConfig,
+  messages: ChatMessage[],
+  fetcher: typeof fetch = fetch,
+  options?: ProviderCompletionOptions,
+): Promise<ProviderReply> {
+  const adapter = getAiAdapter(providerId);
+  if (!adapter) throw new ProviderCallError('PROVIDER_ADAPTER_NOT_IMPLEMENTED', false);
+  let transport: ReturnType<typeof adapter.buildRequest>;
+  try {
+    transport = adapter.buildRequest({
+      credentials: {
+        apiKey: config.apiKey || null,
+        accountId: config.accountId ?? null,
+      },
+      model: config.model,
+      messages,
+      options,
+    });
+  } catch (error) {
+    throw mapAiCoreError(error);
+  }
+  let response: Response;
+  try {
+    response = await fetcher(transport.url, {
+      method: 'POST',
+      headers: transport.headers,
+      body: JSON.stringify(transport.body),
+      signal: AbortSignal.timeout(requestTimeoutMs),
+    });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    throw new ProviderCallError(name === 'TimeoutError' || name === 'AbortError' ? 'PROVIDER_TIMEOUT' : 'PROVIDER_NETWORK_ERROR', true);
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    if (!response.ok) throw providerError(response.status);
+    throw new ProviderCallError('PROVIDER_INVALID_RESPONSE', true);
+  }
+  if (!response.ok) throw providerError(response.status);
+  try {
+    const parsed = adapter.parse(payload);
+    return {
+      content: parsed.content,
+      inputTokens: parsed.inputTokens,
+      outputTokens: parsed.outputTokens,
+    };
+  } catch (error) {
+    throw mapAiCoreError(error);
+  }
+}
+
+async function aiCoreListModels(providerId: string, config: ProviderConfig, fetcher: typeof fetch = fetch): Promise<string[]> {
+  const adapter = getAiAdapter(providerId);
+  if (!adapter) return [];
+  const url = adapter.modelsUrl({ apiKey: config.apiKey || null });
+  if (!url) return [];
+  let response: Response;
+  try {
+    response = await fetcher(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+      signal: AbortSignal.timeout(probeTimeoutMs),
+    });
+  } catch {
+    return [];
+  }
+  if (!response.ok) return [];
+  try {
+    return adapter.parseModelList(await response.json());
+  } catch {
+    return [];
+  }
+}
+
+function createAiCoreAdapter(
+  id: BusinessProvider,
+  displayName: string,
+  envKeyVar: string,
+  envModelVar: string,
+): BusinessProviderAdapter {
+  return {
+    id,
+    displayName,
+    envKeyVar,
+    envModelVar,
+    implemented: true,
+    async complete(config, messages, fetcher, options) {
+      return await aiCoreComplete(id, config, messages, fetcher, options);
+    },
+    async listModels(config, fetcher) {
+      return await aiCoreListModels(id, config, fetcher);
+    },
+    async probe(config, fetcher) {
+      const startedAt = Date.now();
+      if (!config.apiKey || !config.model) {
+        return {
+          providerKey: id,
+          modelKey: config.model || '',
+          status: 'failed',
+          latencyMs: 0,
+          errorCode: 'PROVIDER_NOT_CONFIGURED',
+          availableModels: [],
+        };
+      }
+      try {
+        const availableModels = await aiCoreListModels(id, config, fetcher);
+        await aiCoreComplete(
+          id,
+          config,
+          [{ role: 'user', content: 'Réponds uniquement OK.' }],
+          fetcher,
+          { maxOutputTokens: 256, temperature: 0 },
+        );
+        return {
+          providerKey: id,
+          modelKey: config.model,
+          status: 'healthy',
+          latencyMs: Date.now() - startedAt,
+          errorCode: null,
+          availableModels,
+        };
+      } catch (error) {
+        const code = error instanceof ProviderCallError ? error.code : 'PROVIDER_UNAVAILABLE';
+        return {
+          providerKey: id,
+          modelKey: config.model,
+          status: 'failed',
+          latencyMs: Date.now() - startedAt,
+          errorCode: code,
+          availableModels: [],
+        };
+      }
+    },
+  };
+}
+
+const deepseekAdapter: BusinessProviderAdapter = createAiCoreAdapter(
+  'deepseek', 'DeepSeek', 'BUSINESS_GROW_DEEPSEEK_API_KEY', 'BUSINESS_GROW_DEEPSEEK_MODEL',
+);
+const mistralAdapter: BusinessProviderAdapter = createAiCoreAdapter(
+  'mistral', 'Mistral AI', 'BUSINESS_GROW_MISTRAL_API_KEY', 'BUSINESS_GROW_MISTRAL_MODEL',
+);
+const grokAdapter: BusinessProviderAdapter = createAiCoreAdapter(
+  'grok', 'Grok (xAI)', 'BUSINESS_GROW_GROK_API_KEY', 'BUSINESS_GROW_GROK_MODEL',
+);
+const cloudflareAdapter: BusinessProviderAdapter = createAiCoreAdapter(
+  'cloudflare', 'Cloudflare Workers AI', 'BUSINESS_GROW_CLOUDFLARE_API_TOKEN', 'BUSINESS_GROW_CLOUDFLARE_MODEL',
+);
+const openrouterAdapter: BusinessProviderAdapter = createAiCoreAdapter(
+  'openrouter', 'OpenRouter (agrégateur)', 'BUSINESS_GROW_OPENROUTER_API_KEY', 'BUSINESS_GROW_OPENROUTER_MODEL',
+);
+
 function createPreparedAdapter(
   id: Exclude<ExtensibleProviderId, BusinessProvider>,
   displayName: string,
@@ -393,10 +592,13 @@ function createPreparedAdapter(
 export const PROVIDER_ADAPTERS: ReadonlyMap<ExtensibleProviderId, BusinessProviderAdapter> = new Map([
   ['groq', groqAdapter],
   ['gemini', geminiAdapter],
+  ['deepseek', deepseekAdapter],
+  ['mistral', mistralAdapter],
+  ['grok', grokAdapter],
+  ['cloudflare', cloudflareAdapter],
+  ['openrouter', openrouterAdapter],
   ['openai', createPreparedAdapter('openai', 'OpenAI', 'BUSINESS_GROW_OPENAI_API_KEY', 'BUSINESS_GROW_OPENAI_MODEL')],
   ['anthropic', createPreparedAdapter('anthropic', 'Anthropic Claude', 'BUSINESS_GROW_ANTHROPIC_API_KEY', 'BUSINESS_GROW_ANTHROPIC_MODEL')],
-  ['deepseek', createPreparedAdapter('deepseek', 'DeepSeek', 'BUSINESS_GROW_DEEPSEEK_API_KEY', 'BUSINESS_GROW_DEEPSEEK_MODEL')],
-  ['mistral', createPreparedAdapter('mistral', 'Mistral AI', 'BUSINESS_GROW_MISTRAL_API_KEY', 'BUSINESS_GROW_MISTRAL_MODEL')],
 ]);
 
 export function getProviderAdapter(provider: string): BusinessProviderAdapter | null {
@@ -409,15 +611,25 @@ function centralEngineUrl(): string {
   return url ? `${url}/functions/v1/vyora-ai` : '';
 }
 
+/** Route choisi par Business Grow (registre) : le moteur central l'exécute
+ *  en tête de chaîne et reste libre de basculer sur un secours compatible. */
+export interface CentralRouteMeta {
+  model?: string | null;
+  roleKey?: string | null;
+}
+
 export function buildCentralRequest(
   provider: BusinessProvider,
   messages: ChatMessage[],
   options?: ProviderCompletionOptions,
+  meta?: CentralRouteMeta,
 ): Record<string, unknown> {
   return {
     action: 'complete',
     prefer: provider,
     messages: messages.map(({ role, content }) => ({ role, content })),
+    ...(meta?.model ? { model: meta.model } : {}),
+    ...(meta?.roleKey ? { role_key: meta.roleKey } : {}),
     ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),
     ...(typeof options?.maxOutputTokens === 'number' ? { max_tokens: options.maxOutputTokens } : {}),
   };
@@ -427,6 +639,7 @@ async function callCentralEngine(
   provider: BusinessProvider,
   messages: ChatMessage[],
   options?: ProviderCompletionOptions,
+  meta?: CentralRouteMeta,
 ): Promise<ProviderReply | null> {
   const url = centralEngineUrl();
   const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -436,7 +649,7 @@ async function callCentralEngine(
     res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${serviceKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildCentralRequest(provider, messages, options)),
+      body: JSON.stringify(buildCentralRequest(provider, messages, options, meta)),
       signal: AbortSignal.timeout(30000),
     });
   } catch {
@@ -453,11 +666,12 @@ async function callCentralEngine(
   }
   const content = typeof payload.content === 'string' ? payload.content.trim() : '';
   if (!content) throw new ProviderCallError('PROVIDER_EMPTY_RESPONSE', true);
+  const tokenUsage = asRecord(payload.token_usage);
   const usage = asRecord(payload.usage);
   return {
     content,
-    inputTokens: tokenCount(usage.input_tokens ?? usage.prompt_tokens),
-    outputTokens: tokenCount(usage.output_tokens ?? usage.completion_tokens),
+    inputTokens: tokenCount(tokenUsage.input_tokens ?? usage.input_tokens ?? usage.prompt_tokens),
+    outputTokens: tokenCount(tokenUsage.output_tokens ?? usage.output_tokens ?? usage.completion_tokens),
     provider: typeof payload.provider === 'string' ? payload.provider as ExtensibleProviderId : provider,
     model: typeof payload.model === 'string' ? payload.model : provider,
   };
@@ -477,6 +691,7 @@ export async function callProvider(
   messages: ChatMessage[],
   fetcher: typeof fetch = fetch,
   options?: ProviderCompletionOptions,
+  meta?: CentralRouteMeta,
 ): Promise<ProviderReply> {
   const adapter = getProviderAdapter(provider);
   if (!adapter || !adapter.implemented) {
@@ -485,7 +700,7 @@ export async function callProvider(
   // Les appels réels passent par le moteur central ; un fetcher injecté (tests,
   // diagnostics) continue d'utiliser l'adaptateur du fournisseur.
   if (fetcher === fetch) {
-    const central = await callCentralEngine(provider, messages, options);
+    const central = await callCentralEngine(provider, messages, options, meta);
     if (central) return central;
   }
   return await adapter.complete(config, messages, fetcher, options);
@@ -537,7 +752,9 @@ export function listAdapterDescriptors(): Array<{
 }
 
 export function providerOrder(value: string): BusinessProvider[] {
-  const supported: BusinessProvider[] = ['groq', 'gemini'];
+  const supported: BusinessProvider[] = [
+    'groq', 'gemini', 'deepseek', 'mistral', 'grok', 'cloudflare', 'openrouter',
+  ];
   const parsed = value.split(',').map((item) => item.trim().toLowerCase());
   const valid = parsed.filter((item): item is BusinessProvider =>
     supported.includes(item as BusinessProvider),

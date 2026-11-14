@@ -90,7 +90,7 @@ export const businessGrowBridge: BusinessGrowStatusPort & BusinessAiEnginePort =
 
     if (assistantReply === null) {
       try {
-        const listed = await businessGrowApi.listMessages(conversationId);
+        const listed = await businessGrowApi.listMessages(conversationId, request.workspaceId ?? null);
         const lastAssistant = [...listed.messages]
           .reverse()
           .find((message) => message.author_role === 'assistant');

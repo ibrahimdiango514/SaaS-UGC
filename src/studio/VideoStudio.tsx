@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, ArrowRight, CheckCircle2, Clapperboard, Clock3, Coins, Download, Film,
-  FolderKanban, Image as ImageIcon, Layers3, Lock, Play, Plus, RefreshCw, Scissors, Sparkles, Square, Wand2,
+  FolderKanban, Image as ImageIcon, Layers3, Play, Plus, RefreshCw, Scissors, Sparkles, Square, Wand2,
 } from 'lucide-react';
 import {
   Badge, Banner, Button, Card, ErrorState, Input, LoadingState, Modal, Select, cn,
@@ -165,7 +165,7 @@ export default function VideoStudio() {
   }, [selectedModel?.model_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!serviceKey || !modelId || mode === 'video-to-video') { setEstimate(null); return; }
+    if (!serviceKey || !modelId) { setEstimate(null); return; }
     let active = true;
     // Phase 2: ask the backend for the exact, non-generating estimate-cost
     // quote using the SAME parameters/prompt as the eventual generation.
@@ -252,7 +252,6 @@ export default function VideoStudio() {
 
   const onModeChange = (next: GenerationMode) => {
     setMode(next);
-    if (next === 'video-to-video') { setModelId(''); setParamValues({}); setEstimate(null); return; }
     const candidates = modelsForMode(models, next);
     if (!candidates.some((m) => m.model_id === modelId)) {
       const first = candidates[0];
@@ -305,7 +304,7 @@ export default function VideoStudio() {
 
   const launchIssues = useMemo(() => {
     const issues: string[] = [];
-    if (mode === 'video-to-video') issues.push('La transformation vidéo n’est pas encore disponible.');
+
     if (!selectedModel) issues.push('Choisissez un modèle vidéo disponible.');
     else if (!modelModes(selectedModel).includes(mode)) issues.push('Le modèle sélectionné n’accepte pas ce mode.');
     if (!projectId) issues.push('Sélectionnez ou créez un projet pour enregistrer la vidéo.');
@@ -492,24 +491,25 @@ export default function VideoStudio() {
             </div>
             <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
               {VALID_MODES.map((m) => {
-                const available = m !== 'video-to-video' && modelsForMode(models, m).length > 0;
+                const available = modelsForMode(models, m).length > 0;
                 return (
                   <button key={m} type="button" onClick={() => onModeChange(m)}
                     className={cn('flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-[12px] font-medium transition-all',
                       mode === m ? 'border-brand-400/50 bg-brand-500/20 text-white' : 'border-white/[0.07] bg-white/[0.02] text-slate-400 hover:text-white')}>
                     {m === 'text-to-video' ? <Sparkles size={13} /> : m === 'image-to-video' ? <ImageIcon size={13} /> : <Film size={13} />}
                     {MODE_LABELS[m]}
-                    {m === 'video-to-video' && <Lock size={10} className="ml-1 text-amber-300" />}
-                    {!available && m !== 'video-to-video' && <span className="text-[9px] text-amber-300">0 modèle</span>}
+                    {!available && <span className="text-[9px] text-amber-300">0 modèle</span>}
                   </button>
                 );
               })}
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{MODE_DESCRIPTIONS[mode]}</p>
             {mode === 'video-to-video' && (
-              <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-[11px] leading-relaxed text-amber-200">
-                <Lock size={12} className="mr-1 inline" /> Espace préparé, non opérationnel. Aucun modèle vidéo → vidéo n’est intégré, aucun paramètre ni bouton de génération n’est proposé.
-                <Link to="/app/studio/espace/video-to-video" className="ml-1 underline underline-offset-2">Voir la fiche</Link>
+              <div className="mt-3 rounded-xl border border-cyan-400/25 bg-cyan-400/[0.06] p-3 text-[11px] leading-relaxed text-cyan-100">
+                <Film size={12} className="mr-1 inline" /> La transformation vidéo → vidéo nécessite l’import d’une vidéo source.
+                <Link to="/app/studio?mode=video-source" className="ml-1 font-semibold underline underline-offset-2">
+                  Ouvrir dans le Studio (import vidéo)
+                </Link>
               </div>
             )}
           </Card>

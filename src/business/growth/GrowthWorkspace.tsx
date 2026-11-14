@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity, AlertCircle, ArrowRight, BarChart3, Brain, Building2, Check, ChevronRight, Clapperboard,
@@ -30,7 +30,7 @@ import {
   CatalogPanel, CompanyPanel, CrmPanel, GoalsPanel, GrowthKpi, MarketPanel, StrategyPanel,
 } from './GrowthPanels';
 
-type GrowthTab = 'overview' | 'company' | 'goals' | 'catalog' | 'market' | 'crm' | 'strategy' | 'activity' | 'settings';
+export type GrowthTab = 'overview' | 'company' | 'goals' | 'catalog' | 'market' | 'crm' | 'strategy' | 'activity' | 'settings';
 
 const TABS: { id: GrowthTab; label: string; icon: typeof Target }[] = [
   { id: 'overview', label: 'Vue d’ensemble', icon: BarChart3 },
@@ -80,7 +80,7 @@ function extractActions(answer: string): string[] {
 
 export default function GrowthWorkspace({
   workspace, workspaceId, memory, loadingMemory, memoryError, onReloadMemory, onOpenAssistant,
-  onOpenIntegrations, onOpenProviders,
+  onOpenIntegrations, onOpenProviders, initialTab,
 }: {
   workspace: Workspace | null;
   workspaceId: string | null;
@@ -91,9 +91,21 @@ export default function GrowthWorkspace({
   onOpenAssistant: (prompt?: string) => void;
   onOpenIntegrations?: () => void;
   onOpenProviders?: () => void;
+  /** Onglet demandé par une navigation entrante (Business Grow → Croissance). */
+  initialTab?: GrowthTab | null;
 }) {
   const toast = useToast();
-  const [tab, setTab] = useState<GrowthTab>('overview');
+  const activeRef = useRef(true);
+  const workspaceRef = useRef(workspaceId);
+  workspaceRef.current = workspaceId;
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
+  const [tab, setTab] = useState<GrowthTab>(initialTab ?? 'overview');
+
+  // Navigation entrante (Studio UGC, Dashboard, Projet) : l'onglet demandé est
+  // appliqué une seule fois, puis l'utilisateur reprend la main librement.
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
   const [products, setProducts] = useState<Array<{ name: string; description?: string | null; price?: string | null }>>([]);
   const [productsError, setProductsError] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
@@ -102,6 +114,7 @@ export default function GrowthWorkspace({
   const [aiProvider, setAiProvider] = useState('');
   const [aiTask, setAiTask] = useState<GrowthAiTask>('diagnostic');
   const [consentBusy, setConsentBusy] = useState(false);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
 
   const consent = Boolean(memory?.consent);
   const profile = useMemo(() => profileFromMemory(memory), [memory]);
@@ -146,7 +159,7 @@ export default function GrowthWorkspace({
           name: product.name, description: product.description,
           price: product.price_amount === null || product.price_amount === undefined
             ? null
-            : formatGrowthAmount(Number(product.price_amount), product.price_currency ?? 'XOF'),
+            : formatGrowthAmount(Number(product.price_amount), product.price_currency ?? ''),
         })));
       })
       .catch((error) => { if (active) setProductsError(asAppError(error).message); });
@@ -164,38 +177,44 @@ export default function GrowthWorkspace({
   }), [profile, goals, prospects, competitors, signals, products, workspace?.name]);
 
   const putRecord = useCallback(async (category: string, content: unknown, itemId?: string | null) => {
-    await businessGrowApi.putMemoryItem(category, content, itemId ?? null);
-    await onReloadMemory();
-  }, [onReloadMemory]);
+    if (!workspaceId) throw new Error('Aucune entreprise active.');
+    await businessGrowApi.putMemoryItem(category, content, itemId ?? null, workspaceId);
+    if (activeRef.current && workspaceRef.current === workspaceId) await onReloadMemory();
+  }, [onReloadMemory, workspaceId]);
 
   const deleteRecord = useCallback(async (itemId: string) => {
-    await businessGrowApi.deleteMemoryItem(itemId);
-    await onReloadMemory();
-  }, [onReloadMemory]);
+    if (!workspaceId) throw new Error('Aucune entreprise active.');
+    await businessGrowApi.deleteMemoryItem(itemId, workspaceId);
+    if (activeRef.current && workspaceRef.current === workspaceId) await onReloadMemory();
+  }, [onReloadMemory, workspaceId]);
 
   const saveCompany = useCallback(async (patch: Partial<CompanyProfile>) => {
+    if (!workspaceId) throw new Error('Aucune entreprise active.');
     try {
-      await businessGrowApi.saveMemoryProfile(mergeCompanyProfile(memory?.profile, patch));
+      await businessGrowApi.saveMemoryProfile(mergeCompanyProfile(memory?.profile, patch), workspaceId);
+      if (!activeRef.current || workspaceRef.current !== workspaceId) return;
       await onReloadMemory();
       toast.success('Informations de l’entreprise enregistrées.');
     } catch (error) {
-      toast.error(asAppError(error).message);
+      if (activeRef.current && workspaceRef.current === workspaceId) toast.error(asAppError(error).message);
       throw error;
     }
-  }, [memory?.profile, onReloadMemory, toast]);
+  }, [memory?.profile, onReloadMemory, toast, workspaceId]);
 
   const setConsent = useCallback(async (enabled: boolean) => {
+    if (!workspaceId) { toast.error('Aucune entreprise active.'); return; }
     setConsentBusy(true);
     try {
-      await businessGrowApi.setMemoryConsent(enabled);
+      await businessGrowApi.setMemoryConsent(enabled, workspaceId);
+      if (!activeRef.current || workspaceRef.current !== workspaceId) return;
       await onReloadMemory();
       toast.success(enabled ? 'Mémoire métier activée.' : 'Mémoire métier désactivée.');
     } catch (error) {
-      toast.error(asAppError(error).message);
+      if (activeRef.current && workspaceRef.current === workspaceId) toast.error(asAppError(error).message);
     } finally {
-      setConsentBusy(false);
+      if (activeRef.current && workspaceRef.current === workspaceId) setConsentBusy(false);
     }
-  }, [onReloadMemory, toast]);
+  }, [onReloadMemory, toast, workspaceId]);
 
   const askAi = useCallback(async (task: GrowthAiTask) => {
     if (!workspaceId) {
@@ -209,13 +228,16 @@ export default function GrowthWorkspace({
     setAiProvider('');
     try {
       const conversation = await businessGrowApi.createConversation(`VYORA Croissance · ${TASK_LABEL[task]}`, workspaceId);
+      if (!activeRef.current || workspaceRef.current !== workspaceId) return;
       const sent = await businessGrowApi.sendMessage(
         conversation.conversationId,
         buildGrowthPrompt(task, snapshot),
         crypto.randomUUID(),
         { roleKey: TASK_ROLE[task], workspaceId },
       );
-      const listed = await businessGrowApi.listMessages(conversation.conversationId);
+      if (!activeRef.current || workspaceRef.current !== workspaceId) return;
+      const listed = await businessGrowApi.listMessages(conversation.conversationId, workspaceId);
+      if (!activeRef.current || workspaceRef.current !== workspaceId) return;
       const reply = [...listed.messages].reverse().find((message) => message.author_role === 'assistant' && message.content.trim());
       if (!reply) {
         setAiError('Le service IA n’a pas renvoyé de réponse exploitable. Réessayez ou vérifiez les services IA dans l’onglet Services IA.');
@@ -225,11 +247,12 @@ export default function GrowthWorkspace({
       setAiAnswer(reply.content);
       toast.success('Analyse IA générée.');
     } catch (error) {
+      if (!activeRef.current || workspaceRef.current !== workspaceId) return;
       const message = asAppError(error).message;
       setAiError(message);
       toast.error(message);
     } finally {
-      setAiBusy(false);
+      if (activeRef.current && workspaceRef.current === workspaceId) setAiBusy(false);
     }
   }, [snapshot, toast, workspaceId]);
 
@@ -244,11 +267,11 @@ export default function GrowthWorkspace({
         source: 'ia',
         createdAt: new Date().toISOString(),
       });
-      toast.success('Plan IA enregistré dans votre mémoire métier.');
+      if (activeRef.current && workspaceRef.current === workspaceId) toast.success('Plan IA enregistré dans votre mémoire métier.');
     } catch (error) {
-      toast.error(asAppError(error).message);
+      if (activeRef.current && workspaceRef.current === workspaceId) toast.error(asAppError(error).message);
     }
-  }, [aiAnswer, aiTask, putRecord, toast]);
+  }, [aiAnswer, aiTask, putRecord, toast, workspaceId]);
 
   const activeGoals = goals.filter((goal) => goal.status === 'en_cours');
   const overdueGoals = goals.filter((goal) => isGoalOverdue(goal));
@@ -275,7 +298,7 @@ export default function GrowthWorkspace({
                 ? 'border-emerald-400/25 bg-emerald-400/[0.07] text-emerald-100'
                 : 'border-amber-400/25 bg-amber-400/[0.07] text-amber-100')}>
               <span className={cn('h-1.5 w-1.5 rounded-full', consent ? 'bg-emerald-300' : 'bg-amber-300')} />
-              {healthLabel(consent, recordCount)}
+              {!memory ? (loadingMemory ? 'Chargement de la mémoire…' : 'Mémoire indisponible') : healthLabel(consent, recordCount)}
             </span>
             <Link
               to="/app/studio"
@@ -290,14 +313,19 @@ export default function GrowthWorkspace({
         </div>
       </header>
 
-      {!consent && (
+      <p className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3 text-xs leading-relaxed text-slate-400">
+        Les analyses IA transmettent au fournisseur le contexte d’entreprise, les objectifs, le marché, les produits et la mémoire consentie ;
+        les prospects Smart CRM sont agrégés. Évitez les données sensibles dans les champs libres.
+      </p>
+
+      {memory && !consent && (
         <section className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.05] p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="max-w-2xl">
               <p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><ShieldCheck size={15} /> Mémoire métier requise</p>
               <p className="mt-1 text-xs leading-relaxed text-amber-100/80">
-                VYORA conserve le contexte de votre entreprise dans une mémoire privée, isolée par compte et supprimable à tout moment.
-                Sans consentement, aucune information ne peut être enregistrée et l’IA ne dispose d’aucun contexte.
+                VYORA conserve le contexte de votre entreprise dans une mémoire privée, isolée par compte et entreprise, supprimable à tout moment.
+                Sans consentement, cette mémoire n’est pas utilisée ; les modules et données entreprise accessibles restent distincts.
               </p>
             </div>
             <Button size="sm" variant="primary" loading={consentBusy} icon={<Check size={13} />} onClick={() => void setConsent(true)}>
@@ -325,12 +353,16 @@ export default function GrowthWorkspace({
 
       {loadingMemory && !memory ? (
         <LoadingState label="Chargement de votre mémoire métier…" />
+      ) : !memory ? (
+        <section className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 text-xs text-amber-100">
+          État de la mémoire indisponible ; les données ne peuvent pas être présentées comme vides. Rechargez avant de continuer.
+        </section>
       ) : tab === 'overview' ? (
         <div className="space-y-4">
           <section className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             <GrowthKpi icon={<Target size={13} className="text-cyan-300" />} label="Objectifs en cours" value={String(activeGoals.length)} hint={overdueGoals.length ? `${overdueGoals.length} en retard` : `${goals.length} objectif(s) au total`} />
-            <GrowthKpi icon={<Users size={13} className="text-violet-300" />} label="Pipeline ouvert" value={formatGrowthAmount(pipeline.openValue, prospects[0]?.currency ?? 'XOF')} hint={`${pipeline.openCount} opportunité(s) active(s)`} />
-            <GrowthKpi icon={<TrendingUp size={13} className="text-emerald-300" />} label="Ventes gagnées" value={formatGrowthAmount(pipeline.wonValue, prospects[0]?.currency ?? 'XOF')} hint={`${pipeline.byStage.gagne} client(s) gagné(s)`} />
+            <GrowthKpi icon={<Users size={13} className="text-violet-300" />} label="Pipeline ouvert" value={formatGrowthAmount(pipeline.openValue, pipeline.openCurrency ?? '')} hint={`${pipeline.openCount} opportunité(s) active(s) · total inconnu si données incomplètes ou devises mixtes`} />
+            <GrowthKpi icon={<TrendingUp size={13} className="text-emerald-300" />} label="Ventes gagnées" value={formatGrowthAmount(pipeline.wonValue, pipeline.wonCurrency ?? '')} hint={`${pipeline.byStage.gagne} client(s) gagné(s)`} />
             <GrowthKpi icon={<Activity size={13} className="text-amber-300" />} label="Signaux marché" value={String(signals.length)} hint={`${competitors.length} concurrent(s) suivi(s)`} />
           </section>
 
@@ -396,7 +428,7 @@ export default function GrowthWorkspace({
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200">Pipeline commercial</p>
                 <h3 className="mt-1 text-sm font-semibold text-white">Répartition réelle de vos opportunités</h3>
               </div>
-              <span className="text-[11px] text-slate-400">{pipeline.totalCount} opportunité(s) · {formatGrowthAmount(pipeline.openValue + pipeline.wonValue, prospects[0]?.currency ?? 'XOF')}</span>
+              <span className="text-[11px] text-slate-400">{pipeline.totalCount} opportunité(s) · {formatGrowthAmount(pipeline.activeAndWonValue, pipeline.activeAndWonCurrency ?? '')}</span>
             </div>
             {pipeline.totalCount === 0 ? (
               <p className="mt-3 text-[11px] text-slate-500">Aucune opportunité enregistrée. Ajoutez un prospect pour voir votre pipeline se construire.</p>
@@ -548,13 +580,17 @@ export default function GrowthWorkspace({
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button size="sm" variant={consent ? 'outline' : 'primary'} loading={consentBusy} onClick={() => void setConsent(!consent)}>
+              <Button size="sm" variant={consent ? 'outline' : 'primary'} loading={consentBusy} onClick={() => { if (consent) setConfirmRevoke(true); else void setConsent(true); }}>
                 {consent ? 'Désactiver la mémoire' : 'Activer la mémoire métier'}
               </Button>
               <Button size="sm" variant="ghost" icon={<RefreshCw size={12} />} onClick={() => void onReloadMemory()} disabled={loadingMemory}>
                 Recharger mes données
               </Button>
             </div>
+            {confirmRevoke && <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/5 p-3 text-xs text-amber-100" role="alert">
+              La révocation supprimera le profil, les notes, les prospects et les plans de cette mémoire. Les tâches, rapports et conversations déjà enregistrés restent conservés et peuvent contenir des informations copiées.
+              <div className="mt-2 flex gap-2"><Button size="sm" disabled={consentBusy} onClick={() => { setConfirmRevoke(false); void setConsent(false); }}>Confirmer la désactivation et la suppression</Button><Button size="sm" variant="ghost" onClick={() => setConfirmRevoke(false)}>Annuler</Button></div>
+            </div>}
           </section>
 
           <section className="grid gap-3 sm:grid-cols-2">

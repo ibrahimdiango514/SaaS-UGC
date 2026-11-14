@@ -1,22 +1,26 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Activity, Bot, Coins, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
+import { Activity, Bot, Coins, Cpu, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Modal, Banner, LoadingState, ErrorState, EmptyState, Tabs, StatCard } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
 import { formatDate, formatMoney, statusLabel, truncate } from '../lib/format';
 import ProviderBudgetSettings from './admin/ProviderBudgetSettings';
+import ProviderBalanceCard from './admin/ProviderBalanceCard';
+import AiCoreControl from './admin/AiCoreControl';
 import CreditManager from './admin/CreditManager';
+import SasPayPanel from './admin/SasPayPanel';
 import {
   GrowthActivitySection, KpiSection, ModelsSection, ProvidersSection, RevenueSection, StudioActivitySection, money,
 } from './admin/AdminSections';
 import {
-  adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminMetrics, adminProviderSpendSummary,
-  adminSetProviderSpendCap, adminSetVideoPricing,
+  adminAckProviderSpendAlert, adminConfirmRecharge, adminCreatePromo, adminListAuditLogs, adminMetrics,
+  adminProviderBalance, adminProviderSpendSummary, adminRefreshProviderBalance,
+  adminSetProviderSpendCap, adminSetProviderSpendPolicy, adminSetVideoPricing,
   adminVideoCatalog,
   adminListRecharges, adminListSettings, adminListUsers, adminOverview, adminSetAccountStatus,
   adminSetPlan, adminSetRole, adminSetSetting, adminUpdateService, listPlans, listServices,
 } from '../lib/api';
-import type { AdminMetrics, AdminOverview, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
+import type { AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, Plan, RechargeOrder, ServiceCatalogItem } from '../lib/types';
 
 type AuditLog = { id: string; action: string; target_type: string | null; target_id: string | null; details: Record<string, unknown>; created_at: string; actor_user_id: string };
 type Setting = { setting_key: string; setting_value: Record<string, unknown>; description: string | null };
@@ -57,6 +61,9 @@ export default function Admin() {
   const [providerSpend, setProviderSpend] = useState<AdminProviderSpendSummary | null>(null);
   const [providerSpendError, setProviderSpendError] = useState('');
   const [providerSpendCapDraft, setProviderSpendCapDraft] = useState('0');
+  const [providerBalance, setProviderBalance] = useState<AdminProviderBalance | null>(null);
+  const [providerBalanceError, setProviderBalanceError] = useState('');
+  const [providerBalanceBusy, setProviderBalanceBusy] = useState(false);
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState('');
@@ -82,6 +89,10 @@ export default function Admin() {
           return null;
         }),
       ]);
+      // Solde fournisseur : lecture seule du dernier relevé serveur (aucune
+      // resynchronisation automatique à chaque affichage de la page).
+      try { setProviderBalance(await adminProviderBalance()); setProviderBalanceError(''); }
+      catch (err) { setProviderBalance(null); setProviderBalanceError(asAppError(err).message); }
       setOverview(o); setUsers(Array.isArray(u) ? u : []); setRecharges(r); setServices(s); setPlans(p); setSettings(st); setLogs(l as AuditLog[]);
       setProviderSpend(spend);
       if (spend) setProviderSpendCapDraft(String(spend.max_usd));
@@ -178,6 +189,34 @@ export default function Admin() {
     await run('provider-spend', () => adminSetProviderSpendCap(providerSpend?.max_usd ?? 0, false), 'Tests payants désactivés immédiatement.');
   };
 
+  const onSaveProviderSpendPolicy = async (alertPercent: number, providerCaps: Record<string, number>) => {
+    const maxUsd = providerSpend?.max_usd ?? Number(providerSpendCapDraft);
+    await run('provider-policy', () => adminSetProviderSpendPolicy(
+      maxUsd, providerSpend?.enabled ?? false, alertPercent, providerCaps,
+    ), 'Politique de budget fournisseur enregistrée.');
+  };
+
+  const onRefreshProviderBalance = async () => {
+    setProviderBalanceBusy(true);
+    setProviderBalanceError('');
+    try {
+      const fresh = await adminRefreshProviderBalance();
+      setProviderBalance(fresh);
+      if (fresh.status !== 'ok') {
+        setProviderBalanceError(fresh.error_message ?? 'La lecture du solde MuAPI a échoué.');
+      }
+      setProviderSpend(await adminProviderSpendSummary());
+    } catch (err) {
+      setProviderBalanceError(asAppError(err).message);
+    } finally {
+      setProviderBalanceBusy(false);
+    }
+  };
+
+  const onAckProviderSpendAlert = async (alertId: string) => {
+    await run('provider-alert', () => adminAckProviderSpendAlert(alertId), 'Alerte de budget prise en compte.');
+  };
+
   const refreshVideoCatalog = async () => {
     setVideoCatalogLoading(true);
     setVideoCatalogError('');
@@ -202,9 +241,11 @@ export default function Admin() {
         { id: 'kpis', label: 'KPI & MRR', icon: <TrendingUp size={14} /> },
         { id: 'users', label: `Utilisateurs (${users.length})`, icon: <Users size={14} /> },
         { id: 'recharges', label: 'Recharges', icon: <CreditCard size={14} /> },
+        { id: 'saspay', label: 'Paiements SasPay', icon: <Coins size={14} /> },
         { id: 'services', label: 'Services', icon: <Zap size={14} /> },
         { id: 'models', label: 'Modèles vidéo', icon: <Video size={14} /> },
         { id: 'providers', label: 'Fournisseurs IA', icon: <Bot size={14} /> },
+        { id: 'ai-core', label: 'Contrôle IA', icon: <Cpu size={14} /> },
         { id: 'studio-activity', label: 'Activité Studio', icon: <Video size={14} /> },
         { id: 'growth-activity', label: 'Activité Business Growth', icon: <Sparkles size={14} /> },
         { id: 'video-pricing', label: 'Tarifs vidéo', icon: <Video size={14} /> },
@@ -258,6 +299,8 @@ export default function Admin() {
 
       {tab === 'providers' && <ProvidersSection metrics={metrics} />}
 
+      {tab === 'ai-core' && <AiCoreControl />}
+
       {tab === 'studio-activity' && <StudioActivitySection metrics={metrics} loading={metricsLoading} />}
 
       {tab === 'growth-activity' && <GrowthActivitySection metrics={metrics} loading={metricsLoading} />}
@@ -293,7 +336,9 @@ export default function Admin() {
                   <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
                     <div><p className="text-sm font-semibold text-white">{formatMoney(r.amount_minor, r.currency)} → {r.credits_to_grant} crédits</p><p className="text-[11px] text-slate-500">{formatDate(r.created_at, true)} · {r.country_code} · {r.provider}</p></div>
                     <div className="flex items-center gap-2"><Badge status={r.status}>{statusLabel(r.status)}</Badge>
-                      {['pending', 'processing'].includes(r.status) && <Button size="sm" variant="outline" loading={busy === `confirm-${r.id}`} onClick={() => void run(`confirm-${r.id}`, () => adminConfirmRecharge(r.id, `Manuel ${new Date().toISOString()}`), 'Recharge confirmée.')}>Confirmer</Button>}
+                      {/* Une commande SasPay n'est jamais validée à la main : seule une vérification SasPay la règle. */}
+                      {r.provider === 'saspay' && ['pending', 'processing'].includes(r.status) && <span className="text-[11px] text-slate-500">Vérification SasPay</span>}
+                      {r.provider !== 'saspay' && ['pending', 'processing'].includes(r.status) && <Button size="sm" variant="outline" loading={busy === `confirm-${r.id}`} onClick={() => void run(`confirm-${r.id}`, () => adminConfirmRecharge(r.id, `Manuel ${new Date().toISOString()}`), 'Recharge confirmée.')}>Confirmer</Button>}
                     </div>
                   </div>
                 ))}</div>
@@ -309,6 +354,8 @@ export default function Admin() {
           </div>
         </>
       )}
+
+      {tab === 'saspay' && <SasPayPanel />}
 
       {tab === 'services' && (
         <Card><CardHeader title="Catalogue des services" description="Coût en crédits et disponibilité de chaque opération." />
@@ -390,16 +437,27 @@ export default function Admin() {
             { id: 'general', label: 'Paramètres généraux', icon: <Settings2 size={14} /> },
           ]} />
           {settingsSection === 'provider-budget'
-            ? <ProviderBudgetSettings
-              summary={providerSpend}
-              error={providerSpendError}
-              capDraft={providerSpendCapDraft}
-              busy={busy === 'provider-spend'}
-              onCapDraftChange={setProviderSpendCapDraft}
-              onSave={(event) => void onSaveProviderSpendCap(event)}
-              onEnable={() => void onEnableProviderSpend()}
-              onDisable={() => void onDisableProviderSpend()}
-            />
+            ? <div className="space-y-5">
+              <ProviderBalanceCard
+                balance={providerBalance}
+                summary={providerSpend}
+                loading={providerBalanceBusy}
+                error={providerBalanceError}
+                onRefresh={() => void onRefreshProviderBalance()}
+              />
+              <ProviderBudgetSettings
+                summary={providerSpend}
+                error={providerSpendError}
+                capDraft={providerSpendCapDraft}
+                busy={busy === 'provider-spend'}
+                onCapDraftChange={setProviderSpendCapDraft}
+                onSave={(event) => void onSaveProviderSpendCap(event)}
+                onEnable={() => void onEnableProviderSpend()}
+                onDisable={() => void onDisableProviderSpend()}
+                onSavePolicy={onSaveProviderSpendPolicy}
+                onAckAlert={onAckProviderSpendAlert}
+              />
+            </div>
             : <Card><CardHeader title="Paramètres de la plateforme" description="Valeurs JSON réellement utilisées par le backend." />
               {genericSettings.length === 0 ? <EmptyState icon={<Settings2 size={22} />} title="Aucun paramètre" /> : (
                 <div className="divide-y divide-white/[0.06]">{genericSettings.map((s) => (

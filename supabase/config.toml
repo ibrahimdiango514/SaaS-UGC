@@ -45,3 +45,30 @@ verify_jwt = true
 # (comparaison à temps constant) + re-vérification serveur de l'état réel.
 [functions.reelora-video-worker]
 verify_jwt = false
+
+# Surveillance planifiée des fournisseurs IA (pg_cron -> pg_net). Le job ne peut
+# pas présenter de JWT utilisateur : la protection repose sur un jeton Vault
+# comparé à temps constant + l'en-tête `x-vyora-cron`. Contrôle catalogue
+# uniquement (aucune génération, aucun crédit).
+[functions.vyora-provider-health]
+verify_jwt = false
+
+# Paiements SasPay de VYORA (devis, création de commande, statut, soldes en
+# lecture seule). Appelée par le navigateur : JWT utilisateur obligatoire.
+[functions.vyora-payments]
+verify_jwt = true
+
+# Webhook SasPay : SasPay ne peut pas présenter de JWT Supabase. La protection
+# repose sur la signature HMAC-SHA256 du corps brut (secret
+# VYORA_SASPAY_WEBHOOK_SECRET, tolérance 300 s) + re-vérification serveur du
+# paiement (`GET /payments/{id}/verify/`) avant toute livraison.
+[functions.vyora-saspay-webhook]
+verify_jwt = false
+
+# Réconciliation planifiée des paiements SasPay (pg_cron -> pg_net). Le job ne
+# peut pas présenter de JWT utilisateur : la protection repose sur l'en-tête
+# `x-vyora-cron: payments-reconcile` puis sur le jeton Vault
+# `vyora_payments_reconcile_token`, comparé à temps constant. Lecture seule côté
+# SasPay ; ne livre que par le règlement idempotent, après vérification.
+[functions.vyora-payments-reconcile]
+verify_jwt = false

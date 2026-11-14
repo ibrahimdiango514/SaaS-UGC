@@ -45,8 +45,12 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('admin — gestion réelle des crédits', () => {
   it('affiche le solde réel et l’historique du client', async () => {
     renderManager();
-    await waitFor(() => expect(screen.getByText('100')).toBeTruthy());
-    expect(screen.getByTestId('credit-history')).toBeTruthy();
+    // Synchronisation sur le chargement de l'historique réel : le tableau
+    // n'existe qu'une fois l'appel terminé. « 100 » ne peut PAS servir de
+    // signal — il est déjà affiché au premier rendu (solde après opération
+    // projeté = 0 + montant par défaut), avant même le chargement.
+    await waitFor(() => expect(screen.getByTestId('credit-history')).toBeTruthy());
+    expect(screen.getByText('100')).toBeTruthy(); // solde réel chargé
     expect(screen.getByText('Bonus de bienvenue')).toBeTruthy();
     expect(historyMock).toHaveBeenCalledWith(user.id, 25);
   });

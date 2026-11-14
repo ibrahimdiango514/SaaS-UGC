@@ -2,13 +2,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getSession, invoke } = vi.hoisted(() => ({
+const { getSession, invoke, publicConfig } = vi.hoisted(() => ({
   getSession: vi.fn(),
   invoke: vi.fn(),
+  publicConfig: { url: 'https://xbuuhfwobrafcbgtdgjx.supabase.co' },
 }));
 
 vi.mock('../src/lib/supabase', () => ({
   SUPABASE_PUBLISHABLE_KEY: 'test-publishable-key',
+  get SUPABASE_URL() { return publicConfig.url; },
   supabase: {
     auth: { getSession },
     functions: { invoke },
@@ -20,6 +22,7 @@ import { BusinessGrowApiError, businessGrowApi } from '../src/business/api';
 describe('Business Grow browser API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    publicConfig.url = 'https://xbuuhfwobrafcbgtdgjx.supabase.co';
     getSession.mockResolvedValue({
       data: { session: { access_token: 'test-session-token' } },
       error: null,
@@ -36,41 +39,96 @@ describe('Business Grow browser API', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('explains an unavailable Edge Function without exposing a raw SDK message', async () => {
-    const fetchError = Object.assign(new Error('Failed to send a request to the Edge Function'), {
-      name: 'FunctionsFetchError',
-      context: new TypeError('fetch failed'),
-    });
-    invoke.mockResolvedValueOnce({ data: null, error: fetchError });
-
-    await expect(businessGrowApi.listConversations()).rejects.toMatchObject({
-      code: 'BUSINESS_GROW_UNAVAILABLE',
-      message: expect.stringContaining('backend Business Grow'),
-    });
-    expect(invoke).toHaveBeenCalledWith('business-grow', {
-      body: { action: 'conversations.list' },
-    });
-  });
-
-  it('maps an undeployed Edge Function response to an actionable unavailable error', async () => {
-    invoke.mockResolvedValueOnce({
-      data: null,
-      error: Object.assign(new Error('Function not found'), {
-        name: 'FunctionsHttpError',
-        context: new Response('not found', { status: 404 }),
+  it('appelle la fonction Edge avec le JWT VYORA explicite', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ data: { conversations: [] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
       }),
-    });
+    );
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('window', { location: { hostname: '4173-demo.e2b.app' } });
 
-    const error = await businessGrowApi.getStatus().catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(BusinessGrowApiError);
-    expect(error).toMatchObject({
-      code: 'BUSINESS_GROW_UNAVAILABLE',
-      status: 404,
-    });
+    try {
+      await expect(businessGrowApi.listConversations()).resolves.toEqual({ conversations: [] });
+      const [url, init] = fetcher.mock.calls[0];
+      expect(String(url)).toBe('https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/business-grow');
+      const headers = new Headers(init?.headers);
+      expect(headers.get('Authorization')).toBe('Bearer test-session-token');
+      expect(headers.get('apikey')).toBe('test-publishable-key');
+      expect(invoke).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
-  it('can target only the local Supabase Edge endpoint in development', async () => {
+  it('ne prétend jamais que la fonction n’est pas déployée quand le réseau échoue', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      throw new TypeError('Failed to fetch');
+    });
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('window', { location: { hostname: '4173-demo.e2b.app' } });
+
+    try {
+      const error = await businessGrowApi.listConversations().catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(BusinessGrowApiError);
+      expect(error).toMatchObject({ code: 'BUSINESS_GROW_UNREACHABLE' });
+      // Aucune affirmation d'absence de déploiement : ce serait un diagnostic inventé.
+      expect((error as BusinessGrowApiError).message).not.toMatch(/absent|déployée|pas encore installé/i);
+      // Sur Vite, le relais same-origin constitue le secours du chemin direct.
+      const targets = fetcher.mock.calls.map((call) => String(call[0]));
+      expect(targets[0]).toContain('/functions/v1/business-grow');
+      expect(targets[1]).toBe('/api/business-grow');
+      expect(targets).not.toContain('/.netlify/functions/business-grow');
+      expect((error as BusinessGrowApiError).message).not.toMatch(/JSON invalide|404/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('bascule sur le relais same-origin quand seul l’appel direct est bloqué', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('supabase.co')) throw new TypeError('Blocked by client');
+      return new Response(JSON.stringify({ data: { providers: [{ provider_key: 'groq' }] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('window', { location: { hostname: 'vyora-ugc.netlify.app' } });
+
+    try {
+      await expect(businessGrowApi.getStatus()).resolves.toEqual({
+        providers: [{ provider_key: 'groq' }],
+      });
+      expect(fetcher.mock.calls.map((call) => String(call[0]))).toContain('/api/business-grow');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('n’attribue jamais un 404 à un déploiement manquant : un 404 métier est propagé', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ error: { code: 'MEMORY_ITEM_NOT_FOUND', message: 'Note mémoire introuvable.' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('window', { location: { hostname: 'vyora-ugc.netlify.app' } });
+
+    try {
+      const error = await businessGrowApi.getStatus().catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ code: 'MEMORY_ITEM_NOT_FOUND', status: 404 });
+      expect((error as BusinessGrowApiError).message).toBe('Note mémoire introuvable.');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('routes local Supabase development through the same-origin relay', async () => {
     vi.stubEnv(
       'VITE_BUSINESS_GROW_FUNCTION_URL',
       'http://127.0.0.1:54321/functions/v1/business-grow',
@@ -83,7 +141,7 @@ describe('Business Grow browser API', () => {
     try {
       await expect(businessGrowApi.listConversations()).resolves.toEqual({ conversations: [] });
       const [url, init] = fetcher.mock.calls[0];
-      expect(String(url)).toBe('http://127.0.0.1:54321/functions/v1/business-grow');
+      expect(String(url)).toBe('/api/business-grow');
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-session-token');
       expect(new Headers(init?.headers).get('apikey')).toBe('test-publishable-key');
       expect(invoke).not.toHaveBeenCalled();
@@ -111,64 +169,228 @@ describe('Business Grow browser API', () => {
     }
   });
 
+  it.each(['vyora-ugc.netlify.app', 'staging.example.test', '4173-demo.e2b.app'])(
+    'ne transmet pas le JWT d’un autre projet au relais canonique depuis %s',
+    async (hostname) => {
+      publicConfig.url = 'https://other-project.supabase.co';
+      vi.stubGlobal('window', { location: { hostname } });
+      const fetcher = vi.fn(async (_input: RequestInfo | URL) => { throw new TypeError('Blocked'); });
+      vi.stubGlobal('fetch', fetcher);
+      try {
+        await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'BUSINESS_GROW_UNREACHABLE' });
+        expect(fetcher.mock.calls).toHaveLength(1);
+        expect(String(fetcher.mock.calls[0][0])).toBe('https://other-project.supabase.co/functions/v1/business-grow');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('ne bascule jamais une mutation d’un autre projet vers le relais en cas de réponse perdue', async () => {
+    publicConfig.url = 'https://other-project.supabase.co';
+    vi.stubGlobal('window', { location: { hostname: 'staging.example.test' } });
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { action: string };
+      if (body.action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.createModuleRecord('bg_module_lead_rescue', { name: 'Test' }, null, 'ws-1'))
+        .rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(fetcher.mock.calls).toHaveLength(2);
+      expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+        'https://other-project.supabase.co/functions/v1/business-grow',
+        'https://other-project.supabase.co/functions/v1/business-grow',
+      ]);
+      expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body)).action).toBe('v3.modules.records');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    'http://127.0.0.1:54321/functions/v1/business-grow?redirect=evil',
+    'http://user:password@127.0.0.1:54321/functions/v1/business-grow',
+    'http://localhost:1234/functions/v1/business-grow',
+  ])('rejects an unsafe local function override before sending a token: %s', async (url) => {
+    vi.stubEnv('VITE_BUSINESS_GROW_FUNCTION_URL', url);
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'INVALID_LOCAL_FUNCTION_URL' });
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('invokes new Business Grow actions cleanly with structured payloads', async () => {
-    invoke.mockResolvedValue({ data: { data: { ok: true } }, error: null });
-
-    await businessGrowApi.verifyProvider('groq', 'llama-3.3-70b-versatile');
-    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
-      body: { action: 'providers.verify', providerKey: 'groq', modelKey: 'llama-3.3-70b-versatile' },
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ data: { ok: true } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     });
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('window', { location: { hostname: '4173-demo.e2b.app' } });
 
-    await businessGrowApi.listModels('gemini', true);
-    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
-      body: { action: 'models.list', providerKey: 'gemini', includeRemote: true },
-    });
+    try {
+      await businessGrowApi.verifyProvider('groq', 'llama-3.3-70b-versatile');
+      expect(bodies.at(-1)).toEqual({
+        action: 'providers.verify', providerKey: 'groq', modelKey: 'llama-3.3-70b-versatile',
+      });
 
-    await businessGrowApi.saveRouting({
-      roleKey: 'action_plan',
-      selectionMode: 'manual',
-      preferredProviderKey: 'groq',
-      preferredModelKey: null,
-      allowFallback: false,
-    });
-    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
-      body: {
+      await businessGrowApi.listModels('gemini', true);
+      expect(bodies.at(-1)).toEqual({ action: 'models.list', providerKey: 'gemini', includeRemote: true });
+
+      await businessGrowApi.saveRouting({
+        roleKey: 'action_plan',
+        selectionMode: 'manual',
+        preferredProviderKey: 'groq',
+        preferredModelKey: null,
+        allowFallback: false,
+      });
+      expect(bodies.at(-1)).toEqual({
         action: 'routing.save',
         roleKey: 'action_plan',
         selectionMode: 'manual',
         preferredProviderKey: 'groq',
         preferredModelKey: null,
         allowFallback: false,
-      },
-    });
+      });
 
-    await businessGrowApi.getQuota();
-    expect(invoke).toHaveBeenLastCalledWith('business-grow', { body: { action: 'quota.status' } });
+      await businessGrowApi.getQuota();
+      expect(bodies.at(-1)).toEqual({ action: 'quota.status' });
 
-    await businessGrowApi.resolveTool('tool-1', 'approved');
-    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
-      body: { action: 'tools.resolve', executionId: 'tool-1', decision: 'approved' },
-    });
+      await businessGrowApi.resolveTool('tool-1', 'approved');
+      expect(bodies.at(-1)).toEqual({ action: 'tools.resolve', executionId: 'tool-1', decision: 'approved' });
 
-    await businessGrowApi.listIntegrations();
-    expect(invoke).toHaveBeenLastCalledWith('business-grow', { body: { action: 'integrations.list' } });
+      await businessGrowApi.listIntegrations();
+      expect(bodies.at(-1)).toEqual({ action: 'integrations.list' });
 
-    await businessGrowApi.sendMessage('conv-1', 'Hello', 'idem-1', {
-      roleKey: 'marketing_campaign',
-      workspaceId: 'ws-1',
-      routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
-    });
-    expect(invoke).toHaveBeenLastCalledWith('business-grow', {
-      body: {
-        action: 'messages.send',
+      await businessGrowApi.listIntegrations('ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.list', workspaceId: 'ws-1' });
+      await businessGrowApi.requestIntegration('shopify', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.request', connectorKey: 'shopify', workspaceId: 'ws-1' });
+      await businessGrowApi.cancelIntegration('shopify', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.cancel', connectorKey: 'shopify', workspaceId: 'ws-1' });
+      await businessGrowApi.disconnectIntegration('shopify', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.integrations.disconnect', connectorKey: 'shopify', workspaceId: 'ws-1' });
+      await businessGrowApi.resolveTool('tool-1', 'approved', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.tools.resolve', executionId: 'tool-1', decision: 'approved', workspaceId: 'ws-1' });
+      await businessGrowApi.listMessages('conv-1', 'ws-1');
+      expect(bodies.at(-1)).toEqual({ action: 'v3.messages.list', conversationId: 'conv-1', workspaceId: 'ws-1' });
+
+      await businessGrowApi.sendMessage('conv-1', 'Hello', 'idem-1', {
+        roleKey: 'marketing_campaign',
+        workspaceId: 'ws-1',
+        routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
+      });
+      expect(bodies.at(-1)).toEqual({
+        action: 'v3.messages.send',
         conversationId: 'conv-1',
         content: 'Hello',
         idempotencyKey: 'idem-1',
         roleKey: 'marketing_campaign',
         workspaceId: 'ws-1',
         routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: false },
-      },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('refuse sans écriture le protocole entreprise sur une Edge historique', async () => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push(action);
+      return action === 'status'
+        ? new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 })
+        : new Response(JSON.stringify({ error: { code: 'UNKNOWN_ACTION', message: 'Opération inconnue.' } }), { status: 400 });
     });
+    vi.stubGlobal('fetch', fetcher);
+    vi.stubGlobal('window', { location: { hostname: '5173-demo.e2b.app' } });
+    try {
+      await expect(businessGrowApi.listConversations('ws-1')).rejects.toMatchObject({ code: 'BUSINESS_GROW_UPGRADE_REQUIRED' });
+      await expect(businessGrowApi.createModuleRecord('bg_module_lead_rescue', { name: 'test' }, null, 'ws-1'))
+        .rejects.toMatchObject({ code: 'BUSINESS_GROW_UPGRADE_REQUIRED' });
+      expect(calls).toEqual(['v3.conversations.list', 'status', 'v3.modules.records']);
+      expect(calls).not.toContain('modules.records'); // aucun rejeu vers l'ancienne écriture globale
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('préfixe la confirmation d’automatisation et ne la rejoue pas après une réponse perdue', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-automation.e2b.app' } });
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(body);
+      if (body.action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    }));
+    const confirmation = { playbookId: 'rule', sourceCategory: 'bg_module_order_cart_recovery', sourceId: 'cart', previewDay: '2026-11-13',
+      expectedPlaybook: { status: 'actif' }, expectedSource: { status: 'panier' }, task: { status: 'a_faire' } };
+    try {
+      await expect(businessGrowApi.confirmAutomationTask('ws-1', confirmation)).rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(calls).toEqual([{ action: 'status' }, { action: 'v3.automation.task.confirm', workspaceId: 'ws-1', ...confirmation }]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('traite les aperçus et historiques de rapports comme lectures et les bascule sans prévol', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-report.e2b.app' } });
+    const calls: Array<{ target: string; body: Record<string, unknown> }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input); const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ target, body });
+      if (target.includes('supabase.co')) throw new TypeError('lecture bloquée');
+      return new Response(JSON.stringify({ data: body.action === 'v3.agent.report' ? { report: {}, saved: false } : { reports: [] } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.generateReport('ws-1', 'health', '2026-01-01', '2026-01-30');
+      await businessGrowApi.listReports('ws-1');
+      expect(calls.map((call) => call.body.action)).toEqual(['v3.agent.report', 'v3.agent.report', 'v3.agent.reports.list']);
+      expect(calls[1].target).toBe('/api/business-grow');
+      expect(calls[1].body).toMatchObject({ workspaceId: 'ws-1', reportType: 'health', save: false });
+      expect(calls[2].body).toEqual({ action: 'v3.agent.reports.list', workspaceId: 'ws-1' });
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('ne rejoue pas un enregistrement de rapport dont la réponse est inconnue', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-report-save.e2b.app' } });
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push(action);
+      if (action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.generateReport('ws-1', 'health', '2026-01-01', '2026-01-30', true, 'idem'))
+        .rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(calls).toEqual(['status', 'v3.agent.report']);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('ne rejoue pas une suppression de rapport dont la réponse est inconnue', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-report-delete.e2b.app' } });
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(body);
+      if (body.action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+      throw new TypeError('réponse perdue');
+    }));
+    try {
+      await expect(businessGrowApi.deleteReport('ws-1', 'report-1')).rejects.toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+      expect(calls).toEqual([{ action: 'status' }, { action: 'v3.agent.reports.delete', workspaceId: 'ws-1', reportId: 'report-1' }]);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('routes Netlify Deploy Preview calls directly through /api/business-grow with function fallback', async () => {
@@ -194,26 +416,25 @@ describe('Business Grow browser API', () => {
     }
   });
 
-  it('falls back to /api/business-grow on *.netlify.app when functions.invoke encounters FunctionsFetchError', async () => {
+  it('privilégie le relais same-origin sur *.netlify.app, puis l’appel direct', async () => {
     vi.stubGlobal('window', { location: { hostname: 'saas-ugc-growth.netlify.app' } });
-    invoke.mockResolvedValueOnce({
-      data: null,
-      error: Object.assign(new Error('Failed to send a request to the Edge Function'), {
-        name: 'FunctionsFetchError',
-        context: new TypeError('fetch failed'),
-      }),
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/business-grow') return new Response('Not Found', { status: 404 });
+      return new Response(JSON.stringify({ data: { conversations: [{ id: 'c1' }] } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     });
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify({ data: { conversations: [{ id: 'c1' }] } }), { status: 200 }),
-    );
     vi.stubGlobal('fetch', fetcher);
 
     try {
       await expect(businessGrowApi.listConversations()).resolves.toEqual({
         conversations: [{ id: 'c1' }],
       });
-      expect(invoke).toHaveBeenCalledTimes(1);
-      expect(String(fetcher.mock.calls[0][0])).toBe('/api/business-grow');
+      expect(invoke).not.toHaveBeenCalled();
+      const targets = fetcher.mock.calls.map((call) => String(call[0]));
+      expect(targets[0]).toBe('/api/business-grow');
+      expect(targets[1]).toBe('/.netlify/functions/business-grow');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -239,6 +460,122 @@ describe('Business Grow browser API', () => {
       await expect(businessGrowApi.getStatus()).resolves.toEqual({ providers: [{ provider_key: 'groq' }] });
       expect(String(fetcher.mock.calls[0][0])).toBe('/api/business-grow');
       expect(String(fetcher.mock.calls[1][0])).toBe('/.netlify/functions/business-grow');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('selects the working Vite relay before issuing a mutation', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-demo.e2b.app' } });
+    const calls: Array<{ target: string; action: string }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push({ target, action });
+      if (target.includes('supabase.co')) throw new TypeError('Network blocked');
+      return new Response(JSON.stringify({ data: action === 'status'
+        ? { providers: [] } : { conversationId: 'created-once' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.getStatus();
+      await expect(businessGrowApi.createConversation('Essai', null)).resolves.toEqual({ conversationId: 'created-once' });
+      expect(calls.map(({ target, action }) => [target.includes('supabase.co') ? 'direct' : target, action])).toEqual([
+        ['direct', 'status'], ['/api/business-grow', 'status'],
+        ['/api/business-grow', 'status'], ['/api/business-grow', 'conversations.create'],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rechecks the channel with a read when the network changes before a mutation', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-changing.e2b.app' } });
+    let directBlocked = true;
+    let relayBlocked = false;
+    const calls: Array<{ target: string; action: string }> = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = String(input);
+      const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+      calls.push({ target, action });
+      if (target.includes('supabase.co') && directBlocked) throw new TypeError('Blocked');
+      if (target === '/api/business-grow' && relayBlocked) {
+        return new Response(JSON.stringify({ error: { code: 'BUSINESS_GROW_RELAY_UNAVAILABLE' } }), { status: 502 });
+      }
+      return new Response(JSON.stringify({ data: action === 'status'
+        ? { providers: [] } : { conversationId: 'one-conversation' } }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await businessGrowApi.getStatus();
+      directBlocked = false;
+      relayBlocked = true;
+      await expect(businessGrowApi.createConversation('Essai', null)).resolves.toEqual({ conversationId: 'one-conversation' });
+      expect(calls.filter((call) => call.action === 'conversations.create')).toEqual([
+        { target: 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/business-grow', action: 'conversations.create' },
+      ]);
+      expect(calls.slice(2).map(({ target, action }) => [target.includes('supabase.co') ? 'direct' : target, action])).toEqual([
+        ['/api/business-grow', 'status'], ['direct', 'status'], ['direct', 'conversations.create'],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['network', 'relay-error', 'html'] as const)(
+    'never replays a mutation when the result is ambiguous (%s)', async (failure) => {
+      vi.stubGlobal('window', { location: { hostname: 'vyora-ugc.netlify.app' } });
+      const calls: Array<{ target: string; action: string }> = [];
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const target = String(input);
+        const action = (JSON.parse(String(init?.body)) as { action: string }).action;
+        calls.push({ target, action });
+        if (action === 'status') return new Response(JSON.stringify({ data: { providers: [] } }), { status: 200 });
+        if (failure === 'network') throw new TypeError('response lost');
+        if (failure === 'relay-error') {
+          return new Response(JSON.stringify({ error: { code: 'BUSINESS_GROW_UNAVAILABLE' } }), { status: 502 });
+        }
+        return new Response('<html>réponse illisible</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+      });
+      vi.stubGlobal('fetch', fetcher);
+      try {
+        const error = await businessGrowApi.createConversation('Ne pas dupliquer', null).catch((caught: unknown) => caught);
+        expect(error).toMatchObject({ code: 'BUSINESS_GROW_RESULT_UNKNOWN' });
+        expect((error as Error).message).toMatch(/vérifiez son résultat/i);
+        expect(calls.filter((call) => call.action === 'conversations.create')).toEqual([
+          { target: '/api/business-grow', action: 'conversations.create' },
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('shows an expired gateway JWT as an authentication error without retrying another transport', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-auth.e2b.app' } });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      code: 'UNAUTHORIZED_INVALID_JWT_FORMAT', message: 'Invalid JWT',
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const error = await businessGrowApi.getStatus().catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'UNAUTHENTICATED', status: 401 });
+      expect((error as Error).message).toMatch(/session.*reconnectez/i);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('propagates an explicit CORS denial instead of claiming a network failure', async () => {
+    vi.stubGlobal('window', { location: { hostname: '5173-denied.e2b.app' } });
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: {
+      code: 'ORIGIN_NOT_ALLOWED', message: 'Origine non autorisée.',
+    } }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(businessGrowApi.getStatus()).rejects.toMatchObject({ code: 'ORIGIN_NOT_ALLOWED', status: 403 });
+      expect(fetcher).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
     }

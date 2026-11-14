@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Bell, BookOpen, Brain, ChevronDown, Clapperboard, Coins, CreditCard, FolderKanban,
-  History, LayoutDashboard, LogOut, Menu, Search, Settings, Shield, Sparkles,
-  Users, Wand2, X, CheckCheck, SlidersHorizontal, type LucideIcon,
+  ArrowLeftRight, Bell, Brain, CheckCheck, ChevronDown, Coins, CreditCard,
+  LogOut, Menu, Search, Settings, Shield, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -12,41 +11,18 @@ import { initials, relativeDate, truncate } from '../lib/format';
 import { listNotifications, markAllNotificationsRead, markNotificationRead } from '../lib/api';
 import type { AppNotification } from '../lib/types';
 import { BrandLockup, BrandSymbol } from './Brand';
+import { WorkspaceNav } from '../navigation/WorkspaceNav';
+import {
+  BUSINESS_MOBILE_NAV, STUDIO_MOBILE_NAV, isNavItemActive,
+} from '../navigation/config';
 import { Badge, Button, cn, LoadingState } from './ui';
 
-interface NavItem { to: string; label: string; icon: LucideIcon; end?: boolean }
-const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
-  { label: 'Espace', items: [
-    { to: '/app', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
-    { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  ] },
-  { label: 'Modules', items: [
-    { to: '/app/studio', label: 'Studio UGC', icon: Clapperboard },
-    { to: '/app/business', label: 'Business Grow', icon: Brain },
-  ] },
-  { label: 'Ressources', items: [
-    { to: '/app/avatars', label: 'Avatars', icon: Users },
-    { to: '/app/scripts', label: 'Scripts IA', icon: Wand2 },
-    { to: '/app/prompts', label: 'Prompts', icon: BookOpen },
-    { to: '/app/presets', label: 'Réglages vidéo', icon: SlidersHorizontal },
-    { to: '/app/bibliotheque', label: 'Bibliothèque', icon: Sparkles },
-    { to: '/app/historique', label: 'Historique', icon: History },
-  ] },
-  { label: 'Compte', items: [
-    { to: '/app/abonnement', label: 'Abonnement', icon: CreditCard },
-    { to: '/app/parametres', label: 'Paramètres', icon: Settings },
-  ] },
-];
-
-const NAV: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
-const MOBILE_NAV = NAV.filter((item) =>
-  ['/app', '/app/projets', '/app/studio', '/app/business', '/app/historique'].includes(item.to),
-);
+const ADMIN_NAV = [{ to: '/admin', label: 'Administration', icon: Shield }];
 
 function Logo({ compact = false, to = '/app' }: { compact?: boolean; to?: string }) {
   return (
-    <NavLink to={to} aria-label="VYORA, tableau de bord" className="flex items-center gap-2.5">
-      {compact ? <BrandSymbol size={36} /> : <BrandLockup tagline />}
+    <NavLink to={to} aria-label="VYORA, tableau de bord" className="flex min-h-11 min-w-11 items-center gap-2.5">
+      {compact ? <BrandSymbol size={36} /> : <BrandLockup />}
     </NavLink>
   );
 }
@@ -56,13 +32,17 @@ export default function Layout() {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const studioMobileShell = location.pathname === '/app/studio';
-  const navGroups = isAdmin
-    ? [{ label: 'Administration', items: [{ to: '/admin', label: 'Administration', icon: Shield, end: true }] }]
-    : NAV_GROUPS;
+  const isHub = location.pathname === '/app';
+  const isBusiness = location.pathname === '/app/business' || location.pathname.startsWith('/app/business/');
   const mobileNav = isAdmin
-    ? [{ to: '/admin', label: 'Administration', icon: Shield, end: true }]
-    : MOBILE_NAV;
+    ? ADMIN_NAV
+    : isHub
+      ? []
+      : isBusiness
+        ? BUSINESS_MOBILE_NAV
+        : STUDIO_MOBILE_NAV;
+  const mobileItemActive = (item: { to: string; label: string; icon: typeof Shield }) =>
+    isNavItemActive({ to: item.to, label: item.label, description: '', icon: item.icon }, location.pathname, location.search);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -154,30 +134,39 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen lg:flex">
-      {/* Desktop sidebar */}
-      <aside className="relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex">
+      {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}
+      <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', isHub && 'lg:hidden')}>
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
-        <div className="relative px-2 pb-6">
+        <div className="relative px-2 pb-4">
           <Logo to={isAdmin ? '/admin' : '/app'} />
-          <p className="mt-1.5 pl-[46px] text-[10px] font-medium uppercase tracking-[0.2em] text-slate-600">Create · Evolve · Grow</p>
         </div>
-        <nav className="relative flex-1 space-y-5 overflow-y-auto no-scrollbar">
-          {navGroups.map((group) => (
-            <section key={group.label}>
-              <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">{group.label}</p>
-              <div className="space-y-0.5">
-                {group.items.map((item) => (
-                  <NavLink key={item.to} to={item.to} end={item.end}
-                    className={({ isActive }) => cn('nav-link py-2', isActive && 'nav-link-active')}>
-                    <item.icon size={17} /> {item.label}
-                  </NavLink>
-                ))}
-              </div>
-            </section>
-          ))}
-        </nav>
-        {!isAdmin && <div className="relative mt-4 overflow-hidden rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-cyan-400/[0.10] via-panel/70 to-violet-500/[0.05] p-3.5">
+        {!isAdmin && (
+          <Link
+            to="/app"
+            className="relative mb-4 flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-3 py-2 text-[11px] font-semibold text-slate-300 transition hover:border-cyan-300/25 hover:text-white"
+          >
+            <ArrowLeftRight size={13} className="text-cyan-300" />
+            Tous les espaces
+            <span className="ml-auto text-[9px] font-normal uppercase tracking-[0.12em] text-slate-600">
+              {isBusiness ? 'Business' : 'Studio'}
+            </span>
+          </Link>
+        )}
+        {isAdmin ? (
+          <nav className="relative flex-1">
+            {ADMIN_NAV.map((item) => (
+              <NavLink key={item.to} to={item.to} className="nav-link min-h-11">
+                <item.icon size={17} /> {item.label}
+              </NavLink>
+            ))}
+          </nav>
+        ) : (
+          <div className="relative mt-1 flex min-h-0 flex-1 flex-col">
+            <WorkspaceNav scope={isBusiness ? 'business' : 'studio'} />
+          </div>
+        )}
+        {!isAdmin && !isBusiness && !isHub && <div className="relative mt-4 overflow-hidden rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-cyan-400/[0.10] via-panel/70 to-violet-500/[0.05] p-3.5">
           <div className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Coins size={14} /> Crédits Studio UGC</div>
           <p className="mt-1 text-2xl font-bold tracking-tight text-white">{quota?.credits ?? 0}</p>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
@@ -189,15 +178,22 @@ export default function Layout() {
           <p className="mt-1.5 text-[11px] text-slate-400">{quota?.plan?.display_name ?? 'Formule'} · {quota?.usage?.video ?? 0}/{quota?.plan?.max_videos_per_month ?? 0} vidéos ce mois</p>
           <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/app/abonnement')}>Gérer le Studio</Button>
         </div>}
+        {!isAdmin && isBusiness && (
+          <div className="relative mt-4 overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-violet-400/[0.10] via-panel/70 to-cyan-400/[0.04] p-3.5">
+            <div className="flex items-center gap-2 text-xs font-semibold text-violet-100"><Brain size={14} /> Espace Business Growth</div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">Données métier isolées. Aucun accès aux crédits ni aux fichiers Studio.</p>
+            <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/app/business/modules')}>Ouvrir les modules métier</Button>
+          </div>
+        )}
       </aside>
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-white/[0.06] bg-[#05080e]/80 px-4 backdrop-blur-2xl sm:px-6', studioMobileShell && 'hidden lg:flex')}>
+        <header className={cn('sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-white/[0.06] bg-[#05080e]/80 px-4 backdrop-blur-2xl sm:px-6')}>
           <button className="btn btn-ghost btn-icon lg:hidden" onClick={() => setDrawerOpen(true)} aria-label="Ouvrir le menu"><Menu size={20} /></button>
           <div className="lg:hidden"><Logo compact to={isAdmin ? '/admin' : '/app'} /></div>
 
-          {!isAdmin && <form className="hidden max-w-md flex-1 items-center gap-2 rounded-xl border border-line bg-white/[0.025] px-3 py-2 md:flex"
+          {!isAdmin && !isBusiness && !isHub && <form className="hidden max-w-md flex-1 items-center gap-2 rounded-xl border border-line bg-white/[0.025] px-3 py-2 md:flex"
             onSubmit={(e) => { e.preventDefault(); navigate(`/app/projets?q=${encodeURIComponent(search)}`); }}>
             <Search size={16} className="text-slate-500" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un projet…"
@@ -205,7 +201,17 @@ export default function Layout() {
           </form>}
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
-            {!isAdmin && <button onClick={() => void onRefreshQuota()} disabled={quotaRefreshing}
+            {!isAdmin && !isHub && (
+              <Link
+                to="/app"
+                aria-label="Tous les espaces"
+                className="group inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-2.5 text-[11px] font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:bg-cyan-400/[0.07] hover:text-white sm:px-3"
+              >
+                <ArrowLeftRight size={14} className="text-cyan-300 transition group-hover:rotate-180" />
+                <span className="hidden md:inline">Tous les espaces</span>
+              </Link>
+            )}
+            {!isAdmin && !isBusiness && !isHub && <button onClick={() => void onRefreshQuota()} disabled={quotaRefreshing}
               className="hidden items-center gap-1.5 rounded-xl border border-line bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:flex" title="Actualiser le solde">
               <Coins size={15} className="text-amber-300" /> {quota?.credits ?? 0}
             </button>}
@@ -265,7 +271,9 @@ export default function Layout() {
                     ? <button onClick={() => navigate('/admin')} className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><Shield size={15} /> Console d’administration</button>
                     : <>
                       <button onClick={() => navigate('/app/parametres')} className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><Settings size={15} /> Paramètres</button>
-                      <button onClick={() => navigate('/app/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Abonnement</button>
+                      {!isBusiness && <button onClick={() => navigate('/app/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Abonnement Studio</button>}
+                      {isBusiness && <button onClick={() => navigate('/app/business/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Formules Business Growth</button>}
+                      {!isHub && <button onClick={() => navigate('/app')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><ArrowLeftRight size={15} /> Tous les espaces</button>}
                     </>}
                   <button onClick={() => void onLogout()} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-rose-300 hover:bg-rose-500/10"><LogOut size={15} /> Déconnexion</button>
                 </div>
@@ -274,7 +282,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className={cn('relative flex-1 px-4 sm:px-6 lg:pb-10 lg:pt-8', studioMobileShell ? 'pb-0 pt-0' : 'pb-28 pt-6')}>
+        <main className={cn('relative flex-1 px-4 pb-28 pt-6 sm:px-6 lg:pb-10 lg:pt-8')}>
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(ellipse_at_50%_-20%,rgba(34,211,238,0.07),transparent_70%)]" />
           <div className="relative mx-auto w-full max-w-[1400px]"><Outlet /></div>
         </main>
@@ -285,22 +293,27 @@ export default function Layout() {
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm lg:hidden" onMouseDown={() => setDrawerOpen(false)}>
           <div className="flex h-full w-[min(88vw,300px)] flex-col border-r border-line bg-panel px-3 py-5" onMouseDown={(e) => e.stopPropagation()}>
             <div className="mb-6 flex items-center justify-between px-2"><Logo to={isAdmin ? '/admin' : '/app'} /><button onClick={() => setDrawerOpen(false)} className="btn btn-ghost btn-icon"><X size={18} /></button></div>
-            <nav className="flex-1 space-y-5 overflow-y-auto">
-              {navGroups.map((group) => (
-                <section key={group.label}>
-                  <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">{group.label}</p>
-                  <div className="space-y-0.5">
-                    {group.items.map((item) => (
-                      <NavLink key={item.to} to={item.to} end={item.end}
-                        className={({ isActive }) => cn('nav-link py-2', isActive && 'nav-link-active')}>
-                        <item.icon size={17} /> {item.label}
-                      </NavLink>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </nav>
-            {!isAdmin && <div className="mt-6 rounded-2xl border border-cyan-300/15 bg-cyan-400/[0.06] p-3 text-sm">
+            {!isAdmin && (
+              <Link to="/app" onClick={() => setDrawerOpen(false)} className="mb-3 flex min-h-11 items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.06] px-3 py-2 text-xs font-semibold text-slate-200">
+                <ArrowLeftRight size={14} className="text-cyan-300" /> Tous les espaces
+              </Link>
+            )}
+            {isAdmin ? (
+              <nav className="flex-1">
+                {ADMIN_NAV.map((item) => (
+                  <NavLink key={item.to} to={item.to} onClick={() => setDrawerOpen(false)} className="nav-link min-h-11">
+                    <item.icon size={17} /> {item.label}
+                  </NavLink>
+                ))}
+              </nav>
+            ) : (
+              <WorkspaceNav
+                scope={isBusiness ? 'business' : 'studio'}
+                onNavigate={() => setDrawerOpen(false)}
+                onRequestClose={() => setDrawerOpen(false)}
+              />
+            )}
+            {!isAdmin && !isBusiness && !isHub && <div className="mt-6 rounded-2xl border border-cyan-300/15 bg-cyan-400/[0.06] p-3 text-sm">
               <p className="text-xs text-slate-400">Crédits Studio UGC</p>
               <p className="text-xl font-bold text-white">{quota?.credits ?? 0}</p>
             </div>}
@@ -309,13 +322,17 @@ export default function Layout() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', studioMobileShell ? 'hidden' : 'lg:hidden')}>
-        {mobileNav.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end}
-            className={({ isActive }) => cn('flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition', isActive ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500')}>
-            <item.icon size={19} /> <span className="truncate">{item.label.split(' ')[0]}</span>
-          </NavLink>
-        ))}
+      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', isHub ? 'hidden' : 'lg:hidden')}>
+        {mobileNav.map((item) => {
+          const active = mobileItemActive(item);
+          return (
+            <Link key={item.to} to={item.to}
+              aria-current={active ? 'page' : undefined}
+              className={cn('flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition', active ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500')}>
+              <item.icon size={19} /> <span className="truncate">{item.label.split(' ')[0]}</span>
+            </Link>
+          );
+        })}
       </nav>
     </div>
   );

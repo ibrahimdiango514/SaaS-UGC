@@ -1,6 +1,15 @@
 [build]
   command = "npm ci && npm run build"
   publish = "dist"
+  # Filet de sécurité : aucun build Netlify pour les branches de travail de la
+  # PR #6 et de la Phase 3 Business Grow tant que leur déploiement n'est pas
+  # décidé. Les relais existants ciblent la base de production : un aperçu de
+  # la Phase 3 ne doit pas être publié isolément. Code 0 = build annulé avant
+  # toute installation ; tout autre code = build normal. `main` et les autres
+  # branches continuent de se construire exactement comme avant.
+  # Garder aussi [skip netlify] dans les commits de ces branches et les titres
+  # de leurs éventuelles PR. Une préproduction exige une cible isolée vérifiée.
+  ignore = '[ "$HEAD" = "arena/323bad30-saas-ugc" ] || [ "$BRANCH" = "arena/323bad30-saas-ugc" ] || [ "$HEAD" = "arena/ada94e4c-saas-ugc" ] || [ "$BRANCH" = "arena/ada94e4c-saas-ugc" ]'
 
 [build.environment]
   NODE_VERSION = "22"

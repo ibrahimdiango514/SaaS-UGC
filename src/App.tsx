@@ -17,12 +17,14 @@ const OwnerLogin = lazy(() => import('./pages/OwnerLogin'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Home = lazy(() => import('./pages/Home'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const Avatars = lazy(() => import('./pages/Avatars'));
 const Scripts = lazy(() => import('./pages/Scripts'));
 const Prompts = lazy(() => import('./pages/Prompts'));
 const Presets = lazy(() => import('./pages/Presets'));
 const Subscription = lazy(() => import('./pages/Subscription'));
+const StudioPricing = lazy(() => import('./pages/StudioPricing'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Admin = lazy(() => import('./pages/Admin'));
 const VideoStudio = lazy(() => import('./studio/VideoStudio'));
@@ -34,6 +36,10 @@ const StudioLegacy = lazy(() => import('./studio/StudioPages').then(({ StudioLeg
 const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioProjects: component }) => ({ default: component })));
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
+const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
+const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
+const BusinessGrowSubscription = lazy(() => import('./pages/BusinessGrowSubscription'));
+const PaymentReturn = lazy(() => import('./pages/PaymentReturn'));
 
 export default function App() {
   return (
@@ -57,11 +63,15 @@ export default function App() {
                 <Route element={<ProtectedRoute />}>
                   <Route element={<Layout />}>
                     <Route path="/app">
-                      <Route index element={<Dashboard />} />
+                      <Route index element={<Home />} />
+                      <Route path="studio/accueil" element={<Dashboard />} />
                       <Route path="projets" element={<StudioProjects />} />
                       <Route path="projets/:id" element={<ProjectDetail />} />
                       <Route path="studio" element={<GenerationStudio />} />
                       <Route path="business" element={<BusinessGrow />} />
+                      <Route path="business/modules" element={<BusinessModules />} />
+                      <Route path="business/modules/:moduleKey" element={<BusinessModuleWorkspace />} />
+                      <Route path="business/abonnement" element={<BusinessGrowSubscription />} />
                       <Route path="studio/classique" element={<VideoStudio />} />
                       <Route path="studio/montage" element={<VideoEditor />} />
                       <Route path="studio/avance" element={<StudioLegacy />} />
@@ -76,6 +86,8 @@ export default function App() {
                       <Route path="bibliotheque" element={<StudioSaved />} />
                       <Route path="historique" element={<StudioGenerations />} />
                       <Route path="abonnement" element={<Subscription />} />
+                      <Route path="credits" element={<StudioPricing />} />
+                      <Route path="paiement/retour" element={<PaymentReturn />} />
                       <Route path="parametres" element={<Settings />} />
                     </Route>
                     <Route element={<AdminRoute />}>

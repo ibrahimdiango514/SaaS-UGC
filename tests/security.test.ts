@@ -66,10 +66,54 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(3);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(6);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
+    // Surveillance fournisseur : jeton Vault comparé à temps constant + en-tête
+    // dédié, jamais un JWT utilisateur (le job pg_cron n'en a pas).
+    expect(config).toMatch(/\[functions\.vyora-provider-health\][\s\S]*?verify_jwt\s*=\s*false/);
+    const providerHealth = read('supabase/functions/vyora-provider-health/index.ts');
+    expect(providerHealth).toContain("x-vyora-cron");
+    expect(providerHealth).toContain('constantTimeEqual');
+    expect(providerHealth).toContain('vyora_provider_health_cron_token');
+    // Contrôle catalogue uniquement : aucune complétion, donc aucune génération.
+    expect(providerHealth).not.toContain('chat/completions');
+    expect(providerHealth).not.toContain(':generateContent');
+    // Webhook SasPay : appelé par SasPay, donc sans JWT utilisateur. Il s'authentifie
+    // par signature HMAC-SHA256 du corps brut, comparée à temps constant, avec un
+    // secret propre à VYORA et une fenêtre anti-rejeu ; sans secret, tout est refusé.
+    expect(config).toMatch(/\[functions\.vyora-saspay-webhook\][\s\S]*?verify_jwt\s*=\s*false/);
+    const sasPayWebhook = read('supabase/functions/_shared/saspay/webhook.ts');
+    expect(sasPayWebhook).toContain("name: 'HMAC', hash: 'SHA-256'");
+    expect(sasPayWebhook).toContain('timingSafeEqualHex');
+    expect(sasPayWebhook).toContain('WEBHOOK_TOLERANCE_SECONDS');
+    const sasPayHttp = read('supabase/functions/_shared/saspay/http.ts');
+    expect(sasPayHttp).toContain('x-webhook-signature');
+    expect(sasPayHttp).toContain('x-webhook-timestamp');
+    expect(sasPayHttp).toContain('VYORA_SASPAY_WEBHOOK_SECRET');
+    // Le corps est lu brut (texte) avant toute analyse JSON : la signature porte dessus.
+    expect(sasPayHttp).toMatch(/createWebhookHandler[\s\S]*?await request\.text\(\)/);
+    const sasPayService = read('supabase/functions/_shared/saspay/payments.ts');
+    expect(sasPayService).toContain('WEBHOOK_NOT_CONFIGURED');
+    expect(sasPayService).toContain('WEBHOOK_SIGNATURE_INVALID');
+    expect(sasPayService).toContain('verifyWebhookSignature');
+    // Réconciliation planifiée : en-tête dédié contrôlé AVANT toute lecture en base,
+    // puis jeton Vault comparé à temps constant. Ni JWT utilisateur, ni clé de service.
+    expect(config).toMatch(/\[functions\.vyora-payments-reconcile\][\s\S]*?verify_jwt\s*=\s*false/);
+    expect(sasPayHttp).toMatch(/createReconcileHandler[\s\S]*?x-vyora-cron[\s\S]*?payments-reconcile[\s\S]*?isCronToken/);
+    expect(sasPayService).toMatch(/async function isCronToken[\s\S]*?constantTimeEqual\(presented, expected\)/);
+    expect(read('supabase/functions/_shared/saspay/store.ts')).toContain('vyora_payments_reconcile_token');
+    const reconcile = read('supabase/functions/vyora-payments-reconcile/index.ts');
+    expect(reconcile).toContain('createReconcileHandler');
+    // Le jeton n'est écrit nulle part dans le dépôt : il naît dans Vault, à la migration.
+    const reconcileMigration = read('supabase/migrations/20261113110000_vyora_saspay_refunds_reconcile.sql');
+    expect(reconcileMigration).toContain("vault.create_secret(");
+    expect(reconcileMigration).toContain("'vyora_payments_reconcile_token'");
+    expect(reconcileMigration).not.toMatch(/Bearer [0-9a-f]{32,}/);
+    // La clé SasPay est propre à VYORA : aucun repli sur celle d'un autre produit.
+    expect(sasPayHttp).not.toMatch(/get\('SASPAY_SECRET_KEY'\)/);
+    expect(sasPayHttp).not.toMatch(/get\('SASPAY_WEBHOOK_SECRET'\)/);
     const worker = read('supabase/functions/reelora-video-worker/index.ts');
     expect(worker).toContain('constantTimeEqual');
     expect(worker).toContain('reelora_worker_token');
@@ -103,9 +147,15 @@ describe('Video Studio : frontière des secrets et espaces non opérationnels', 
   });
   it('la navigation marque explicitement les espaces préparés', () => {
     const sections = read('src/studio/sections.ts');
+    // Ce qui n'a pas de moteur reste explicitement préparé, jamais présenté
+    // comme générable ; la fiche dédiée porte le libellé « non opérationnel ».
     expect(sections).toContain("status: 'prepared'");
-    expect(sections).toContain('non opérationnel');
+    expect(read('src/studio/components/PreparedSpace.tsx')).toContain('non opérationnel');
+    // …et Video→Video n'est plus présenté comme verrouillé : il route vers le
+    // Studio réel (import vidéo source + devis serveur).
     expect(sections).toContain("id: 'video-to-video'");
+    expect(sections).toMatch(/id: 'video-to-video'[\s\S]{0,200}status: 'live'/);
+    expect(sections).not.toMatch(/id: 'video-to-video'[\s\S]{0,200}status: 'prepared'/);
   });
 });
 

@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight, ArrowUpRight, BadgeCheck, Brain, Check, Clapperboard, Coins, Database,
   Gauge, Layers3, LockKeyhole, Play, ShieldCheck, Sparkles, TrendingUp, Users, Wand2, Zap,
 } from 'lucide-react';
-import { listPlans } from '../lib/api';
-import { formatMoney } from '../lib/format';
-import type { Plan } from '../lib/types';
 import { BrandLockup } from '../components/Brand';
-import { LoadingState, cn } from '../components/ui';
+import { cn } from '../components/ui';
 
 const DIMENSIONS = [
   {
@@ -51,6 +48,37 @@ const STEPS = [
   { n: '04', title: 'Mesurez et ajustez', text: 'Suivez vos résultats, vos prospects et vos actions, puis adaptez la stratégie.' },
 ];
 
+const PAINS = [
+  {
+    key: 'business',
+    eyebrow: 'Business Grow',
+    accent: 'violet' as const,
+    title: 'Votre activité avance, mais vous n’avez pas le temps de la piloter.',
+    intro: 'Les décisions importantes se prennent trop souvent sans vision claire de l’ensemble.',
+    items: [
+      { pain: 'Suivre et organiser les activités devient un travail à part entière.', fix: 'L’assistant Business Grow analyse vos données et structure un plan d’action priorisé, avec des jalons concrets.' },
+      { pain: 'Les performances restent invisibles entre deux imprévus.', fix: 'Le tableau de bord Croissance réunit objectifs, prospects et opportunités en un seul lieu de travail.' },
+      { pain: 'Les relances, les impayés et les litiges commerciaux se perdent.', fix: 'L’assistant structure le suivi des encaissements, des relances et des litiges, étape par étape.' },
+      { pain: 'Des opportunités commerciales passent entre les mailles.', fix: 'Le CRM intégré fait remonter les prospects et les opportunités avant qu’ils n’échappent à votre contrôle.' },
+      { pain: 'Décider sans données, c’est risquer de se tromper de priorité.', fix: 'Chaque recommandation s’appuie sur le contexte réel de votre entreprise : offre, marché, produits.' },
+    ],
+  },
+  {
+    key: 'studio',
+    eyebrow: 'Studio UGC',
+    accent: 'cyan' as const,
+    title: 'Produire du contenu régulier coûte trop cher et prend trop de temps.',
+    intro: 'Entre le script, les scènes, la génération et le montage, chaque vidéo devient un projet d’équipe.',
+    items: [
+      { pain: 'Écrire des scripts qui sonnent naturels prend des heures.', fix: 'L’IA rédige des scripts UGC structurés : accroche, scènes, texte dit, sous-titres et appel à l’action.' },
+      { pain: 'La production vidéo suppose d’enchaîner des dizaines d’outils.', fix: 'Un seul studio : brief, script, catalogue vidéo vérifié, génération suivie et montage.' },
+      { pain: 'Chaque génération est un risque budgétaire en aveugle.', fix: 'Le devis fournisseur est vérifié côté serveur avant toute réservation : aucun coût surprise.' },
+      { pain: 'Les productions s’accumulent sans organisation.', fix: 'Chaque projet garde son fil : scripts versionnés, bibliothèque privée, historique complet.' },
+      { pain: 'Garder un rythme de publication régulier est le premier challenge.', fix: 'Les scripts, hooks et visuels se préparent en minutes, pas en jours.' },
+    ],
+  },
+];
+
 const FAQ = [
   { q: 'VYORA génère-t-il réellement des vidéos ?', a: 'Oui. Les créations finalisées sont enregistrées dans votre bibliothèque privée. Le lecteur ne s’affiche qu’une fois le fichier vidéo réellement disponible.' },
   { q: 'Comment le devis fonctionne-t-il ?', a: 'Le devis est calculé côté serveur. Pour les modèles à tarification dynamique, VYORA interroge l’endpoint de devis officiel du fournisseur et affiche le montant exact en USD. Si ce montant ne peut pas être vérifié, le devis est indiqué comme indisponible : aucun prix n’est inventé.' },
@@ -61,28 +89,85 @@ const FAQ = [
 
 const TRUST = ['Un compte, deux espaces', 'Devis vérifié avant génération', 'Clés API côté serveur'];
 
-export default function Landing() {
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [plansLoading, setPlansLoading] = useState(true);
-  const [plansError, setPlansError] = useState('');
-  const [openFaq, setOpenFaq] = useState<number | null>(0);
+/* B3 — Hero 3D (react-three/fiber) : chargé en lazy (chunk three.js séparé),
+   avec repli systématique sur l'image statique si WebGL est absent, si le
+   mouvement est réduit (accessibilité), ou si la scène échoue. */
+const HeroScene = lazy(() => import('../components/HeroScene'));
 
-  const loadPlans = useCallback(() => {
-    setPlansLoading(true);
-    setPlansError('');
-    return listPlans()
-      .then((p) => setPlans(p))
-      .catch(() => {
-        setPlans([]);
-        setPlansError('Les formules ne peuvent pas être chargées pour le moment.');
-      })
-      .finally(() => setPlansLoading(false));
+class HeroSceneBoundary extends Component<{
+  onFail: () => void;
+  fallback: ReactNode;
+  children: ReactNode;
+}, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onFail(); }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+
+const HERO_HEIGHT_CLASSES = 'h-[380px] w-full sm:h-[440px] lg:h-[560px]';
+
+function HeroVisual() {
+  const [webgl, setWebgl] = useState(true);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [sceneFailed, setSceneFailed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      setWebgl(Boolean(canvas.getContext('webgl2') ?? canvas.getContext('webgl')));
+    } catch {
+      setWebgl(false);
+    }
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReducedMotion(mq.matches);
+    const onChange = (event: MediaQueryListEvent) => setReducedMotion(event.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  useEffect(() => { void loadPlans(); }, [loadPlans]);
+  const staticImage = (
+    <img
+      src="/brand/vyora-hero.jpg"
+      alt="Direction artistique VYORA : lumière, matière et profondeur"
+      className={cn('object-cover object-center', HERO_HEIGHT_CLASSES)}
+    />
+  );
+
+  if (!webgl || reducedMotion || sceneFailed) return staticImage;
+
+  // L'image sert de fond pendant le chargement du chunk 3D et reste visible
+  // derrière la scène (canvas transparent) : l'aurora flotte sur la DA.
+  return (
+    <div className={`relative ${HERO_HEIGHT_CLASSES}`}>
+      <img
+        src="/brand/vyora-hero.jpg"
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full object-cover object-center"
+      />
+      <HeroSceneBoundary onFail={() => setSceneFailed(true)} fallback={staticImage}>
+        <Suspense fallback={null}>
+          <HeroScene />
+        </Suspense>
+      </HeroSceneBoundary>
+    </div>
+  );
+}
+
+export default function Landing() {
+  const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   return (
     <div className="relative min-h-screen overflow-hidden">
+      <a
+        href="#contenu"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-cyan-400 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-[#03131a]"
+      >
+        Aller au contenu
+      </a>
+
       {/* Nav */}
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#05080e]/70 backdrop-blur-2xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
@@ -93,7 +178,7 @@ export default function Landing() {
             <a href="#dimensions" className="transition hover:text-white">Les deux espaces</a>
             <a href="#fonctionnalites" className="transition hover:text-white">Fonctionnalités</a>
             <a href="#workflow" className="transition hover:text-white">Comment ça marche</a>
-            <a href="#tarifs" className="transition hover:text-white">Tarifs</a>
+            <a href="#defis" className="transition hover:text-white">Défis résolus</a>
             <a href="#faq" className="transition hover:text-white">FAQ</a>
           </nav>
           <div className="ml-auto flex items-center gap-2">
@@ -140,11 +225,7 @@ export default function Landing() {
             <div className="relative mx-auto w-full max-w-xl lg:max-w-none">
               <div aria-hidden="true" className="absolute -inset-6 rounded-[2.5rem] bg-gradient-to-br from-cyan-400/15 via-transparent to-violet-500/20 blur-2xl" />
               <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#080d15] shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]">
-                <img
-                  src="/brand/vyora-hero.jpg"
-                  alt="Direction artistique VYORA : lumière, matière et profondeur"
-                  className="h-[380px] w-full object-cover object-center sm:h-[440px] lg:h-[560px]"
-                />
+                <HeroVisual />
                 <div aria-hidden="true" className="absolute inset-0 bg-[linear-gradient(to_top,rgba(5,8,14,0.94),rgba(5,8,14,0.18)_58%,rgba(5,8,14,0.28))]" />
                 <span className="absolute right-4 top-4 rounded-full border border-white/15 bg-[#05080e]/75 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white backdrop-blur">
                   Créer · Développer
@@ -354,47 +435,40 @@ export default function Landing() {
         </section>
 
         {/* ---------------------------------------------------------------- */}
-        {/* Pricing                                                           */}
+        {/* Défis résolus (les vrais problèmes des utilisateurs)             */}
         {/* ---------------------------------------------------------------- */}
-        <section id="tarifs" className="mx-auto max-w-7xl scroll-mt-24 px-4 py-16 sm:px-6 sm:py-24">
-          <div className="mx-auto max-w-2xl text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-cyan-200">Tarifs</p>
-            <h2 className="vyora-display mt-3 text-3xl text-white sm:text-4xl">Des formules adaptées à votre cadence</h2>
-            <p className="mt-3 text-sm text-slate-400">Les formules et quotas ci-dessous proviennent directement de la base de données VYORA.</p>
-          </div>
-          {plansLoading && <LoadingState label="Chargement des formules…" />}
-          {!plansLoading && plansError && (
-            <div className="mx-auto mt-10 max-w-md rounded-2xl border border-rose-400/25 bg-rose-400/[0.06] p-4 text-center">
-              <p className="text-sm text-rose-100">{plansError}</p>
-              <button type="button" onClick={() => { void loadPlans(); }} className="btn btn-outline btn-sm mt-3">Réessayer</button>
+        <section id="defis" className="relative scroll-mt-24 border-y border-white/[0.06] bg-[#060a11] py-16 sm:py-24">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6">
+            <div className="mx-auto max-w-2xl text-center">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-violet-200">Les défis que vous connaissez</p>
+              <h2 className="vyora-display mt-3 text-3xl text-white sm:text-4xl">Chaque jour, les mêmes obstacles</h2>
+              <p className="mt-3 text-sm leading-relaxed text-slate-400">VYORA est construit pour les résoudre — pas pour vous en donner une autre liste de fonctionnalités.</p>
             </div>
-          )}
-          {!plansLoading && !plansError && plans.length === 0 && (
-            <p className="mt-10 text-center text-sm text-slate-400">Les formules seront affichées dès que le catalogue sera disponible.</p>
-          )}
-          <div className="mt-11 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {plans.map((plan) => {
-              const highlighted = plan.plan_key === 'studio';
-              return (
-                <article key={plan.plan_key} className={cn('vyora-card flex flex-col p-6', highlighted && 'border-cyan-300/30 shadow-[0_40px_100px_-60px_rgba(34,211,238,0.55)]')}>
-                  {highlighted && <span className="mb-3 w-fit rounded-full bg-cyan-400/15 px-2.5 py-1 text-[10px] font-semibold text-cyan-100">Le plus choisi</span>}
-                  <h3 className="text-lg font-semibold text-white">{plan.display_name}</h3>
-                  <p className="mt-1 text-xs text-slate-400">{(plan.tagline ?? '').replace(/\bReelora\b/gi, 'VYORA')}</p>
-                  <p className="mt-5 text-2xl font-semibold text-white">{formatMoney(plan.monthly_price_minor, plan.currency)}<span className="text-sm font-normal text-slate-500"> / mois</span></p>
-                  <ul className="mt-5 flex-1 space-y-2.5">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-start gap-2 text-xs text-slate-300">
-                        <Check size={14} className="mt-0.5 shrink-0 text-emerald-400" /> {feature.replace(/\bReelora\b/gi, 'VYORA')}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-xs text-slate-400">
-                    {plan.max_projects} projets · {plan.max_videos_per_month} vidéos/mois · {plan.max_scripts_per_month} scripts/mois
-                  </div>
-                  <Link to="/inscription" className={cn('btn btn-md mt-4 w-full', highlighted ? 'btn-primary' : 'btn-outline')}>Choisir {plan.display_name}</Link>
-                </article>
-              );
-            })}
+            <div className="mt-11 grid gap-4 lg:grid-cols-2">
+              {PAINS.map((block) => {
+                const violet = block.accent === 'violet';
+                return (
+                  <article key={block.key} className="vyora-card p-6 sm:p-7">
+                    <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em]',
+                      violet ? 'border-violet-300/25 bg-violet-400/10 text-violet-100' : 'border-cyan-300/25 bg-cyan-400/10 text-cyan-100')}>
+                      {violet ? <Brain size={12} /> : <Clapperboard size={12} />} {block.eyebrow}
+                    </span>
+                    <h3 className="vyora-display mt-4 text-xl text-white">{block.title}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-400">{block.intro}</p>
+                    <ul className="mt-5 space-y-3">
+                      {block.items.map((item) => (
+                        <li key={item.pain} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5">
+                          <p className="text-[13px] font-medium text-slate-200">{item.pain}</p>
+                          <p className={cn('mt-1.5 flex items-start gap-2 text-xs leading-relaxed', violet ? 'text-violet-100/80' : 'text-cyan-100/80')}>
+                            <Check size={13} className="mt-0.5 shrink-0" /> {item.fix}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </article>
+                );
+              })}
+            </div>
           </div>
         </section>
 

@@ -67,6 +67,10 @@ describe('Reelora AI ↔ Platform contracts', () => {
       cta: 'Découvre le sérum maintenant',
       preferredRatio: '9:16',
       suggestedSector: 'cosmetique',
+      productId: null,
+      projectId: null,
+      projectTitle: null,
+      platform: null,
       consumesStudioCredits: false,
     });
 

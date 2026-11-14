@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  ArrowUpRight, Building2, Check, Download, ExternalLink, FileText, Lightbulb, Package,
+  ArrowUpRight, Building2, Check, Clapperboard, Download, ExternalLink, FileText, Lightbulb, Package,
   Pencil, Plus, RefreshCw, Search, Target, Trash2, TrendingUp, Upload, Users, X, Link2,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { createProduct, deleteProduct, listProducts, updateProduct } from '../../lib/api';
+import { buildStudioLocationStateFromBrief } from '../../contracts/business-grow';
 import type { Product, Workspace } from '../../lib/types';
 import {
   EMPTY_COMPANY_PROFILE, GROWTH_CATEGORY, PROSPECT_STAGES, formatGrowthAmount, goalProgress,
@@ -416,11 +418,6 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
     if (created > 0 && failures.length === 0) { setImportOpen(false); setImportText(''); }
   };
 
-  const totalValue = products.reduce((sum, product) => {
-    const amount = Number(product.price_amount ?? 0);
-    return sum + (Number.isFinite(amount) ? amount : 0);
-  }, 0);
-
   return (
     <div className="space-y-4" data-testid="growth-catalog">
       <section className="vyora-card p-5">
@@ -428,7 +425,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">Catalogue</p>
             <h2 className="mt-1 font-display text-xl font-semibold text-white">Vos produits et offres</h2>
-            <p className="mt-1 text-xs text-slate-400">{products.length} produit(s) · valeur cumulée affichée {formatGrowthAmount(totalValue, products[0]?.price_currency ?? 'XOF')}</p>
+            <p className="mt-1 text-xs text-slate-400">{products.length} produit(s) · prix individuels indiqués ci-dessous</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" icon={<RefreshCw size={13} />} onClick={() => void load()} disabled={loading}>Actualiser</Button>
@@ -472,7 +469,7 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
                   <p className="truncate text-sm font-semibold text-white">{product.name}</p>
                   <p className="mt-0.5 text-[11px] text-slate-500">
                     {product.price_amount !== null && product.price_amount !== undefined
-                      ? formatGrowthAmount(Number(product.price_amount), product.price_currency ?? 'XOF')
+                      ? formatGrowthAmount(Number(product.price_amount), product.price_currency ?? '')
                       : 'Prix non renseigné'}
                   </p>
                 </div>
@@ -492,6 +489,20 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
                   <ExternalLink size={10} /> Voir la fiche produit
                 </a>
               )}
+              <Link
+                to="/app/studio"
+                state={buildStudioLocationStateFromBrief({
+                  productId: product.id,
+                  product: product.name,
+                  summary: product.description ?? '',
+                  angle: (product.key_benefits ?? []).slice(0, 3).join(' · '),
+                  brandName: product.name,
+                }) ?? undefined}
+                className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/[0.06] px-2 py-1.5 text-[10px] font-medium text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.12]"
+                data-testid={`catalog-to-studio-${product.id}`}
+              >
+                <Clapperboard size={11} /> Créer la vidéo UGC de ce produit
+              </Link>
             </article>
           ))}
         </div>
@@ -554,8 +565,8 @@ export function MarketPanel({
 
   const saveSignal = async () => {
     if (!signalForm.title.trim()) { toast.warning('Le titre du signal est obligatoire.'); return; }
-    const value = signalForm.metricValue.trim() === '' ? 0 : Number(signalForm.metricValue);
-    if (!Number.isFinite(value)) { toast.warning('Valeur de performance invalide.'); return; }
+    const value = signalForm.metricValue.trim() === '' ? null : Number(signalForm.metricValue);
+    if (value !== null && (!Number.isFinite(value) || value < 0 || value > 1_000_000_000_000)) { toast.warning('Valeur de performance invalide.'); return; }
     setSaving(true);
     try {
       await onPut(GROWTH_CATEGORY.signal, { ...signalForm, title: signalForm.title.trim(), metricValue: value }, editingSignal?.id ?? null);
@@ -636,12 +647,12 @@ export function MarketPanel({
                     {signal.observedAt && <span className="text-[10px] text-slate-600">{signal.observedAt}</span>}
                   </div>
                   <p className="mt-1 text-sm font-medium text-white">{signal.title}</p>
-                  {signal.metricLabel && <p className="mt-0.5 text-[11px] text-slate-400">{signal.metricLabel} : <strong className="text-slate-200">{signal.metricValue}</strong></p>}
+                  {signal.metricLabel && <p className="mt-0.5 text-[11px] text-slate-400">{signal.metricLabel} : <strong className="text-slate-200">{signal.metricValue ?? '—'}</strong></p>}
                   {signal.notes && <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">{signal.notes}</p>}
                   {signal.url && <a href={signal.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[10px] text-cyan-200">Ouvrir la source <ArrowUpRight size={10} /></a>}
                 </div>
                 <div className="flex gap-1">
-                  <Button size="sm" variant="ghost" aria-label={`Modifier ${signal.title}`} onClick={() => { setEditingSignal(signal); setSignalForm({ title: signal.title, kind: signal.kind, platform: signal.platform, url: signal.url, metricLabel: signal.metricLabel, metricValue: String(signal.metricValue), observedAt: signal.observedAt, notes: signal.notes }); setSignalModal(true); }}><Pencil size={11} /></Button>
+                  <Button size="sm" variant="ghost" aria-label={`Modifier ${signal.title}`} onClick={() => { setEditingSignal(signal); setSignalForm({ title: signal.title, kind: signal.kind, platform: signal.platform, url: signal.url, metricLabel: signal.metricLabel, metricValue: signal.metricValue === null ? '' : String(signal.metricValue), observedAt: signal.observedAt, notes: signal.notes }); setSignalModal(true); }}><Pencil size={11} /></Button>
                   <Button size="sm" variant="ghost" aria-label={`Supprimer ${signal.title}`} onClick={() => void remove(signal.id, signal.title)}><Trash2 size={11} /></Button>
                 </div>
               </article>
@@ -716,7 +727,7 @@ export function CrmPanel({
     setEditing(prospect ?? null);
     setForm(prospect ? {
       name: prospect.name, company: prospect.company, email: prospect.email, phone: prospect.phone,
-      stage: prospect.stage, value: String(prospect.value || ''), currency: prospect.currency,
+      stage: prospect.stage, value: prospect.value === null ? '' : String(prospect.value), currency: prospect.currency,
       nextAction: prospect.nextAction, nextActionAt: prospect.nextActionAt, notes: prospect.notes,
     } : EMPTY_PROSPECT);
     setModal(true);
@@ -725,12 +736,15 @@ export function CrmPanel({
   const payload = (source: ProspectForm) => ({
     name: source.name.trim(), company: source.company.trim(), email: source.email.trim(),
     phone: source.phone.trim(), stage: source.stage,
-    value: Math.max(0, Number(source.value) || 0), currency: source.currency.toUpperCase(),
+    value: source.value.trim() === '' ? null : Number(source.value), currency: source.currency.trim().toUpperCase(),
     nextAction: source.nextAction.trim(), nextActionAt: source.nextActionAt, notes: source.notes.trim(),
   });
 
   const save = async () => {
     if (!form.name.trim() && !form.company.trim()) { toast.warning('Renseignez au moins un nom ou une entreprise.'); return; }
+    if (form.value.trim() && (!Number.isFinite(Number(form.value)) || Number(form.value) < 0 || Number(form.value) > 1_000_000_000_000 || !/^[A-Z]{3}$/.test(form.currency.trim().toUpperCase()))) {
+      toast.warning('Renseignez un montant valide et une devise à trois lettres.'); return;
+    }
     setSaving(true);
     try {
       await onPut(GROWTH_CATEGORY.prospect, payload(form), editing?.id ?? null);
@@ -757,15 +771,15 @@ export function CrmPanel({
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-200">Prospects & opportunités</p>
             <h2 className="mt-1 font-display text-xl font-semibold text-white">Votre pipeline commercial</h2>
-            <p className="mt-1 text-xs text-slate-400">Les montants affichés sont ceux que vous avez saisis, dans leur devise d’origine.</p>
+            <p className="mt-1 text-xs text-slate-400">Les montants sont affichés dans leur devise d’origine. Les totaux restent inconnus si des valeurs manquent ou si les devises diffèrent.</p>
           </div>
           <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => openForm()} disabled={busy}>Nouveau prospect</Button>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[
-            ['Pipeline ouvert', formatGrowthAmount(summary.openValue, prospects[0]?.currency ?? 'XOF')],
+            ['Pipeline ouvert', formatGrowthAmount(summary.openValue, summary.openCurrency ?? '')],
             ['Opportunités ouvertes', String(summary.openCount)],
-            ['Gagné', formatGrowthAmount(summary.wonValue, prospects[0]?.currency ?? 'XOF')],
+            ['Gagné', formatGrowthAmount(summary.wonValue, summary.wonCurrency ?? '')],
             ['Total prospects', String(summary.totalCount)],
           ].map(([label, value]) => (
             <div key={label} className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
@@ -801,7 +815,7 @@ export function CrmPanel({
                   </div>
                   <span className={cn('shrink-0 text-[10px] font-semibold', stage?.tone)}>{stage?.label}</span>
                 </div>
-                <p className="mt-2 text-sm font-semibold text-white">{prospect.value > 0 ? formatGrowthAmount(prospect.value, prospect.currency) : 'Montant non renseigné'}</p>
+                <p className="mt-2 text-sm font-semibold text-white">{prospect.value !== null ? formatGrowthAmount(prospect.value, prospect.currency) : 'Montant non renseigné'}</p>
                 {prospect.nextAction && (
                   <p className="mt-1.5 rounded-lg border border-white/[0.06] bg-black/20 px-2 py-1.5 text-[10px] text-slate-300">
                     <span className="text-slate-500">Prochaine action : </span>{prospect.nextAction}

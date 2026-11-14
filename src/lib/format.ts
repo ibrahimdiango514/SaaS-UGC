@@ -40,6 +40,7 @@ export const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Annulé', archived: 'Archivé', approved: 'Approuvé', superseded: 'Remplacé',
   active: 'Actif', inactive: 'Inactif', suspended: 'Suspendu', pending: 'En attente',
   pending_payment: 'Paiement en attente', paid: 'Payé', ready: 'Prêt',
+  todo: 'À effectuer', confirmed: 'Confirmé', refunded: 'Remboursé',
 };
 
 export const STATUS_TONES: Record<string, string> = {
@@ -48,7 +49,21 @@ export const STATUS_TONES: Record<string, string> = {
   pending_payment: 'warning', completed: 'success', succeeded: 'success', approved: 'success',
   paid: 'success', active: 'success', ready: 'success',
   failed: 'danger', cancelled: 'danger', suspended: 'danger',
+  todo: 'neutral', confirmed: 'success', refunded: 'neutral',
 };
+
+/** Opérations du grand livre de crédits, en clair. */
+export const LEDGER_OPERATION_LABELS: Record<string, string> = {
+  recharge: 'Achat de crédits', purchase: 'Achat de crédits', topup: 'Achat de crédits',
+  refund: 'Remboursement', reserve: 'Réservation', release: 'Restitution', capture: 'Consommation',
+  consume: 'Consommation', signup_bonus: 'Crédits de bienvenue', bonus: 'Crédits offerts',
+  promo: 'Code promotionnel', admin_adjustment: 'Ajustement', adjustment: 'Ajustement',
+  monthly_grant: 'Dotation mensuelle', expiration: 'Expiration',
+};
+
+export function ledgerOperationLabel(type: string | null | undefined): string {
+  return LEDGER_OPERATION_LABELS[type ?? ''] ?? type ?? '—';
+}
 
 export function statusLabel(status: string | null | undefined): string {
   return STATUS_LABELS[status ?? ''] ?? status ?? '—';

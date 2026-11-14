@@ -31,19 +31,27 @@ beforeEach(() => { window.history.pushState({}, '', '/'); });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('parcours public', () => {
-  it('affiche la page d’accueil en français avec les formules issues de la base', async () => {
+  it('affiche la page d’accueil en français, sans abonnements non commercialisés', async () => {
     render(<App />);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Vos idées prennent forme');
     expect(screen.getByText('Fonctionnalités')).toBeTruthy();
-    await waitFor(() => expect(screen.getByText('Découverte')).toBeTruthy());
-    expect(screen.getByText('Pour découvrir VYORA')).toBeTruthy();
-    expect(screen.getByText('Studio', { selector: 'h3' })).toBeTruthy();
-    expect(screen.getByText('9 crédits offerts')).toBeTruthy();
+    // Les deux espaces sont présentés clairement
+    expect(screen.getByText('VYORA Studio')).toBeTruthy();
+    expect(screen.getByText('VYORA Business')).toBeTruthy();
+    // La section “défis résolus” remplace l’ancienne section Tarifs
+    expect(screen.getByText('Les défis que vous connaissez')).toBeTruthy();
+    expect(screen.getByText('Chaque jour, les mêmes obstacles')).toBeTruthy();
+    // Aucune offre fictive : le système commercial d’abonnements n’est pas
+    // encore lancé → pas de section Tarifs, pas de cartes de formules, pas de
+    // prix ni de bouton d’achat sur la page d’accueil.
+    expect(screen.queryByText('Tarifs')).toBeNull();
+    expect(screen.queryByText('Découverte')).toBeNull();
+    expect(screen.queryByText(/mois/)).toBeNull();
   });
 
   it('navigue vers l’inscription et affiche le formulaire complet', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('link', { name: /Commencer/ }));
+    fireEvent.click(screen.getAllByRole('link', { name: /Créer mon compte/ })[0]);
     await waitFor(() => expect(window.location.pathname).toBe('/inscription'));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte'), { timeout: 5000 });
     expect(screen.getByLabelText('Nom complet')).toBeTruthy();

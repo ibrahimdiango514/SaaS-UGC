@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import BusinessGrow from '../src/business/BusinessGrow';
-import { BusinessGrowApiError } from '../src/business/api';
+import { BusinessGrowApiError, type BusinessIntegrationConnection } from '../src/business/api';
 import type { ReactNode } from 'react';
 import type { Brand, Product } from '../src/lib/types';
 import {
@@ -37,6 +37,23 @@ vi.mock('../src/context/AuthContext', () => ({
   })(),
 }));
 
+/**
+ * Implémentation par défaut de `verifyProvider`, réarmée dans `beforeEach`.
+ * Les `mockResolvedValueOnce` d'un test restent ainsi réservés à ce test : la
+ * sonde automatique de fin de test ne peut plus les consommer.
+ */
+const defaultVerifyProvider = async (providerKey: string) => ({
+  providerKey,
+  modelKey: 'verified-groq-model',
+  status: 'healthy' as const,
+  latencyMs: 38,
+  errorCode: null,
+  availableModels: ['verified-groq-model'],
+});
+const verifyProviderImpl = { current: defaultVerifyProvider };
+/** Préférences de routage réellement servies par le backend mocké. */
+const savedPreferences = { current: [] as Array<Record<string, unknown>> };
+
 const businessMocks = vi.hoisted(() => {
   const state: {
     conversations: Array<{ id: string; title: string; created_at: string; updated_at: string; last_message?: string }>;
@@ -51,7 +68,15 @@ const businessMocks = vi.hoisted(() => {
       request_model_key?: string | null;
     }>;
     memory: { consent: boolean; policyVersion: string | null; profile: Record<string, unknown> | null; items: Array<{ id: string; category: string; content: unknown; created_at: string; updated_at: string }> };
-  } = { conversations: [], messages: [], memory: { consent: false, policyVersion: null, profile: null, items: [] } };
+    agentMemories: Array<{ id: string; category: string; title: string; content: string; confidence: string; created_at?: string | null }>;
+  } = {
+    conversations: [], messages: [],
+    memory: { consent: false, policyVersion: null, profile: null, items: [] },
+    agentMemories: [
+      { id: 'mem-company-1', category: 'company', title: 'Notre entreprise vend des savons artisanaux', content: 'Notre entreprise vend des savons artisanaux à Bamako.', confidence: 'fact', created_at: '2026-11-10T09:00:00Z' },
+      { id: 'mem-decision-1', category: 'decision', title: 'J’ai décidé de cibler les pharmacies', content: 'J’ai décidé de cibler les pharmacies plutôt que les supermarchés.', confidence: 'fact', created_at: '2026-11-11T10:30:00Z' },
+    ],
+  };
   const createdId = '11111111-1111-4111-8111-111111111111';
   return {
     state,
@@ -93,14 +118,7 @@ const businessMocks = vi.hoisted(() => {
     }> => {
       throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
     }),
-    verifyProvider: vi.fn(async (providerKey: string) => ({
-      providerKey,
-      modelKey: 'verified-groq-model',
-      status: 'healthy' as const,
-      latencyMs: 38,
-      errorCode: null,
-      availableModels: ['verified-groq-model'],
-    })),
+    verifyProvider: vi.fn(async (providerKey: string) => verifyProviderImpl.current(providerKey)),
     listModels: vi.fn(async () => ({ models: [], remoteModels: {} })),
     getQuota: vi.fn(async (): Promise<{
       domain: 'business_grow';
@@ -115,13 +133,16 @@ const businessMocks = vi.hoisted(() => {
       reserved_units: 0,
       monthly_allowance: null,
     })),
-    listRequests: vi.fn(async () => ({ requests: [] })),
-    listTools: vi.fn(async () => ({ tools: [] as Array<Record<string, unknown>> })),
+    listRequests: vi.fn(async () => ({ requests: [] as Array<Record<string, unknown>> })),
+    listTools: vi.fn(async (_conversationId?: string | null, _workspaceId?: string | null) => ({ tools: [] as Array<Record<string, unknown>> })),
     resolveTool: vi.fn(async (_id: string, _decision: 'approved' | 'rejected') => ({ status: 'executed' })),
-    listIntegrations: vi.fn(async () => ({ connections: [] })),
+    listIntegrations: vi.fn(async (_workspaceId?: string | null): Promise<{ connections: BusinessIntegrationConnection[] }> => ({ connections: [] })),
+    requestIntegration: vi.fn(async (connectorKey: string, _workspaceId?: string | null) => ({ connectorKey, status: 'pending' })),
+    cancelIntegration: vi.fn(async (connectorKey: string, _workspaceId?: string | null) => ({ connectorKey, cancelled: true })),
+    disconnectIntegration: vi.fn(async (connectorKey: string, _workspaceId?: string | null) => ({ connectorKey, disconnected: true })),
     getRouting: vi.fn(async () => ({ preferences: [] as Array<Record<string, unknown>> })),
     saveRouting: vi.fn(async () => ({ saved: true, id: 'pref-1' })),
-    getMemory: vi.fn(async () => state.memory),
+    getMemory: vi.fn(async (_workspaceId?: string | null) => state.memory),
     setMemoryConsent: vi.fn(async (enabled: boolean) => {
       state.memory = { ...state.memory, consent: enabled, policyVersion: 'business-grow-memory-v1' };
       return { event_id: 1, occurred_at: '2026-01-01T00:00:00Z' };
@@ -129,6 +150,19 @@ const businessMocks = vi.hoisted(() => {
     saveMemoryProfile: vi.fn(async () => ({ saved: true })),
     putMemoryItem: vi.fn(async () => ({ itemId: '22222222-2222-4222-8222-222222222222' })),
     deleteMemoryItem: vi.fn(async () => ({ deleted: true })),
+    listAgentMemories: vi.fn(async () => ({ memories: state.agentMemories })),
+    searchAgentMemories: vi.fn(async (query: string) => ({
+      memories: state.agentMemories.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(query.toLowerCase())),
+    })),
+    forgetAgentMemory: vi.fn(async (id: string) => {
+      const originalLength = state.agentMemories.length;
+      state.agentMemories = state.agentMemories.filter((item) => item.id !== id);
+      return { forgotten: state.agentMemories.length !== originalLength };
+    }),
+    generateReport: undefined as undefined | ReturnType<typeof vi.fn>,
+    listReports: undefined as undefined | ReturnType<typeof vi.fn>,
+    proposeTask: undefined as undefined | ReturnType<typeof vi.fn>,
+    importLegacyMemory: undefined as undefined | ReturnType<typeof vi.fn>,
   };
 });
 
@@ -153,11 +187,18 @@ import App from '../src/App';
 
 beforeEach(() => {
   authMocks.userId = 'business-grow-test-user';
-  authMocks.workspace = null;
+  authMocks.workspace = { id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier Test', country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01' };
   businessMocks.state.conversations = [];
   businessMocks.state.messages = [];
   businessMocks.state.memory = { consent: false, policyVersion: null, profile: null, items: [] };
+  businessMocks.state.agentMemories = [
+    { id: 'mem-company-1', category: 'company', title: 'Notre entreprise vend des savons artisanaux', content: 'Notre entreprise vend des savons artisanaux à Bamako.', confidence: 'fact', created_at: '2026-11-10T09:00:00Z' },
+    { id: 'mem-decision-1', category: 'decision', title: 'J’ai décidé de cibler les pharmacies', content: 'J’ai décidé de cibler les pharmacies plutôt que les supermarchés.', confidence: 'fact', created_at: '2026-11-11T10:30:00Z' },
+  ];
+  businessMocks.generateReport = undefined; businessMocks.listReports = undefined;
+  businessMocks.proposeTask = undefined; businessMocks.importLegacyMemory = undefined;
   vi.clearAllMocks();
+  verifyProviderImpl.current = defaultVerifyProvider;
   businessMocks.getStatus.mockResolvedValue({ providers: [] });
   businessMocks.listModels.mockResolvedValue({ models: [], remoteModels: {} });
   businessMocks.getQuota.mockResolvedValue({
@@ -169,12 +210,21 @@ beforeEach(() => {
   });
   businessMocks.listRequests.mockResolvedValue({ requests: [] });
   businessMocks.listTools.mockResolvedValue({ tools: [] });
-  businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
+  businessMocks.resolveTool.mockImplementation(async () => ({ status: 'executed' }));
+  businessMocks.listIntegrations.mockReset().mockResolvedValue({ connections: [] });
+  businessMocks.requestIntegration.mockReset().mockImplementation(async (connectorKey) => ({ connectorKey, status: 'pending' }));
+  businessMocks.cancelIntegration.mockReset().mockImplementation(async (connectorKey) => ({ connectorKey, cancelled: true }));
+  businessMocks.disconnectIntegration.mockReset().mockImplementation(async (connectorKey) => ({ connectorKey, disconnected: true }));
+  savedPreferences.current = [];
+  businessMocks.getRouting.mockImplementation(async () => ({ preferences: savedPreferences.current }));
   businessMocks.listConversations.mockImplementation(async () => ({ conversations: businessMocks.state.conversations }));
   businessMocks.listMessages.mockImplementation(async () => ({ messages: businessMocks.state.messages }));
+  businessMocks.getMemory.mockImplementation(async () => businessMocks.state.memory);
+  businessMocks.sendMessage.mockReset();
   businessMocks.sendMessage.mockImplementation(async () => {
     throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
   });
+  businessMocks.createConversation.mockClear();
   businessMocks.listBrands.mockClear();
   businessMocks.listProducts.mockClear();
 });
@@ -191,7 +241,7 @@ describe('Business Grow', () => {
 
   it('charge le backend sans prétendre disposer d’un service IA', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    expect(await screen.findByText(/Aucun service IA vérifié/)).toBeTruthy();
+    expect(await screen.findByText(/Aucun service IA vérifié n’est actuellement disponible/)).toBeTruthy();
     expect(screen.getByTestId('business-overall-status').textContent).toContain('IA non disponible');
 
     const composer = screen.getByLabelText('Votre demande') as HTMLTextAreaElement;
@@ -199,6 +249,50 @@ describe('Business Grow', () => {
     expect(composer.value).toBe('Rédige une campagne pour mon produit.');
     expect((screen.getByRole('button', { name: 'Envoyer' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByText('Aucune conversation enregistrée')).toBeTruthy();
+  });
+
+  it('prépare une tâche depuis un rapport et attend la confirmation séparée avant de la résoudre', async () => {
+    const conversationId = '33333333-3333-4333-8333-333333333333';
+    const sourceId = '44444444-4444-4444-8444-444444444444';
+    businessMocks.state.conversations = [{ id: conversationId, title: 'Conseil', created_at: '2026-01-01', updated_at: '2026-01-01' }];
+    const report = { type: 'health', period: { from: '2026-10-15', to: '2026-11-13' }, asOf: '2026-11-13',
+      coverage: [{ module: 'Payment Recovery', category: 'bg_module_payment_recovery', count: 1, status: 'available', truncated: false }],
+      metrics: [], recommendations: [{ id: 'invoice:' + sourceId, kind: 'invoice_overdue', module: 'Payment Recovery', priority: 'élevée',
+        problem: 'Facture à vérifier', evidence: ['Retard déclaré'], potentialImpact: 'Montant non garanti', action: 'Préparer un suivi',
+        sourceCategory: 'bg_module_payment_recovery', sourceRecordId: sourceId, facts: {} }], totalRecommendations: 1, warnings: [] };
+    const tools: Array<Record<string, unknown>> = [];
+    businessMocks.generateReport = vi.fn(async () => ({ report, saved: false }));
+    businessMocks.listReports = vi.fn(async () => ({ reports: [] }));
+    businessMocks.listTools.mockImplementation(async () => ({ tools: [...tools] }));
+    businessMocks.proposeTask = vi.fn(async () => {
+      tools.push({ id: 'tool-1', conversation_id: conversationId, request_id: null, tool_name: 'create_follow_up_task',
+        risk_level: 'write_requires_approval', status: 'pending_approval', input_args: { summary: 'Suivre la facture', task: { priority: 'haute', dueDate: '2026-11-13' } }, output_result: {}, created_at: '2026-11-13' });
+      return { id: 'tool-1', status: 'pending_approval' };
+    });
+    businessMocks.resolveTool.mockImplementation(async () => { tools[0].status = 'executed'; tools[0].output_result = { taskId: 'task-1' }; return { status: 'executed' }; });
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /Diagnostics & rapports/ }));
+    expect(await screen.findByText('Facture à vérifier')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Préparer une tâche' }));
+    expect(await screen.findByText('Suivre la facture')).toBeTruthy();
+    expect(businessMocks.resolveTool).not.toHaveBeenCalled();
+    expect(screen.getByText(/La confirmation crée une tâche interne/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer la création' }));
+    await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-1', 'approved', 'workspace-1'));
+    expect(await screen.findByRole('link', { name: 'Voir la tâche' })).toBeTruthy();
+  });
+
+  it('demande une confirmation séparée avant la copie de la mémoire historique', async () => {
+    businessMocks.state.memory = { consent: true, policyVersion: 'v1', profile: null, items: [] };
+    businessMocks.importLegacyMemory = vi.fn(async () => ({ importedItems: 1, importedProfile: false }));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Importer l’ancienne mémoire personnelle' }));
+    expect(businessMocks.importLegacyMemory).not.toHaveBeenCalled();
+    expect(screen.getByText('Confirmer la copie dans l’entreprise active ?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer l’import' }));
+    await waitFor(() => expect(businessMocks.importLegacyMemory).toHaveBeenCalledWith('workspace-1'));
+    expect(await screen.findByText(/1 note\(s\) importée\(s\)/)).toBeTruthy();
   });
 
   it('charge la mémoire consentie et affiche les statuts vérifiables des services IA', async () => {
@@ -282,7 +376,7 @@ describe('Business Grow', () => {
     fireEvent.click(createButton);
 
     expect(await screen.findAllByRole('button', { name: /^Nouvelle conversation$/ })).toHaveLength(2);
-    expect(businessMocks.createConversation).toHaveBeenCalledWith('Nouvelle conversation', null);
+    expect(businessMocks.createConversation).toHaveBeenCalledWith('Nouvelle conversation', 'workspace-1');
   });
 
   it('charge les messages de la conversation sélectionnée', async () => {
@@ -305,7 +399,107 @@ describe('Business Grow', () => {
     expect(await screen.findByText('Message A')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Campagne B/ }));
     expect(await screen.findByText('Message B')).toBeTruthy();
-    expect(businessMocks.listMessages).toHaveBeenCalledWith(second);
+    expect(businessMocks.listMessages).toHaveBeenCalledWith(second, 'workspace-1');
+  });
+
+  it('garde les messages lorsqu’on reclique la conversation déjà sélectionnée', async () => {
+    const id = '33333333-3333-4333-8333-333333333333';
+    businessMocks.state.conversations = [{ id, title: 'Conversation active', created_at: '2026-01-01', updated_at: '2026-01-01' }];
+    businessMocks.state.messages = [{ id: 'm', author_role: 'assistant', content: 'Message conservé', created_at: '2026-01-01' }];
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText('Message conservé')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation active' }));
+    expect(screen.getByText('Message conservé')).toBeTruthy();
+  });
+
+  it('la réponse tardive d’un envoi ne doit pas annuler le chargement de la conversation sélectionnée entre-temps', async () => {
+    const first = '33333333-3333-4333-8333-333333333333';
+    const second = '44444444-4444-4444-8444-444444444444';
+    businessMocks.state.conversations = [
+      { id: first, title: 'Conversation A', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: second, title: 'Conversation B', created_at: '2026-01-02', updated_at: '2026-01-02' },
+    ];
+    let finishSend!: (value: { requestId: string; inputMessageId: string; status: string; providerAvailable: boolean }) => void;
+    let finishSecond!: (value: { messages: typeof businessMocks.state.messages }) => void;
+    businessMocks.sendMessage.mockImplementation(async () => new Promise((resolve) => { finishSend = resolve; }));
+    businessMocks.listMessages.mockImplementation(async (conversationId?: string) => conversationId === second
+      ? new Promise((resolve) => { finishSecond = resolve; })
+      : { messages: [{ id: 'a', author_role: 'assistant', content: 'Contenu A', created_at: '2026-01-01' }] });
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByText('Contenu A');
+    fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Question A' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+    await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Conversation B' }));
+    await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(second, 'workspace-1'));
+    await act(async () => { finishSend({ requestId: 'r', inputMessageId: 'm', status: 'succeeded', providerAvailable: true }); });
+    await act(async () => { finishSecond({ messages: [{ id: 'b', author_role: 'assistant', content: 'Contenu B attendu', created_at: '2026-01-02' }] }); });
+    expect(await screen.findByText('Contenu B attendu')).toBeTruthy();
+    expect(screen.queryByText('Contenu A')).toBeNull();
+  });
+
+  it('ne conserve pas un brouillon à renvoyer si le message a été envoyé mais que le rafraîchissement échoue', async () => {
+    const id = '33333333-3333-4333-8333-333333333333';
+    businessMocks.state.conversations = [{ id, title: 'Conversation A', created_at: '2026-01-01', updated_at: '2026-01-01' }];
+    businessMocks.listMessages.mockResolvedValueOnce({ messages: [] }).mockRejectedValue(new Error('historique indisponible'));
+    businessMocks.sendMessage.mockResolvedValue({ requestId: 'r', inputMessageId: 'm', status: 'succeeded', providerAvailable: true });
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Conversation A' });
+    await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(id, 'workspace-1'));
+    const draft = screen.getByLabelText('Votre demande') as HTMLTextAreaElement;
+    fireEvent.change(draft, { target: { value: 'Message envoyé une seule fois' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
+    expect(await screen.findByText(/message envoyé.*historique/i)).toBeTruthy();
+    expect(draft.value).toBe('');
+    expect(businessMocks.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('distingue une mémoire inaccessible d’une mémoire désactivée', async () => {
+    businessMocks.getMemory.mockRejectedValue(new Error('Lecture mémoire indisponible'));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    expect(await screen.findByText('Lecture mémoire indisponible')).toBeTruthy();
+    expect(screen.getByText(/État de la mémoire indisponible/)).toBeTruthy();
+    expect(screen.queryByRole('switch')).toBeNull();
+    expect(screen.queryByText('La mémoire est désactivée et reste vide.')).toBeNull();
+  });
+
+  it('ignore la mémoire chargée tardivement après changement d’entreprise', async () => {
+    let finishOld!: (value: typeof businessMocks.state.memory) => void;
+    businessMocks.getMemory.mockImplementation(async (workspaceId?: string | null) => workspaceId === 'workspace-1'
+      ? new Promise((resolve) => { finishOld = resolve; })
+      : { consent: true, policyVersion: 'v1', profile: null, items: [{ id: 'b', category: 'business_context', content: { text: 'Note entreprise B' }, created_at: '2026-01-01', updated_at: '2026-01-01' }] });
+    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    await waitFor(() => expect(businessMocks.getMemory).toHaveBeenCalledWith('workspace-1'));
+    authMocks.workspace = { ...authMocks.workspace!, id: 'workspace-2', name: 'Entreprise B' };
+    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    expect(await screen.findByText('Note entreprise B')).toBeTruthy();
+    await act(async () => { finishOld({ consent: true, policyVersion: 'v1', profile: null, items: [{ id: 'a', category: 'business_context', content: { text: 'Secret entreprise A' }, created_at: '2026-01-01', updated_at: '2026-01-01' }] }); });
+    expect(screen.queryByText('Secret entreprise A')).toBeNull();
+    expect(screen.getByText('Note entreprise B')).toBeTruthy();
+  });
+
+  it('écarte les propositions d’une conversation précédente arrivées après la sélection', async () => {
+    const a = '33333333-3333-4333-8333-333333333333', b = '44444444-4444-4444-8444-444444444444';
+    businessMocks.state.conversations = [
+      { id: a, title: 'Outils A', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      { id: b, title: 'Outils B', created_at: '2026-01-02', updated_at: '2026-01-02' },
+    ];
+    let finishA!: (value: { tools: Array<Record<string, unknown>> }) => void;
+    const proposal = (id: string, title: string, conversationId: string) => ({ id, conversation_id: conversationId, request_id: null, tool_name: 'propose_action_plan',
+      status: 'pending_approval', risk_level: 'write_requires_approval', input_args: { summary: title }, output_result: {}, created_at: '2026-01-01' });
+    businessMocks.listTools.mockImplementation(async (conversationId?: string | null) => conversationId === a
+      ? new Promise((resolve) => { finishA = resolve; })
+      : { tools: [proposal('b', 'Proposition B', b)] });
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Outils A' });
+    await waitFor(() => expect(businessMocks.listTools).toHaveBeenCalledWith(a, 'workspace-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Outils B' }));
+    expect(await screen.findByText('Proposition B')).toBeTruthy();
+    await act(async () => { finishA({ tools: [proposal('a', 'Proposition confidentielle A', a)] }); });
+    expect(screen.queryByText('Proposition confidentielle A')).toBeNull();
+    expect(screen.getByText('Proposition B')).toBeTruthy();
   });
 
   it('ne laisse pas un chargement de messages d’un compte précédent repeupler Business Grow', async () => {
@@ -329,7 +523,7 @@ describe('Business Grow', () => {
 
     const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     await screen.findByRole('button', { name: 'Conversation privée A' });
-    await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(oldConversationId));
+    await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(oldConversationId, 'workspace-1'));
 
     authMocks.userId = 'business-grow-user-2';
     businessMocks.state.conversations = [{
@@ -394,7 +588,13 @@ describe('Business Grow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     expect(await screen.findByText('Aidez-moi à planifier.')).toBeTruthy();
-    expect(await screen.findAllByText('Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.')).toHaveLength(2);
+    // Le statut réel du message persisté reste lisible, sans détail technique.
+    expect(
+      await screen.findAllByText('Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.'),
+    ).toHaveLength(1);
+    // La bannière globale explique l'action réelle à effectuer (contrôle valable 24 h).
+    expect(screen.getByText(/Aucun service IA n’est vérifié pour le moment\. Ouvrez « Services IA »/)).toBeTruthy();
+    expect(screen.queryByText(/NO_VERIFIED_PROVIDER/)).toBeNull();
   });
 
   it('affiche la réponse réellement persistée sans exposer le service utilisé', async () => {
@@ -430,15 +630,42 @@ describe('Business Grow', () => {
     expect(screen.getByTestId('business-message-assistant').textContent).not.toContain('verified-gemini-model');
   });
 
-  it('n’affiche pas le backend comme disponible si Supabase/Edge ne répond pas', async () => {
+  it('affiche un chargement puis un message factuel — jamais « backend non déployé »', async () => {
     businessMocks.getStatus.mockRejectedValue(new Error('Fonction Business Grow introuvable.'));
     businessMocks.listConversations.mockRejectedValue(new Error('Backend indisponible.'));
 
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    expect(await screen.findByText('Backend Business Grow indisponible')).toBeTruthy();
-    expect(screen.getByTestId('business-overall-status').textContent).toContain('Backend en attente');
+    // Le premier appel est en vol : ce n'est pas une panne.
+    expect(screen.getByTestId('business-ai-loading')).toBeTruthy();
+    expect(screen.queryByTestId('business-ai-unavailable')).toBeNull();
+    expect(await screen.findByText('Business Grow ne répond pas pour le moment', undefined, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByTestId('business-overall-status').textContent).toContain('Statut IA indisponible');
+    expect(screen.getByText(/statut des services IA indisponible/i)).toBeTruthy();
+    expect(screen.getByText('Historique indisponible')).toBeTruthy();
+    expect(screen.queryByText('Aucune conversation enregistrée')).toBeNull();
+    expect(screen.queryByText(/aucun service IA vérifié/i)).toBeNull();
     expect((screen.getByRole('button', { name: 'Envoyer' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/Aucune donnée n’est enregistrée localement/)).toBeTruthy();
+    // Aucune cause inventée sur le déploiement.
+    expect(screen.queryByText(/pas déployée|absent ou injoignable|pas encore installé/i)).toBeNull();
+  });
+
+  it('ne confond pas un statut IA non chargé avec une absence de fournisseur', async () => {
+    businessMocks.getStatus.mockRejectedValue(new Error('Réseau indisponible.'));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+
+    expect(await screen.findByText(/statut des services IA indisponible/i)).toBeTruthy();
+    expect(screen.getByTestId('business-overall-status').textContent).toContain('Statut IA indisponible');
+    expect(screen.queryByText(/aucun service IA vérifié/i)).toBeNull();
+    expect(screen.getByText('Aucune conversation enregistrée')).toBeTruthy();
+  });
+
+  it('ne présente pas un historique non chargé comme vide lorsque le statut IA répond', async () => {
+    businessMocks.listConversations.mockRejectedValue(new Error('Réseau indisponible.'));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+
+    expect(await screen.findByText('Historique indisponible')).toBeTruthy();
+    expect(screen.queryByText('Aucune conversation enregistrée')).toBeNull();
+    expect(screen.getByText('Impossible de charger l’historique des conversations. Réessayez.')).toBeTruthy();
   });
 
   it('enregistre et révoque le consentement avant d’afficher les données mémoire', async () => {
@@ -459,8 +686,10 @@ describe('Business Grow', () => {
     expect(await screen.findByDisplayValue(/Lancer une offre/)).toBeTruthy();
     expect(screen.getByText('Produit de lancement')).toBeTruthy();
     fireEvent.click(screen.getByRole('switch', { name: 'Activée' }));
+    expect(businessMocks.setMemoryConsent).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer la désactivation et la suppression' }));
     expect(await screen.findByText('La mémoire est désactivée et reste vide.')).toBeTruthy();
-    expect(businessMocks.setMemoryConsent).toHaveBeenCalledWith(false);
+    expect(businessMocks.setMemoryConsent).toHaveBeenCalledWith(false, 'workspace-1');
   });
 
   it('renomme et supprime réellement une conversation via le backend', async () => {
@@ -475,12 +704,12 @@ describe('Business Grow', () => {
     fireEvent.change(screen.getByLabelText('Nouveau titre de conversation'), { target: { value: 'Nom modifié' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enregistrer le titre' }));
     expect(await screen.findByRole('button', { name: 'Nom modifié' })).toBeTruthy();
-    expect(businessMocks.renameConversation).toHaveBeenCalledWith(id, 'Nom modifié');
+    expect(businessMocks.renameConversation).toHaveBeenCalledWith(id, 'Nom modifié', 'workspace-1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Supprimer la conversation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirmer la suppression' }));
     expect(await screen.findByText('Aucune conversation enregistrée')).toBeTruthy();
-    expect(businessMocks.deleteConversation).toHaveBeenCalledWith(id);
+    expect(businessMocks.deleteConversation).toHaveBeenCalledWith(id, 'workspace-1');
   });
 
   it('enregistre les rôles initiaux comme propositions et aucun fournisseur comme disponible', () => {
@@ -570,7 +799,7 @@ describe('Business Grow', () => {
 
     businessMocks.listTools.mockResolvedValueOnce({ tools: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Approuver' }));
-    await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-handoff-1', 'approved'));
+    await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-handoff-1', 'approved', 'workspace-1'));
   });
 
   it('permet de vérifier un service réel et présente les services en préparation sans les simuler', async () => {
@@ -603,13 +832,88 @@ describe('Business Grow', () => {
     expect(await screen.findByText(/Connexion vérifiée avec succès/)).toBeTruthy();
   });
 
-  it('affiche les intégrations planifiées dans l’onglet Intégrations sans fausse connexion', async () => {
+  it('affiche les intégrations sans fausse connexion et propose une demande d’activation', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
     expect(await screen.findByTestId('business-integrations')).toBeTruthy();
-    expect(screen.getByTestId('connector-facebook').textContent).toContain('Planifié');
-    expect(screen.getByTestId('connector-shopify').textContent).toContain('Planifié');
+    await waitFor(() => expect(screen.getByTestId('connector-facebook').textContent).toContain('Non connecté'));
+    const facebook = screen.getByTestId('connector-facebook').textContent ?? '';
+    expect(facebook).toContain('Non connecté');
+    expect(facebook).toContain('Demander l’activation');
+    expect(facebook).not.toContain('Connecté');
+    expect(screen.getByTestId('connector-shopify').textContent).toContain('Non connecté');
     expect(screen.getByTestId('connector-woocommerce')).toBeTruthy();
+  });
+
+  it('garde les demandes d’intégration dans l’entreprise active et ne prétend pas connecter le service externe', async () => {
+    let rows: BusinessIntegrationConnection[] = [];
+    businessMocks.listIntegrations.mockImplementation(async () => ({ connections: rows }));
+    businessMocks.requestIntegration.mockImplementation(async (connectorKey) => {
+      rows = [{ id: 'pending', workspace_id: 'workspace-1', connector_key: connectorKey, external_account_ref: null, status: 'pending', updated_at: '2026-11-13T00:00:00Z' }];
+      return { connectorKey, status: 'pending' };
+    });
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    const facebook = await screen.findByTestId('connector-facebook');
+    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+    fireEvent.click(within(facebook).getByRole('button', { name: 'Demander l’activation' }));
+    expect(await screen.findByText(/Aucun service externe n’a été connecté/)).toBeTruthy();
+    expect(businessMocks.requestIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
+    expect(businessMocks.listIntegrations).toHaveBeenCalledWith('workspace-1');
+    expect(facebook.textContent).toContain('Demande enregistrée');
+    fireEvent.click(within(facebook).getByRole('button', { name: 'Annuler la demande' }));
+    await waitFor(() => expect(businessMocks.cancelIntegration).toHaveBeenCalledWith('facebook', 'workspace-1'));
+  });
+
+  it('affiche un état inconnu et bloque les actions quand la lecture échoue ou mélange les entreprises', async () => {
+    businessMocks.listIntegrations.mockRejectedValue(new Error('Lecture indisponible'));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    expect(await screen.findByText(/État des intégrations indisponible/)).toBeTruthy();
+    const facebook = screen.getByTestId('connector-facebook');
+    expect(facebook.textContent).toContain('État inconnu');
+    expect(facebook.textContent).not.toContain('Non connecté');
+    expect((within(facebook).getByRole('button', { name: 'Demander l’activation' }) as HTMLButtonElement).disabled).toBe(true);
+    businessMocks.listIntegrations.mockResolvedValueOnce({ connections: [{ id: 'other', workspace_id: 'workspace-2', connector_key: 'facebook', external_account_ref: null, status: 'pending', updated_at: '2026-11-13' }] });
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    expect(await screen.findByText(/Réponse invalide pour cette entreprise/)).toBeTruthy();
+    expect(facebook.textContent).toContain('État inconnu');
+    businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+  });
+
+  it('ne réessaie pas une mutation d’intégration non confirmée et impose une nouvelle lecture', async () => {
+    businessMocks.requestIntegration.mockRejectedValueOnce(new Error('Réponse perdue'));
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    const facebook = await screen.findByTestId('connector-facebook');
+    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+    fireEvent.click(within(facebook).getByRole('button', { name: 'Demander l’activation' }));
+    expect(await screen.findByText(/Opération non confirmée/)).toBeTruthy();
+    expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
+    expect((within(facebook).getByRole('button', { name: 'Demander l’activation' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
+    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+    expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
+  });
+
+  it('distingue la déconnexion locale d’une révocation chez le fournisseur', async () => {
+    let rows: BusinessIntegrationConnection[] = [{ id: 'active', workspace_id: 'workspace-1', connector_key: 'facebook', external_account_ref: 'compte-test', status: 'connected', updated_at: '2026-11-13' }];
+    businessMocks.listIntegrations.mockImplementation(async () => ({ connections: rows }));
+    businessMocks.disconnectIntegration.mockImplementation(async (connectorKey) => {
+      rows = [{ ...rows[0], external_account_ref: null, status: 'disconnected' }];
+      return { connectorKey, disconnected: true };
+    });
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    const facebook = await screen.findByTestId('connector-facebook');
+    const disconnect = await within(facebook).findByRole('button', { name: 'Retirer l’association locale' });
+    fireEvent.click(disconnect);
+    expect(await screen.findByText(/Association locale retirée/)).toBeTruthy();
+    expect(screen.getByText(/révoquez-la également auprès de celui-ci/i)).toBeTruthy();
+    expect(businessMocks.disconnectIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
+    expect(facebook.textContent).toContain('Déconnecté localement');
   });
 
   it('applique le contrat BusinessGrowEntryIntent et permet d’activer le secours auto en routage manuel', async () => {
@@ -648,7 +952,8 @@ describe('Business Grow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
-    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    expect(businessMocks.getRouting.mock.calls.length).toBeGreaterThan(0);
+    const options = businessMocks.sendMessage.mock.calls[0][3];
     expect(options).toMatchObject({
       roleKey: 'action_plan',
       routing: { selectionMode: 'manual', preferredProviderKey: 'groq', allowFallback: true },
@@ -700,11 +1005,12 @@ describe('Business Grow', () => {
     expect(geminiCard.textContent).not.toContain('gemini');
     expect(geminiCard.textContent).not.toContain('gemini-2.5-flash');
 
-    const verifyBtn = groqCard.querySelector('button');
-    if (verifyBtn) fireEvent.click(verifyBtn);
+    // La sonde part désormais automatiquement (aucune action manuelle requise).
+    await waitFor(() => expect(businessMocks.verifyProvider).toHaveBeenCalledWith('groq'));
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Impossible de vérifier la connexion au service IA.');
+    // Le détail technique reste masqué et l'aide affichée est celle du code réel.
     expect(alert.textContent).toContain('contactez le support VYORA');
     expect(alert.textContent).not.toContain('PROVIDER_AUTH_FAILED');
     expect(alert.textContent).not.toContain('Supabase Edge Functions Secrets');
@@ -721,15 +1027,13 @@ describe('Business Grow', () => {
         checked_at: '2026-11-10T18:00:00Z',
       }],
     });
-    businessMocks.getRouting.mockResolvedValueOnce({
-      preferences: [{
-        role_key: 'business_advisor',
-        selection_mode: 'manual',
-        preferred_provider_key: 'gemini',
-        preferred_model_key: 'gemini-2.5-flash',
-        allow_fallback: false,
-      }],
-    });
+    savedPreferences.current = [{
+      role_key: 'business_advisor',
+      selection_mode: 'manual',
+      preferred_provider_key: 'gemini',
+      preferred_model_key: 'gemini-2.5-flash',
+      allow_fallback: false,
+    }];
     businessMocks.sendMessage.mockResolvedValueOnce({
       requestId: 'req-auto-override',
       inputMessageId: 'msg-auto-override',
@@ -741,14 +1045,123 @@ describe('Business Grow', () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
+    // Attendre que la préférence de routage sauvegardée soit réellement chargée :
+    // l'envoi doit refléter l'état serveur, pas une course avec son chargement.
+    fireEvent.click(screen.getByRole('button', { name: /Services IA/ }));
+    expect(await screen.findByTestId('saved-routing-rules')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Assistant/ }));
+
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Priorités du mois.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     await waitFor(() => expect(businessMocks.sendMessage).toHaveBeenCalled());
-    const [, , , options] = businessMocks.sendMessage.mock.calls.at(-1)!;
+    const options = businessMocks.sendMessage.mock.calls[0][3];
     expect(options).toMatchObject({
       roleKey: 'business_advisor',
       routing: { selectionMode: 'auto', allowFallback: true },
     });
+  });
+});
+
+describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
+  it('affiche les éléments mémorisés de l’agent avec leur statut de confiance', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+
+    const memoryPanel = await screen.findByTestId('ai-memory-panel');
+    expect(screen.getByText('Mémoire de l’agent')).toBeTruthy();
+    expect(within(memoryPanel).getByTestId('ai-memory-mem-company-1')).toBeTruthy();
+    expect(within(memoryPanel).getByTestId('ai-memory-mem-decision-1')).toBeTruthy();
+    expect(within(memoryPanel).getByText('Entreprise')).toBeTruthy();
+    expect(within(memoryPanel).getByText('Décision')).toBeTruthy();
+    expect(within(memoryPanel).getAllByText('Vérifié').length).toBeGreaterThanOrEqual(2);
+    expect(within(memoryPanel).getByText('Notre entreprise vend des savons artisanaux')).toBeTruthy();
+  });
+
+  it('efface une mémoire au clic sur « Oublier » (tombstone, la liste se met à jour)', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByTestId('ai-memory-mem-company-1')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Oublier « Notre entreprise vend des savons artisanaux »/ }));
+
+    await waitFor(() => expect(businessMocks.forgetAgentMemory).toHaveBeenCalledWith('mem-company-1'));
+    expect(screen.queryByTestId('ai-memory-mem-company-1')).toBeNull();
+    expect(screen.getByTestId('ai-memory-mem-decision-1')).toBeTruthy();
+  });
+
+  it('recherche dans la mémoire de l’agent et filtre les résultats', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByTestId('ai-memory-mem-company-1')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Rechercher dans la mémoire de l’agent'), { target: { value: 'pharmacies' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rechercher' }));
+
+    await waitFor(() => expect(businessMocks.searchAgentMemories).toHaveBeenCalledWith('pharmacies'));
+    await waitFor(() => expect(screen.queryByTestId('ai-memory-mem-company-1')).toBeNull());
+    expect(screen.getByTestId('ai-memory-mem-decision-1')).toBeTruthy();
+  });
+
+  it('présente l’état vide quand la mémoire est désactivée (consentement off)', async () => {
+    businessMocks.state.agentMemories = [];
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByText('Mémoire désactivée')).toBeTruthy();
+    expect(screen.getByText(/Activez la mémoire pour que VYORA retienne vos déclarations explicites/)).toBeTruthy();
+  });
+
+  it('change le consentement de la mémoire de l’agent (activation)', async () => {
+    businessMocks.state.agentMemories = [];
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    await screen.findByText('Mémoire désactivée');
+
+    const toggle = screen.getByRole('switch');
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(businessMocks.setMemoryConsent).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(screen.queryByText('Mémoire désactivée')).toBeNull());
+  });
+
+  it('affiche les règles de routage sauvegardées et l’activité IA récente', async () => {
+    savedPreferences.current = [{
+      role_key: 'marketing_campaign',
+      selection_mode: 'manual',
+      preferred_provider_key: 'gemini',
+      preferred_model_key: 'gemini-2.5-flash',
+      allow_fallback: false,
+    }];
+    businessMocks.listRequests.mockResolvedValueOnce({ requests: [{
+      id: 'req-ai-1', conversation_id: 'conv-1', role_key: 'business_advisor',
+      provider_key: 'groq', model_key: 'openai/gpt-oss-120b', status: 'succeeded',
+      input_tokens: 120, output_tokens: 340, latency_ms: 850,
+      error_code: null, created_at: '2026-11-12T09:00:00Z',
+    }]});
+
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    await screen.findByTestId('business-grow');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    expect(await screen.findByTestId('ai-routing-panel')).toBeTruthy();
+    expect(await screen.findByTestId('ai-routing-rules')).toBeTruthy();
+    expect(screen.getByTestId('ai-routing-rules').textContent).toContain('marketing_campaign');
+    expect(screen.getByText('Configurer')).toBeTruthy();
+
+    expect(await screen.findByTestId('ai-activity-panel')).toBeTruthy();
+    expect(screen.getByTestId('ai-activity-panel').textContent).toContain('succeeded');
+    expect(screen.getByTestId('ai-activity-panel').textContent).toContain('850 ms');
+    expect(screen.getByTestId('ai-activity-panel').textContent).toContain('120→340 jetons');
   });
 });

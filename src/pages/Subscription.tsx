@@ -5,7 +5,7 @@ import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Banner, Loa
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { asAppError } from '../lib/errors';
-import { formatDate, formatMoney, statusLabel } from '../lib/format';
+import { formatDate, formatMoney, statusLabel, ledgerOperationLabel } from '../lib/format';
 import { createRecharge, getSubscription, listLedger, listPlans, listRecharges, redeemPromo, requestPlanChange } from '../lib/api';
 import type { LedgerEntry, Plan, RechargeOrder, Subscription as Sub } from '../lib/types';
 
@@ -137,7 +137,7 @@ export default function Subscription() {
             <Card><CardHeader title="Derniers mouvements de crédits" action={<Link to="/app/historique" className="text-xs font-semibold text-brand-300">Tout voir</Link>} />
               {ledger.length === 0 ? <EmptyState icon={<Coins size={22} />} title="Aucun mouvement" /> : (
                 <div className="divide-y divide-white/[0.06]">{ledger.slice(0, 8).map((l) => (
-                  <div key={l.id} className="flex items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm text-white">{l.operation_type}</p><p className="text-[11px] text-slate-500">{formatDate(l.created_at, true)}</p></div><span className={`text-sm font-semibold ${l.available_delta > 0 ? 'text-emerald-300' : l.available_delta < 0 ? 'text-rose-300' : 'text-slate-400'}`}>{l.available_delta > 0 ? '+' : ''}{l.available_delta}</span></div>
+                  <div key={l.id} className="flex items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm text-white">{ledgerOperationLabel(l.operation_type)}</p><p className="text-[11px] text-slate-500">{formatDate(l.created_at, true)}</p></div><span className={`text-sm font-semibold ${l.available_delta > 0 ? 'text-emerald-300' : l.available_delta < 0 ? 'text-rose-300' : 'text-slate-400'}`}>{l.available_delta > 0 ? '+' : ''}{l.available_delta}</span></div>
                 ))}</div>
               )}
             </Card>

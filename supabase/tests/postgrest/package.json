@@ -1,0 +1,20 @@
+{
+  "name": "vyora-postgrest-bench",
+  "private": true,
+  "type": "module",
+  "description": "Banc d'intégration Supabase/PostgREST local : PostgreSQL 17 réel, gateway conforme PostgREST v12.2.3 (JWT → rôle → RLS), JWT signés, Edge Functions réelles. Aucun service distant.",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "node start.mjs",
+    "stop": "node stop.mjs",
+    "test": "node run.mjs",
+    "audit": "node audit-functions.mjs"
+  },
+  "dependencies": {
+    "embedded-postgres": "17.5.0-beta.15",
+    "esbuild": "^0.25.0",
+    "pg": "8.23.1"
+  }
+}

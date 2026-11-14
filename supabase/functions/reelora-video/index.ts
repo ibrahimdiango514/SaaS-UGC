@@ -204,17 +204,70 @@ async function loadVideoPricingConfig(): Promise<VideoPricingConfig | null> {
   };
 }
 
+/**
+ * Calcule le nombre de crédits Studio d'une opération.
+ *
+ * SEULE AUTORITÉ : ce calcul. Le client reçoit le résultat, il ne le propose
+ * jamais. Si un seul paramètre est inconnu (coût fournisseur, change, valeur du
+ * crédit, marge), la fonction renvoie `null` et l'appelant DOIT refuser
+ * l'opération commerciale : aucun coût n'est deviné.
+ *
+ * Formule : ((coût fournisseur + traitement) × change × (1 + marge)) / valeur du crédit
+ * puis arrondi supérieur, minimum 1 crédit.
+ *
+ * `secondaryCostsUsd` couvre les traitements complémentaires réellement
+ * facturés par le fournisseur ou par le pipeline (rendu, remux, audio).
+ */
 export function calculateVideoCredits(
   providerCostUsd: number,
   config: Pick<VideoPricingConfig, "usd_to_xof" | "credit_value_xof" | "markup_percent" | "additional_cost_usd">,
+  secondaryCostsUsd: number[] = [],
 ): number | null {
   const { usd_to_xof, credit_value_xof, markup_percent, additional_cost_usd } = config;
+  const extras = secondaryCostsUsd.map((value) => Number(value));
   if (![providerCostUsd, usd_to_xof, credit_value_xof, markup_percent, additional_cost_usd].every(Number.isFinite)
     || providerCostUsd <= 0 || (usd_to_xof ?? 0) <= 0 || (credit_value_xof ?? 0) <= 0
     || (markup_percent ?? -1) < 0 || (additional_cost_usd ?? -1) < 0) return null;
-  const totalXof = (providerCostUsd + additional_cost_usd!) * usd_to_xof! * (1 + markup_percent! / 100);
+  if (extras.some((value) => !Number.isFinite(value) || value < 0)) return null;
+
+  const extrasUsd = extras.reduce((total, value) => total + value, 0);
+  const totalXof = (providerCostUsd + additional_cost_usd! + extrasUsd)
+    * usd_to_xof! * (1 + markup_percent! / 100);
   const credits = Math.ceil(totalXof / credit_value_xof!);
   return Number.isSafeInteger(credits) && credits > 0 ? credits : null;
+}
+
+/**
+ * Grille d'achat Studio : prix par crédit dégressif selon le pack.
+ * Les packs et leurs montants viennent de `ugc_app_settings.studio_pricing_config`
+ * (administrable), jamais d'une constante côté navigateur.
+ */
+export interface StudioPack {
+  pack_key: string;
+  label: string;
+  price_xof: number;
+  credits: number;
+  recommended?: boolean;
+}
+
+export function packPricePerCredit(pack: Pick<StudioPack, "price_xof" | "credits">): number | null {
+  if (!Number.isFinite(pack.price_xof) || !Number.isFinite(pack.credits)
+    || pack.price_xof <= 0 || pack.credits <= 0) return null;
+  return Math.round((pack.price_xof / pack.credits) * 10000) / 10000;
+}
+
+/** Vérifie qu'un pack est cohérent : plus de crédits ⇒ prix par crédit plus bas. */
+export function assertPackLadder(packs: StudioPack[]): string | null {
+  const sorted = packs
+    .map((pack) => ({ pack, unit: packPricePerCredit(pack) }))
+    .sort((a, b) => (a.pack.credits - b.pack.credits));
+  for (let index = 1; index < sorted.length; index += 1) {
+    const previous = sorted[index - 1].unit;
+    const current = sorted[index].unit;
+    if (previous === null || current === null) return "invalid_pack_values";
+    if (current >= previous) return "pack_ladder_not_degressive";
+  }
+  return null;
 }
 async function loadAvatar(id: string): Promise<Json | null> {
   const rows = await restService<Json>(`reelora_avatars?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
@@ -276,7 +329,18 @@ type Access = "account" | "public_only" | "unverified";
 type Status = "active" | "disabled" | "coming_soon" | "unsupported" | "unverified";
 
 /** Required inputs VYORA can actually provide today. No audio/TTS/lipsync engine is connected. */
-const SUPPORTED_REQUIRED_FIELDS = new Set(["prompt", "image_url"]);
+/**
+ * Champs obligatoires réellement câblés par `buildMuapiBody` : une source image,
+ * une source vidéo et une source audio, chacune importée par l'utilisateur dans
+ * le bucket privé du workspace et signée côté serveur. Tout autre champ
+ * obligatoire (mask, LoRA, liste d'images…) reste refusé : il n'existe aucun
+ * contrôle VYORA pour le fournir, donc aucune génération ne doit être lancée.
+ */
+const SUPPORTED_REQUIRED_FIELDS = new Set([
+  "prompt", "image_url", "video_url", "audio_url",
+  // Variantes de nommage de la même capacité, déclarées par certains modèles.
+  "input_video", "first_frame_url", "first_frame_image",
+]);
 /** Media/structured fields are never exposed as tunable scalar parameters. */
 const SOURCE_FIELDS = new Set([
   "prompt", "image_url", "last_image", "audio_url", "video_url", "input_video",
@@ -585,6 +649,95 @@ async function probeAccount(): Promise<AccountProbe> {
     auth,
   };
 }
+/** Solde fournisseur : toujours lu en direct, jamais estimé ni simulé. */
+interface ProviderBalance {
+  status: "ok" | "error";
+  balance_usd: number | null;
+  currency: string | null;
+  http_status: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  data: Json;
+}
+
+async function fetchProviderBalance(): Promise<ProviderBalance> {
+  if (!MUAPI_KEY()) {
+    return { status: "error", balance_usd: null, currency: null, http_status: null,
+      error_code: "provider_key_missing", error_message: "Clé MuAPI absente côté serveur.", data: {} };
+  }
+  const reply = await muapiFetch("/api/v1/account/balance", { useKey: true, timeout: 12000 });
+  const data = obj(reply.data);
+  const raw = obj(data.data ?? data);
+  const balance = finite(raw.balance ?? data.balance);
+  if (!reply.ok || balance === null) {
+    return { status: "error", balance_usd: null, currency: null, http_status: reply.status ?? null,
+      error_code: reply.ok ? "provider_balance_unreadable" : "provider_balance_unavailable",
+      error_message: reply.ok
+        ? "La réponse de solde MuAPI ne contient pas de montant exploitable."
+        : reply.error || `HTTP ${reply.status}`,
+      data: {} };
+  }
+  return { status: "ok", balance_usd: balance, currency: str(raw.currency ?? data.currency, 10) || "USD",
+    http_status: reply.status ?? null, error_code: null, error_message: null, data: raw };
+}
+
+/** Persiste le solde observé (service_role uniquement) pour l'affichage admin. */
+async function persistProviderBalance(probe: ProviderBalance): Promise<void> {
+  const d = probe.data;
+  const payload: Json = {
+    provider: "muapi",
+    balance_usd: probe.balance_usd,
+    currency: probe.currency,
+    account_email: str(d.email, 200) || null,
+    bonus_balances: obj(d.bonus_balances),
+    topup_totals: obj(d.topup_totals),
+    http_status: probe.http_status,
+    status: probe.status,
+    error_code: probe.error_code,
+    error_message: probe.error_message ? redact(probe.error_message).slice(0, 500) : null,
+    synced_at: probe.status === "ok" ? new Date().toISOString() : null,
+    checked_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const res = await fetch(`${SUPABASE_URL()}/rest/v1/ugc_provider_balance?on_conflict=provider`, {
+    method: "POST",
+    headers: svcHeaders({ "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" }),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) {
+    console.error("provider balance persist failed", res.status);
+    return;
+  }
+  // Un échec de synchro doit aussi laisser une trace exploitable côté admin.
+  if (probe.status !== "ok") {
+    await fetch(`${SUPABASE_URL()}/rest/v1/ugc_provider_spend_alerts`, {
+      method: "POST",
+      headers: svcHeaders({ "Content-Type": "application/json", Prefer: "return=minimal" }),
+      body: JSON.stringify({
+        alert_key: `balance_sync_${new Date().toISOString().slice(0, 13)}`,
+        provider: "muapi",
+        kind: "balance_sync_failed",
+        severity: "warning",
+        title: "Solde MuAPI non vérifiable",
+        reason: probe.error_message ? redact(probe.error_message).slice(0, 300) : probe.error_code,
+        metadata: { http_status: probe.http_status, error_code: probe.error_code },
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+  }
+}
+
+/**
+ * Condition B du double contrôle : le solde fournisseur doit couvrir le coût.
+ * Un solde illisible bloque l'appel payant (jamais d'optimisme par défaut).
+ */
+function balanceGate(probe: ProviderBalance, costUsd: number): string | null {
+  if (probe.status !== "ok" || probe.balance_usd === null) return "PROVIDER_BALANCE_UNAVAILABLE";
+  if (costUsd > 0 && probe.balance_usd < costUsd) return "PROVIDER_BALANCE_INSUFFICIENT";
+  return null;
+}
+
 function entriesOf(reply: MuapiReply): Json[] {
   const data = obj(reply.data);
   return Array.isArray(data.models) ? (data.models as unknown[]).filter((x): x is Json => !!x && typeof x === "object") : [];
@@ -622,6 +775,13 @@ function buildQuoteBody(body: Json, schema: Record<string, ParamDef>, fields: st
   if ((fields.includes("prompt") || required.includes("prompt")) && prompt) out.prompt = prompt;
   if ((fields.includes("image_url") || required.includes("image_url")) && imageUrl) out.image_url = imageUrl;
   if ((fields.includes("last_image") || required.includes("last_image")) && lastImageUrl) out.last_image = lastImageUrl;
+  // Sources vidéo / audio : uniquement si le modèle les déclare, jamais inventées.
+  const videoUrl = str(body.video_url, 2000);
+  const audioUrl = str(body.audio_url, 2000);
+  for (const key of ["video_url", "input_video"]) {
+    if ((fields.includes(key) || required.includes(key)) && videoUrl) out[key] = videoUrl;
+  }
+  if ((fields.includes("audio_url") || required.includes("audio_url")) && audioUrl) out.audio_url = audioUrl;
   const params = obj(body.params);
   for (const [key, def] of Object.entries(schema)) {
     if (!fields.includes(key) || isSourceField(key) || key.startsWith("__")) continue;
@@ -641,7 +801,14 @@ function buildQuoteBody(body: Json, schema: Record<string, ParamDef>, fields: st
 }
 /* -------------------------------- MuAPI --------------------------------- */
 
-function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: string, lastImageUrl = ""): Json {
+function buildMuapiBody(
+  model: Json,
+  payload: Json,
+  prompt: string,
+  imageUrl: string,
+  lastImageUrl = "",
+  media: { videoUrl?: string; audioUrl?: string } = {},
+): Json {
   const fields = asArray(model.input_fields);
   const required = asArray(model.required_fields);
   const body: Json = {};
@@ -649,6 +816,24 @@ function buildMuapiBody(model: Json, payload: Json, prompt: string, imageUrl: st
   if (fields.includes("image_url")) {
     if (required.includes("image_url") && !imageUrl) throw new Error("IMAGE_MISSING");
     if (imageUrl) body.image_url = imageUrl;
+  }
+  // Sources média importées par l'utilisateur : envoyées UNIQUEMENT si le
+  // modèle les déclare. Aucune valeur inventée, aucun média de démonstration.
+  const videoUrl = media.videoUrl ?? "";
+  const audioUrl = media.audioUrl ?? "";
+  for (const key of ["video_url", "input_video"]) {
+    if (!fields.includes(key)) continue;
+    if (required.includes(key) && !videoUrl) throw new Error("VIDEO_MISSING");
+    if (videoUrl) body[key] = videoUrl;
+  }
+  if (fields.includes("audio_url")) {
+    if (required.includes("audio_url") && !audioUrl) throw new Error("AUDIO_MISSING");
+    if (audioUrl) body.audio_url = audioUrl;
+  }
+  for (const key of ["first_frame_url", "first_frame_image"]) {
+    if (!fields.includes(key)) continue;
+    if (required.includes(key) && !imageUrl) throw new Error("IMAGE_MISSING");
+    if (imageUrl) body[key] = imageUrl;
   }
   // `last_image` is an optional, model-specific reference frame. It is sent
   // ONLY when the verified catalog explicitly declares that input field.
@@ -742,6 +927,10 @@ function friendly(code: string, _detail: string): string {
     PROVIDER_SPEND_CAP_EXCEEDED: "Le budget fournisseur disponible ne couvre pas cette génération.",
     PROVIDER_SPEND_UNAVAILABLE: "La vérification du budget fournisseur est indisponible. Aucun appel payant n’a été lancé.",
     PROVIDER_SPEND_ALREADY_RESERVED: "La réservation du budget est déjà utilisée ou nécessite une vérification administrative.",
+    PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED: "Le plafond VYORA de ce fournisseur est atteint. Aucun appel payant n’a été lancé.",
+    PROVIDER_SPEND_PROVIDER_CAP_UNAVAILABLE: "Le plafond de ce fournisseur n’a pas pu être vérifié. Aucun appel payant n’a été lancé.",
+    PROVIDER_BALANCE_INSUFFICIENT: "Le solde fournisseur MuAPI est insuffisant pour cette génération. Aucun appel payant n’a été lancé : rechargez le compte MuAPI depuis l’espace administration.",
+    PROVIDER_BALANCE_UNAVAILABLE: "Impossible de vérifier le solde MuAPI. Aucun appel payant n’a été lancé. Réessayez ou vérifiez la clé et la connexion au fournisseur.",
   };
   return map[code] ?? "La génération a échoué. Les crédits réservés ont été restitués.";
 }
@@ -943,6 +1132,66 @@ async function actionAdminCatalog(userJwt: string): Promise<Response> {
   if (!response.ok) return fail("FORBIDDEN", "Accès administrateur requis.", 403);
   await actionModels();
   return actionCatalog(true);
+}
+
+/**
+ * Solde fournisseur pour l'administration : lecture réelle + resynchronisation.
+ * Accessible aux seuls admins (vérifié par `reelora_admin_overview` avec le JWT
+ * de l'appelant). Aucune valeur n'est inventée : en cas d'échec, `balance_usd`
+ * reste null et `error_code` explique pourquoi.
+ */
+async function actionAdminProviderBalance(userJwt: string, refresh: boolean): Promise<Response> {
+  const response = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_overview`, {
+    method: "POST",
+    headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) return fail("FORBIDDEN", "Accès administrateur requis.", 403);
+
+  if (refresh) {
+    const probe = await fetchProviderBalance();
+    await persistProviderBalance(probe);
+    // Recalcule le plafond consommé/restant à la même occasion.
+    const summary = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_spend_summary`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    });
+    const spend = summary.ok ? await summary.json() as Json : null;
+    return json({
+      balance: {
+        provider: "muapi",
+        status: probe.status,
+        balance_usd: probe.balance_usd,
+        currency: probe.currency,
+        http_status: probe.http_status,
+        error_code: probe.error_code,
+        error_message: probe.error_message ? redact(probe.error_message) : null,
+        checked_at: new Date().toISOString(),
+      },
+      spend,
+    });
+  }
+
+  const [stored, spend] = await Promise.all([
+    fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_balance`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    }),
+    fetch(`${SUPABASE_URL()}/rest/v1/rpc/reelora_admin_provider_spend_summary`, {
+      method: "POST",
+      headers: { apikey: ANON_KEY(), Authorization: userJwt, "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    }),
+  ]);
+  const balance = stored.ok ? await stored.json() as Json : { error: "read_failed" };
+  const spendData = spend.ok ? await spend.json() as Json : null;
+  return json({ balance, spend: spendData });
 }
 
 interface ResolvedProviderQuote {
@@ -1193,8 +1442,21 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
   const lastImagePath = acceptsLastImage ? workspaceImagePath(payload.last_image_storage_path, workspaceId) : "";
   if (!lastImageUrl && lastImagePath) lastImageUrl = (await signStoragePath(lastImagePath)) ?? "";
 
+  // Sources vidéo / audio importées par l'utilisateur (Video→Video, Audio→Video).
+  // Le chemin Storage est vérifié dans le workspace de la tâche, puis signé.
+  const acceptsVideo = modelFields.some((f) => f === "video_url" || f === "input_video");
+  const acceptsAudio = modelFields.includes("audio_url");
+  let videoUrl = acceptsVideo ? str(payload.video_url, 2000) : "";
+  const videoPath = acceptsVideo ? workspaceImagePath(payload.video_storage_path, workspaceId) : "";
+  if (!videoUrl && videoPath) videoUrl = (await signStoragePath(videoPath)) ?? "";
+  let audioUrl = acceptsAudio ? str(payload.audio_url, 2000) : "";
+  const audioPath = acceptsAudio ? workspaceImagePath(payload.audio_storage_path, workspaceId) : "";
+  if (!audioUrl && audioPath) audioUrl = (await signStoragePath(audioPath)) ?? "";
+
   let submitBody: Json;
-  try { submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl); }
+  try {
+    submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, { videoUrl, audioUrl });
+  }
   catch (e) {
     const code = e instanceof Error ? e.message.split(":")[0] : "INVALID_INPUT";
     return await failJob(jobId, userId, code, e instanceof Error ? e.message : String(e));
@@ -1219,6 +1481,18 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
         : "PROVIDER_SPEND_ALREADY_RESERVED";
     return await failJob(jobId, userId, code, "");
   }
+
+  // Condition B — solde fournisseur réellement vérifié AVANT tout appel payant.
+  const estimatedUsd = finite(spendDecision.estimated_cost_usd) ?? 0;
+  const providerBalance = await fetchProviderBalance();
+  void persistProviderBalance(providerBalance);
+  const gate = balanceGate(providerBalance, estimatedUsd);
+  if (gate) {
+    console.warn("provider balance gate blocked", redact(gate));
+    return await failJob(jobId, userId, gate,
+      providerBalance.error_message || `solde=${providerBalance.balance_usd ?? "inconnu"} requis=${estimatedUsd}`);
+  }
+
   let submitUrl = `${MUAPI_BASE}${endpoint}`;
   const token = await workerToken();
   if (token) {
@@ -1312,10 +1586,15 @@ export async function handler(req: Request): Promise<Response> {
 
   let body: Json;
   try { body = await req.json() as Json; } catch { return fail("INVALID_BODY", "Corps de requête JSON invalide.", 400); }
-  const action = str(body.action, 20);
+  // 40 et non 20 : « admin-provider-balance » fait 22 caracteres et etait
+  // tronque, ce qui le faisait tomber dans la branche « job_id requis ».
+  const action = str(body.action, 40);
   try {
     if (action === "catalog") return await actionCatalog();
     if (action === "admin-catalog") return await actionAdminCatalog(userJwt);
+    if (action === "admin-provider-balance") {
+      return await actionAdminProviderBalance(userJwt, bool(body.refresh, false));
+    }
     if (action === "model-detail") return await actionModelDetail(body);
     if (action === "models") return await actionModels();
     if (action === "estimate") return await actionEstimate(body, userId);
