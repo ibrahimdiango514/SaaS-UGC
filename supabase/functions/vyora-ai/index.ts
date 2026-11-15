@@ -22,6 +22,7 @@
 import {
   parseRegistrySnapshot,
   runAiCall,
+  routingLogPayload,
   type AiCallLogEntry,
   type AiEngineDeps,
   type AiRegistrySnapshot,
@@ -550,7 +551,7 @@ async function releaseAiCall(params: {
 
 /** Journal de la DÉCISION de routage : chaîne + scores + raison, aucun secret. */
 async function logAiRouting(entry: AiRoutingLogEntry): Promise<void> {
-  await callRpc("vyora_ai_log_routing", { p_payload: entry });
+  await callRpc("vyora_ai_log_routing", { p_payload: routingLogPayload(entry) });
 }
 
 function aiEngineDeps(): AiEngineDeps {
