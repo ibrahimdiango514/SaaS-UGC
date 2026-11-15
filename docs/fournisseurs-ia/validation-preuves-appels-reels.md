@@ -1,6 +1,7 @@
 # VYORA — Validation des fournisseurs IA : preuves d'appels réels
 
 > **Date des mesures :** 2026-11-15 (UTC).
+> **Branche :** `arena/bfcedd89-saas-ugc` — PR ouverte vers `develop` (aucune fusion sans autorisation).
 > **Environnement :** projet Supabase `xbuuhfwobrafcbgtdgjx`, Edge Functions actives.
 > **Règle appliquée :** aucun fournisseur n'est déclaré opérationnel sans une
 > complétion réellement servie et enregistrée. Chaque ligne ci-dessous renvoie à
@@ -164,7 +165,51 @@ cette situation.
 
 ---
 
-## 6. Sécurité
+## 6. Deux défauts de traçabilité trouvés et corrigés pendant la validation
+
+La validation a servi de test d'intégration réel : elle a révélé deux pertes de
+données silencieuses, toutes deux invisibles en test unitaire.
+
+### 6.1 Journal de routage — colonnes vides
+
+Le moteur émet sa décision en camelCase (`chosenProvider`, `roleKey`,
+`skipReason`) ; la RPC `vyora_ai_log_routing` lit `p_payload->>'chosen_provider'`,
+`->>'role_key'`, `->>'skip_reason'`. Les deux hôtes transmettaient l'objet **tel
+quel** : PostgreSQL renvoyait NULL pour chaque clé absente, sans erreur. Comme
+la journalisation est « non bloquante » par conception, la perte était
+totalement muette.
+
+**Constat :** quatre lignes avec `chosen_provider`, `chosen_model` et `role_key`
+à NULL alors que la chaîne était bien enregistrée.
+
+**Correction :** `routingLogPayload()` porte la conversion, à un seul endroit.
+**Preuve après correction** (`ai_routing_log`, 2026-11-15 05:08:23) :
+`role_key = content_strategy`, `chosen_provider = llm7`, `chosen_model = default`.
+
+### 6.2 Consommation — dépenses invisibles
+
+Le diagnostic appelait `vyora_ai_log_call` avec un unique `p_payload` jsonb
+groupé, alors que la RPC attend des paramètres **plats**, un appel par tentative.
+Résultat : aucune ligne dans `ai_calls_log` — la dernière datait de la veille —
+donc une dépense réelle non suivie.
+
+**Correction :** boucle sur les tentatives, coût imputé à la seule tentative
+finale réussie, `fallback_from` renseigné.
+**Preuve après correction** (`ai_calls_log`, 2026-11-15 05:11:19) :
+
+```
+task_key      : content_strategy
+provider_key  : gonka
+model_key     : deepseek-ai-deepseek-v4-flash-0731
+status        : success
+tokens        : 24 in / 64 out
+latence       : 11 933 ms
+coût          : 0,000002 USD (entrée) + 0,000006 USD (sortie)
+```
+
+---
+
+## 7. Sécurité
 
 - Les clés vivent **exclusivement** dans les secrets Edge Function ;
 - vérification **par nom** uniquement : l'API de gestion renvoie des valeurs
@@ -174,7 +219,7 @@ cette situation.
 
 ---
 
-## 7. Vérifications techniques
+## 8. Vérifications techniques
 
 | Vérification | Résultat |
 |---|---|
@@ -183,4 +228,7 @@ cette situation.
 | `npm run build` | ✓ 21 s |
 | `npm run check:edge-imports` | conforme au bundler Deno |
 | Parité chargeur ↔ générateur | 12 / 12 verts |
-| Intégrité des artefacts en base | `vyora-ai` 9 tranches / md5 `213f010c…` ; `vyora-ai-providers` 8 tranches / md5 `5964b446…` |
+| Intégrité des artefacts en base | `vyora-ai` 9 tranches / 16 120 car. / md5 `065344ce…` ; `vyora-ai-providers` 9 tranches / md5 `a9554b73…` |
+| Edge Functions déployées | `vyora-ai` **v9** ACTIVE, `vyora-ai-providers` **v10** ACTIVE (`verify_jwt: false`) |
+| Journal de routage | corrigé et prouvé (`role_key`, `chosen_provider`, `chosen_model` renseignés) |
+| Consommation réelle | corrigée et prouvée (`ai_calls_log` : gonka, 24/64 tokens, coût mesuré) |
