@@ -201,18 +201,33 @@ function aiEngineDeps(outcomeBox: { outcome: AiCallOutcome | null }): AiEngineDe
     },
     env: (name) => env(name) || null,
     fetcher: fetch,
+    // `vyora_ai_log_call` attend des paramètres PLATS (un appel par tentative),
+    // pas un jsonb : un payload groupé serait rejeté et la dépense réelle
+    // resterait invisible.
     logCall: async (entry) => {
-      await rpc('vyora_ai_log_call', {
-        p_payload: {
-          space: entry.space,
-          user_id: entry.userId,
-          workspace_id: entry.workspaceId,
-          task_key: entry.taskKey,
-          attempts: entry.attempts,
-          cost_input_usd: entry.costInputUsd,
-          cost_output_usd: entry.costOutputUsd,
-        },
-      });
+      if (!entry.attempts.length) return;
+      const lastSuccess = entry.attempts.length - 1;
+      for (let i = 0; i < entry.attempts.length; i += 1) {
+        const attempt = entry.attempts[i];
+        await rpc('vyora_ai_log_call', {
+          p_space: entry.space,
+          p_user_id: entry.userId,
+          p_workspace_id: entry.workspaceId,
+          p_task_key: entry.taskKey,
+          p_provider_key: attempt.providerKey,
+          p_model_key: attempt.modelKey,
+          p_provider_model_key: attempt.providerModelKey,
+          p_attempt_number: attempt.attempt,
+          p_status: attempt.status,
+          p_error_code: attempt.errorCode,
+          p_input_tokens: attempt.inputTokens,
+          p_output_tokens: attempt.outputTokens,
+          p_latency_ms: attempt.latencyMs,
+          p_cost_input_usd: attempt.status === 'success' && i === lastSuccess ? entry.costInputUsd : null,
+          p_cost_output_usd: attempt.status === 'success' && i === lastSuccess ? entry.costOutputUsd : null,
+          p_fallback_from: i > 0 ? entry.attempts[i - 1].providerKey : null,
+        });
+      }
     },
     logRouting: async (entry) => {
       await rpc('vyora_ai_log_routing', { p_payload: routingLogPayload(entry) });
