@@ -277,6 +277,12 @@ async function routeDiagnostic(body: Json): Promise<Response> {
   const levelRaw = str(body.level, 20);
   const level = (['fast', 'economy', 'advanced', 'specialized', 'fallback'] as const)
     .includes(levelRaw as never) ? (levelRaw as AiCallRequest['level'] & string) : null;
+  // Fournisseurs à écarter (ex. dernier échec connu, ou ciblage d'un candidat
+  // précis pour une vérification). Le moteur en fait une pénalité, pas un
+  // retrait : la chaîne reste non vide.
+  const avoidProviders = Array.isArray(body.avoid)
+    ? body.avoid.filter((v): v is string => typeof v === 'string').slice(0, 8)
+    : undefined;
   const wantCall = body.call === true;
 
   const snapshot = await loadRegistrySnapshot();
@@ -299,6 +305,7 @@ async function routeDiagnostic(body: Json): Promise<Response> {
         ? body.capabilities.filter((c): c is string => typeof c === 'string').slice(0, 8)
         : undefined,
       preferProvider,
+      avoidProviders,
       minContextTokens: null,
       maxCostInPerMtok: null,
     },
@@ -308,6 +315,7 @@ async function routeDiagnostic(body: Json): Promise<Response> {
   const report: Json = {
     role: roleKey,
     prefer: preferProvider,
+    avoid: avoidProviders ?? [],
     level,
     call_requested: wantCall,
     skip_reason: skipReason,
@@ -345,6 +353,7 @@ async function routeDiagnostic(body: Json): Promise<Response> {
     role: roleKey,
     level,
     preferProvider,
+    avoidProviders,
     space: 'system',
     userId: null,
     taskKey: roleKey ?? 'route_diagnostic',
