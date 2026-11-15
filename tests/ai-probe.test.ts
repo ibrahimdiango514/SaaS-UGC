@@ -16,6 +16,10 @@ import {
   normalizeCatalog,
   pickProbeModel,
   probeProvider,
+  redactSecrets,
+  errorDetailOf,
+  conversationalModels,
+  probeModelCandidates,
   type AiProbeDescriptor,
 } from '../supabase/functions/_shared/ai-core/index.ts';
 
@@ -459,5 +463,225 @@ describe('sonde — choix du modèle', () => {
 
   it('catalogue vide : aucun modèle', () => {
     expect(pickProbeModel([], 'vendor/x')).toBeNull();
+  });
+
+  // Cas réel (LLM7, 2026-11-15) : le catalogue mélange chat, image et
+  // transcription. Sonder `jev-latest` a renvoyé « Model 'jev-latest' does not
+  // support chat endpoints » — un faux négatif imputé au fournisseur.
+  it('écarte les familles non conversationnelles (image, vidéo, audio)', () => {
+    const mixed = normalizeCatalog('openai', {
+      data: [
+        { id: 'gpt-image-2', architecture: { input_modalities: ['text'], output_modalities: ['image'] } },
+        { id: 'seedance-2.0', architecture: { input_modalities: ['text'], output_modalities: ['video'] } },
+        { id: 'whisper-large-v3', architecture: { input_modalities: ['audio'], output_modalities: ['text'] } },
+        { id: 'chat-vendor/solid', pricing: { prompt: '0.000001', completion: '0.000002' } },
+      ],
+    }).models;
+    expect(pickProbeModel(mixed, 'gpt-image-2')).not.toBe('gpt-image-2');
+    expect(pickProbeModel(mixed, 'whisper-large-v3')).not.toBe('whisper-large-v3');
+    expect(pickProbeModel(mixed, null)).toBe('chat-vendor/solid');
+  });
+
+  // Cas réel (LLM7) : `claude-sonnet-5` est publié à 450 000 $/Mtok. Trier sur
+  // ce prix ferait désigner le modèle le plus aberrant du catalogue.
+  it('ignore les prix publiés invraisemblables lors du tri', () => {
+    const absurd = normalizeCatalog('openai', {
+      data: [
+        // Valeur réellement publiée par LLM7 en entrée (450 000 $/Mtok).
+        { id: 'claude-sonnet-5', pricing: { prompt: '450000', completion: '0.00000225' } },
+        { id: 'vendor/normal', pricing: { prompt: '0.000003', completion: '0.000015' } },
+      ],
+    }).models;
+    expect(pickProbeModel(absurd, null)).toBe('vendor/normal');
+  });
+
+  it('un prix inconnu n’exclut pas un modèle conversationnel', () => {
+    const unpriced = normalizeCatalog('openai', { data: [{ id: 'vendor/unpriced' }] }).models;
+    expect(pickProbeModel(unpriced, null)).toBe('vendor/unpriced');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Diagnostic des échecs : le corps du fournisseur doit survivre
+// ---------------------------------------------------------------------------
+//
+// Sans ces garanties, un 400 reste `PROVIDER_REQUEST_REJECTED` et la cause
+// (« modèle inexistant » vs « paramètre refusé ») est indiscernable — c'est
+// exactement le blocage rencontré sur LLM7 et Ollama.
+
+describe('probeProvider — capture du diagnostic fournisseur', () => {
+  it('400 : statut HTTP réel et message du fournisseur conservés', async () => {
+    const fetcher = routedFetch([
+      { match: '/models', response: () => jsonResponse(OPENAI_CATALOG) },
+      {
+        match: '/chat/completions',
+        response: () => jsonResponse({ error: { message: 'model "beam" not found' } }, 400),
+      },
+    ]);
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, 'beam', { fetcher });
+    expect(result.completionOk).toBe(false);
+    expect(result.completionErrorCode).toBe('PROVIDER_REQUEST_REJECTED');
+    expect(result.completionHttpStatus).toBe(400);
+    expect(result.completionDetail).toBe('model "beam" not found');
+  });
+
+  it('422 : le corps non-JSON est conservé brut (tronqué)', async () => {
+    const fetcher = routedFetch([
+      { match: '/models', response: () => jsonResponse(OPENAI_CATALOG) },
+      { match: '/chat/completions', response: () => new Response('Unprocessable: temperature must be > 0', { status: 422 }) },
+    ]);
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, 'x', { fetcher });
+    expect(result.completionHttpStatus).toBe(422);
+    expect(result.completionDetail).toContain('temperature');
+  });
+
+  it('succès : aucun diagnostic parasite', async () => {
+    const fetcher = routedFetch([
+      { match: '/models', response: () => jsonResponse(OPENAI_CATALOG) },
+      { match: '/chat/completions', response: () => jsonResponse(OPENAI_OK) },
+    ]);
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, 'some-vendor/fast-model', { fetcher });
+    expect(result.completionHttpStatus).toBeNull();
+    expect(result.completionDetail).toBeNull();
+  });
+
+  it('complétion jamais tentée : statut et détail restent null', async () => {
+    const fetcher = routedFetch([{ match: '/models', response: () => jsonResponse(OPENAI_CATALOG) }]);
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, null, { fetcher });
+    expect(result.completionHttpStatus).toBeNull();
+    expect(result.completionDetail).toBeNull();
+  });
+
+  it('redactSecrets retire un jeton recopié et borne la longueur', () => {
+    expect(redactSecrets('invalid key Bearer sk-live-abcdef123456 for project')).toBe(
+      'invalid key Bearer [redacted] for project',
+    );
+    expect(redactSecrets('x'.repeat(1000)).length).toBe(400);
+  });
+
+  it('errorDetailOf privilégie le message, retombe sur le brut', () => {
+    expect(errorDetailOf({ error: { message: 'bad model' } }, '{"error":{}}')).toBe('bad model');
+    expect(errorDetailOf({ detail: 'quota' }, null)).toBe('quota');
+    expect(errorDetailOf(null, 'plain text failure')).toBe('plain text failure');
+    expect(errorDetailOf({}, null)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Repli borné : un refus qui met en cause le MODÈLE ne condamne pas le compte
+// ---------------------------------------------------------------------------
+//
+// Cas réel (LLM7, 2026-11-15) : le catalogue mélange chat et image. La sonde a
+// reçu `400 Model 'jev-latest' does not support chat endpoints` et en a conclu
+// « fournisseur dégradé ». La bonne conclusion était « ce modèle-là refuse le
+// chat ». Ces tests garantissent que la sonde insiste sans jamais dériver en
+// dépense illimitée.
+
+describe('probeProvider — repli borné sur refus lié au modèle', () => {
+  const catalog = normalizeCatalog('openai', {
+    data: [
+      { id: 'image-forge', architecture: { input_modalities: ['text'], output_modalities: ['image'] } },
+      { id: 'chat-cheap', pricing: { prompt: '0.0000001', completion: '0.0000002' } },
+      { id: 'chat-solid', pricing: { prompt: '0.000001', completion: '0.000002' } },
+    ],
+  }).models;
+
+  it('400 sur le premier modèle : la sonde essaie le suivant et réussit', async () => {
+    const posts: string[] = [];
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/models')) {
+        // Catalogue réel : une famille image (écartée) et deux modèles de chat,
+        // le moins cher d'abord — exactement la topologie LLM7.
+        return jsonResponse({
+          data: [
+            { id: 'image-forge', architecture: { input_modalities: ['text'], output_modalities: ['image'] } },
+            { id: 'chat-cheap', pricing: { prompt: '0.0000001', completion: '0.0000002' } },
+            { id: 'chat-solid', pricing: { prompt: '0.000001', completion: '0.000002' } },
+          ],
+        });
+      }
+      const body = JSON.parse(String(init?.body ?? '{}')) as { model?: string };
+      posts.push(String(body.model));
+      if (body.model === 'chat-cheap') {
+        return jsonResponse({ error: { message: 'does not support chat endpoints' } }, 400);
+      }
+      return jsonResponse(OPENAI_OK);
+    }) as unknown as typeof fetch;
+
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, 'auto', { fetcher });
+
+    expect(posts).toEqual(['chat-cheap', 'chat-solid']);
+    expect(result.completionOk).toBe(true);
+    expect(result.probeModel).toBe('chat-solid');
+    expect(result.completionDetail).toBeNull();
+  });
+
+  it('trois refus liés au modèle : la sonde s’arrête à trois essais, jamais plus', async () => {
+    let posts = 0;
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/models')) {
+        return jsonResponse({
+          data: Array.from({ length: 8 }, (_, i) => ({ id: `chat-${i}` })),
+        });
+      }
+      posts += 1;
+      return jsonResponse({ error: { message: 'unsupported' } }, 400);
+    }) as unknown as typeof fetch;
+
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, 'auto', { fetcher });
+    expect(posts).toBe(3);
+    expect(result.completionOk).toBe(false);
+    expect(result.completionHttpStatus).toBe(400);
+  });
+
+  it('un 401 n’est JAMAIS réessayé : le verdict porte sur le compte', async () => {
+    let posts = 0;
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/models')) return jsonResponse(OPENAI_CATALOG);
+      posts += 1;
+      return jsonResponse({ error: { message: 'invalid key' } }, 401);
+    }) as unknown as typeof fetch;
+
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, 'some-vendor/fast-model', { fetcher });
+    expect(posts).toBe(1);
+    expect(result.completionErrorCode).toBe('PROVIDER_AUTH_FAILED');
+  });
+
+  it('un 402 est classé PROVIDER_PAYMENT_REQUIRED, jamais « requête rejetée »', async () => {
+    let posts = 0;
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/models')) return jsonResponse(OPENAI_CATALOG);
+      posts += 1;
+      return jsonResponse({ error: 'Add usage credits or subscribe' }, 402);
+    }) as unknown as typeof fetch;
+
+    const result = await probeProvider(openAiDescriptor, { apiKey: 'k' }, 'some-vendor/fast-model', { fetcher });
+    expect(posts).toBe(1);
+    expect(result.completionHttpStatus).toBe(402);
+    // Cas réel LLM7 + Ollama (2026-11-15) : le solde est vide. Ce n'est ni une
+    // mauvaise configuration ni une panne — c'est la facturation.
+    expect(result.completionErrorCode).toBe('PROVIDER_PAYMENT_REQUIRED');
+    expect(result.completionDetail).toContain('credits');
+  });
+
+  it('catalogue mixte : les candidats excluent les familles image/audio', () => {
+    expect(conversationalModels(catalog).map((m) => m.providerModel)).toEqual(['chat-cheap', 'chat-solid']);
+  });
+
+  it('probeModelCandidates borne le nombre d’essais', () => {
+    const many = normalizeCatalog('openai', {
+      data: Array.from({ length: 10 }, (_, i) => ({
+        id: `chat-${i}`,
+        pricing: { prompt: `0.00000${i + 1}`, completion: `0.00000${i + 1}` },
+      })),
+    }).models;
+    expect(probeModelCandidates(many, null, 3)).toHaveLength(3);
+    expect(probeModelCandidates(many, null, 0)).toHaveLength(1);
+  });
+
+  it('la préférence explicite passe en premier, sans doublon', () => {
+    const ranked = probeModelCandidates(catalog, 'chat-solid', 3);
+    expect(ranked[0]).toBe('chat-solid');
+    expect(new Set(ranked).size).toBe(ranked.length);
   });
 });

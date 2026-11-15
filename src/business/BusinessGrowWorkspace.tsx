@@ -261,6 +261,8 @@ function describeProviderFailureHint(code: string | null | undefined): string {
       return 'La vérification du service IA a échoué. Contactez le support VYORA si le problème persiste.';
     case 'PROVIDER_RATE_LIMITED':
       return 'Le service IA est temporairement saturé. Réessayez plus tard.';
+    case 'PROVIDER_PAYMENT_REQUIRED':
+      return 'Le crédit du service IA est épuisé. Réessayez plus tard ou contactez le support VYORA.';
     case 'PROVIDER_REQUEST_REJECTED':
       return 'La demande n’a pas été acceptée. Vérifiez votre message puis réessayez.';
     case 'PROVIDER_NOT_CONFIGURED':
@@ -2310,6 +2312,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         'PROVIDER_MODEL_MISMATCH',
         'PROVIDER_AUTH_FAILED',
         'PROVIDER_RATE_LIMITED',
+        'PROVIDER_PAYMENT_REQUIRED',
         'PROVIDER_UNAVAILABLE',
         'PROVIDER_TIMEOUT',
         'PROVIDER_NETWORK_ERROR',

@@ -88,6 +88,10 @@ const probeTimeoutMs = 15_000;
 
 function providerError(status: number): ProviderCallError {
   if (status === 401 || status === 403) return new ProviderCallError('PROVIDER_AUTH_FAILED', false);
+  // 402 : solde épuisé chez le fournisseur. Non réessayable sur ce
+  // fournisseur (réessayer ne rechargera pas le compte), mais le routage DOIT
+  // pouvoir basculer vers un autre : c'est une indisponibilité, pas un refus.
+  if (status === 402) return new ProviderCallError('PROVIDER_PAYMENT_REQUIRED', true);
   if (status === 429) return new ProviderCallError('PROVIDER_RATE_LIMITED', true);
   if (status >= 500) return new ProviderCallError('PROVIDER_UNAVAILABLE', true);
   return new ProviderCallError('PROVIDER_REQUEST_REJECTED', false);

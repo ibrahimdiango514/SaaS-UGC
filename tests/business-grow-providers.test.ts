@@ -291,3 +291,42 @@ describe('Business Grow provider clients', () => {
     expect(result.content).toBe('Réponse finale claire.');
   });
 });
+
+// ---------------------------------------------------------------------------
+// 402 : solde fournisseur épuisé
+// ---------------------------------------------------------------------------
+//
+// Cas réel (2026-11-15) : LLM7 répond « Insufficient balance » et Ollama
+// « Add usage credits ». Sans distinction, ce cas était classé « requête
+// rejetée » et l'opérateur cherchait un défaut de configuration inexistant.
+describe('callProvider — 402 facturation', () => {
+  const config = {
+    apiKey: 'test-key',
+    baseUrl: 'https://api.llm7.io/v1',
+    model: 'chat-solid',
+  };
+
+  it('402 → PROVIDER_PAYMENT_REQUIRED (distinct d’un refus de requête)', async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'Insufficient balance. Please top up your balance.' }), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      callProvider('llm7', config as never, [{ role: 'user', content: 'bonjour' }], fetcher),
+    ).rejects.toMatchObject({ code: 'PROVIDER_PAYMENT_REQUIRED', retryable: true });
+  });
+
+  it('400 reste PROVIDER_REQUEST_REJECTED (non réessayable tel quel)', async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { message: 'bad request' } }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      callProvider('llm7', config as never, [{ role: 'user', content: 'bonjour' }], fetcher),
+    ).rejects.toMatchObject({ code: 'PROVIDER_REQUEST_REJECTED' });
+  });
+});
