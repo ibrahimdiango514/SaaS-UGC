@@ -203,6 +203,13 @@ function statusError(status: number): AiProviderError {
  * Un fournisseur exigeant un identifiant de compte (`account_id_env`) n'est
  * retenu que si cet identifiant est lui aussi présent.
  */
+export function resolveConfiguredProvidersFromSnapshot(
+  snapshot: AiRegistrySnapshot,
+  deps: AiEngineDeps,
+): Set<string> {
+  return resolveConfiguredProviders(snapshot, deps, credentialsResolver(snapshot, deps));
+}
+
 function resolveConfiguredProviders(
   snapshot: AiRegistrySnapshot,
   deps: AiEngineDeps,
@@ -220,6 +227,39 @@ function resolveConfiguredProviders(
     configured.add(provider.key);
   }
   return configured;
+}
+
+/**
+ * Résolution des identifiants d'un fournisseur — LOGIQUE UNIQUE du moteur.
+ *
+ * Ordre : descripteur du registre (`api_key_env` / `account_id_env` /
+ * `gateway_id_env`) lu dans les secrets Edge, puis repli sur les conventions
+ * historiques fournies par l'hôte. Exportée pour que les diagnostics de routage
+ * utilisent EXACTEMENT cette logique : une copie divergerait silencieusement.
+ */
+export function credentialsResolver(
+  snapshot: AiRegistrySnapshot,
+  deps: AiEngineDeps,
+): (providerKey: string) => AiCredentials {
+  const providerIndex = new Map(snapshot.providers.map((p) => [p.key, p]));
+  return (providerKey: string): AiCredentials => {
+    const descriptor = providerIndex.get(providerKey);
+    const envName = descriptor?.apiKeyEnv;
+    if (envName && deps.env) {
+      const apiKey = deps.env(envName);
+      const accountId = descriptor?.accountIdEnv ? deps.env(descriptor.accountIdEnv) : null;
+      const gatewayId = descriptor?.gatewayIdEnv ? deps.env(descriptor.gatewayIdEnv) : null;
+      if (apiKey) {
+        const base = deps.credentials(providerKey);
+        return {
+          apiKey,
+          accountId: accountId ?? base.accountId ?? null,
+          gatewayId: gatewayId ?? base.gatewayId ?? null,
+        };
+      }
+    }
+    return deps.credentials(providerKey);
+  };
 }
 
 export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Promise<AiCallOutcome> {
@@ -241,25 +281,7 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
   const modelIndex = new Map(snapshot.models.map((m) => [`${m.provider}|${m.key}`, m]));
   const providerIndex = new Map(snapshot.providers.map((p) => [p.key, p]));
 
-  /** Clé du fournisseur : d'abord le descripteur du registre, sinon le deps. */
-  const credentialsFor = (providerKey: string): AiCredentials => {
-    const descriptor = providerIndex.get(providerKey);
-    const envName = descriptor?.apiKeyEnv;
-    if (envName && deps.env) {
-      const apiKey = deps.env(envName);
-      const accountId = descriptor?.accountIdEnv ? deps.env(descriptor.accountIdEnv) : null;
-      const gatewayId = descriptor?.gatewayIdEnv ? deps.env(descriptor.gatewayIdEnv) : null;
-      if (apiKey) {
-        const base = deps.credentials(providerKey);
-        return {
-          apiKey,
-          accountId: accountId ?? base.accountId ?? null,
-          gatewayId: gatewayId ?? base.gatewayId ?? null,
-        };
-      }
-    }
-    return deps.credentials(providerKey);
-  };
+  const credentialsFor = credentialsResolver(snapshot, deps);
 
   /** Journalise la DÉCISION (jamais bloquant, jamais de secret). */
   const logDecision = (params: {
