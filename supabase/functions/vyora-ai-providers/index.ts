@@ -27,6 +27,7 @@ import {
   parseRegistrySnapshot,
   runAiCall,
   resolveConfiguredProvidersFromSnapshot,
+  routingLogPayload,
   buildAiChain,
   type AiCallOutcome,
   type AiCallRequest,
@@ -214,7 +215,7 @@ function aiEngineDeps(outcomeBox: { outcome: AiCallOutcome | null }): AiEngineDe
       });
     },
     logRouting: async (entry) => {
-      await rpc('vyora_ai_log_routing', { p_payload: entry });
+      await rpc('vyora_ai_log_routing', { p_payload: routingLogPayload(entry) });
     },
     // Idempotence : la clé vient de l'appelant. Sans clé, rien n'est réservé —
     // et donc rien n'est bloqué.

@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAiChain,
   resolveConfiguredProvidersFromSnapshot,
+  routingLogPayload,
   type AiEngineDeps,
   type AiRegistrySnapshot,
 } from '../supabase/functions/_shared/ai-core/index.ts';
@@ -310,5 +311,77 @@ describe('buildAiChain — préférence explicite et exclusions', () => {
     expect(steps[0].providerKey).toBe('gemini');
     // groq reste joignable en dernier recours, jamais en premier.
     expect(steps[steps.length - 1].providerKey).toBe('groq');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Journal de routage — contrat de sérialisation
+// ---------------------------------------------------------------------------
+
+describe('journal de routage — le contrat doit être en snake_case', () => {
+  // Défaut constaté en production : le moteur émet du camelCase
+  // (`chosenProvider`, `roleKey`, `skipReason`) mais `vyora_ai_log_routing` lit
+  // `p_payload->>'chosen_provider'`. Résultat : /sislog écrit avec des colonnes
+  // vides — la décision de routage était inexploitable, alors que la
+  // journalisation ne lève jamais d'erreur (elle est « non bloquante »).
+  //
+  // Ce test verrouille la conversion : l'hôte DOIT sérialiser en snake_case.
+
+  it('convertit une entrée du moteur en payload lu par la RPC', () => {
+    const entry = {
+      space: 'business' as const,
+      taskKey: 'content_strategy',
+      roleKey: 'content_strategy',
+      level: null,
+      requestKey: 'diag:content_strategy:1',
+      chain: [{ provider: 'gonka', model: 'm', score: 112, reason: 'catalog' as const, costIn: 0.1, costOut: 0.1 }],
+      chosenProvider: 'gonka',
+      chosenModel: 'm',
+      attempts: 2,
+      skipReason: null,
+    };
+
+    const payload = routingLogPayload(entry);
+
+    // La RPC ne lit QUE ces clés-là.
+    expect(payload.space).toBe('business');
+    expect(payload.task_key).toBe('content_strategy');
+    expect(payload.role_key).toBe('content_strategy');
+    expect(payload.request_key).toBe('diag:content_strategy:1');
+    expect(payload.chosen_provider).toBe('gonka');
+    expect(payload.chosen_model).toBe('m');
+    expect(payload.attempts).toBe(2);
+    expect(payload.skip_reason).toBeNull();
+    // Le camelCase ne doit pas fuiter : une clé inconnue est silencieusement
+    // ignorée par la RPC, donc elle disparaîtrait sans bruit.
+    expect(payload.chosenProvider).toBeUndefined();
+    expect(payload.roleKey).toBeUndefined();
+    expect(payload.skipReason).toBeUndefined();
+  });
+
+  it('préserve la chaîne avec les clés attendues par l’écran d’administration', () => {
+    const entry = {
+      space: 'system' as const,
+      taskKey: null,
+      roleKey: null,
+      level: 'fast',
+      requestKey: null,
+      chain: [
+        { provider: 'groq', model: 'a', score: 126, reason: 'role_rule' as const, costIn: 0.15, costOut: 0.6 },
+        { provider: 'gonka', model: 'b', score: 112, reason: 'catalog' as const, costIn: 0.1, costOut: 0.1 },
+      ],
+      chosenProvider: null,
+      chosenModel: null,
+      attempts: 0,
+      skipReason: 'NO_MATCHING_MODEL',
+    };
+    const payload = routingLogPayload(entry);
+    expect(payload.level).toBe('fast');
+    expect(payload.skip_reason).toBe('NO_MATCHING_MODEL');
+    const chain = payload.chain as Array<Record<string, unknown>>;
+    expect(chain).toHaveLength(2);
+    expect(chain[1].provider).toBe('gonka');
+    expect(chain[1].reason).toBe('catalog');
+    expect(chain[1].costIn).toBe(0.1);
   });
 });

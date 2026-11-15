@@ -506,6 +506,30 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
   };
 }
 
+/**
+ * Payload du journal de routage, au format lu par `public.vyora_ai_log_routing`.
+ *
+ * Le moteur manipule du camelCase ; la RPC lit `p_payload->>'chosen_provider'`,
+ * `->>'role_key'`, `->>'skip_reason'`. Transmettre l'objet tel quel écrivait des
+ * colonnes VIDES sans jamais lever d'erreur — la journalisation est « non
+ * bloquante » par conception, donc la perte était silencieuse. La conversion
+ * vit ici, à un seul endroit, plutôt que chez chaque hôte.
+ */
+export function routingLogPayload(entry: AiRoutingLogEntry): Record<string, unknown> {
+  return {
+    space: entry.space,
+    task_key: entry.taskKey,
+    role_key: entry.roleKey,
+    level: entry.level,
+    request_key: entry.requestKey,
+    chain: entry.chain,
+    chosen_provider: entry.chosenProvider,
+    chosen_model: entry.chosenModel,
+    attempts: entry.attempts,
+    skip_reason: entry.skipReason,
+  };
+}
+
 async function safeLogRouting(deps: AiEngineDeps, entry: AiRoutingLogEntry): Promise<void> {
   try {
     await deps.logRouting?.(entry);
