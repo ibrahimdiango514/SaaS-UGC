@@ -44,11 +44,71 @@ export interface AiProbeResult {
   probeModel: string | null;
   completionOk: boolean | null;
   completionErrorCode: string | null;
+  /**
+   * Message d'erreur RENVOYÉ PAR LE FOURNISSEUR (tronqué, assaini).
+   *
+   * Pourquoi : un `400` sans corps ne permet aucun diagnostic — c'est
+   * exactement ce qui a rendu `PROVIDER_REQUEST_REJECTED` indéchiffrable sur
+   * LLM7 et Ollama. Le corps est lu, tronqué et purgé de tout secret avant
+   * d'être persisté ; il ne contient jamais la clé (les fournisseurs ne la
+   * renvoient pas et `redactSecrets` la retire par précaution).
+   */
+  completionDetail: string | null;
+  /** Statut HTTP de la complétion (null si jamais tentée). */
+  completionHttpStatus: number | null;
   latencyMs: number;
+}
+
+/** Tronque un texte pour la persistance (jamais de charge illimitée). */
+const DETAIL_MAX = 400;
+
+/**
+ * Assainit un corps d'erreur avant persistance.
+ *
+ * Trois protections : longueur bornée, retours à la ligne aplatis, et retrait
+ * de toute valeur ressemblant à un jeton (au cas où le fournisseur recopierait
+ * l'en-tête `Authorization` dans son message d'erreur — cela arrive).
+ */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/(Bearer\s+)[A-Za-z0-9._\-]{8,}/gi, '$1[redacted]')
+    .replace(/(sk-|gnk-|cfut_|key-)[A-Za-z0-9._\-]{8,}/gi, '$1[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, DETAIL_MAX);
+}
+
+/** Extrait le message d'erreur le plus parlant d'une charge JSON inconnue. */
+export function errorDetailOf(payload: unknown, raw: string | null): string | null {
+  const text = (() => {
+    if (payload && typeof payload === 'object') {
+      const record = payload as Record<string, unknown>;
+      const err = record.error;
+      const candidates = [
+        typeof record.message === 'string' ? record.message : null,
+        typeof record.detail === 'string' ? record.detail : null,
+        err && typeof err === 'object'
+          ? (err as Record<string, unknown>).message
+          : typeof err === 'string' ? err : null,
+        typeof record.code === 'string' ? record.code : null,
+      ].filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+      if (candidates.length) return candidates[0];
+    }
+    return raw;
+  })();
+  if (!text) return null;
+  const clean = redactSecrets(text);
+  return clean.length ? clean : null;
 }
 
 function statusCode(status: number): string {
   if (status === 401 || status === 403) return 'PROVIDER_AUTH_FAILED';
+  // 402 = la clé est valide, c'est le SOLDE qui est vide. Cas réel du
+  // 2026-11-15 : LLM7 (« Insufficient balance ») et Ollama (« Add usage
+  // credits ») renvoyaient tous deux 402, classé « requête rejetée » — ce qui
+  // laissait croire à un défaut de configuration. Le distinguer oriente
+  // l'opérateur vers la facturation, seul endroit où agir.
+  if (status === 402) return 'PROVIDER_PAYMENT_REQUIRED';
   if (status === 404) return 'PROVIDER_MODELS_ENDPOINT_MISSING';
   if (status === 429) return 'PROVIDER_RATE_LIMITED';
   if (status >= 500) return 'PROVIDER_UNAVAILABLE';
@@ -138,6 +198,8 @@ export async function probeProvider(
     probeModel: probeModel === 'auto' ? null : (probeModel ?? null),
     completionOk: null,
     completionErrorCode: null,
+    completionDetail: null,
+    completionHttpStatus: null,
     latencyMs: 0,
   };
 
@@ -191,7 +253,7 @@ export async function probeProvider(
   const testedModel = probeModel === 'auto' ? pickProbeModel(result.models, null) : probeModel;
   if (!testedModel) return result;
 
-  // — Complétion réelle, plafonnée : une seule requête, sortie minime —
+  // — Complétion réelle, plafonnée : sortie minime, nombre d'essais borné —
   const adapter = resolveAiAdapter({
     key: descriptor.key,
     kind: descriptor.kind,
@@ -206,6 +268,59 @@ export async function probeProvider(
     return { ...result, reached: 'completion', completionOk: false, completionErrorCode: 'PROVIDER_ADAPTER_UNSUPPORTED' };
   }
 
+  /**
+   * Modèles à essayer, dans l'ordre.
+   *
+   * Pourquoi plusieurs : un catalogue contient des familles que la sonde ne
+   * sait pas distinguer (LLM7 publie `jev-latest` à côté de modèles de chat).
+   * S'arrêter au premier refus faisait déclarer « fournisseur défaillant » alors
+   * que la bonne conclusion était « ce modèle-là n'accepte pas le chat ».
+   *
+   * Bornes strictes, pour ne jamais transformer une sonde en dépense :
+   *   * au plus `PROBE_ATTEMPTS` complétions (3) ;
+   *   * un nouvel essai UNIQUEMENT sur un refus qui met en cause le MODÈLE
+   *     (400/404/422). Un 401/402/403/429 concerne le compte entier : réessayer
+   *     un autre modèle ne changerait rien et multiplierait les appels.
+   */
+  const candidates = probeModel === 'auto'
+    ? probeModelCandidates(result.models, null, PROBE_ATTEMPTS)
+    : [testedModel];
+
+  let last: AiProbeResult | null = null;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const model = candidates[index];
+    const attempt = await attemptCompletion(adapter, credentials, model, options, result, startedAt);
+    if (attempt.completionOk === true) return attempt;
+    last = attempt;
+    const retryable = attempt.completionHttpStatus !== null
+      && MODEL_LEVEL_REJECTION.has(attempt.completionHttpStatus)
+      && index < candidates.length - 1;
+    if (!retryable) return attempt;
+  }
+
+  return last ?? result;
+}
+
+/**
+ * Statuts qui mettent en cause le MODÈLE et non le compte.
+ *
+ * 401/403 (clé), 402 (crédits), 429 (quota) sont des verdicts sur le compte :
+ * changer de modèle ne les corrigerait pas. 400/404/422 disent « cette requête,
+ * pour ce modèle, est invalide » : un autre modèle peut répondre.
+ */
+const MODEL_LEVEL_REJECTION = new Set([400, 404, 422]);
+
+/** Nombre maximal de complétions de contrôle par sonde. */
+const PROBE_ATTEMPTS = 3;
+
+async function attemptCompletion(
+  adapter: NonNullable<ReturnType<typeof resolveAiAdapter>>,
+  credentials: AiCredentials,
+  testedModel: string,
+  options: AiProbeOptions,
+  result: AiProbeResult,
+  startedAt: number,
+): Promise<AiProbeResult> {
   try {
     const transport = adapter.buildRequest({
       credentials,
@@ -217,15 +332,26 @@ export async function probeProvider(
       method: 'POST',
       headers: transport.headers,
       body: JSON.stringify(transport.body),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
     });
     if (!res.ok) {
+      // Le corps est lu SANS échouer la sonde : c'est la seule information qui
+      // distingue un modèle inexistant d'un paramètre refusé.
+      const rawBody = await res.text().catch(() => null);
+      let parsedBody: unknown = null;
+      try {
+        parsedBody = rawBody ? JSON.parse(rawBody) : null;
+      } catch {
+        parsedBody = null;
+      }
       return {
         ...result,
         reached: 'completion',
         probeModel: testedModel,
         completionOk: false,
         completionErrorCode: statusCode(res.status),
+        completionHttpStatus: res.status,
+        completionDetail: errorDetailOf(parsedBody, rawBody),
         latencyMs: Date.now() - startedAt,
       };
     }
@@ -249,9 +375,78 @@ export async function probeProvider(
   }
 }
 
-/** Modèles conversationnels du catalogue (les embeddings sont écartés du test). */
+// ---------------------------------------------------------------------------
+// Choix du modèle de sonde
+// ---------------------------------------------------------------------------
+
+/** Plafond au-delà duquel un prix publié n'est plus une information de tri. */
+const MAX_PLAUSIBLE_COST_PER_MTOK = 1000;
+
 export function conversationalModels(models: AiCatalogModel[]): AiCatalogModel[] {
-  return models.filter((model) => model.capabilities.embeddings !== true);
+  return models.filter(isChatCapable);
+}
+
+/**
+ * Ce modèle accepte-t-il vraiment `/v1/chat/completions` ?
+ *
+ * Les catalogues mélangent les familles : LLM7 publie pêle-mêle des modèles de
+ * chat, d'image (`gpt-image-*`, `seedance-*`, `kling-*`) et de transcription
+ * (`whisper-*`). Sonder un modèle d'image sur l'endpoint de chat renvoie un 400
+ * « does not support chat endpoints » — un faux négatif qui faisait passer un
+ * fournisseur sain pour défaillant.
+ */
+export function isChatCapable(model: AiCatalogModel): boolean {
+  const caps = model.capabilities as Record<string, unknown>;
+  if (caps.embeddings === true || caps.images === true || caps.video === true || caps.audio === true) {
+    return false;
+  }
+  return !NON_CHAT_FAMILY.test(model.providerModel);
+}
+
+/**
+ * Familles qui ne répondent pas sur `/chat/completions`.
+ *
+ * Nécessaire PARCE QUE les catalogues ne déclarent pas toujours leur
+ * architecture : LLM7 renvoie tous ses modèles avec la seule capacité
+ * `writing`, y compris `gpt-image-2`, `seedance-2.0` et `whisper-large-v3`. Le
+ * filtre par capacités déclarées ne peut donc rien y voir.
+ *
+ * C'est un filtre de NOM, assumé comme tel : il ne prétend pas déduire une
+ * capacité, il reconnaît des familles génératives connues (image, vidéo,
+ * synthèse et reconnaissance vocales, embeddings) pour ne pas envoyer une
+ * requête de chat à un modèle qui la refusera.
+ */
+const NON_CHAT_FAMILY = new RegExp(
+  [
+    'gpt-image', 'dall-e', 'stable-diffusion', 'sdxl', 'flux-', '-flux', 'midjourney',
+    'seedance', 'kling', 'sora', 'veo-', 'runway', 'pika',
+    'whisper', 'tts', '-tts', 'voxtral', 'elevenlabs',
+    'embed', 'bge-', 'gte-', 'e5-', 'voyage', 'rerank',
+  ].join('|'),
+  'i',
+);
+
+/** Modèles triés par préférence : préférence explicite, puis prix plausible. */
+function rankedProbeModels(models: AiCatalogModel[], preferred: string | null): AiCatalogModel[] {
+  const conversational = conversationalModels(models);
+  const ranked: AiCatalogModel[] = [];
+  if (preferred) {
+    const exact = conversational.find((m) => m.providerModel === preferred);
+    if (exact) ranked.push(exact);
+  }
+  const priced = conversational
+    .filter((m) => {
+      // Les DEUX prix doivent être plausibles : chez LLM7 l'anomalie porte sur
+      // l'entrée (`claude-sonnet-5` : 450 000 $/Mtok en entrée, 2,25 en sortie).
+      // Ne regarder que la sortie laisserait passer ce modèle.
+      const costs = [m.costIn, m.costOut].filter((v): v is number => v !== null);
+      return costs.length > 0 && costs.every((c) => c >= 0 && c <= MAX_PLAUSIBLE_COST_PER_MTOK);
+    })
+    .sort((a, b) => (a.costOut ?? a.costIn ?? 0) - (b.costOut ?? b.costIn ?? 0));
+  for (const model of [...priced, ...conversational]) {
+    if (!ranked.some((m) => m.providerModel === model.providerModel)) ranked.push(model);
+  }
+  return ranked;
 }
 
 /**
@@ -259,10 +454,27 @@ export function conversationalModels(models: AiCatalogModel[]): AiCatalogModel[]
  * Aucun identifiant n'est écrit en dur : le modèle vient du catalogue réel.
  */
 export function pickProbeModel(models: AiCatalogModel[], preferred: string | null): string | null {
-  const conversational = conversationalModels(models);
-  if (preferred && conversational.some((m) => m.providerModel === preferred)) return preferred;
-  const priced = [...conversational]
-    .filter((m) => m.costIn !== null || m.costOut !== null)
-    .sort((a, b) => (a.costOut ?? a.costIn ?? 0) - (b.costOut ?? b.costIn ?? 0));
-  return (priced[0] ?? conversational[0])?.providerModel ?? null;
+  return rankedProbeModels(models, preferred)[0]?.providerModel ?? null;
+}
+
+/**
+ * Modèles de repli, dans l'ordre, pour une sonde qui doit insister.
+ *
+ * Sert uniquement à la sonde : jamais au routage produit (voir `router.ts`).
+ * Le plafond est appliqué ici, pas chez l'appelant.
+ */
+export function probeModelCandidates(
+  models: AiCatalogModel[],
+  preferred: string | null,
+  limit = 3,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const model of rankedProbeModels(models, preferred)) {
+    if (out.length >= Math.max(1, limit)) break;
+    if (seen.has(model.providerModel)) continue;
+    seen.add(model.providerModel);
+    out.push(model.providerModel);
+  }
+  return out;
 }

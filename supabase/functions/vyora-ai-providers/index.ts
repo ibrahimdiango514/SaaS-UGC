@@ -266,8 +266,16 @@ export async function handler(req: Request): Promise<Response> {
 
     // Modèle de test : un choix EXPLICITE de l'opérateur, sinon le modèle le
     // moins cher du catalogue réel. Jamais un identifiant deviné.
-    const preferred = str(body.model, 120) || null;
-    const probeModel = probe.catalogOk ? pickProbeModel(conversationalModels(probe.models), preferred) : null;
+    // Déclaré au registre par l'opérateur (alias documenté absent du
+    // catalogue), ou modèle imposé par l'appel. Une déclaration explicite n'est
+    // pas une inférence : le catalogue reste la source par défaut.
+    const preferred = str(body.model, 120) || str(row.probe_model, 120) || null;
+    // Une déclaration EXPLICITE (opérateur ou appel) prime et n'est pas
+    // confrontée au catalogue : c'est précisément le cas des alias documentés
+    // que le fournisseur n'énumère pas (`default` chez LLM7). Le catalogue ne
+    // sert qu'au choix AUTOMATIQUE, où aucune valeur n'est inventée.
+    const probeModel = preferred
+      || (probe.catalogOk ? pickProbeModel(conversationalModels(probe.models), null) : null);
 
     let completion: AiProbeResult = probe;
     if (probeCompletion && probe.catalogOk && probeModel) {
@@ -294,6 +302,8 @@ export async function handler(req: Request): Promise<Response> {
         latency_ms: completion.latencyMs,
         probe_model: probeModel,
         reached: completion.reached,
+        http_status: completion.completionHttpStatus,
+        error_detail: completion.completionDetail,
       },
     });
 
@@ -312,6 +322,10 @@ export async function handler(req: Request): Promise<Response> {
       probe_model: probeModel,
       completion_ok: completion.completionOk,
       error_code: errorCode,
+      // Preuve exploitable : statut HTTP + message réel du fournisseur.
+      // `completionDetail` est déjà tronqué et purgé de tout secret côté sonde.
+      http_status: completion.completionHttpStatus,
+      error_detail: completion.completionDetail,
       latency_ms: completion.latencyMs,
       reached: completion.reached,
     });

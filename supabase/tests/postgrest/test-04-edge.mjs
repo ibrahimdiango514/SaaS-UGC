@@ -176,6 +176,45 @@ export async function run(ctx) {
   await ctx.adminQuery(`
     update saas_business.ai_providers set enabled = true where provider_key = 'groq'`);
 
+  // --- 7bis. Sonde : alias hors catalogue admis sur preuve réelle -------------
+  // Cas réel (LLM7, 2026-11-15) : `default` n'est pas énuméré par `/models` mais
+  // répond 200. La sonde doit pouvoir l'enregistrer comme modèle vérifié, sans
+  // jamais inventer un identifiant absent d'une complétion réussie.
+  //
+  // Deux régressions sont verrouillées ici :
+  //   * `model_key` porte une clé étrangère vers `ai_models` : y écrire un alias
+  //     faisait échouer TOUT l'enregistrement ;
+  //   * `provider_health_cron_runs` n'accepte que groq/gemini : y écrire les
+  //     fournisseurs de la phase d'intégration annulait aussi l'enregistrement.
+  await ctx.adminQuery(`
+    update saas_business.ai_providers
+       set integration_phase = coalesce(integration_phase, 'test'),
+           probe_model = 'default'
+     where provider_key = 'groq'`);
+  const probe = await ctx.adminQuery(`
+    select public.vyora_ai_record_probe('{"provider_key":"groq","catalog_ok":true,"completion_ok":true,"latency_ms":42,"probe_model":"default"}'::jsonb) as res`);
+  const probeRes = probe.rows?.[0]?.res ?? {};
+  h.check(probeRes.status === 'available',
+    'sonde : un alias déclaré hors catalogue est enregistré (statut available)', `res=${JSON.stringify(probeRes)}`);
+
+  const alias = await ctx.adminQuery(`
+    select verification_status, enabled from saas_business.ai_models
+     where provider_key = 'groq' and provider_model_key = 'default'`);
+  h.check((alias.rows?.[0]?.verification_status ?? '') === 'verified',
+    'sonde : l’alias vérifié entre au registre (utilisable en repli)', JSON.stringify(alias.rows?.[0] ?? {}));
+
+  const health = await ctx.adminQuery(`
+    select probe_model, http_status from saas_business.ai_provider_health_checks
+     where provider_key = 'groq' order by checked_at desc limit 1`);
+  h.check(health.rows?.[0]?.probe_model === 'default',
+    'sonde : le modèle réellement testé est persisté (probe_model)', JSON.stringify(health.rows?.[0] ?? {}));
+
+  await ctx.adminQuery(`
+    delete from saas_business.ai_models where provider_key = 'groq' and provider_model_key = 'default';
+    update saas_business.ai_providers
+       set probe_model = null, integration_phase = null
+     where provider_key = 'groq'`);
+
   // --- 8. Confirmations d'actions (outils) -------------------------------------
   r = await edge('tools.list', { conversationId: convA });
   h.check(r.status === 200 && Array.isArray(r.json?.data?.tools), 'outils : liste des exécutions d’outils (confirmations d’actions)', `status=${r.status} n=${r.json?.data?.tools?.length}`);
