@@ -24,6 +24,13 @@ import {
   probeProvider,
   conversationalModels,
   pickProbeModel,
+  parseRegistrySnapshot,
+  runAiCall,
+  resolveConfiguredProvidersFromSnapshot,
+  buildAiChain,
+  type AiCallOutcome,
+  type AiCallRequest,
+  type AiEngineDeps,
   type AiProbeDescriptor,
   type AiProbeResult,
 } from '../_shared/ai-core/index.ts';
@@ -153,6 +160,231 @@ async function isAdmin(jwt: string): Promise<boolean> {
   return res.ok;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Diagnostic du ROUTAGE réel                                                  */
+/*                                                                             */
+/* La sonde prouve qu'un fournisseur répond ; elle ne prouve pas que le moteur */
+/* le CHOISIT. Or le routeur écarte un fournisseur absent de l'ensemble des    */
+/* « configurés » (`buildAiChain`, filtre dur n°1) — un fournisseur sain peut  */
+/* donc rester inatteignable. Cette action exécute la vraie chaîne de décision */
+/* du moteur avec le registre réel, et n'appelle le fournisseur QUE si         */
+/* l'opérateur le demande explicitement (`call: true`).                        */
+/* -------------------------------------------------------------------------- */
+
+/** Snapshot du registre, lu côté serveur (aucun secret dans la réponse). */
+async function loadRegistrySnapshot(): Promise<ReturnType<typeof parseRegistrySnapshot>> {
+  const res = await rpc('vyora_ai_registry_snapshot', {});
+  if (!res.ok) return null;
+  return parseRegistrySnapshot(res.data);
+}
+
+/**
+ * Dépendances du moteur, identiques à celles de l'hôte `vyora-ai`.
+ *
+ * `configuredProviders` reste VIDE : le moteur complète l'ensemble en lisant
+ * `api_key_env` au registre et sa valeur dans les secrets Edge. On ne duplique
+ * donc ici aucune liste de fournisseurs — c'est précisément ce que ce
+ * diagnostic doit mesurer.
+ */
+function aiEngineDeps(outcomeBox: { outcome: AiCallOutcome | null }): AiEngineDeps {
+  return {
+    // Un diagnostic ne consomme pas la chaîne entière : 2 tentatives au plus,
+    // chacune bornée à 20 s (la fonction Edge plafonne à 150 s).
+    maxAttempts: 2,
+    requestTimeoutMs: 20_000,
+    loadRegistry: loadRegistrySnapshot,
+    configuredProviders: () => new Set<string>(),
+    credentials: (providerKey) => {
+      const names = legacyEnvNames(providerKey);
+      return { apiKey: firstEnv(names.apiKey), accountId: firstEnv(names.accountId), gatewayId: null };
+    },
+    env: (name) => env(name) || null,
+    fetcher: fetch,
+    logCall: async (entry) => {
+      await rpc('vyora_ai_log_call', {
+        p_payload: {
+          space: entry.space,
+          user_id: entry.userId,
+          workspace_id: entry.workspaceId,
+          task_key: entry.taskKey,
+          attempts: entry.attempts,
+          cost_input_usd: entry.costInputUsd,
+          cost_output_usd: entry.costOutputUsd,
+        },
+      });
+    },
+    logRouting: async (entry) => {
+      await rpc('vyora_ai_log_routing', { p_payload: entry });
+    },
+    // Idempotence : la clé vient de l'appelant. Sans clé, rien n'est réservé —
+    // et donc rien n'est bloqué.
+    claimCall: async (requestKey, meta) => {
+      const res = await rpc('vyora_ai_claim_call', {
+        p_request_key: requestKey,
+        p_space: meta.space,
+        p_user_id: meta.userId,
+        p_workspace_id: meta.workspaceId,
+      });
+      void outcomeBox;
+      const row = Array.isArray(res.data) ? (res.data[0] as Json | undefined) : undefined;
+      if (!res.ok || !row) return { claimed: true, status: 'in_flight', providerKey: null, modelKey: null, outcomeCode: null };
+      return {
+        claimed: row.claimed === true,
+        status: typeof row.status === 'string' ? row.status : 'in_flight',
+        providerKey: typeof row.provider_key === 'string' ? row.provider_key : null,
+        modelKey: typeof row.model_key === 'string' ? row.model_key : null,
+        outcomeCode: typeof row.outcome_code === 'string' ? row.outcome_code : null,
+      };
+    },
+    releaseCall: async (params) => {
+      await rpc('vyora_ai_release_call', {
+        p_request_key: params.requestKey,
+        p_status: params.status,
+        p_provider_key: params.providerKey,
+        p_model_key: params.modelKey,
+        p_outcome_code: params.outcomeCode,
+        p_content_chars: params.contentChars,
+      });
+    },
+  };
+}
+
+/** Noms de variables historiques d'un fournisseur (aucune valeur). */
+function legacyEnvNames(providerKey: string): { apiKey: string[]; accountId: string[] } {
+  const upper = providerKey.replace(/[^a-z0-9]+/gi, '_').toUpperCase();
+  return {
+    apiKey: [
+      `BUSINESS_GROW_${upper}_API_KEY`,
+      `BUSINESS_GROW_${upper}_API_TOKEN`,
+      `${upper}_API_KEY`,
+      `${upper}_API_TOKEN`,
+    ],
+    accountId: [`BUSINESS_GROW_${upper}_ACCOUNT_ID`, `${upper}_ACCOUNT_ID`],
+  };
+}
+
+function firstEnv(names: string[]): string | null {
+  for (const name of names) {
+    const value = env(name);
+    if (value) return value;
+  }
+  return null;
+}
+
+async function routeDiagnostic(body: Json): Promise<Response> {
+  const roleKey = str(body.role, 60) || null;
+  const preferProvider = str(body.prefer, 40).toLowerCase() || null;
+  const levelRaw = str(body.level, 20);
+  const level = (['fast', 'economy', 'advanced', 'specialized', 'fallback'] as const)
+    .includes(levelRaw as never) ? (levelRaw as AiCallRequest['level'] & string) : null;
+  const wantCall = body.call === true;
+
+  const snapshot = await loadRegistrySnapshot();
+  if (!snapshot) {
+    return fail('REGISTRY_UNAVAILABLE', 'Registre illisible : diagnostic de routage impossible.', 503);
+  }
+
+  const prompt = str(body.prompt, 2000)
+    || 'Réponds uniquement par le mot OK. Ceci est un test de routage interne.';
+
+  // Chaîne de décision, calculée par le routeur de production lui-même, avec la
+  // résolution d'identifiants du moteur (aucune copie locale de la logique).
+  const routeDeps = aiEngineDeps({ outcome: null });
+  const { steps, skipReason } = buildAiChain(
+    snapshot,
+    {
+      role: roleKey,
+      level,
+      requireCapabilities: Array.isArray(body.capabilities)
+        ? body.capabilities.filter((c): c is string => typeof c === 'string').slice(0, 8)
+        : undefined,
+      preferProvider,
+      minContextTokens: null,
+      maxCostInPerMtok: null,
+    },
+    resolveConfiguredProvidersFromSnapshot(snapshot, routeDeps),
+  );
+
+  const report: Json = {
+    role: roleKey,
+    prefer: preferProvider,
+    level,
+    call_requested: wantCall,
+    skip_reason: skipReason,
+    // La chaîne complète, dans l'ordre où le moteur l'essaierait.
+    chain: steps.map((step, index) => ({
+      rank: index + 1,
+      provider: step.providerKey,
+      model: step.modelKey,
+      provider_model: step.providerModelKey,
+      score: step.score,
+      reason: step.reason,
+      cost_in: step.costIn,
+      cost_out: step.costOut,
+    })),
+    executed: null as Json | null,
+  };
+
+  if (!wantCall) {
+    // Dry-run par défaut : aucune requête fournisseur, aucune facturation.
+    report.note = steps.length > 0
+      ? 'Chaîne calculée sans appel : `call: true` exécute la vraie complétion.'
+      : 'Aucun modèle compatible : voir skip_reason.';
+    return json({ service: 'vyora-ai-providers', action: 'route', dry_run: true, ...report });
+  }
+
+  if (skipReason) {
+    return json({ service: 'vyora-ai-providers', action: 'route', dry_run: false, ...report });
+  }
+
+  const box: { outcome: AiCallOutcome | null } = { outcome: null };
+  const deps = aiEngineDeps(box);
+  const outcome = await runAiCall(deps, {
+    messages: [{ role: 'user', content: prompt }],
+    options: { maxOutputTokens: 16, temperature: 0 },
+    role: roleKey,
+    level,
+    preferProvider,
+    space: 'system',
+    userId: null,
+    taskKey: roleKey ?? 'route_diagnostic',
+    // Clé d'idempotence : un rejeu ne rappelle jamais le fournisseur.
+    requestKey: `diag:${roleKey ?? 'auto'}:${Date.now()}`,
+  });
+  box.outcome = outcome;
+
+  report.executed = {
+    ok: outcome.ok,
+    code: outcome.code,
+    provider: outcome.providerKey,
+    model: outcome.modelKey,
+    provider_model: outcome.providerModelKey,
+    http_status: null,
+    content_chars: outcome.content !== null ? outcome.content.length : null,
+    input_tokens: outcome.inputTokens,
+    output_tokens: outcome.outputTokens,
+    estimated_cost_usd: outcome.estimatedCostUsd,
+    latency_ms: outcome.latencyMs,
+    duplicate: outcome.duplicate === true,
+    // Chaque tentative réelle, dans l'ordre : c'est la preuve du fallback.
+    attempts: outcome.attempts.map((attempt) => ({
+      attempt: attempt.attempt,
+      provider: attempt.providerKey,
+      model: attempt.modelKey,
+      status: attempt.status,
+      error_code: attempt.errorCode,
+      latency_ms: attempt.latencyMs,
+      input_tokens: attempt.inputTokens,
+      output_tokens: attempt.outputTokens,
+      score: attempt.score,
+      routed_by: attempt.routedBy,
+    })),
+  };
+
+  return json({ service: 'vyora-ai-providers', action: 'route', dry_run: false, ...report });
+}
+
+
 // Exposé pour le chargeur de production (`new Function`) : le bundle n'a pas
 // d'exports ES, il publie donc le handler sur l'objet global avant Deno.serve.
 const runtimeGlobal = globalThis as unknown as {
@@ -191,6 +423,10 @@ export async function handler(req: Request): Promise<Response> {
   }
 
   const action = str(body.action, 40) || 'probe';
+
+  // Diagnostic du routage : lecture du registre + chaîne de décision, sans
+  // toucher au catalogue ni au statut des fournisseurs.
+  if (action === 'route') return routeDiagnostic(body);
 
   // — Descripteurs : uniquement les fournisseurs de la phase d'intégration —
   const descriptorsRes = await rpc('vyora_ai_provider_descriptors', {});
