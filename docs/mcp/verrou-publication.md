@@ -144,3 +144,70 @@ commit;
 ```
 
 Cette opération doit être explicite, revue et tracée.
+
+---
+
+## Fusion des PR #10 et #12 — procédure vérifiée
+
+Une répétition de fusion a été exécutée en bac à sable (aucune push, aucun
+commit) pour établir la procédure exacte. Résultat : **9 conflits, tous
+résolubles**, et une suite complète à **1728 tests verts** après résolution.
+
+### Conflits et résolution
+
+| Fichier | Type | Résolution |
+|---|---|---|
+| `src/App.tsx` | contenu | **garder les deux routes** (`connect` et `mcp`) — complémentaires, pas concurrentes |
+| `supabase/functions/vyora-oauth/index.ts` | add/add | version #12 (vérification d'identité) |
+| `supabase/functions/vyora-oauth/loader.ts` | add/add | version #12 (épingle SHA-256 du bundle corrigé) |
+| `supabase/functions/vyora-oauth.edge.js` | add/add | version #12 (bundle corrigé) |
+| `scripts/build-edge-loader.mjs` | add/add | version #12 **+ réintégrer la cible `vyora-mcp`** |
+| `scripts/build-edge-loader.d.mts` | add/add | version #12 |
+| `tests/oauth-connector.test.ts` | add/add | version #12 |
+| `docs/mcp/connecteurs-oauth.md` | add/add | version #12 |
+
+### Deux pièges, à ne pas manquer
+
+**1. La cible `vyora-mcp` disparaît.** Le générateur de #12 ne connaît pas
+`vyora-mcp`, apporté par #10. Prendre la version #12 sans réintégrer cette
+cible casse la publication de l'artefact `vyora-mcp` — et le périmètre MCP
+avec. Le générateur doit lister les **cinq** cibles :
+
+```
+vyora-ai, vyora-ai-providers, vyora-provider-health, vyora-mcp, vyora-oauth
+```
+
+**2. Il faut régénérer TOUTES les migrations.** Le générateur de #12 émet une
+épingle de publication. Les migrations de #10, écrites avant, n'en ont pas.
+Après fusion, six tests de parité échouent jusqu'à régénération :
+
+```bash
+node scripts/build-edge-loader.mjs --all
+```
+
+Cette commande réécrit les cinq migrations et les cinq chargeurs. C'est le
+rôle du générateur : une seule source de vérité.
+
+### Un contrat de test qui doit évoluer
+
+`tests/edge-loader-parity.test.ts` (apporté par #10) vérifiait l'**absence**
+de `on conflict (name)`, la clé de l'empreinte étant `(name, sha256)`.
+L'arrivée du manifeste rend `on conflict (name)` nécessaire : republier un
+artefact met à jour l'épingle au lieu d'échouer sur la clé primaire. Ce test
+doit être adapté consciemment — c'est un changement de contrat, pas un détail.
+
+De même, `tests/migration-order.test.ts` doit assertir sur le **contenu** de
+`20261116040000` (« ne publie plus rien ») et non sur son absence, car après
+fusion le fichier existe en version neutralisée.
+
+### Ordre de fusion recommandé
+
+```
+1. #12  (publie l'artefact corrigé + pose l'épingle)
+2. #10  (no-op sur l'artefact, apporte le serveur MCP)
+```
+
+puis appliquer les migrations, puis redéployer le chargeur `vyora-oauth`.
+
+L'ordre inverse fonctionne aussi : la migration de #10 ne publie plus rien,
+et celle de #12 publie puis épingle. Le verrou rend les deux ordres sûrs.
