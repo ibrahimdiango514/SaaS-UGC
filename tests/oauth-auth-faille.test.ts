@@ -1,128 +1,290 @@
-// VYORA — reproduction d'une faille d'authentification (trouvée en écrivant
-// les tests d'isolation).
+// VYORA — authentification des actions OAuth privées.
 //
-// ## Le problème
+// ## Historique de ce fichier
 //
-// `callerId()` dans `vyora-oauth/index.ts` ne fait que découper la chaîne après
-// « Bearer ». Elle ne vérifie NI la signature, NI l'expiration, NI même que le
-// jeton soit un JWT. La valeur obtenue est utilisée comme `userId` dans les
-// comparaisons de propriété (`row.user_id !== userId`).
+// Il a d'abord servi à DÉMONTRER une faille : `callerId()` ne vérifiait ni
+// signature ni expiration, et l'Edge Function est déployée avec
+// `verify_jwt: false`. Un `Authorization: Bearer <uuid>` arbitraire devenait
+// l'identité de l'appelant, rendant les contrôles `user_id` décoratifs.
 //
-// Or l'Edge Function est déployée avec `verify_jwt: false` — vérifié sur le
-// déploiement réel. Rien ne valide donc le jeton en amont.
+// La faille est corrigée : `resolveCaller()` (dans
+// `supabase/functions/vyora-oauth/auth.ts`) vérifie le jeton auprès de
+// Supabase Auth avant toute logique métier. Les anciens tests `it.fails` sont
+// devenus des tests normaux — c'est la preuve que la protection existe.
 //
-// Conséquence : envoyer `Authorization: Bearer <uuid de la victime>` suffit à
-// se faire passer pour elle. Ce n'est pas une faille d'isolation au sens strict
-// (les contrôles `user_id` sont justes), c'est une faille d'AUTHENTIFICATION
-// qui rend ces contrôles inopérants : ils comparent l'identité à elle-même.
+// ## Ce que ce fichier couvre maintenant
 //
-// ## Convention de ce fichier
-//
-// Chaque test encode le comportement SOUHAITÉ et est marqué `it.fails` : il
-// passe aujourd'hui parce que la protection manque, et deviendra rouge dès
-// qu'elle sera ajoutée — signal qu'il faut le passer en `it`. Une dette
-// visible, pas un faux vert.
+// Le comportement de `resolveCaller` face à toutes les catégories de jetons
+// (absent, malformé, forgé, expiré, révoqué, valide), et le fait qu'aucun de ces
+// cas ne peut atteindre une opération privée.
 import { describe, expect, it } from 'vitest';
-import { createHandler, handleList, handleToolCall, type HandlerDeps } from '../supabase/functions/vyora-oauth/index.ts';
-import type { OAuthStore } from '../supabase/functions/vyora-oauth/store.ts';
+import { looksLikeJwt, resolveCaller, type AuthConfig } from '../supabase/functions/vyora-oauth/auth.ts';
+import { createHandler } from '../supabase/functions/vyora-oauth/index.ts';
 import { generateKeyBase64 } from '../supabase/functions/_shared/oauth/crypto.ts';
 
-const VICTIME = 'aaaaaaaa-0000-4000-8000-000000000001';
+const USER_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 
-function deps(fetchImpl?: typeof fetch): HandlerDeps {
-  return {
-    store: {
-      async createState() {},
-      async consumeState() { return null; },
-      async upsertAccount() { return null; },
-      async getAccountSecret(id: string) {
-        return {
-          id, user_id: VICTIME, provider: 'gmail', external_account_id: 'sub-A',
-          status: 'connected', capabilities: ['read', 'send'],
-          access_token_cipher: null, access_token_iv: null, access_token_tag: null,
-          refresh_token_cipher: null, refresh_token_iv: null, refresh_token_tag: null,
-          access_expires_at: null,
-        };
-      },
-      async setAccountStatus() {},
-      async updateTokens() { return false; },
-      async audit() {},
-    } as OAuthStore,
-    config: {
-      baseUrl: 'https://projet.supabase.co',
-      serviceKey: 'service-key-factice',
-      clientId: 'client-id-google',
-      clientSecret: 'client-secret-google',
-      encryptionKey: generateKeyBase64(),
-      redirectUri: 'https://projet.supabase.co/functions/v1/vyora-oauth?action=callback',
-      fetchImpl,
-    },
-  };
+/** JWT bien formé (3 segments base64url) mais dont la signature est inventée. */
+const JWT_FORGE = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.signature-inventee';
+const JWT_EXPIRE = 'eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjF9.signature-expiree';
+
+function authConfig(fetchImpl: typeof fetch): AuthConfig {
+  return { baseUrl: 'https://projet.supabase.co', anonKey: 'anon-key-factice', fetchImpl };
 }
 
-/** L'attaquant présente l'identifiant de la victime comme sien. */
-const JETON_FORGE = VICTIME;
+/** Simule `/auth/v1/user` : rend l'utilisateur si le jeton est reconnu. */
+function authService(accepted: string | null, status = 200) {
+  const calls: Array<{ url: string; authorization: string; apikey: string }> = [];
+  const impl = (async (url: string, init: RequestInit = {}) => {
+    const headers = init.headers as Record<string, string>;
+    calls.push({ url: String(url), authorization: headers.Authorization ?? '', apikey: headers.apikey ?? '' });
+    if (status !== 200) return new Response('{}', { status });
+    const token = (headers.Authorization ?? '').replace(/^Bearer\s+/, '');
+    if (accepted === null || token !== accepted) return new Response('{}', { status: 401 });
+    return new Response(JSON.stringify({ id: USER_ID, email: 'a@exemple.fr' }), { status: 200 });
+  }) as unknown as typeof fetch;
+  return { calls, impl };
+}
 
-describe('FAILLE — l’identité de l’appelant n’est pas vérifiée', () => {
-  it.fails('un jeton forgé doit être rejeté (aujourd’hui accepté)', async () => {
-    const response = await handleList(deps(), JETON_FORGE);
-    expect(response.status).toBe(401);
+describe('resolveCaller / jetons refusés sans appel réseau', () => {
+  it('refuse l’absence d’en-tête', async () => {
+    const { calls, impl } = authService(JWT_FORGE);
+    const result = await resolveCaller(null, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'unauthenticated' });
+    // Un en-tête absent ne justifie pas un aller-retour réseau.
+    expect(calls).toHaveLength(0);
   });
 
-  it.fails('une chaîne arbitraire doit être rejetée (aujourd’hui acceptée comme identité)', async () => {
-    // « nimporte-quoi » n'est même pas un UUID : c'est pourtant pris pour un
-    // utilisateur, et transmis tel quel à PostgREST.
-    const response = await handleList(deps(), 'nimporte-quoi');
-    expect(response.status).toBe(401);
+  it('refuse un en-tête vide ou réduit à des espaces', async () => {
+    const { calls, impl } = authService(JWT_FORGE);
+    for (const header of ['', '   ', 'Bearer', 'Bearer ', 'Bearer    ']) {
+      const result = await resolveCaller(header, authConfig(impl));
+      expect(result.ok).toBe(false);
+    }
+    expect(calls).toHaveLength(0);
   });
 
-  it.fails('tools/call doit refuser une identité non vérifiée (aujourd’hui 409)', async () => {
-    // Le compte est bien reconnu comme appartenant à « l'appelant » : le
-    // contrôle de propriété compare la victime à elle-même et laisse passer.
-    // L'erreur obtenue (409) porte sur l'absence de jeton stocké, PAS sur
-    // l'identité — preuve que l'authentification n'a pas eu lieu.
-    const response = await handleToolCall(
-      { name: 'vyora_gmail_search', arguments: {}, account_id: 'compte-de-la-victime' },
-      deps(),
-      JETON_FORGE,
-    );
-    expect(response.status).toBe(403);
+  it('refuse un schéma autre que Bearer', async () => {
+    const { calls, impl } = authService(JWT_FORGE);
+    const result = await resolveCaller('Basic dXNlcjpwYXNz', authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'unauthenticated' });
+    expect(calls).toHaveLength(0);
   });
 
-  it('le handler HTTP ne valide aucun jeton : la seule exigence est un en-tête non vide', async () => {
-    // Preuve directe au niveau routage, énoncée sans détour pour que la faille
-    // ne soit pas noyée dans une assertion indirecte.
-    const handler = createHandler({
-      baseUrl: 'https://p.supabase.co', serviceKey: 'k', clientId: 'c',
-      clientSecret: 's', encryptionKey: generateKeyBase64(), redirectUri: 'https://p/cb',
+  it('refuse un UUID nu — le cas exact de l’attaque d’origine', async () => {
+    // Avant correction, cette valeur devenait l'identité de l'appelant.
+    const { calls, impl } = authService(JWT_FORGE);
+    const result = await resolveCaller(`Bearer ${USER_ID}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'unauthenticated' });
+    // Rejeté sur la forme, donc sans même interroger Auth.
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuse un JWT tronqué ou à deux segments', async () => {
+    const { impl } = authService(JWT_FORGE);
+    for (const token of ['abc', 'a.b', 'a.b.c.d', 'a..c']) {
+      const result = await resolveCaller(`Bearer ${token}`, authConfig(impl));
+      expect(result.ok).toBe(false);
+    }
+  });
+});
+
+describe('resolveCaller / jetons soumis à Supabase Auth', () => {
+  it('accepte un jeton authentique et rend l’identité d’Auth', async () => {
+    const { calls, impl } = authService(JWT_FORGE);
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, authConfig(impl));
+
+    expect(result).toEqual({ ok: true, userId: USER_ID });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://projet.supabase.co/auth/v1/user');
+    expect(calls[0].authorization).toBe(`Bearer ${JWT_FORGE}`);
+    // La clé publique accompagne le jeton, elle ne le remplace pas.
+    expect(calls[0].apikey).toBe('anon-key-factice');
+  });
+
+  it('refuse un JWT forgé (signature invalide → 401 d’Auth)', async () => {
+    const { impl } = authService(null);
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'unauthenticated' });
+  });
+
+  it('refuse un JWT expiré (401 d’Auth)', async () => {
+    const { impl } = authService(null);
+    const result = await resolveCaller(`Bearer ${JWT_EXPIRE}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'unauthenticated' });
+  });
+
+  it('refuse un jeton révoqué (403 d’Auth)', async () => {
+    const { impl } = authService(null, 403);
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'unauthenticated' });
+  });
+
+  it('distingue une panne d’Auth (503) d’un refus d’identité (401)', async () => {
+    // Confondre les deux ferait afficher « session expirée » lors d'une panne,
+    // et pousserait l'utilisateur à se reconnecter pour rien.
+    const { impl } = authService(JWT_FORGE, 500);
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'auth_unavailable' });
+  });
+
+  it('traite un réseau injoignable comme une indisponibilité, pas un refus', async () => {
+    const impl = (async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'auth_unavailable' });
+  });
+
+  it('traite une réponse 200 non-JSON comme une indisponibilité', async () => {
+    const impl = (async () => new Response('<html>proxy</html>', { status: 200 })) as unknown as typeof fetch;
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'auth_unavailable' });
+  });
+
+  it('refuse une réponse sans identifiant exploitable', async () => {
+    const impl = (async () => new Response(JSON.stringify({ email: 'x@y.z' }), { status: 200 })) as unknown as typeof fetch;
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, authConfig(impl));
+    expect(result).toEqual({ ok: false, reason: 'auth_unavailable' });
+  });
+
+  it('refuse faute de clé publique plutôt que de faire confiance au porteur', async () => {
+    // Sans clé, impossible d'interroger Auth. Accepter serait le pire choix.
+    const { calls, impl } = authService(JWT_FORGE);
+    const result = await resolveCaller(`Bearer ${JWT_FORGE}`, {
+      baseUrl: 'https://projet.supabase.co', anonKey: '', fetchImpl: impl,
     });
+    expect(result).toEqual({ ok: false, reason: 'auth_unavailable' });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('looksLikeJwt / reconnaissance de forme', () => {
+  it('accepte un JWT à trois segments base64url', () => {
+    expect(looksLikeJwt(JWT_FORGE)).toBe(true);
+  });
+
+  it('rejette un UUID, une chaîne vide et les formes incomplètes', () => {
+    for (const value of [USER_ID, '', 'abc', 'a.b', 'a.b.c.d', 'a.b.c!']) {
+      expect(looksLikeJwt(value)).toBe(false);
+    }
+  });
+});
+
+describe('handler HTTP / aucune action privée sans identité vérifiée', () => {
+  const config = {
+    baseUrl: 'https://p.supabase.co',
+    serviceKey: 'k',
+    clientId: 'c',
+    clientSecret: 's',
+    encryptionKey: generateKeyBase64(),
+    redirectUri: 'https://p/cb',
+    anonKey: 'anon-key-factice',
+  };
+
+  /** Auth injoignable : toute action privée doit échouer. */
+  const authDown = (async () => { throw new Error('down'); }) as unknown as typeof fetch;
+
+  const privateActions = [
+    'list', 'audit', 'revoke', 'refresh', 'check', 'start', 'tools_list', 'tools_call',
+  ];
+
+  it('refuse toutes les actions privées sans en-tête Authorization', async () => {
+    const handler = createHandler({ ...config, fetchImpl: authDown });
+    for (const action of privateActions) {
+      const response = await handler(new Request('https://p.supabase.co/functions/v1/vyora-oauth', {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      }));
+      expect(response.status, `action ${action}`).toBe(401);
+    }
+  });
+
+  it('refuse toutes les actions privées avec un UUID nu en porteur', async () => {
+    // Régression directe de la faille : ce porteur ne doit plus rien ouvrir.
+    const handler = createHandler({ ...config, fetchImpl: authDown });
+    for (const action of privateActions) {
+      const response = await handler(new Request('https://p.supabase.co/functions/v1/vyora-oauth', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${USER_ID}` },
+        body: JSON.stringify({ action }),
+      }));
+      expect(response.status, `action ${action}`).toBe(401);
+    }
+  });
+
+  it('refuse toutes les actions privées avec un JWT forgé', async () => {
+    const handler = createHandler({ ...config, fetchImpl: authDown });
+    for (const action of privateActions) {
+      const response = await handler(new Request('https://p.supabase.co/functions/v1/vyora-oauth', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${JWT_FORGE}` },
+        body: JSON.stringify({ action }),
+      }));
+      // 401 (jeton refusé) ou 503 (Auth injoignable) — jamais un succès.
+      expect([401, 503], `action ${action}`).toContain(response.status);
+    }
+  });
+
+  it('rend 503 quand Auth est injoignable, pas 401', async () => {
+    const handler = createHandler({ ...config, fetchImpl: authDown });
     const response = await handler(new Request('https://p.supabase.co/functions/v1/vyora-oauth', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${VICTIME}` },
+      headers: { Authorization: `Bearer ${JWT_FORGE}` },
+      body: JSON.stringify({ action: 'list' }),
+    }));
+    expect(response.status).toBe(503);
+    expect((await response.json() as { error: string }).error).toBe('auth_unavailable');
+  });
+
+  it('laisse passer une action privée avec un JWT authentique', async () => {
+    // Contre-épreuve : sans elle, un handler qui refuserait tout passerait
+    // pour sécurisé.
+    const { impl } = authService(JWT_FORGE);
+    const handler = createHandler({ ...config, fetchImpl: impl });
+    const response = await handler(new Request('https://p.supabase.co/functions/v1/vyora-oauth', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${JWT_FORGE}` },
       body: JSON.stringify({ action: 'status' }),
     }));
     expect(response.status).toBe(200);
   });
 });
 
-describe('Ce que la faille permet, concrètement', () => {
-  it.fails('l’attaquant reçoit les comptes de la victime via `list`', async () => {
-    // Le fetch imite PostgREST : il rend les lignes de l'utilisateur dont le
-    // JWT est présenté. L'attaquant présentant celui de la victime, il reçoit
-    // ses comptes. La RLS a fait son travail — c'est l'identité d'ENTRÉE qui
-    // est fausse, et aucune couche en aval ne peut le rattraper.
-    const comptesDeLaVictime = [{ id: 'compte-A', provider: 'gmail', email: 'a@exemple.fr' }];
-    const fetchImpl = (async (_url: string, init: RequestInit = {}) => {
-      const header = (init.headers as Record<string, string>).Authorization ?? '';
-      return new Response(
-        JSON.stringify(header.includes(VICTIME) ? comptesDeLaVictime : []),
-        { status: 200 },
-      );
-    }) as unknown as typeof fetch;
+describe('callback reste public — la correction ne casse pas le flux OAuth', () => {
+  const config = {
+    baseUrl: 'https://p.supabase.co',
+    serviceKey: 'k',
+    clientId: 'c',
+    clientSecret: 's',
+    encryptionKey: generateKeyBase64(),
+    redirectUri: 'https://p/cb',
+    anonKey: 'anon-key-factice',
+  };
 
-    const payload = await (await handleList(deps(fetchImpl), JETON_FORGE)).json() as { items: Array<{ id: string }> };
+  it('accepte un GET callback sans en-tête Authorization', async () => {
+    // Google redirige le navigateur : aucun jeton ne peut être présent.
+    // Passer `verify_jwt: true` casserait ce chemin — d'où la vérification
+    // applicative plutôt que la vérification de plateforme.
+    //
+    // Le fetch simulé rend un tableau vide pour `oauth_state_consume` : l'état
+    // est inconnu, ce qui est exactement le scénario CSRF testé ici.
+    const storeFetch = (async () => new Response('[]', { status: 200 })) as unknown as typeof fetch;
+    const handler = createHandler({ ...config, fetchImpl: storeFetch });
+    const response = await handler(new Request(
+      'https://p.supabase.co/functions/v1/vyora-oauth?action=callback&code=abc&state=inconnu',
+    ));
+    // 400 : l'état est inconnu (comportement CSRF attendu), mais la requête a
+    // bien ATTEINT le handler sans authentification. C'est ce qui compte ici.
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: string }).error).toBe('state_invalid');
+  });
 
-    // Comportement ATTENDU : un porteur non authentifié n'obtient rien.
-    expect(payload.items).toEqual([]);
+  it('refuse un callback sans paramètres, toujours sans exiger de jeton', async () => {
+    const storeFetch = (async () => new Response('[]', { status: 200 })) as unknown as typeof fetch;
+    const handler = createHandler({ ...config, fetchImpl: storeFetch });
+    const response = await handler(new Request(
+      'https://p.supabase.co/functions/v1/vyora-oauth?action=callback',
+    ));
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: string }).error).toBe('code_or_state_missing');
   });
 });

@@ -187,6 +187,7 @@ function deps(store: MemoryStore, fetchImpl?: typeof fetch): HandlerDeps {
       clientSecret: 'client-secret-google',
       encryptionKey: KEY,
       redirectUri: 'https://projet.supabase.co/functions/v1/vyora-oauth?action=callback',
+      anonKey: 'anon-key-factice',
       fetchImpl,
     },
   };
@@ -721,16 +722,40 @@ describe('connecteur OAuth / routage HTTP', () => {
     expect((await response.json() as { error: string }).error).toBe('state_invalid');
   });
 
-  it('rejette une action inconnue', async () => {
+  it('rejette une action inconnue (une fois l’identité vérifiée)', async () => {
+    // L'authentification passe AVANT le routage : une action inconnue n'est
+    // signalée qu'à un appelant identifié. Un inconnu non authentifié reçoit
+    // 401, ce qui ne lui apprend rien sur les actions existantes.
+    const authFetch = (async (url: string) => (
+      String(url).endsWith('/auth/v1/user')
+        ? new Response(JSON.stringify({ id: 'user-test' }), { status: 200 })
+        : new Response('{}', { status: 200 })
+    )) as unknown as typeof fetch;
     const handler = createHandler({
       baseUrl: 'https://p.supabase.co', serviceKey: 'k', clientId: 'c',
       clientSecret: 's', encryptionKey: KEY, redirectUri: 'https://p/cb',
+      anonKey: 'anon-key-factice', fetchImpl: authFetch,
+    });
+    const response = await handler(new Request('https://p.supabase.co/functions/v1/vyora-oauth', {
+      method: 'POST', headers: { Authorization: 'Bearer aaa.bbb.ccc' },
+      body: JSON.stringify({ action: 'supprimer_tout' }),
+    }));
+    expect(response.status).toBe(404);
+  });
+
+  it('refuse une action inconnue SANS identité vérifiée (401, pas 404)', async () => {
+    // Sans cela, un attaquant pourrait énumérer les actions par tâtonnement :
+    // 404 = l'action n'existe pas, 401 = l'action existe mais il faut un compte.
+    const handler = createHandler({
+      baseUrl: 'https://p.supabase.co', serviceKey: 'k', clientId: 'c',
+      clientSecret: 's', encryptionKey: KEY, redirectUri: 'https://p/cb',
+      anonKey: 'anon-key-factice',
     });
     const response = await handler(new Request('https://p.supabase.co/functions/v1/vyora-oauth', {
       method: 'POST', headers: { Authorization: 'Bearer jwt' },
       body: JSON.stringify({ action: 'supprimer_tout' }),
     }));
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(401);
   });
 
   it('répond au préflight CORS', async () => {
@@ -758,7 +783,7 @@ describe('connecteur OAuth / list', () => {
       }],
     })) as unknown as typeof fetch;
 
-    const response = await handleList(deps(store, fetchImpl), 'jwt-utilisateur');
+    const response = await handleList(deps(store, fetchImpl), 'jwt-utilisateur', 'jwt-utilisateur');
     const text = await response.text();
     expect(response.status).toBe(200);
     expect(text).not.toContain('NE-DOIT-PAS-FUIR');
@@ -775,7 +800,7 @@ describe('connecteur OAuth / list', () => {
       calls.push(init);
       return { ok: true, status: 200, json: async () => [] } as Response;
     }) as unknown as typeof fetch;
-    await handleList(deps(store, fetchImpl), 'jwt-utilisateur');
+    await handleList(deps(store, fetchImpl), 'jwt-utilisateur', 'jwt-utilisateur');
     const headers = calls[0].headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer jwt-utilisateur');
   });

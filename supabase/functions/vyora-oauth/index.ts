@@ -4,13 +4,31 @@
 // avec des permissions séparées et révocables.
 //
 // ## Modèle de sécurité
-//   - La fonction est déployée `verify_jwt: true` : toute requête doit porter un
-//     JWT Supabase valide. L'identité vient de `auth.uid()` côté base, jamais du
-//     corps de la requête : un utilisateur ne peut pas agir sur le compte d'un
-//     autre, même en forgeant un identifiant.
+//
+//   - La fonction est déployée `verify_jwt: false`, et DOIT l'être : `callback`
+//     est appelée par une redirection navigateur de Google, sans en-tête
+//     `Authorization`. La vérification de plateforme casserait ce chemin.
+//
+//     Conséquence : la vérification est APPLICATIVE, pas déléguée. Toutes les
+//     actions sauf `callback` passent par `resolveCaller()` (`./auth.ts`), qui
+//     présente le jeton à Supabase Auth (`GET /auth/v1/user`) et n'accepte
+//     l'identité que si Auth la reconnaît.
+//
+//     Auparavant, un simple découpage de l'en-tête servait d'identité : envoyer
+//     `Bearer <uuid>` suffisait à se faire passer pour cet utilisateur. Ne
+//     jamais réintroduire ce raccourci.
+//
+//   - `callback` reste publique, protégée par l'état CSRF à usage unique et
+//     PKCE — c'est précisément leur rôle, et ils suffisent.
+//
+//   - L'identité vient de la réponse d'Auth. Aucun champ du corps de requête,
+//     aucun identifiant décodé du jeton ne peut l'influencer.
+//
 //   - Les jetons Google ne sont jamais renvoyés au navigateur ni journalisés.
 //     Ils sont chiffrés en AES-256-GCM avec `VYORA_OAUTH_ENCRYPTION_KEY`, clé qui
-//     n'existe que dans les secrets Supabase.
+//     n'existe que dans les secrets Supabase. Le journal ne consigne que des
+//     codes d'action fixes, jamais un contenu échangé.
+//
 //   - Le vérificateur PKCE et l'état CSRF sont chiffrés en base, à usage unique,
 //     avec une durée de vie de 10 minutes.
 //
@@ -54,6 +72,7 @@ import {
   googleToolsListPayload,
   type GoogleToolName,
 } from './google-tools.ts';
+import { resolveCaller, type AuthConfig } from './auth.ts';
 
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -90,6 +109,12 @@ interface Config {
   readonly clientSecret: string;
   readonly encryptionKey: string;
   readonly redirectUri: string;
+  /**
+   * Clé publique, utilisée UNIQUEMENT pour interroger Supabase Auth.
+   * Elle n'autorise rien : elle accompagne le jeton de l'utilisateur, qui seul
+   * porte l'identité.
+   */
+  readonly anonKey: string;
   readonly fetchImpl?: typeof fetch;
 }
 
@@ -106,17 +131,11 @@ function readConfig(override: Partial<Config> = {}): Config {
     encryptionKey: override.encryptionKey ?? env('VYORA_OAUTH_ENCRYPTION_KEY'),
     redirectUri: override.redirectUri
       ?? (env('VYORA_OAUTH_REDIRECT_URI') || `${baseUrl}/functions/v1/vyora-oauth?action=callback`),
+    // Deux noms possibles selon la génération du projet Supabase : la clé
+    // publishable remplace progressivement l'anon key historique.
+    anonKey: override.anonKey ?? (env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY')),
     fetchImpl: override.fetchImpl,
   };
-}
-
-/** Identité de l'appelant, résolue par Supabase à partir du JWT. */
-function callerId(request: Request): string | null {
-  // Supabase place le JWT vérifié dans l'en-tête `Authorization`. On ne décode
-  // QUE pour refuser tôt les requêtes sans jeton ; l'autorisation réelle est
-  // faite en base par `auth.uid()`, qui ne peut pas être forgé.
-  const header = request.headers.get('Authorization') ?? '';
-  return header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() || null : null;
 }
 
 export interface HandlerDeps {
@@ -333,13 +352,23 @@ export async function handleCallback(
  * avec un filtre `user_id`, en s'appuyant sur la RLS qui n'autorise que le
  * propriétaire.
  */
-export async function handleList(deps: HandlerDeps, bearer: string): Promise<Response> {
+export async function handleList(
+  deps: HandlerDeps,
+  bearer: string,
+  userId: string,
+): Promise<Response> {
   const { config } = deps;
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/rest/v1/oauth_accounts?select=id,provider,external_account_id,display_name,email,capabilities,status,last_verified_at,last_error,created_at&order=created_at.desc`;
+  // Double bornage, volontaire :
+  //   1. le filtre `user_id=eq.<userId>` limite la requête à l'appelant ;
+  //   2. le JWT est transmis tel quel, donc la RLS s'applique AUSSI.
+  // `userId` vient de Supabase Auth (vérifié en amont), jamais du client.
+  // Si l'un des deux mécanismes se cassait, l'autre suffirait encore.
+  const owner = encodeURIComponent(userId);
+  const url = `${config.baseUrl.replace(/\/+$/, '')}/rest/v1/oauth_accounts?select=id,provider,external_account_id,display_name,email,capabilities,status,last_verified_at,last_error,created_at&user_id=eq.${owner}&order=created_at.desc`;
   const doFetch = config.fetchImpl ?? fetch;
   const response = await doFetch(url, {
     headers: {
-      apikey: env('SUPABASE_ANON_KEY'),
+      apikey: config.anonKey || env('SUPABASE_ANON_KEY'),
       // Le JWT de l'utilisateur, pas la clé service : la RLS s'applique.
       Authorization: `Bearer ${bearer}`,
     },
@@ -395,6 +424,37 @@ export function handleStatus(deps: HandlerDeps): Response {
   });
 }
 
+/**
+ * Journalise un refus de PROPRIÉTÉ : l'appelant a demandé un compte qui ne lui
+ * appartient pas.
+ *
+ * C'est l'événement le plus révélateur d'une attaque — bien plus qu'un refus de
+ * capacité, qui peut n'être qu'une erreur d'usage. Il était absent du journal :
+ * une tentative d'accès croisé ne laissait aucune trace.
+ *
+ * Champs volontairement limités, et jamais dérivés du client :
+ *   - `userId` est l'identité VÉRIFIÉE de l'appelant (celle d'Auth) ;
+ *   - `account_id` est l'identifiant demandé, pas celui du propriétaire ;
+ *   - `detail` est un code fixe, sans nom, sans e-mail, sans jeton.
+ *
+ * Un compte inexistant et un compte appartenant à autrui produisent la même
+ * entrée : le journal ne doit pas devenir un annuaire des comptes existants.
+ */
+async function auditOwnershipDenial(
+  store: HandlerDeps['store'],
+  userId: string,
+  accountId: string,
+  operation: string,
+): Promise<void> {
+  await store.audit({
+    userId,
+    accountId,
+    action: 'denied',
+    outcome: 'denied',
+    detail: `propriete_refusee:${operation}`,
+  });
+}
+
 /** `revoke` — révoque chez Google puis efface localement. */
 export async function handleRevoke(input: { account_id: unknown }, deps: HandlerDeps, userId: string): Promise<Response> {
   const accountId = String(input.account_id ?? '').trim();
@@ -402,8 +462,12 @@ export async function handleRevoke(input: { account_id: unknown }, deps: Handler
 
   const row = await deps.store.getAccountSecret(accountId);
   if (!row) return fail(404, 'account_not_found');
-  // Isolation : on refuse explicitement le compte d'un autre utilisateur.
-  if (row.user_id !== userId) return fail(403, 'forbidden');
+  // Isolation : on refuse explicitement le compte d'un autre utilisateur, et
+  // on le journalise — c'est le signal d'une tentative d'accès croisé.
+  if (row.user_id !== userId) {
+    await auditOwnershipDenial(deps.store, userId, accountId, 'revoke');
+    return fail(403, 'forbidden');
+  }
 
   const result = await revokeAccount({
     store: deps.store,
@@ -421,7 +485,10 @@ export async function handleRefresh(input: { account_id: unknown }, deps: Handle
 
   const row = await deps.store.getAccountSecret(accountId);
   if (!row) return fail(404, 'account_not_found');
-  if (row.user_id !== userId) return fail(403, 'forbidden');
+  if (row.user_id !== userId) {
+    await auditOwnershipDenial(deps.store, userId, accountId, 'refresh');
+    return fail(403, 'forbidden');
+  }
 
   try {
     const accessToken = await refreshAccount(row as OAuthAccountRow, {
@@ -440,12 +507,18 @@ export async function handleRefresh(input: { account_id: unknown }, deps: Handle
 }
 
 /** `audit` — journal des actions, borné à l'appelant par `auth.uid()`. */
-export async function handleAudit(deps: HandlerDeps, bearer: string): Promise<Response> {
+export async function handleAudit(
+  deps: HandlerDeps,
+  bearer: string,
+  userId: string,
+): Promise<Response> {
   const { config } = deps;
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/rest/v1/oauth_audit_log?select=id,provider,action,capability,outcome,detail,created_at&order=created_at.desc&limit=100`;
+  // Même double bornage que `handleList` : filtre explicite + RLS.
+  const owner = encodeURIComponent(userId);
+  const url = `${config.baseUrl.replace(/\/+$/, '')}/rest/v1/oauth_audit_log?select=id,provider,action,capability,outcome,detail,created_at&user_id=eq.${owner}&order=created_at.desc&limit=100`;
   const doFetch = config.fetchImpl ?? fetch;
   const response = await doFetch(url, {
-    headers: { apikey: env('SUPABASE_ANON_KEY'), Authorization: `Bearer ${bearer}` },
+    headers: { apikey: config.anonKey || env('SUPABASE_ANON_KEY'), Authorization: `Bearer ${bearer}` },
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) return fail(502, 'audit_failed');
@@ -464,7 +537,10 @@ export async function handleCheck(input: { account_id: unknown; capability: unkn
 
   const row = await deps.store.getAccountSecret(accountId);
   if (!row) return fail(404, 'account_not_found');
-  if (row.user_id !== userId) return fail(403, 'forbidden');
+  if (row.user_id !== userId) {
+    await auditOwnershipDenial(deps.store, userId, accountId, 'check');
+    return fail(403, 'forbidden');
+  }
 
   try {
     const { accessToken } = await loadUsableAccount({
@@ -525,7 +601,10 @@ export async function handleToolCall(
 
   const row = await deps.store.getAccountSecret(accountId);
   if (!row) return fail(404, 'account_not_found');
-  if (row.user_id !== userId) return fail(403, 'forbidden');
+  if (row.user_id !== userId) {
+    await auditOwnershipDenial(deps.store, userId, accountId, 'tools_call');
+    return fail(403, 'forbidden');
+  }
   if (row.status === 'revoked') return fail(409, 'account_revoked');
   if (row.status !== 'connected' && row.status !== 'error') {
     return fail(409, `account_not_usable:${row.status}`);
@@ -657,15 +736,47 @@ export function createHandler(override: Partial<Config> = {}) {
       }, deps);
     }
 
-    const bearer = callerId(request);
-    if (!bearer) return fail(401, 'unauthorized');
+    // ---------------------------------------------------------------------
+    // Authentification des actions privées.
+    //
+    // `callback` est déjà traitée plus haut et n'arrive jamais ici : elle est
+    // publique par nécessité (redirection Google sans en-tête), protégée par
+    // l'état CSRF à usage unique et PKCE.
+    //
+    // Pour tout le reste, l'identité est vérifiée auprès de Supabase Auth. Un
+    // `Bearer` arbitraire — dont un UUID nu — est refusé ici, avant d'atteindre
+    // la moindre logique métier.
+    // ---------------------------------------------------------------------
+    const authorization = request.headers.get('Authorization');
+    const auth: AuthConfig = {
+      baseUrl: config.baseUrl,
+      anonKey: config.anonKey,
+      fetchImpl: config.fetchImpl,
+    };
+    const caller = await resolveCaller(authorization, auth);
+
+    if (!caller.ok) {
+      // Deux causes distinctes, deux statuts : un jeton invalide est un refus
+      // du client (401), une panne d'Auth est une indisponibilité serveur (503).
+      // Les confondre ferait croire à une session expirée lors d'une panne.
+      return caller.reason === 'auth_unavailable'
+        ? fail(503, 'auth_unavailable', 'Le service d’authentification est temporairement indisponible.')
+        : fail(401, 'unauthorized', 'Session VYORA invalide ou expirée.');
+    }
+
+    // À partir d'ici, `userId` provient de la réponse d'Auth. Il ne peut pas
+    // être influencé par le corps de la requête ni par le contenu du jeton.
+    const userId = caller.userId;
+    // Le porteur brut n'est plus utilisé comme identité : il ne sert plus qu'à
+    // porter la RLS de PostgREST sur les deux lectures (`list`, `audit`).
+    const bearer = authorization?.replace(/^Bearer\s+/i, '').trim() ?? '';
 
     switch (action) {
       case 'start':
         return handleStart(
           { provider: body.provider, capabilities: body.capabilities, redirectAfter: body.redirect_after },
           deps,
-          bearer,
+          userId,
         );
       case 'status':
         return handleStatus(deps);
@@ -675,18 +786,18 @@ export function createHandler(override: Partial<Config> = {}) {
         return handleToolCall(
           { name: body.name, arguments: body.arguments, account_id: body.account_id },
           deps,
-          bearer,
+          userId,
         );
       case 'list':
-        return handleList(deps, bearer);
+        return handleList(deps, bearer ?? '', userId);
       case 'revoke':
-        return handleRevoke({ account_id: body.account_id }, deps, bearer);
+        return handleRevoke({ account_id: body.account_id }, deps, userId);
       case 'refresh':
-        return handleRefresh({ account_id: body.account_id }, deps, bearer);
+        return handleRefresh({ account_id: body.account_id }, deps, userId);
       case 'check':
-        return handleCheck({ account_id: body.account_id, capability: body.capability }, deps, bearer);
+        return handleCheck({ account_id: body.account_id, capability: body.capability }, deps, userId);
       case 'audit':
-        return handleAudit(deps, bearer);
+        return handleAudit(deps, bearer ?? '', userId);
       default:
         return fail(404, 'action_unknown');
     }

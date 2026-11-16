@@ -149,6 +149,7 @@ function deps(store: OAuthStore, fetchImpl?: typeof fetch): HandlerDeps {
       clientSecret: 'client-secret-google',
       encryptionKey: KEY,
       redirectUri: 'https://projet.supabase.co/functions/v1/vyora-oauth?action=callback',
+      anonKey: 'anon-key-factice',
       fetchImpl,
     },
   };
@@ -208,7 +209,7 @@ describe('isolation OAuth / un utilisateur ne voit pas les comptes d’un autre'
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )) as unknown as typeof fetch;
 
-    const response = await handleList(deps(store, fetchImpl), 'jwt-de-B');
+    const response = await handleList(deps(store, fetchImpl), 'jwt-de-B', 'jwt-de-B');
     const payload = await body(response);
     const items = payload.items as Array<{ id: string }>;
 
@@ -225,7 +226,7 @@ describe('isolation OAuth / un utilisateur ne voit pas les comptes d’un autre'
       return new Response('[]', { status: 200 });
     }) as unknown as typeof fetch;
 
-    await handleList(deps(store, fetchImpl), 'jwt-de-B');
+    await handleList(deps(store, fetchImpl), 'jwt-de-B', 'jwt-de-B');
 
     expect(sent).toHaveLength(1);
     expect(sent[0].Authorization).toBe('Bearer jwt-de-B');
@@ -243,7 +244,7 @@ describe('isolation OAuth / un utilisateur ne voit pas les comptes d’un autre'
       refresh_token_cipher: 'fuite',
     }]), { status: 200 })) as unknown as typeof fetch;
 
-    const payload = await body(await handleList(deps(store, fetchImpl), 'jwt-de-B'));
+    const payload = await body(await handleList(deps(store, fetchImpl), 'jwt-de-B', 'jwt-de-B'));
     const serialized = JSON.stringify(payload);
 
     expect(serialized).not.toContain('fuite');
@@ -258,7 +259,7 @@ describe('isolation OAuth / un utilisateur ne voit pas les comptes d’un autre'
       { status: 200 },
     )) as unknown as typeof fetch;
 
-    const payload = await body(await handleAudit(deps(store, fetchImpl), 'jwt-de-B'));
+    const payload = await body(await handleAudit(deps(store, fetchImpl), 'jwt-de-B', 'jwt-de-B'));
     const serialized = JSON.stringify(payload);
 
     expect(serialized).toContain('connect_start');
@@ -272,7 +273,7 @@ describe('isolation OAuth / un utilisateur ne voit pas les comptes d’un autre'
       { status: 200 },
     )) as unknown as typeof fetch;
 
-    const serialized = JSON.stringify(await body(await handleList(deps(store, fetchImpl), 'jwt-de-B')));
+    const serialized = JSON.stringify(await body(await handleList(deps(store, fetchImpl), 'jwt-de-B', 'jwt-de-B')));
     expect(serialized).not.toContain(TOKEN_A);
   });
 });
@@ -337,14 +338,10 @@ describe('isolation OAuth / tentatives d’accès avec l’identifiant d’un au
     for (const entry of denials) expect(entry.userId).toBe(USER_B);
   });
 
-  it.fails('un refus de PROPRIÉTÉ devrait être journalisé (ne l’est pas aujourd’hui)', async () => {
-    // MANQUE RÉEL constaté en écrivant ces tests : `handleToolCall` journalise
-    // les refus de capacité, mais renvoie `403 forbidden` sur une violation de
-    // propriété SANS écrire au journal. Or c'est précisément la tentative la
-    // plus révélatrice d'une attaque : sans trace, elle reste invisible.
-    //
-    // Ce test encode le comportement SOUHAITÉ et passera en `it` quand le
-    // journal sera ajouté. Il échoue donc volontairement aujourd'hui.
+  // Ce test était `it.fails` : il documentait un manque réel — les refus de
+  // propriété n'étaient pas journalisés. Il est devenu un test normal après
+  // l'ajout de `auditOwnershipDenial`.
+  it('un refus de PROPRIÉTÉ est journalisé, au nom de l’appelant', async () => {
     store.audits.length = 0;
     await handleToolCall(
       { name: 'vyora_gmail_search', arguments: {}, account_id: accountA },
@@ -353,12 +350,51 @@ describe('isolation OAuth / tentatives d’accès avec l’identifiant d’un au
     );
 
     const denials = store.audits.filter((entry) => entry.outcome === 'denied');
-    expect(denials.length).toBeGreaterThan(0);
-    // Et jamais attribué à la victime, ce qui fausserait son historique.
-    for (const entry of denials) {
-      expect(entry.userId).toBe(USER_B);
-      expect(entry.userId).not.toBe(USER_A);
+    expect(denials).toHaveLength(1);
+    expect(denials[0].userId).toBe(USER_B);
+    // Jamais attribué à la victime : cela fausserait son historique.
+    expect(denials[0].userId).not.toBe(USER_A);
+    expect(denials[0].detail).toBe('propriete_refusee:tools_call');
+  });
+
+  it('chaque opération privée journalise son propre refus de propriété', async () => {
+    // Une seule opération oubliée suffirait à rendre une attaque invisible.
+    const operations: Array<[string, (accountId: string) => Promise<unknown>]> = [
+      ['revoke', (id) => handleRevoke({ account_id: id }, deps(store), USER_B)],
+      ['refresh', (id) => handleRefresh({ account_id: id }, deps(store), USER_B)],
+      ['check', (id) => handleCheck({ account_id: id, capability: 'read' }, deps(store), USER_B)],
+      ['tools_call', (id) => handleToolCall({ name: 'vyora_gmail_search', arguments: {}, account_id: id }, deps(store), USER_B)],
+    ];
+
+    for (const [label, run] of operations) {
+      store.audits.length = 0;
+      const response = await run(accountA) as Response;
+      expect(response.status, label).toBe(403);
+
+      const denial = store.audits.find((entry) => entry.outcome === 'denied');
+      expect(denial, `journal manquant pour ${label}`).toBeDefined();
+      expect(denial!.userId, label).toBe(USER_B);
+      expect(denial!.detail, label).toBe(`propriete_refusee:${label}`);
     }
+  });
+
+  it('l’entrée de refus ne contient ni jeton, ni e-mail, ni nom de compte', async () => {
+    // Le journal est lisible par l'utilisateur : il ne doit rien y apprendre
+    // sur le compte d'autrui, même en cas de tentative.
+    store.audits.length = 0;
+    await handleToolCall(
+      { name: 'vyora_gmail_search', arguments: {}, account_id: accountA },
+      deps(store),
+      USER_B,
+    );
+
+    const serialized = JSON.stringify(store.audits);
+    expect(serialized).not.toContain(TOKEN_A);
+    expect(serialized).not.toContain('ya29');
+    expect(serialized).not.toContain('google-sub-A');
+    expect(serialized).not.toContain('@');
+    // Seul l'identifiant TECHNIQUE du compte demandé figure.
+    expect(serialized).toContain('propriete_refusee');
   });
 
   it('un identifiant de compte inexistant ne distingue pas « absent » de « appartient à un autre »', async () => {
@@ -632,5 +668,89 @@ describe('isolation OAuth / le handler HTTP refuse avant toute logique métier',
       body: JSON.stringify({ action: 'list' }),
     }));
     expect(response.status).toBe(401);
+  });
+});
+
+describe('journalisation / aucun secret ne peut y entrer', () => {
+  let store: MemoryStore;
+  let accountA: string;
+
+  beforeEach(async () => {
+    store = createMemoryStore();
+    accountA = await seedAccountForA(store);
+    await store.upsertAccount({
+      id: 'compte-de-B',
+      user_id: USER_B,
+      provider: 'gmail',
+      external_account_id: 'google-sub-B',
+      status: 'connected',
+      capabilities: ['read'],
+    });
+  });
+
+  it('un seul champ `detail` est un code fixe, jamais un contenu client', async () => {
+    // Le risque réel : journaliser le message d'erreur brut de Google, qui peut
+    // contenir l'e-mail du compte ou un extrait de requête.
+    store.audits.length = 0;
+    await handleToolCall(
+      {
+        name: 'vyora_gmail_search',
+        arguments: { query: 'mot-de-passe secret de A' },
+        account_id: 'compte-de-B',
+      },
+      deps(store),
+      USER_B,
+    );
+
+    // La requête de l'utilisateur n'a aucune raison d'être archivée.
+    const serialized = JSON.stringify(store.audits);
+    expect(serialized).not.toContain('mot-de-passe');
+  });
+
+  it('aucun jeton déchiffré n’atteint le journal lors d’un refus de capacité', async () => {
+    store.audits.length = 0;
+    await handleToolCall(
+      { name: 'vyora_gmail_send', arguments: { to: 'x@y.z', subject: 's', body: 'b' }, account_id: 'compte-de-B' },
+      deps(store),
+      USER_B,
+    );
+
+    const serialized = JSON.stringify(store.audits);
+    expect(serialized).not.toContain('ya29');
+    expect(serialized).not.toContain(TOKEN_A);
+  });
+
+  it('le journal d’un succès ne contient pas le contenu échangé', async () => {
+    const fetchImpl = (async () => new Response(
+      JSON.stringify({ messages: [{ id: 'm1' }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )) as unknown as typeof fetch;
+
+    store.audits.length = 0;
+    await handleToolCall(
+      { name: 'vyora_gmail_search', arguments: { query: 'facture' }, account_id: accountA },
+      deps(store, fetchImpl),
+      USER_A,
+    );
+
+    const ok = store.audits.find((entry) => entry.outcome === 'ok');
+    expect(ok).toBeDefined();
+    // L'entrée nomme l'outil, pas la requête ni la réponse.
+    expect(ok!.detail).toBe('vyora_gmail_search');
+    expect(JSON.stringify(ok)).not.toContain('facture');
+  });
+
+  it('les jetons du compte ne figurent dans AUCUNE entrée du journal', async () => {
+    // Balayage global après plusieurs opérations.
+    store.audits.length = 0;
+    await handleToolCall({ name: 'vyora_gmail_search', arguments: {}, account_id: accountA }, deps(store), USER_B);
+    await handleRevoke({ account_id: accountA }, deps(store), USER_B);
+    await handleCheck({ account_id: accountA, capability: 'read' }, deps(store), USER_B);
+
+    const serialized = JSON.stringify(store.audits);
+    expect(serialized).not.toContain('ya29');
+    expect(serialized).not.toContain('cipher');
+    expect(serialized).not.toContain('iv');
+    expect(serialized).not.toContain('tag');
   });
 });

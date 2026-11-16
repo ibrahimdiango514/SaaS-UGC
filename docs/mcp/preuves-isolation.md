@@ -23,10 +23,14 @@ comme tel, dans la section « Ce qui reste non vérifié ».
 | B peut-il lire, révoquer, rafraîchir le compte de A ? | **non** | [LOCAL] |
 | B peut-il appeler `tools/call` sur le compte de A ? | **non** | [LOCAL] |
 | Un refus croisé contacte-t-il Google ? | **non** | [LOCAL] |
-| **L'identité de l'appelant est-elle authentifiée ?** | **NON — faille ouverte** | [PROD] configuration |
+| **L'identité de l'appelant est-elle authentifiée ?** | **OUI — corrigé** | [LOCAL] + [PROD] config |
+| Un `Bearer <uuid>` ouvre-t-il encore quelque chose ? | **non, 401** | [LOCAL] |
+| `callback` reste-t-il public ? | **oui** | [LOCAL] |
+| Les refus de propriété sont-ils journalisés ? | **oui** | [LOCAL] |
 
-La dernière ligne est la conclusion importante de ce document. Elle est
-détaillée en section 6.
+Les sections 6 et 7 décrivent la faille et le manque **tels qu'ils ont été
+trouvés**, puis la correction appliquée. Elles sont conservées parce qu'elles
+expliquent pourquoi le code est écrit ainsi aujourd'hui.
 
 ---
 
@@ -134,7 +138,10 @@ introduits volontairement pour confirmer que ces tests mordent :
 
 ---
 
-## 6. FAILLE OUVERTE — l'identité de l'appelant n'est pas authentifiée
+## 6. FAILLE (CORRIGÉE) — l'identité de l'appelant n'était pas authentifiée
+
+> **État : corrigée.** Cette section conserve l'analyse d'origine, parce qu'elle
+> explique la forme du code actuel. La correction est décrite en section 6 bis.
 
 ### Le constat [PROD]
 
@@ -223,13 +230,70 @@ appelle sans en-tête. La correction doit distinguer les actions :
 3. `userId` doit provenir de cet appel, **jamais** du corps de la requête.
 4. Corriger le commentaire d'en-tête pour qu'il décrive la réalité.
 
-Cette correction **n'a pas été appliquée** : elle modifie une fonction déjà
-déployée et opérationnelle, ce qui dépasse l'autorisation donnée pour ce tour
-(« renforcer les tests d'isolation »). Elle attend un accord explicite.
+Cette correction a été appliquée — voir section 6 bis.
+
+## 6 bis. Correction appliquée
+
+### Le module
+
+`supabase/functions/vyora-oauth/auth.ts` expose `resolveCaller()`, qui :
+
+1. **rejette sur la forme, sans appel réseau**, tout ce qui ne peut pas être un
+   JWT (trois segments base64url). Un UUID nu — le cas exact de l'attaque — est
+   donc refusé même si Auth est injoignable ;
+2. **présente le jeton à `GET /auth/v1/user`** et n'accepte l'identité que si
+   Auth la reconnaît (signature, expiration, révocation vérifiées par Auth) ;
+3. **distingue les causes** : `401`/`403` d'Auth = identité refusée → `401` pour
+   le client ; panne réseau, `5xx`, réponse non-JSON = indisponibilité → `503`.
+   Confondre les deux ferait afficher « session expirée » pendant une panne.
+
+L'identité retournée vient **exclusivement** de la réponse d'Auth.
+
+### Le routage
+
+Dans `createHandler`, la vérification est placée **après** le traitement de
+`callback` et **avant** le `switch` des actions. Aucune action privée ne peut
+donc être atteinte sans identité vérifiée — c'est structurel, pas une
+vérification à répéter dans chaque branche.
+
+`callerId()` a été **supprimée** : la laisser disponible aurait invité à la
+réutiliser.
+
+### `list` et `audit` : double bornage
+
+Ces deux actions lisent PostgREST directement. Elles reçoivent désormais le
+`userId` vérifié **et** le porteur brut :
+
+- un filtre explicite `user_id=eq.<userId>` borne la requête ;
+- le JWT est transmis, donc la RLS s'applique aussi.
+
+Si l'un des deux mécanismes se cassait, l'autre tiendrait encore.
+
+### Configuration de déploiement requise
+
+**Rien à changer sur `verify_jwt` : `false` est correct et doit le rester.**
+Le passer à `true` casserait `callback`.
+
+| Élément | Valeur requise | État vérifié |
+|---|---|---|
+| `verify_jwt` | **`false`** | conforme |
+| `SUPABASE_URL` | auto-injecté | présent |
+| `SUPABASE_ANON_KEY` | requis pour interroger Auth | **présent** |
+| `VYORA_OAUTH_ENCRYPTION_KEY` | requis (chiffrement) | présent |
+| `GOOGLE_CLIENT_ID` / `_SECRET` | requis pour connecter | **absents** |
+
+Sans `SUPABASE_ANON_KEY`, `resolveCaller` renvoie `auth_unavailable` (503) et
+**aucune** action privée ne fonctionne : le refus est sûr, jamais permissif.
+`SUPABASE_PUBLISHABLE_KEY` est acceptée en repli.
+
+Le porteur brut n'est plus qu'un moyen de faire appliquer la RLS, jamais une
+identité.
 
 ---
 
-## 7. Manque constaté : un refus de propriété n'est pas journalisé
+## 7. Manque (CORRIGÉ) : un refus de propriété n'était pas journalisé
+
+> **État : corrigé.** Voir « Correction » en fin de section.
 
 Trouvé en écrivant les tests, pas en relisant le code.
 
@@ -246,21 +310,75 @@ Test associé : `tests/oauth-isolation.test.ts` →
 « un refus de PROPRIÉTÉ devrait être journalisé (ne l'est pas aujourd'hui) »,
 marqué `it.fails`. Il passera en `it` quand la journalisation sera ajoutée.
 
-Non corrigé pour la même raison que la section 6 : cela modifie une fonction
-déployée. L'ajout est pourtant de trois lignes — un `store.audit()` avant chaque
-`return fail(403, 'forbidden')`.
+### Correction
+
+Un helper `auditOwnershipDenial()` est appelé sur les **quatre** sites qui
+renvoient `403 forbidden` : `tools_call`, `revoke`, `refresh`, `check`.
+
+L'entrée journalisée est volontairement pauvre, pour qu'aucune donnée sensible
+ne puisse y entrer :
+
+| Champ | Valeur |
+|---|---|
+| `userId` | identité **vérifiée** de l'appelant (issue d'Auth) |
+| `account_id` | l'identifiant technique demandé |
+| `action` | `denied` |
+| `outcome` | `denied` |
+| `detail` | code fixe `propriete_refusee:<operation>` |
+
+Ni nom, ni e-mail, ni jeton, ni contenu de requête. Un compte inexistant et un
+compte appartenant à autrui produisent la même entrée : le journal ne devient
+pas un annuaire des comptes existants.
+
+Tests : `tests/oauth-isolation.test.ts` vérifie la présence de l'entrée pour
+chacune des quatre opérations (une seule oubliée suffirait à rendre une attaque
+invisible), l'attribution à l'appelant et jamais à la victime, et l'absence de
+jeton, d'e-mail et de nom de compte.
 
 ## 8. Ce qui reste non vérifié
 
-- **Aucun test de bout en bout avec deux vrais utilisateurs** : il n'existe aucun
-  compte OAuth en production, donc l'isolation réelle entre deux comptes
-  connectés n'a jamais été observée. Les tests locaux simulent PostgREST ; ils ne
-  prouvent pas le comportement de la RLS sur des données réelles.
-- **Aucun appel HTTP direct à l'Edge Function déployée** : le bac à sable de cette
-  session n'a pas d'accès réseau à `supabase.co` (seuls github/npm/pypi sont
-  joignables). Les constats [PROD] viennent de l'API de gestion Supabase et de
-  requêtes SQL, pas d'appels `curl`. La faille de la section 6 est donc établie
-  par lecture de configuration et de code, **pas** par exploitation réelle.
-- **Le serveur MCP (`vyora-mcp`)** n'a pas été réexaminé ici : il vit sur une
-  autre branche (`arena/vyora-mcp-connecteurs`). L'isolation vérifiée dans ce
-  document est celle du chemin `vyora-oauth → tools/call`.
+Limites assumées, énoncées pour qu'elles ne soient pas découvertes plus tard.
+
+### La correction n'est pas déployée
+
+Le code corrigé est dans le dépôt et dans le bundle
+(`supabase/functions/vyora-oauth.edge.js`, sha256 `b2101d14…`), mais **la
+version déployée reste la v1**, qui contient la faille. Tant qu'aucun
+déploiement n'est autorisé, la production conserve le comportement décrit en
+section 6.
+
+Aucun déploiement n'a été effectué : il attend une autorisation explicite.
+
+### Aucun test de bout en bout contre l'Edge Function réelle
+
+Le bac à sable n'a pas d'accès réseau à `supabase.co` (seuls github/npm/pypi
+sont joignables). La correction est donc validée par :
+
+- `tests/oauth-auth-faille.test.ts` (23 tests) — `resolveCaller` face à toutes
+  les catégories de jetons, avec `/auth/v1/user` simulé ;
+- la lecture du bundle déployable, qui contient bien l'appel à `/auth/v1/user`
+  et plus l'extraction naïve.
+
+Elle n'est **pas** validée par un appel HTTP réel à la fonction déployée. Le
+premier appel après déploiement devra confirmer :
+
+| Cas | Attendu |
+|---|---|
+| `POST` sans en-tête | `401 unauthorized` |
+| `POST` avec `Bearer <uuid>` | `401 unauthorized` |
+| `POST` avec un JWT valide | l'action s'exécute |
+| `GET ?action=callback` sans jeton | atteint le handler (`400 state_invalid`) |
+
+### Aucun test avec deux vrais utilisateurs
+
+Il n'existe **aucun compte OAuth en production** (0 vérifié). L'isolation entre
+deux comptes réellement connectés n'a donc jamais été observée. Les tests
+simulent PostgREST et Auth ; ils prouvent la logique, pas le comportement de la
+RLS sur des données réelles.
+
+### Ce qui n'a pas été touché
+
+- Le serveur MCP (`vyora-mcp`) vit sur une autre branche : l'isolation vérifiée
+  ici est celle du chemin `vyora-oauth → tools/call`.
+- Le rafraîchissement planifié (pg_cron) reste à brancher.
+- Les trois secrets Google restent absents : aucune connexion réelle possible.
