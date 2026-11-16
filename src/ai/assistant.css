@@ -1,0 +1,229 @@
+/* ------------------------------------------------------------------------- */
+/* VYORA AI — identité de l'espace assistant                                  */
+/*                                                                            */
+/* Ce fichier ne redéfinit pas le design system : il l'étend. Les tokens      */
+/* (ink, panel, brand, accent) viennent de tailwind.config.js, les primitives  */
+/* de components/ui.tsx. Ici, uniquement ce qui est propre à l'assistant.     */
+/* ------------------------------------------------------------------------- */
+
+/* ---------------------------- Fond d'ambiance ---------------------------- */
+
+.vy-ambient {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Deux halos lents, cyan et violet, derrière le contenu. `pointer-events:none`
+   est essentiel : sans cela, ils intercepteraient les clics. */
+.vy-ambient::before,
+.vy-ambient::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(90px);
+  opacity: 0.5;
+}
+
+.vy-ambient::before {
+  width: 38rem;
+  height: 38rem;
+  top: -16rem;
+  left: -10rem;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.22), transparent 68%);
+  animation: aurora 18s ease-in-out infinite;
+}
+
+.vy-ambient::after {
+  width: 32rem;
+  height: 32rem;
+  bottom: -14rem;
+  right: -8rem;
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.18), transparent 70%);
+  animation: aurora 22s ease-in-out infinite reverse;
+}
+
+/* ------------------------------- Panneaux -------------------------------- */
+
+.vy-panel {
+  @apply rounded-2xl border border-line bg-panel/70 backdrop-blur-md;
+}
+
+.vy-rail {
+  @apply flex h-full flex-col border-r border-line bg-panel/60 backdrop-blur-md;
+  transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* --------------------------------- Bulles -------------------------------- */
+
+.vy-bubble-assistant {
+  @apply rounded-2xl rounded-tl-md border border-line bg-white/[0.045] px-4 py-3;
+}
+
+.vy-bubble-user {
+  @apply rounded-2xl rounded-tr-md border border-brand-400/25 bg-brand-500/[0.12] px-4 py-3;
+}
+
+/* -------------------------------- Composeur ------------------------------ */
+
+.vy-composer {
+  @apply rounded-3xl border border-line bg-panel/85 shadow-card backdrop-blur-lg;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.vy-composer:focus-within {
+  border-color: rgba(34, 211, 238, 0.45);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.18), 0 18px 48px -24px rgba(6, 182, 212, 0.55);
+}
+
+.vy-composer textarea {
+  @apply w-full resize-none bg-transparent text-[0.95rem] leading-relaxed text-white outline-none;
+  max-height: 220px;
+}
+
+.vy-composer textarea::placeholder {
+  @apply text-slate-500;
+}
+
+/* ------------------------------- Suggestions ----------------------------- */
+
+.vy-suggestion {
+  @apply flex w-full items-start gap-3 rounded-xl border border-line bg-white/[0.03] px-3.5 py-3 text-left text-sm text-slate-300;
+  transition: border-color 180ms ease, background-color 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.vy-suggestion:hover {
+  @apply border-brand-400/40 bg-brand-500/[0.08] text-white;
+  transform: translateY(-2px);
+}
+
+.vy-suggestion:active {
+  transform: translateY(0) scale(0.995);
+}
+
+/* ---------------------------------- Items -------------------------------- */
+
+.vy-conversation {
+  @apply flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[0.83rem] text-slate-400;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.vy-conversation:hover {
+  @apply bg-white/[0.06] text-slate-100;
+}
+
+.vy-conversation[data-active='true'] {
+  @apply bg-brand-500/[0.14] text-white;
+  box-shadow: inset 2px 0 0 rgba(34, 211, 238, 0.75);
+}
+
+.vy-nav-item {
+  @apply flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-slate-300;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.vy-nav-item:hover {
+  @apply bg-white/[0.07] text-white;
+}
+
+/* ----------------------------- Apparition --------------------------------- */
+
+/* Les messages arrivent en douceur. Respecte prefers-reduced-motion plus bas. */
+.vy-enter {
+  animation: riseIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Curseur de frappe : trois points qui pulsent en décalage. */
+.vy-typing span {
+  @apply inline-block h-1.5 w-1.5 rounded-full bg-brand-300;
+  animation: vyBlink 1.2s ease-in-out infinite;
+}
+
+.vy-typing span:nth-child(2) { animation-delay: 0.16s; }
+.vy-typing span:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes vyBlink {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* --------------------------- Contenu Markdown ---------------------------- */
+
+/* Rendu maison (pas de dépendance) : titres, listes, code, emphases. */
+.vy-prose {
+  @apply text-[0.925rem] leading-relaxed text-slate-200;
+}
+
+.vy-prose > * + * {
+  @apply mt-3;
+}
+
+.vy-prose h1,
+.vy-prose h2,
+.vy-prose h3 {
+  @apply font-display font-semibold text-white;
+}
+
+.vy-prose h1 { @apply text-lg; }
+.vy-prose h2 { @apply text-base; }
+.vy-prose h3 { @apply text-[0.95rem]; }
+
+.vy-prose ul { @apply ml-5 list-disc space-y-1; }
+.vy-prose ol { @apply ml-5 list-decimal space-y-1; }
+
+.vy-prose code {
+  @apply rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.85em] text-brand-200;
+}
+
+.vy-prose pre {
+  @apply overflow-x-auto rounded-xl border border-line bg-black/50 p-3.5;
+}
+
+.vy-prose pre code {
+  @apply bg-transparent p-0 text-[0.83rem] text-slate-200;
+}
+
+.vy-prose blockquote {
+  @apply border-l-2 border-brand-400/50 pl-3 text-slate-400;
+}
+
+.vy-prose a {
+  @apply text-brand-300 underline underline-offset-2;
+}
+
+.vy-prose strong { @apply font-semibold text-white; }
+
+/* -------------------------------- Scrollbar ------------------------------ */
+
+.vy-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+}
+
+/* --------------------------- Accessibilité ------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .vy-enter,
+  .vy-ambient::before,
+  .vy-ambient::after,
+  .vy-typing span {
+    animation: none !important;
+  }
+  .vy-rail,
+  .vy-composer,
+  .vy-suggestion {
+    transition: none !important;
+  }
+}
+
+/* Sur mobile, le rail devient un tiroir : il ne prend plus de place fixe. */
+@media (max-width: 860px) {
+  .vy-rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 17rem !important;
+    z-index: 50;
+    box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.9);
+  }
+}
