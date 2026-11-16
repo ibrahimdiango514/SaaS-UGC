@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc -b --pretty false",
+    "typecheck:edge": "tsc -p tsconfig.edge.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "check:edge-imports": "node scripts/check-edge-imports.mjs",

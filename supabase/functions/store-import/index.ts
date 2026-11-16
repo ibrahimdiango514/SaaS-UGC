@@ -27,6 +27,10 @@ import {
   type ImportAccess, type StoreImportDependencies,
 } from './handler.ts';
 import type { NormalizedProduct } from '../../../src/business/importer/normalize.ts';
+import { minorToDecimal } from '../../../src/business/importer/normalize.ts';
+// L'analyseur de fichier, importé explicitement : sans lui, `parseFile` levait
+// un ReferenceError à l'exécution et tout import de fichier finissait en 500.
+import { importFile } from '../../../src/business/importer/files.ts';
 
 const env = (name: string): string => (globalThis as unknown as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(name) ?? '';
 
@@ -90,15 +94,16 @@ async function getUserId(authorization: string): Promise<string | null> {
  * `price_currency` ; un prix inconnu reste `null` plutôt que d'inventer zéro.
  */
 function productRow(workspaceId: string, produit: NormalizedProduct, origine: 'url' | 'file') {
-  const montant = produit.priceMinor === null
-    ? null
-    : produit.priceMinor / 10 ** (produit.currencyExponent ?? 2);
+  // `minorToDecimal` applique le bon exposant : le XOF n'a PAS de décimales.
+  // L'ancien calcul divisait tout par 100, ce qui aurait écrit 12 000 XOF
+  // comme 120,00 — un prix faux, silencieusement, à chaque import.
+  const montant = minorToDecimal(produit.priceMinor, produit.currency);
   return {
     workspace_id: workspaceId,
     name: produit.name.slice(0, 300),
     description: produit.description ? produit.description.slice(0, 4_000) : null,
-    key_benefits: JSON.stringify(produit.benefits ?? []),
-    features: JSON.stringify(produit.features ?? []),
+    key_benefits: JSON.stringify([]),
+    features: JSON.stringify([]),
     price_amount: montant,
     price_currency: (produit.currency || 'XOF').slice(0, 3),
     product_url: produit.productUrl,
