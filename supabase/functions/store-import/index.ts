@@ -22,7 +22,10 @@
  */
 
 import postgres from 'npm:postgres@3.4.5';
-import { createStoreImportHandler, denoResolveHost, type StoreImportDependencies } from './handler.ts';
+import {
+  createStoreImportHandler, denoResolveHost,
+  type ImportAccess, type StoreImportDependencies,
+} from './handler.ts';
 import type { NormalizedProduct } from '../../../src/business/importer/normalize.ts';
 
 const env = (name: string): string => (globalThis as unknown as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(name) ?? '';
@@ -110,6 +113,37 @@ function productRow(workspaceId: string, produit: NormalizedProduct) {
 
 const store: StoreImportDependencies = {
   getUserId,
+
+  /**
+   * Abonnement Business Ground — la SEULE source de vérité.
+   *
+   * Appel à `saas_business.bg_import_access`, qui lit `subscriptions` et
+   * `plans` et applique la règle (statut actif, période en cours, formule
+   * encore commercialisée). Aucune valeur du navigateur n'entre ici : seul
+   * l'identifiant issu de GoTrue.
+   *
+   * Toute panne (base absente, erreur SQL) PROPAGE l'exception : le handler
+   * répond alors 503 et n'exécute rien. Un module réservé aux abonnés ne
+   * s'ouvre jamais par accident.
+   */
+  async checkImportAccess(userId: string): Promise<ImportAccess> {
+    const db = requiredSql();
+    const [ligne] = await db<{ droits: Record<string, unknown> }[]>`
+      select saas_business.bg_import_access(${userId}::uuid, now()) as droits
+    `;
+    const droits = (ligne?.droits ?? {}) as Record<string, unknown>;
+    return {
+      allowed: droits.allowed === true,
+      reason: typeof droits.reason === 'string' ? droits.reason : 'UNKNOWN',
+      message: typeof droits.message === 'string'
+        ? droits.message
+        : 'Un abonnement Business Ground actif est requis.',
+      status: typeof droits.status === 'string' ? droits.status : null,
+      planKey: typeof droits.plan_key === 'string' ? droits.plan_key : null,
+      currentPeriodEnd: typeof droits.current_period_end === 'string'
+        ? droits.current_period_end : null,
+    };
+  },
 
   async grantWorkspace(userId: string, workspaceId: string) {
     const db = requiredSql();

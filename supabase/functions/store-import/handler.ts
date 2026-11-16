@@ -64,9 +64,34 @@ export interface PreviewRecord {
   origin: ImportBatch['origin'];
 }
 
+/**
+ * Droits d'accès au module Import & Connect, calculés CÔTÉ SERVEUR.
+ *
+ * Le navigateur n'envoie jamais ceci : la valeur vient de
+ * `saas_business.bg_import_access`, lue avec la connexion service. Un client
+ * qui prétendrait être abonné n'a aucune prise sur cette décision.
+ */
+export interface ImportAccess {
+  allowed: boolean;
+  /** Motif lisible par la machine : NO_SUBSCRIPTION, SUBSCRIPTION_EXPIRED… */
+  reason: string;
+  /** Message destiné à l'utilisateur. */
+  message: string;
+  status?: string | null;
+  planKey?: string | null;
+  currentPeriodEnd?: string | null;
+}
+
 export interface StoreImportDependencies {
   /** Vérifie l'utilisateur à partir de l'en-tête Authorization. */
   getUserId(authorization: string): Promise<string | null>;
+  /**
+   * Vérifie l'abonnement Business Ground de CET utilisateur.
+   *
+   * Obligatoire : sans cette dépendance, le module refuse de servir
+   * (`IMPORT_ACCESS_UNAVAILABLE`). On préfère indisponible à ouvert.
+   */
+  checkImportAccess(userId: string): Promise<ImportAccess>;
   /** Contrôle d'accès à l'entreprise, exécuté en base. */
   grantWorkspace(userId: string, workspaceId: string): Promise<WorkspaceGrant>;
   /** Catalogue existant de l'entreprise, pour les doublons. */
@@ -259,6 +284,53 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
     }
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return jsonResponse(failure('INVALID_BODY', 'Corps JSON invalide.'), 400, corsOrigin);
+    }
+
+    // ---------------------------------------------------------------------
+    // ABONNEMENT BUSINESS GROUND — vérifié AVANT toute opération.
+    //
+    // Place volontaire : après l'identité (on sait QUI demande), et avant la
+    // lecture de l'action, la vérification d'entreprise, tout accès réseau et
+    // toute écriture. Un appel direct à cette fonction sans abonnement ne peut
+    // donc rien déclencher, même avec un corps parfaitement formé.
+    //
+    // La décision ne dépend d'aucune valeur envoyée par le client : seul
+    // `userId`, établi par GoTrue, est utilisé.
+    // ---------------------------------------------------------------------
+    if (typeof dependencies.checkImportAccess !== 'function') {
+      return jsonResponse(
+        failure('IMPORT_ACCESS_UNAVAILABLE', 'La vérification de l’abonnement est indisponible.'),
+        503, corsOrigin,
+      );
+    }
+    let access: ImportAccess;
+    try {
+      access = await dependencies.checkImportAccess(userId);
+    } catch {
+      // Panne de vérification : on refuse. Un doute ne doit jamais ouvrir
+      // l'accès à un module réservé aux abonnés.
+      return jsonResponse(
+        failure('IMPORT_ACCESS_UNAVAILABLE', 'La vérification de l’abonnement est indisponible.'),
+        503, corsOrigin,
+      );
+    }
+    if (!access || access.allowed !== true) {
+      return jsonResponse(
+        {
+          error: {
+            code: 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
+            message: access?.message || 'Un abonnement Business Ground actif est requis.',
+            reason: access?.reason ?? 'NO_SUBSCRIPTION',
+            // Le client utilise ces champs pour afficher l'état réel et le lien
+            // de souscription ; ils ne donnent aucun droit.
+            subscription_status: access?.status ?? null,
+            plan_key: access?.planKey ?? null,
+            current_period_end: access?.currentPeriodEnd ?? null,
+          },
+        },
+        403,
+        corsOrigin,
+      );
     }
 
     const action = text(body.action, 20);
