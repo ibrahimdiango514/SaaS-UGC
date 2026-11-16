@@ -48,7 +48,7 @@ export const LOADER_TARGETS = {
   // chiffrement AES-256-GCM et une machine d'état OAuth ; la publier par
   // tranches vérifiées par SHA-256 évite qu'une altération en transit modifie
   // silencieusement un contrôle de sécurité.
-  'vyora-oauth': { migration: '20261116040000' },
+  'vyora-oauth': { migration: '20261116060000' },
 };
 
 /**
