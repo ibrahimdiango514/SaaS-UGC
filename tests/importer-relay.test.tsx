@@ -123,9 +123,9 @@ describe('import par URL — confirmation', () => {
 
     saisirUrl();
     fireEvent.click(screen.getByTestId('store-url-preview'));
-    await waitFor(() => expect(screen.getByTestId('store-url-confirm')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('import-confirm')).toBeTruthy());
 
-    fireEvent.click(screen.getByTestId('store-url-confirm'));
+    fireEvent.click(screen.getByTestId('import-confirm'));
     await waitFor(() => expect(screen.getByTestId('import-result')).toBeTruthy());
 
     const [, corps] = api.invokeEdge.mock.calls[1];
@@ -148,8 +148,8 @@ describe('import par URL — confirmation', () => {
     panneau();
     saisirUrl();
     fireEvent.click(screen.getByTestId('store-url-preview'));
-    await waitFor(() => expect(screen.getByTestId('store-url-confirm')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('store-url-confirm'));
+    await waitFor(() => expect(screen.getByTestId('import-confirm')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('import-confirm'));
 
     await waitFor(() => expect(screen.getByText(/1 produit\(s\) non créé\(s\)/i)).toBeTruthy());
     expect(screen.getByText(/Crème Nuit : Refusé par la base/)).toBeTruthy();
@@ -163,8 +163,8 @@ describe('import par URL — confirmation', () => {
     panneau();
     saisirUrl();
     fireEvent.click(screen.getByTestId('store-url-preview'));
-    await waitFor(() => expect(screen.getByTestId('store-url-confirm')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('store-url-confirm'));
+    await waitFor(() => expect(screen.getByTestId('import-confirm')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('import-confirm'));
 
     await waitFor(() => expect(screen.getByText(/Aperçu expiré/i)).toBeTruthy());
     // Retour à l'étape source : l'utilisateur doit relancer un aperçu.
@@ -183,7 +183,7 @@ describe('import par URL — confirmation', () => {
     panneau();
     saisirUrl();
     fireEvent.click(screen.getByTestId('store-url-preview'));
-    await waitFor(() => expect(screen.getByTestId('store-url-confirm')).toBeTruthy());
-    expect((screen.getByTestId('store-url-confirm') as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('import-confirm')).toBeTruthy());
+    expect((screen.getByTestId('import-confirm') as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Edge Function `store-import` — import d'un catalogue par URL.
+ * Edge Function `store-import` — import d'un catalogue par URL **ou par fichier**.
  *
  * ## Pourquoi une Edge Function
  * Le navigateur ne peut ni résoudre le DNS ni épingler une IP : l'import par URL
@@ -14,6 +14,15 @@
  * - `parseStoreUrl` / `assertPublicAddresses` : validation d'URL et d'IP.
  * - La sortie réseau est remplacée par `pinnedFetchLike` (`safe-egress.ts`) :
  *   même pipeline, mais la connexion est épinglée sur l'IP validée.
+ *
+ * ## Pourquoi l'import de fichier passe aussi par ici
+ * Le chemin fichier existait uniquement côté navigateur : le fichier était
+ * analysé localement, puis écrit par des `insert` PostgREST successifs. Or ces
+ * `insert` ne sont contrôlés que par l'appartenance à l'entreprise : un compte
+ * SANS abonnement pouvait donc créer des produits en appelant PostgREST
+ * directement, alors que le même compte était refusé sur le chemin URL. Un
+ * verrou qui ne protège qu'une porte n'est pas un verrou. Le fichier est
+ * maintenant analysé et écrit ici, derrière la même garde d'abonnement.
  *
  * ## Garanties
  * - **Aperçu sans écriture** : `preview` ne touche jamais `ugc_products`.
@@ -37,6 +46,7 @@ import {
 } from '../../../src/business/importer/pipeline.ts';
 import { fetchPublicCatalog } from '../../../src/business/importer/sources.ts';
 import { DEFAULT_CURRENCY, type NormalizedProduct } from '../../../src/business/importer/normalize.ts';
+import type { FileParseResult } from '../../../src/business/importer/files.ts';
 import { pinnedFetchLike, type EgressDeps } from './safe-egress.ts';
 import { MAX_CATALOG_BYTES, MAX_HTML_BYTES } from '../../../src/business/importer/sources.ts';
 
@@ -59,8 +69,18 @@ export interface PreviewRecord {
   userId: string;
   workspaceId: string;
   createdAt: number;
+  /** D'où viennent les produits : sert à l'historique et à la traçabilité. */
+  kind: 'url' | 'file';
   /** Produits validés au moment de l'aperçu — la confirmation ne relit pas le réseau. */
   products: NormalizedProduct[];
+  /**
+   * Pour chaque produit, s'il est importable (hors doublon interne).
+   *
+   * Mémorisé ici et non recalculé à la confirmation : le choix affiché à
+   * l'utilisateur doit être exactement celui appliqué, même si le catalogue
+   * change entre-temps.
+   */
+  importables?: boolean[];
   origin: ImportBatch['origin'];
 }
 
@@ -97,7 +117,20 @@ export interface StoreImportDependencies {
   /** Catalogue existant de l'entreprise, pour les doublons. */
   listExistingProducts(workspaceId: string): Promise<ExistingProduct[]>;
   /** Écrit les produits retenus. Ne doit jamais être appelé par `preview`. */
-  insertProducts(workspaceId: string, products: NormalizedProduct[]): Promise<{ created: number; failed: Array<{ name: string; reason: string }> }>;
+  insertProducts(
+    workspaceId: string,
+    products: NormalizedProduct[],
+    /** Origine réelle, enregistrée dans les faits du produit (audit). */
+    kind?: 'url' | 'file',
+  ): Promise<{ created: number; failed: Array<{ name: string; reason: string }> }>;
+  /**
+   * Analyse d'un fichier (CSV/TSV/XML/XLSX).
+   *
+   * Injectable pour les tests ; en production, c'est `importFile` du module
+   * partagé — exactement le même code que celui utilisé côté navigateur, pour
+   * qu'un fichier ne puisse pas être lu différemment selon le chemin.
+   */
+  parseFile?: (bytes: Uint8Array, filename: string) => Promise<FileImportResult>;
   /** Résolveur DNS serveur. Absent = import refusé (fail-closed). */
   resolveHost?: (hostname: string) => Promise<string[]>;
   /** Connexion TCP+TLS, injectable pour les tests. */
@@ -116,7 +149,16 @@ export type StoreImportAction = 'preview' | 'import';
 export interface StoreImportRequest {
   action: StoreImportAction;
   workspaceId: string;
+  /** Import par URL : adresse de la boutique. */
   url: string;
+  /**
+   * Import par fichier : contenu encodé en base64 et nom d'origine.
+   *
+   * Base64 plutôt que multipart : le corps reste du JSON, donc un seul chemin
+   * de validation, et la taille se contrôle avant décodage.
+   */
+  fileBase64?: string;
+  fileName?: string;
   /** Obligatoire pour `import`. */
   previewId?: string;
   /** Obligatoire pour `import`, strictement `true`. */
@@ -153,6 +195,9 @@ export interface ImportPayload {
 
 /* --------------------------------- erreurs -------------------------------- */
 
+/** Résultat de l'analyse d'un fichier, tel que le handler le consomme. */
+export type FileImportResult = FileParseResult;
+
 export class StoreImportError extends Error {
   readonly code: string;
   readonly status: number;
@@ -166,6 +211,14 @@ export class StoreImportError extends Error {
 }
 
 const PREVIEW_TTL_MS = 10 * 60 * 1000;
+/**
+ * Plafond du fichier reçu.
+ *
+ * Identique à `MAX_FILE_BYTES` du module partagé (8 Mio), mais appliqué AVANT
+ * décodage base64 : un corps de 200 Mo ne doit pas être matérialisé en mémoire
+ * pour être ensuite refusé. On tolère 4/3 (l'encodage base64) plus une marge.
+ */
+const MAX_FILE_BASE64_CHARS = Math.ceil((8 * 1024 * 1024 * 4) / 3) + 4096;
 const MAX_PREVIEWS_PER_USER = 20;
 
 /* -------------------------------- utilitaires ----------------------------- */
@@ -359,8 +412,22 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
           return jsonResponse(failure('WORKSPACE_ACCESS_DENIED', 'Rôle insuffisant pour importer dans cette entreprise.'), 403, corsOrigin);
         }
         purge();
-        const payload = await faireApercu(dependencies, { userId, workspaceId, url: text(body.url, 2048), now, ttl });
-        apercus.set(payload.data.previewId, payload.record);
+        // Deux sources, une seule garde : l'abonnement a déjà été vérifié
+        // ci-dessus, avant même de savoir de quel type d'import il s'agit.
+        const fichier = typeof body.fileBase64 === 'string' && body.fileBase64.length > 0;
+        const payload = fichier
+          ? await faireApercuFichier(dependencies, {
+            userId,
+            workspaceId,
+            base64: body.fileBase64 as string,
+            nom: text(body.fileName, 200),
+          })
+          : await faireApercu(dependencies, { userId, workspaceId, url: text(body.url, 2048), now, ttl });
+        apercus.set(payload.data.previewId, {
+          ...payload.record,
+          kind: fichier ? 'file' : 'url',
+          importables: payload.data.products.map((p) => p.importable),
+        });
         evincer();
         return jsonResponse({ data: payload.data }, 200, corsOrigin);
       }
@@ -391,7 +458,11 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
         return jsonResponse(failure('PREVIEW_EXPIRED', 'Aperçu expiré : relancez la prévisualisation.'), 409, corsOrigin);
       }
 
-      const selection = lireSelection(body.selection, enregistrement.products.length);
+      const selection = lireSelection(
+        body.selection,
+        enregistrement.products.length,
+        enregistrement.importables,
+      );
       if (selection instanceof StoreImportError) {
         return jsonResponse(failure(selection.code, selection.message), selection.status, corsOrigin);
       }
@@ -402,7 +473,7 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
 
       // Un aperçu ne se rejoue pas : la confirmation le consomme.
       apercus.delete(previewId);
-      const resultat = await dependencies.insertProducts(workspaceId, retenus);
+      const resultat = await dependencies.insertProducts(workspaceId, retenus, enregistrement.kind);
       return jsonResponse({ data: resultat }, 200, corsOrigin);
     } catch (cause) {
       if (cause instanceof StoreImportError) {
@@ -414,8 +485,28 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
   };
 }
 
-function lireSelection(value: unknown, taille: number): number[] | StoreImportError {
-  if (value === undefined || value === null) return Array.from({ length: taille }, (_, i) => i);
+/**
+ * Détermine les produits à écrire.
+ *
+ * Par défaut, on ne retient que les produits **importables** de l'aperçu : un
+ * doublon interne au lot est marqué non importable précisément pour ne pas être
+ * écrit deux fois. Retenir « tous les indices » contredisait le résumé affiché
+ * à l'utilisateur (et écrivait deux fois le même produit).
+ *
+ * Une sélection explicite reste honorée telle quelle : c'est l'utilisateur qui
+ * décide, et le serveur ne réécrit pas son choix.
+ */
+function lireSelection(
+  value: unknown,
+  taille: number,
+  importables?: boolean[],
+): number[] | StoreImportError {
+  if (value === undefined || value === null) {
+    if (importables && importables.length === taille) {
+      return importables.flatMap((ok, index) => (ok ? [index] : []));
+    }
+    return Array.from({ length: taille }, (_, i) => i);
+  }
   if (!Array.isArray(value)) return new StoreImportError('INVALID_SELECTION', 'Sélection invalide.', 400);
   const propres = value.filter((v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) < taille);
   if (propres.length !== value.length) return new StoreImportError('INVALID_SELECTION', 'Sélection invalide.', 400);
@@ -588,6 +679,156 @@ async function faireApercu(
       userId: contexte.userId,
       workspaceId: contexte.workspaceId,
       createdAt: contexte.now(),
+      kind: 'url',
+      products: produits,
+      origin,
+    },
+  };
+}
+
+/**
+ * Construit l'aperçu d'un FICHIER (CSV/TSV/XML/XLSX).
+ *
+ * ## Aucune sortie réseau
+ * Contrairement à l'aperçu par URL, rien n'est téléchargé : le contenu est déjà
+ * dans la requête. Il n'y a donc ni résolveur, ni épinglage d'IP, ni risque
+ * SSRF. Les protections qui comptent ici sont la taille, le type réel du
+ * contenu et la neutralisation des formules.
+ *
+ * ## Ce que cette fonction ne fait PAS
+ * Elle n'écrit rien. Elle lit le catalogue existant en lecture seule, pour
+ * signaler les doublons, et rend un aperçu que `import` devra confirmer.
+ */
+async function faireApercuFichier(
+  dependencies: StoreImportDependencies,
+  contexte: { userId: string; workspaceId: string; base64: string; nom: string },
+): Promise<{ data: PreviewPayload; record: PreviewRecord }> {
+  if (typeof dependencies.parseFile !== 'function') {
+    // Fail-closed : sans analyseur, aucun fichier n'est accepté.
+    throw new StoreImportError(
+      'FILE_PARSER_UNAVAILABLE',
+      'L’analyse de fichier n’est pas disponible : import refusé par sécurité.',
+      503,
+    );
+  }
+
+  // 1) Taille, AVANT tout décodage : un corps énorme ne doit pas être
+  //    matérialisé pour être ensuite refusé.
+  if (contexte.base64.length > MAX_FILE_BASE64_CHARS) {
+    throw new StoreImportError(
+      'FILE_TOO_LARGE',
+      'Fichier trop volumineux (limite 8 Mio).',
+      413,
+    );
+  }
+
+  // 2) Décodage strict. `atob` est permissif : il ignore les caractères hors
+  //    alphabet, donc un contenu non base64 passerait en silence. On valide
+  //    d'abord la forme, sinon le « fichier » analysé n'est pas celui reçu.
+  const propre = contexte.base64.replace(/\s/g, '');
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(propre) || propre.length % 4 !== 0) {
+    throw new StoreImportError('INVALID_FILE_ENCODING', 'Contenu de fichier illisible.', 400);
+  }
+  let octets: Uint8Array;
+  try {
+    const binaire = atob(propre);
+    octets = new Uint8Array(binaire.length);
+    for (let i = 0; i < binaire.length; i += 1) octets[i] = binaire.charCodeAt(i);
+  } catch {
+    throw new StoreImportError('INVALID_FILE_ENCODING', 'Contenu de fichier illisible.', 400);
+  }
+  if (octets.byteLength === 0) {
+    throw new StoreImportError('EMPTY_FILE', 'Le fichier est vide.', 400);
+  }
+
+  // 3) Analyse. Le module partagé borne la taille, vérifie la signature réelle
+  //    (pas l'extension) et neutralise les formules de tableur.
+  const nom = contexte.nom || 'import.csv';
+  const resultat = await dependencies.parseFile(octets, nom);
+  if (!resultat.ok) {
+    throw new StoreImportError(
+      'FILE_UNREADABLE',
+      resultat.errors.slice(0, 3).join(' ') || 'Le fichier n’a pas pu être lu.',
+      422,
+    );
+  }
+  if (resultat.products.length === 0) {
+    throw new StoreImportError('FILE_EMPTY_CATALOG', 'Aucun produit valide dans le fichier.', 422);
+  }
+
+  // 4) Aperçu identique au chemin URL : mêmes règles de doublon, même forme de
+  //    réponse, pour que l'interface n'ait qu'un seul affichage à gérer.
+  const produits = resultat.products;
+  const existants = await dependencies.listExistingProducts(contexte.workspaceId);
+  const parNom = new Map(existants.map((p) => [p.name.trim().toLowerCase(), p.id]));
+  const vusDansLeLot = new Set<string>();
+
+  const lignes = produits.map((produit, index) => {
+    const cle = produit.name.trim().toLowerCase();
+    let duplicate: 'in-batch' | 'existing' | null = null;
+    if (parNom.has(cle)) duplicate = 'existing';
+    else if (vusDansLeLot.has(cle)) duplicate = 'in-batch';
+    vusDansLeLot.add(cle);
+    return {
+      index,
+      name: produit.name,
+      price: formatPreviewPrice(produit),
+      currency: produit.currency,
+      productUrl: produit.productUrl,
+      warnings: produit.warnings,
+      duplicate,
+      importable: isImportable(produit) && duplicate !== 'in-batch',
+    };
+  });
+
+  const origin: ImportBatch['origin'] = {
+    kind: 'file',
+    reference: nom,
+    // Un fichier n'a pas de plateforme : `kind: 'file'` porte cette information,
+    // et `platform` reste 'unknown' plutôt qu'une valeur inventée.
+    platform: 'unknown',
+    endpoint: resultat.format,
+  };
+
+  const warnings = [
+    'Aucun produit n’a été créé : cette étape est une prévisualisation.',
+    ...resultat.warnings.slice(0, 8),
+    ...(lignes.some((l) => l.duplicate === 'existing')
+      ? ['Des produits portent un nom déjà présent dans votre catalogue : ils seront créés en plus si vous confirmez.']
+      : []),
+    ...(lignes.some((l) => l.duplicate === 'in-batch')
+      ? ['Des doublons internes au fichier sont ignorés : aucun produit n’est écrit deux fois.']
+      : []),
+  ];
+
+  const data: PreviewPayload = {
+    previewId: crypto.randomUUID(),
+    expiresAt: new Date(Date.now() + PREVIEW_TTL_MS).toISOString(),
+    origin,
+    summary: {
+      total: lignes.length,
+      importable: lignes.filter((l) => l.importable).length,
+      duplicateInBatch: lignes.filter((l) => l.duplicate === 'in-batch').length,
+      duplicateExisting: lignes.filter((l) => l.duplicate === 'existing').length,
+      withWarnings: lignes.filter((l) => l.warnings.length > 0).length,
+      priced: produits.filter((p) => p.priceMinor !== null).length,
+      unpriced: produits.filter((p) => p.priceMinor === null).length,
+    },
+    products: lignes,
+    rejected: [],
+    warnings,
+    // Aucune connexion réseau : le champ reste vide plutôt que de laisser
+    // croire à une lecture distante.
+    connectedTo: '',
+  };
+
+  return {
+    data,
+    record: {
+      userId: contexte.userId,
+      workspaceId: contexte.workspaceId,
+      createdAt: Date.now(),
+      kind: 'file',
       products: produits,
       origin,
     },

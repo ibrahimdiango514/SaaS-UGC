@@ -89,7 +89,7 @@ async function getUserId(authorization: string): Promise<string | null> {
  * Le prix est stocké en unité majeure (colonne `price_amount`), la devise dans
  * `price_currency` ; un prix inconnu reste `null` plutôt que d'inventer zéro.
  */
-function productRow(workspaceId: string, produit: NormalizedProduct) {
+function productRow(workspaceId: string, produit: NormalizedProduct, origine: 'url' | 'file') {
   const montant = produit.priceMinor === null
     ? null
     : produit.priceMinor / 10 ** (produit.currencyExponent ?? 2);
@@ -103,7 +103,9 @@ function productRow(workspaceId: string, produit: NormalizedProduct) {
     price_currency: (produit.currency || 'XOF').slice(0, 3),
     product_url: produit.productUrl,
     product_facts: JSON.stringify({
-      source: 'url-import',
+      // L'origine est réelle, pas supposée : l'historique doit pouvoir dire si
+      // le produit vient d'une URL ou d'un fichier déposé.
+      source: origine ?? 'import',
       platform: produit.source?.platform ?? null,
       reference: produit.source?.reference ?? null,
       imported_at: new Date().toISOString(),
@@ -167,14 +169,14 @@ const store: StoreImportDependencies = {
     return lignes.map((ligne) => ({ id: String(ligne.id), name: String(ligne.name) }));
   },
 
-  async insertProducts(workspaceId: string, produits: NormalizedProduct[]) {
+  async insertProducts(workspaceId: string, produits: NormalizedProduct[], origine: 'url' | 'file' = 'url') {
     const db = requiredSql();
     let created = 0;
     const failed: Array<{ name: string; reason: string }> = [];
     for (const produit of produits) {
       try {
         await db`
-          insert into saas_ugc.ugc_products ${db(productRow(workspaceId, produit))}
+          insert into saas_ugc.ugc_products ${db(productRow(workspaceId, produit, origine))}
         `;
         created += 1;
       } catch {
@@ -185,6 +187,9 @@ const store: StoreImportDependencies = {
     return { created, failed };
   },
 
+  // Même analyseur que le navigateur : un fichier ne doit pas être lu
+  // différemment selon le chemin qui l'apporte.
+  parseFile: (bytes: Uint8Array, filename: string) => importFile(bytes, filename),
   resolveHost: denoResolveHost(),
   allowedOrigins,
 };

@@ -6,18 +6,39 @@ import { writeFileSync, mkdirSync, readFileSync, readdirSync, existsSync } from 
 /**
  * Preuve de rendu — panneau d'import universel, étape d'aperçu.
  *
- * Le fichier produit (`artifacts/import-universel.html`) montre un aperçu réel
- * calculé par le vrai pipeline sur un vrai CSV : prix, catégories, variantes,
- * image manquante, prix à compléter et doublon détecté. Il s'ouvre dans un
+ * Le fichier produit (`artifacts/import-universel.html`) montre l'écran d'aperçu
+ * tel qu'il s'affiche quand le serveur renvoie un catalogue réel : prix,
+ * catégories, variantes, prix à compléter et doublons. Il s'ouvre dans un
  * navigateur avec le CSS de l'application, ce qui rend l'écran vérifiable sans
  * exécuter l'application.
+ *
+ * L'aperçu vient désormais de l'Edge Function (`invokeEdge`), puisque l'analyse
+ * a été déplacée côté serveur pour que l'abonnement soit contrôlé avant toute
+ * lecture de fichier. La fixture reproduit donc la réponse serveur.
  */
 
-const api = vi.hoisted(() => ({ createProduct: vi.fn() }));
+const api = vi.hoisted(() => ({ createProduct: vi.fn(), invokeEdge: vi.fn() }));
 vi.mock('../src/lib/api', async () => {
   const reel = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api');
-  return { ...reel, createProduct: api.createProduct };
+  return { ...reel, createProduct: api.createProduct, invokeEdge: api.invokeEdge };
 });
+
+/** Aperçu serveur reproduisant le catalogue de démonstration. */
+const APERCU = {
+  previewId: 'apercu-demo',
+  expiresAt: new Date(Date.now() + 600_000).toISOString(),
+  summary: { total: 4, importable: 3, duplicateInBatch: 1, duplicateExisting: 1, unpriced: 1 },
+  products: [
+    { index: 0, name: 'Sérum éclat', price: '12 000 XOF', currency: 'XOF', productUrl: 'https://boutique.example/serum', warnings: [], duplicate: null, importable: true },
+    { index: 1, name: 'Baume lèvres', price: '4 500 XOF', currency: 'XOF', productUrl: 'https://boutique.example/baume', warnings: [], duplicate: 'existing', importable: true },
+    { index: 2, name: 'Coffret découverte', price: 'à compléter', currency: 'XOF', productUrl: 'https://boutique.example/coffret', warnings: [], duplicate: null, importable: true },
+    { index: 3, name: 'SERUM ECLAT', price: '12 000 XOF', currency: 'XOF', productUrl: 'https://boutique.example/serum-2', warnings: [], duplicate: 'in-batch', importable: false },
+  ],
+  rejected: [],
+  warnings: [],
+  origin: { kind: 'file', platform: 'unknown', endpoint: 'csv', reference: 'catalogue-boutique.csv' },
+  connectedTo: '',
+};
 
 import { StoreImportPanel } from '../src/business/importer/StoreImportPanel';
 
@@ -41,6 +62,7 @@ describe('preuve de rendu — import universel', () => {
   it('produit un artefact HTML à l’étape d’aperçu', async () => {
     cleanup();
     api.createProduct.mockResolvedValue({ id: 'p-1' });
+    api.invokeEdge.mockResolvedValue({ data: APERCU });
 
     const { container } = render(
       <StoreImportPanel
@@ -57,11 +79,11 @@ describe('preuve de rendu — import universel', () => {
 
     await waitFor(() => expect(screen.getByTestId('import-preview')).toBeTruthy());
 
-    // Le pipeline a réellement tourné : doublons, prix manquant, catégories.
-    expect(screen.getByText(/1 doublon\(s\) dans le fichier/i)).toBeTruthy();
+    // L'aperçu serveur est bien celui affiché : doublons, prix manquant.
+    expect(screen.getByText(/1 doublon\(s\) dans la source/i)).toBeTruthy();
     expect(screen.getByText(/1 déjà dans votre catalogue/i)).toBeTruthy();
     expect(screen.getByText(/1 sans prix/i)).toBeTruthy();
-    expect(screen.getByText('prix à compléter')).toBeTruthy();
+    expect(screen.getByText('à compléter')).toBeTruthy();
     // Rien n'a été écrit pendant l'aperçu.
     expect(api.createProduct).not.toHaveBeenCalled();
 
@@ -82,10 +104,10 @@ describe('preuve de rendu — import universel', () => {
 <body>
 <div class="wrap">
   <p class="capture-title">VYORA · Business Grow → Croissance → Catalogue</p>
-  <p class="capture-sub">Aperçu réel produit par le pipeline d’import sur un CSV de 4 lignes. Rien n’a été enregistré.</p>
+  <p class="capture-sub">Aperçu renvoyé par le serveur pour un CSV de 4 lignes. Rien n’a été enregistré.</p>
   ${container.innerHTML}
   <p class="capture-note">
-    Doublon dans le fichier : « SERUM ECLAT » face à « Sérum éclat », détecté par empreinte insensible aux accents et à la casse.
+    Doublon dans la source : « SERUM ECLAT » face à « Sérum éclat », détecté par empreinte insensible aux accents et à la casse.
     Doublon du catalogue : « Baume lèvres » déjà présent dans l’entreprise.
     Prix manquant : le coffret est conservé avec un prix à compléter, jamais remplacé par zéro.
   </p>

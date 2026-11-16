@@ -18,30 +18,45 @@
  * `previewId` émis par le serveur — le navigateur ne peut donc pas écrire un
  * catalogue qu'il n'a pas prévisualisé.
  *
+ * ## Import par fichier : aussi via le serveur
+ *
+ * Le fichier était auparavant analysé localement puis écrit par des `insert`
+ * PostgREST successifs. Ces `insert` ne sont contrôlés que par l'appartenance à
+ * l'entreprise (`ugc_private.can_edit_workspace`), **pas par l'abonnement** :
+ * un compte sans abonnement pouvait donc créer des produits, alors qu'il était
+ * refusé sur le chemin URL. Un verrou qui ne protège qu'une porte n'est pas un
+ * verrou.
+ *
+ * Le fichier est maintenant envoyé à la même Edge Function, qui vérifie
+ * l'abonnement avant toute analyse et n'écrit qu'après confirmation explicite.
+ *
  * ## Ce que l'interface ne fait pas
  *
- * - Aucune requête réseau directe vers la boutique (import fichier = lecture
- *   locale ; import URL = serveur).
+ * - Aucune requête réseau directe vers la boutique.
+ * - Aucune écriture directe dans `ugc_products` : l'écriture est serveur, donc
+ *   soumise à la garde d'abonnement.
  * - Aucun produit affiché tant que la prévisualisation n'a pas réussi.
  * - Aucune écriture sans confirmation explicite.
  * - Aucun produit créé pendant l'aperçu, ni côté navigateur ni côté serveur.
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, ImageOff, Link2, Loader2, Package, Upload, X,
+  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, Link2, Loader2, Package, Upload, X,
 } from 'lucide-react';
 import { Button, cn } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
-import { createProduct } from '../../lib/api';
-import {
-  formatPreviewPrice, runFileImport, type ImportBatch,
-} from './pipeline';
 import { PLATFORM_LABELS } from './platform';
-import { importStore, previewStore, type StorePreview } from './relay';
+import { importStore, previewFile, previewStore, type StorePreview } from './relay';
 
 export interface StoreImportPanelProps {
   workspaceId: string | null;
-  /** Catalogue existant, pour la détection de doublons. */
+  /**
+   * Catalogue existant.
+   *
+   * Conservé dans l'interface publique, mais **plus utilisé pour décider** : la
+   * détection de doublons est faite par le serveur, sur son propre catalogue.
+   * Un navigateur qui se tromperait ne peut donc pas contourner la règle.
+   */
   existing: Array<{ id: string; name: string }>;
   /** Appelé après une écriture réussie, pour rafraîchir la liste. */
   onImported: () => void | Promise<void>;
@@ -50,9 +65,8 @@ export interface StoreImportPanelProps {
 
 type Étape = 'source' | 'apercu' | 'ecriture';
 
-export function StoreImportPanel({ workspaceId, existing, onImported, onClose }: StoreImportPanelProps) {
+export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImportPanelProps) {
   const [étape, setÉtape] = useState<Étape>('source');
-  const [lot, setLot] = useState<ImportBatch | null>(null);
   const [erreurs, setErreurs] = useState<string[]>([]);
   const [avertissements, setAvertissements] = useState<string[]>([]);
   const [chargement, setChargement] = useState(false);
@@ -72,28 +86,34 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
   const relaisDisponible = typeof window !== 'undefined';
 
   const réinitialiser = useCallback(() => {
-    setLot(null);
     setErreurs([]);
     setAvertissements([]);
     setRésultat(null);
     setÉtape('source');
   }, []);
 
+  /**
+   * Import par fichier — **via le serveur**.
+   *
+   * Le fichier n'est plus analysé localement puis écrit par des `insert`
+   * PostgREST : il part à l'Edge Function, qui vérifie l'abonnement avant même
+   * de l'analyser. C'est ce qui rend la restriction réelle et non décorative.
+   */
   const traiterFichier = async (fichier: File) => {
+    if (!workspaceId) {
+      setErreurs(['Sélectionnez une entreprise avant d’importer.']);
+      return;
+    }
     setChargement(true);
     setErreurs([]);
     setAvertissements([]);
     setRésultat(null);
+    setApercuServeur(null);
     try {
       const octets = new Uint8Array(await fichier.arrayBuffer());
-      const résultat = await runFileImport(octets, fichier.name, { existing });
-      if (!résultat.ok) {
-        setErreurs(résultat.errors);
-        setLot(null);
-        return;
-      }
-      setLot(résultat.batch);
-      setAvertissements(résultat.batch.warnings);
+      const apercu = await previewFile({ workspaceId, fileName: fichier.name, bytes: octets });
+      setApercuServeur(apercu);
+      setAvertissements(apercu.warnings);
       setÉtape('apercu');
     } catch (erreur) {
       setErreurs([asAppError(erreur).message]);
@@ -124,7 +144,6 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
     setAvertissements([]);
     setRésultat(null);
     setApercuServeur(null);
-    setLot(null);
     try {
       const apercu = await previewStore({ workspaceId, url: saisie });
       setApercuServeur(apercu);
@@ -138,13 +157,13 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
   };
 
   /**
-   * Confirmation de l'import par URL.
+   * Confirmation de l'import — URL **ou** fichier.
    *
    * Envoie le `previewId` émis par le serveur : le navigateur ne peut pas
    * écrire un catalogue qu'il n'a pas prévisualisé, et un aperçu ne se rejoue
    * pas. Les produits retenus sont ceux que le serveur a marqués importables.
    */
-  const confirmerUrl = async () => {
+  const confirmer = async () => {
     if (!apercuServeur || !workspaceId) return;
     setÉcriture(true);
     setÉtape('ecriture');
@@ -177,53 +196,6 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
     const fichier = événement.dataTransfer.files?.[0];
     if (fichier) await traiterFichier(fichier);
   };
-
-  /**
-   * Écriture.
-   *
-   * Un produit en échec n'interrompt pas les suivants : on rapporte le détail.
-   * Les doublons internes au lot sont ignorés à l'écriture (le premier garde la
-   * place) ; les doublons du catalogue existant sont créés, car l'utilisateur a
-   * pu le décider explicitement en confirmant.
-   */
-  const écrire = async () => {
-    if (!lot || !workspaceId) return;
-    setÉcriture(true);
-    setÉtape('ecriture');
-    const doublonsInternes = new Set(lot.duplicates.filter((d) => d.kind === 'in-batch').map((d) => d.index));
-    const échecs: Array<{ nom: string; raison: string }> = [];
-    let créés = 0;
-
-    for (const [index, produit] of lot.products.entries()) {
-      if (doublonsInternes.has(index)) continue;
-      try {
-        await createProduct({
-          workspace_id: workspaceId,
-          name: produit.name,
-          description: produit.description || null,
-          price_amount: produit.priceMinor === null
-            ? null
-            : (['XOF', 'XAF', 'JPY', 'KRW', 'CLP'].includes(produit.currency)
-              ? produit.priceMinor
-              : produit.priceMinor / 100),
-          price_currency: produit.currency,
-          product_url: produit.productUrl,
-          key_benefits: produit.categories.slice(0, 8),
-        });
-        créés += 1;
-      } catch (erreur) {
-        échecs.push({ nom: produit.name, raison: asAppError(erreur).message });
-      }
-    }
-
-    setRésultat({ créés, échecs });
-    setÉcriture(false);
-    if (créés > 0) await onImported();
-  };
-
-  const aperçu = useMemo(() => lot?.products.slice(0, 40) ?? [], [lot]);
-  const total = lot?.summary.total ?? 0;
-  const àCréer = lot ? lot.summary.importable : 0;
 
   return (
     <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/[0.03] p-4" data-testid="store-importer">
@@ -336,12 +308,17 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
         </div>
       )}
 
-      {/* Étape 2 (URL) — aperçu renvoyé par le serveur, aucune écriture */}
+      {/* Étape 2 — aperçu (serveur, quel que soit le type de source) */}
       {étape === 'apercu' && apercuServeur && (
-        <div className="mt-3" data-testid="store-url-preview-panel">
+        <div
+          className="mt-3"
+          data-testid={apercuServeur.origin.kind === 'file' ? 'store-file-preview-panel' : 'store-url-preview-panel'}
+        >
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
             <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-0.5 text-cyan-100">
-              {PLATFORM_LABELS[apercuServeur.origin.platform]}
+              {apercuServeur.origin.kind === 'file'
+                ? apercuServeur.origin.reference
+                : PLATFORM_LABELS[apercuServeur.origin.platform]}
             </span>
             <span className="text-slate-400">{apercuServeur.summary.total} produit(s) détecté(s)</span>
             {apercuServeur.summary.duplicateInBatch > 0 && (
@@ -361,7 +338,22 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
             </div>
           )}
 
-          <ul className="vy-scroll mt-3 max-h-80 space-y-1.5 overflow-y-auto pr-1" data-testid="store-url-preview">
+          {/*
+            Rappel explicite : un aperçu n'écrit rien. Placé dans le bloc unifié
+            pour qu'il soit dit aussi bien après un fichier qu'après une URL.
+          */}
+          <p className="mt-2 text-[10px] text-slate-500">
+            Aucun produit n’a été créé à cette étape. L’import n’a lieu qu’après votre
+            confirmation, et l’aperçu expire au bout de dix minutes.
+          </p>
+
+          {apercuServeur.rejected.length > 0 && (
+            <div className="mt-2 rounded-lg border border-rose-400/20 bg-rose-400/[0.05] px-3 py-2 text-[10px] text-rose-100">
+              {apercuServeur.rejected.slice(0, 4).map((r) => <p key={`${r.line}-${r.reason}`}>· ligne {r.line} : {r.reason}</p>)}
+            </div>
+          )}
+
+          <ul className="vy-scroll mt-3 max-h-80 space-y-1.5 overflow-y-auto pr-1" data-testid="import-preview">
             {apercuServeur.products.slice(0, 40).map((produit) => (
               <li
                 key={`${produit.index}-${produit.name}`}
@@ -369,17 +361,12 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
                   'flex items-start gap-2.5 rounded-lg border px-2.5 py-2',
                   produit.duplicate ? 'border-amber-400/20 bg-amber-400/[0.04]' : 'border-white/[0.07] bg-black/20',
                 )}
-                data-testid={`store-url-preview-${produit.index}`}
+                data-testid={`import-preview-${produit.index}`}
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white/[0.05] text-slate-600">
-                  <Package size={13} />
-                </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium text-white">{produit.name}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-                    <span className={produit.price ? 'text-slate-300' : 'text-amber-300/80'}>
-                      {produit.price || 'prix à compléter'}
-                    </span>
+                    <span className="text-slate-300">{produit.price}</span>
                     {produit.productUrl && (
                       <a
                         href={produit.productUrl}
@@ -407,7 +394,8 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
           </ul>
           {apercuServeur.products.length > 40 && (
             <p className="mt-1 text-[10px] text-slate-500">
-              Aperçu limité à 40 produits sur {apercuServeur.summary.total}.
+              Aperçu limité à 40 produits sur {apercuServeur.summary.total}. Tous les produits
+              importables seront écrits.
             </p>
           )}
 
@@ -415,127 +403,14 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
             <Button
               size="sm"
               variant="primary"
+              // Rien d'importable ⇒ rien à confirmer : un bouton « Importer 0
+              // produit(s) » serait un piège, pas une action.
               disabled={écriture || !workspaceId || apercuServeur.summary.importable === 0}
-              onClick={() => void confirmerUrl()}
-              icon={<Check size={13} />}
-              data-testid="store-url-confirm"
-            >
-              Importer {apercuServeur.summary.importable} produit(s)
-            </Button>
-            <Button size="sm" variant="ghost" onClick={réinitialiser} icon={<ArrowLeft size={13} />}>
-              Changer de source
-            </Button>
-          </div>
-          <p className="mt-2 text-[10px] text-slate-500">
-            Aucun produit n’a été créé à cette étape. L’import n’a lieu qu’après votre
-            confirmation, et l’aperçu expire au bout de dix minutes.
-          </p>
-        </div>
-      )}
-
-      {/* Étape 2 — aperçu */}
-      {étape === 'apercu' && lot && (
-        <div className="mt-3">
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-0.5 text-cyan-100">
-              {lot.origin.kind === 'file' ? lot.origin.reference : PLATFORM_LABELS[lot.origin.platform]}
-            </span>
-            <span className="text-slate-400">{lot.summary.total} produit(s) détecté(s)</span>
-            {lot.summary.duplicateInBatch > 0 && (
-              <span className="text-amber-200">{lot.summary.duplicateInBatch} doublon(s) dans le fichier</span>
-            )}
-            {lot.summary.duplicateExisting > 0 && (
-              <span className="text-amber-200">{lot.summary.duplicateExisting} déjà dans votre catalogue</span>
-            )}
-            {lot.summary.unpriced > 0 && (
-              <span className="text-slate-500">{lot.summary.unpriced} sans prix (à compléter)</span>
-            )}
-          </div>
-
-          {avertissements.length > 0 && (
-            <div className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-3 py-2 text-[10px] text-amber-100">
-              {avertissements.slice(0, 4).map((avertissement) => <p key={avertissement}>· {avertissement}</p>)}
-            </div>
-          )}
-
-          <ul className="vy-scroll mt-3 max-h-80 space-y-1.5 overflow-y-auto pr-1" data-testid="import-preview">
-            {aperçu.map((produit, index) => {
-              const doublon = lot.duplicates.find((d) => d.index === index);
-              return (
-                <li
-                  key={`${produit.fingerprint}-${index}`}
-                  className={cn(
-                    'flex items-start gap-2.5 rounded-lg border px-2.5 py-2',
-                    doublon ? 'border-amber-400/20 bg-amber-400/[0.04]' : 'border-white/[0.07] bg-black/20',
-                  )}
-                  data-testid={`import-preview-${index}`}
-                >
-                  {produit.imageUrl ? (
-                    // Aperçu distant : l'URL a déjà été validée en https par la
-                    // normalisation. `loading="lazy"` évite 40 requêtes d'un coup.
-                    <img
-                      src={produit.imageUrl}
-                      alt=""
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      className="h-9 w-9 shrink-0 rounded object-cover"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white/[0.05] text-slate-600">
-                      <ImageOff size={13} />
-                    </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-medium text-white">{produit.name}</p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-                      <span className={produit.priceMinor === null ? 'text-amber-300/80' : 'text-slate-300'}>
-                        {formatPreviewPrice(produit)}
-                      </span>
-                      {produit.categories.length > 0 && <span>· {produit.categories.slice(0, 2).join(', ')}</span>}
-                      {produit.variants.length > 0 && <span>· {produit.variants.length} variante(s)</span>}
-                      {produit.productUrl && (
-                        <a
-                          href={produit.productUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-0.5 text-cyan-300/80 underline underline-offset-2"
-                        >
-                          <Link2 size={9} /> fiche
-                        </a>
-                      )}
-                    </p>
-                    {produit.warnings.length > 0 && (
-                      <p className="mt-0.5 text-[10px] text-amber-200/80">{produit.warnings.join(' · ')}</p>
-                    )}
-                    {doublon && (
-                      <p className="mt-0.5 text-[10px] text-amber-300">
-                        {doublon.kind === 'in-batch'
-                          ? 'Doublon dans le fichier — ne sera pas créé deux fois'
-                          : 'Existe déjà dans votre catalogue — sera créé si vous confirmez'}
-                      </p>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          {lot.products.length > aperçu.length && (
-            <p className="mt-1 text-[10px] text-slate-500">
-              Aperçu limité à {aperçu.length} produits sur {total}. Tous seront importés.
-            </p>
-          )}
-
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={écriture || !workspaceId}
-              onClick={() => void écrire()}
+              onClick={() => void confirmer()}
               icon={<Check size={13} />}
               data-testid="import-confirm"
             >
-              Importer {àCréer} produit(s)
+              Importer {apercuServeur.summary.importable} produit(s)
             </Button>
             <Button size="sm" variant="ghost" onClick={réinitialiser} icon={<ArrowLeft size={13} />}>
               Changer de source

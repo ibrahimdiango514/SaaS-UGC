@@ -50,6 +50,45 @@ interface Enveloppe<T> {
 }
 
 /**
+ * Encode un fichier en base64 pour l'envoi au serveur.
+ *
+ * `btoa` n'accepte que du latin-1 : on passe par les octets, jamais par la
+ * chaîne Unicode. Le découpage par blocs évite de dépasser la taille maximale
+ * d'arguments lors de l'étalement d'un très gros tableau.
+ */
+export function fichierEnBase64(octets: Uint8Array): string {
+  let binaire = '';
+  const bloc = 0x8000;
+  for (let i = 0; i < octets.length; i += bloc) {
+    binaire += String.fromCharCode(...octets.subarray(i, i + bloc));
+  }
+  return btoa(binaire);
+}
+
+/**
+ * Demande l'aperçu d'un FICHIER. **N'écrit rien.**
+ *
+ * Le fichier était auparavant analysé dans le navigateur, puis écrit par des
+ * `insert` PostgREST successifs que seule l'appartenance à l'entreprise
+ * contrôlait : un compte sans abonnement pouvait donc créer des produits, alors
+ * qu'il était refusé sur le chemin URL. En passant par la même Edge Function, la
+ * garde d'abonnement est évaluée **avant** l'analyse du fichier.
+ */
+export async function previewFile(input: {
+  workspaceId: string;
+  fileName: string;
+  bytes: Uint8Array;
+}): Promise<StorePreview> {
+  const { data } = await invokeEdge<Enveloppe<StorePreview>>('store-import', {
+    action: 'preview',
+    workspaceId: input.workspaceId,
+    fileName: input.fileName,
+    fileBase64: fichierEnBase64(input.bytes),
+  });
+  return data;
+}
+
+/**
  * Demande un aperçu. **N'écrit rien.**
  *
  * Lève `AppError` avec le code serveur (`URL_REFUSED`, `RESOLVER_UNAVAILABLE`,
