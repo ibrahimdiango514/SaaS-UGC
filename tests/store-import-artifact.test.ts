@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   artifactSql,
   buildArtifact,
@@ -27,6 +29,30 @@ import {
  */
 
 const NOM = 'store-import';
+
+/**
+ * Lit un fichier **tel qu'il est au commit donné**, via `git show`.
+ *
+ * ## Pourquoi ce test existe
+ * L'artefact et le chargeur voyagent dans deux commits successifs : le
+ * chargeur désigne le commit qui contient l'artefact. Générer le chargeur
+ * depuis `HEAD` juste après avoir committé le code — sans avoir committé
+ * l'artefact — produit une épingle cohérente avec le dossier de travail mais
+ * FAUSSE en dépôt : le chargeur déployé télécharge l'ancien bundle, l'empreinte
+ * ne correspond pas, et la fonction répond 503. C'est déjà arrivé.
+ *
+ * Le contrôle ci-dessous interroge donc le commit épinglé lui-même, et non le
+ * disque.
+ */
+function fichierAuCommit(commit: string, chemin: string): string | null {
+  try {
+    return execFileSync('git', ['show', `${commit}:${chemin}`], {
+      cwd: process.cwd(), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+}
 
 describe('artefact store-import — parité avec le dépôt', () => {
   it('produit un bundle déterministe et non vide', () => {
@@ -89,6 +115,23 @@ describe('artefact store-import — parité avec le dépôt', () => {
     const chargeur = readFileSync(FUNCTIONS[NOM].loader, 'utf8');
     expect(commitEpingle()).toMatch(/^[0-9a-f]{40}$/);
     expect(chargeur).not.toMatch(/raw\.githubusercontent\.com[^"]*\/(main|develop|master)\//);
+  });
+
+  it('l’artefact RÉELLEMENT présent au commit épinglé a la bonne empreinte', () => {
+    // Le point le plus fragile du déploiement. Sans ce contrôle, un chargeur
+    // parfaitement formé peut pointer sur un commit où l'artefact n'existe pas
+    // ou diffère : la production échoue en 503 et rien ne le signale ici.
+    const built = buildArtifact(NOM);
+    const commit = commitEpingle();
+    const artefact = fichierAuCommit(commit, FUNCTIONS[NOM].artifact);
+    expect(
+      artefact,
+      `l'artefact est absent du commit épinglé ${commit} : poussez-le, puis régénérez le chargeur sur ce commit`,
+    ).not.toBeNull();
+    expect(createHash('sha256').update(artefact as string, 'utf8').digest('hex')).toBe(built.sha256);
+    // `chars` compte des CARACTÈRES, pas des octets : comparer `Buffer.length`
+    // à `chars` ferait échouer à tort dès qu'un accent est présent.
+    expect((artefact as string).length).toBe(built.chars);
   });
 
   it('ne réintroduit pas l’ancien chargement depuis la base', () => {
