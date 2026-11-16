@@ -356,6 +356,38 @@ export async function handleList(deps: HandlerDeps, bearer: string): Promise<Res
   return json(200, { items });
 }
 
+/**
+ * `status` — quels fournisseurs sont réellement configurés ?
+ *
+ * C'est la SEULE source d'autorité : la fonction lit son propre environnement,
+ * là où Supabase injecte les secrets. Aucun secret n'est renvoyé, seulement des
+ * booléens — le navigateur apprend « c'est prêt » ou « ce n'est pas prêt », rien
+ * de plus.
+ *
+ * Pourquoi pas une RPC SQL : les secrets des Edge Functions ne sont lisibles par
+ * aucune vue SQL dans ce projet. Toute tentative côté base aurait répondu
+ * `false` en toutes circonstances, y compris le jour où Google serait configuré
+ * — un mensonge silencieux, exactement ce que l'interface doit éviter.
+ */
+export function handleStatus(deps: HandlerDeps): Response {
+  const { config } = deps;
+  const googleConfigured = Boolean(
+    config.clientId && config.clientSecret && config.encryptionKey,
+  );
+  return json(200, {
+    // Un booléen par famille de fournisseurs, pas par secret.
+    google: googleConfigured,
+    // Le chiffrement est indispensable : sans clé, connecter un compte
+    // reviendrait à stocker des jetons illisibles.
+    encryption_configured: Boolean(config.encryptionKey),
+    providers: {
+      gmail: googleConfigured,
+      google_drive: googleConfigured,
+      google_calendar: googleConfigured,
+    },
+  });
+}
+
 /** `revoke` — révoque chez Google puis efface localement. */
 export async function handleRevoke(input: { account_id: unknown }, deps: HandlerDeps, userId: string): Promise<Response> {
   const accountId = String(input.account_id ?? '').trim();
@@ -501,6 +533,8 @@ export function createHandler(override: Partial<Config> = {}) {
           deps,
           bearer,
         );
+      case 'status':
+        return handleStatus(deps);
       case 'list':
         return handleList(deps, bearer);
       case 'revoke':

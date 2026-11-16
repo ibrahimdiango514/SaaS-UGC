@@ -774,3 +774,50 @@ describe('connecteur OAuth / list', () => {
     expect(headers.Authorization).toBe('Bearer jwt-utilisateur');
   });
 });
+
+describe('connecteur OAuth / statut de configuration', () => {
+  it('annonce Google configuré seulement si les DEUX identifiants ET la clé existent', async () => {
+    const store = createMemoryStore();
+    const { handleStatus } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const d = deps(store);
+
+    const complet = handleStatus(d);
+    expect(complet.status).toBe(200);
+    expect(await complet.json()).toMatchObject({
+      google: true,
+      encryption_configured: true,
+      providers: { gmail: true, google_drive: true, google_calendar: true },
+    });
+  });
+
+  it('refuse d’annoncer Google prêt sans secret client', async () => {
+    const store = createMemoryStore();
+    const { handleStatus } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const d = deps(store);
+    const response = handleStatus({ ...d, config: { ...d.config, clientSecret: '' } });
+    const body = await response.json() as { google: boolean; providers: Record<string, boolean> };
+    expect(body.google).toBe(false);
+    expect(body.providers.gmail).toBe(false);
+  });
+
+  it('refuse d’annoncer Google prêt sans clé de chiffrement', async () => {
+    const store = createMemoryStore();
+    const { handleStatus } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const d = deps(store);
+    const response = handleStatus({ ...d, config: { ...d.config, encryptionKey: '' } });
+    const body = await response.json() as { google: boolean; encryption_configured: boolean };
+    // Sans clé, connecter un compte stockerait des jetons illisibles.
+    expect(body.google).toBe(false);
+    expect(body.encryption_configured).toBe(false);
+  });
+
+  it('ne divulgue aucun secret dans la réponse', async () => {
+    const store = createMemoryStore();
+    const { handleStatus } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const text = await handleStatus(deps(store)).text();
+    expect(text).not.toContain('client-secret-google');
+    expect(text).not.toContain('client-id-google');
+    expect(text).not.toContain(KEY);
+    expect(text).not.toContain('service-key-factice');
+  });
+});

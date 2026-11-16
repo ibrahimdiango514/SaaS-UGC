@@ -35,6 +35,7 @@ const StudioGenerations = lazy(() => import('./studio/StudioPages').then(({ Stud
 const StudioLegacy = lazy(() => import('./studio/StudioPages').then(({ StudioLegacy: component }) => ({ default: component })));
 const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioProjects: component }) => ({ default: component })));
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
+const Connect = lazy(() => import('./pages/Connect'));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
 const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
@@ -88,6 +89,7 @@ export default function App() {
                       <Route path="abonnement" element={<Subscription />} />
                       <Route path="credits" element={<StudioPricing />} />
                       <Route path="paiement/retour" element={<PaymentReturn />} />
+                      <Route path="connect" element={<Connect />} />
                       <Route path="parametres" element={<Settings />} />
                     </Route>
                     <Route element={<AdminRoute />}>
