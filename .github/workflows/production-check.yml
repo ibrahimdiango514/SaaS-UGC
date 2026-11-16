@@ -12,6 +12,11 @@ name: Vérification de production
 # réponse anonyme est précisément ce qu'on veut mesurer.
 
 on:
+  # Déclenchement automatique à chaque publication : le jeton du dépôt n'a pas
+  # la permission `actions: write`, donc un dispatch manuel est refusé. Un push
+  # suffit et produit la même mesure, sans intervenant.
+  push:
+    branches: ["main", "arena/**"]
   workflow_dispatch:
     inputs:
       site_url:
