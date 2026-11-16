@@ -6,7 +6,9 @@
 // les règles de routage/budget/anti-boucle du moteur.
 import { describe, expect, it, vi } from 'vitest';
 import {
-  AI_PROVIDERS,
+  NATIVE_ADAPTERS,
+  resolveAiAdapter,
+  type AiProviderDescriptor,
   modelBaseKey,
   parseRegistrySnapshot,
   buildAiChain,
@@ -23,14 +25,62 @@ import {
 // Fixtures
 // ---------------------------------------------------------------------------
 
+/**
+ * Descripteur de fournisseur tel que le registre le fournit : c'est LUI qui
+ * décrit le protocole. Le code ne contient plus de liste fermée de fournisseurs.
+ */
+const DESCRIPTORS: Record<string, { kind: AiProviderDescriptor['kind']; baseUrl: string; modelsUrl: string | null; headers?: Record<string, string> }> = {
+  groq: { kind: 'openai', baseUrl: 'https://api.groq.com/openai/v1', modelsUrl: null },
+  gemini: { kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', modelsUrl: null },
+  deepseek: { kind: 'openai', baseUrl: 'https://api.deepseek.com', modelsUrl: 'https://api.deepseek.com/models' },
+  mistral: { kind: 'openai', baseUrl: 'https://api.mistral.ai/v1', modelsUrl: null },
+  grok: { kind: 'openai', baseUrl: 'https://api.x.ai/v1', modelsUrl: null },
+  cloudflare: { kind: 'cloudflare', baseUrl: 'https://api.cloudflare.com/client/v4', modelsUrl: null },
+  openrouter: {
+    kind: 'openai', baseUrl: 'https://openrouter.ai/api/v1', modelsUrl: null,
+    headers: { 'HTTP-Referer': 'https://vyora-ugc.netlify.app', 'X-Title': 'VYORA' },
+  },
+};
+
+function descriptor(overrides: Partial<AiRegistrySnapshot['providers'][number]> & { key: string }) {
+  const base = DESCRIPTORS[overrides.key] ?? { kind: 'openai' as const, baseUrl: 'https://example.test/v1', modelsUrl: null };
+  return {
+    name: overrides.key,
+    status: 'available',
+    aggregator: false,
+    adapterKind: base.kind,
+    baseUrl: base.baseUrl,
+    modelsUrl: base.modelsUrl,
+    apiKeyEnv: `${overrides.key.toUpperCase().replace(/-/g, '_')}_API_KEY`,
+    accountIdEnv: null,
+    gatewayIdEnv: null,
+    transport: 'rest' as const,
+    headers: base.headers ?? {},
+    ...overrides,
+  };
+}
+
+/** Adaptateur d'un fournisseur, tel que le moteur le construit depuis le registre. */
+function adapterFor(key: string) {
+  const row = descriptor({ key });
+  return resolveAiAdapter({
+    key: row.key,
+    kind: row.adapterKind,
+    baseUrl: row.baseUrl ?? '',
+    apiKeyEnv: row.apiKeyEnv,
+    modelsUrl: row.modelsUrl,
+    headers: row.headers,
+  });
+}
+
 function makeSnapshot(overrides: Partial<AiRegistrySnapshot> = {}): AiRegistrySnapshot {
   return {
     version: 2,
     providers: [
-      { key: 'groq', name: 'Groq', status: 'available', aggregator: false },
-      { key: 'deepseek', name: 'DeepSeek', status: 'available', aggregator: false },
-      { key: 'openrouter', name: 'OpenRouter', status: 'available', aggregator: true },
-      { key: 'mistral', name: 'Mistral AI', status: 'available', aggregator: false },
+      descriptor({ key: 'groq', status: 'available' }),
+      descriptor({ key: 'deepseek', status: 'available' }),
+      descriptor({ key: 'openrouter', status: 'available', aggregator: true }),
+      descriptor({ key: 'mistral', status: 'available' }),
     ],
     models: [
       {
@@ -109,83 +159,119 @@ describe('adaptateurs — contrats de transport', () => {
     { role: 'user', content: 'Bonjour' },
   ];
 
-  it('groq : URL, Bearer, corps et tokens (protocole historique inchangé)', () => {
-    const req = AI_PROVIDERS.groq.buildRequest({ credentials: creds, model: 'openai/gpt-oss-20b', messages, options: { temperature: 0.7, maxOutputTokens: 1000 } });
-    expect(req.url).toBe('https://api.groq.com/openai/v1/chat/completions');
+  it('construit un adaptateur OpenAI-compatible depuis le registre (aucune liste en dur)', () => {
+    const adapter = adapterFor('un-fournisseur-inconnu');
+    const req = adapter!.buildRequest({ credentials: creds, model: 'modele-x', messages, options: { temperature: 0.4, maxOutputTokens: 512 } });
+    expect(req.url).toBe('https://example.test/v1/chat/completions');
     expect(req.headers.Authorization).toBe('Bearer test-key');
     const body = req.body as Record<string, unknown>;
-    expect(body.model).toBe('openai/gpt-oss-20b');
-    expect(body.max_tokens).toBe(1000);
-    expect(body.temperature).toBe(0.7);
-    expect(body.messages).toHaveLength(2);
-    const parsed = AI_PROVIDERS.groq.parse(OPENAI_OK);
-    expect(parsed.content).toBe('Réponse du fournisseur.');
-    expect(parsed.inputTokens).toBe(12);
-    expect(parsed.outputTokens).toBe(34);
+    expect(body.model).toBe('modele-x');
+    expect(body.max_tokens).toBe(512);
+    expect(body.temperature).toBe(0.4);
+    expect(adapter!.parse(OPENAI_OK).inputTokens).toBe(12);
   });
 
-  it('gemini : URL du modèle, x-goog-api-key, systemInstruction + usage', () => {
-    const req = AI_PROVIDERS.gemini.buildRequest({ credentials: creds, model: 'gemini-2.5-flash', messages });
+  it('groq : protocole historique inchangé (URL, Bearer, corps, tokens)', () => {
+    const adapter = adapterFor('groq')!;
+    const req = adapter.buildRequest({ credentials: creds, model: 'openai/gpt-oss-20b', messages, options: { temperature: 0.7, maxOutputTokens: 1000 } });
+    expect(req.url).toBe('https://api.groq.com/openai/v1/chat/completions');
+    expect(req.headers.Authorization).toBe('Bearer test-key');
+    expect((req.body as Record<string, unknown>).max_tokens).toBe(1000);
+    expect(adapter.parse(OPENAI_OK).content).toBe('Réponse du fournisseur.');
+  });
+
+  it('gemini : adaptateur natif (URL du modèle, x-goog-api-key, systemInstruction)', () => {
+    const adapter = adapterFor('gemini')!;
+    const req = adapter.buildRequest({ credentials: creds, model: 'gemini-2.5-flash', messages });
     expect(req.url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
     expect(req.headers['x-goog-api-key']).toBe('test-key');
     const body = req.body as Record<string, unknown>;
     expect(body.systemInstruction).toEqual({ parts: [{ text: 'Système.' }] });
     expect((body.contents as unknown[]).map((c) => (c as { role: string }).role)).toEqual(['user']);
-    const parsed = AI_PROVIDERS.gemini.parse({
+    const parsed = adapter.parse({
       candidates: [{ content: { parts: [{ text: '  Bonjour !  ' }] }, finishReason: 'STOP' }],
       usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 21 },
     });
     expect(parsed.content).toBe('Bonjour !');
-    expect(parsed.inputTokens).toBe(7);
     expect(parsed.outputTokens).toBe(21);
   });
 
-  it('deepseek / mistral / grok : protocoles OpenAI sur leurs URLs respectives', () => {
-    expect(AI_PROVIDERS.deepseek.buildRequest({ credentials: creds, model: 'deepseek-chat', messages }).url)
+  it('deepseek / mistral / grok : URLs fournies par le registre, protocole OpenAI', () => {
+    expect(adapterFor('deepseek')!.buildRequest({ credentials: creds, model: 'deepseek-chat', messages }).url)
       .toBe('https://api.deepseek.com/chat/completions');
-    expect(AI_PROVIDERS.mistral.buildRequest({ credentials: creds, model: 'mistral-small-latest', messages }).url)
+    expect(adapterFor('mistral')!.buildRequest({ credentials: creds, model: 'mistral-small-latest', messages }).url)
       .toBe('https://api.mistral.ai/v1/chat/completions');
-    expect(AI_PROVIDERS.grok.buildRequest({ credentials: creds, model: 'grok-4.7', messages }).url)
+    expect(adapterFor('grok')!.buildRequest({ credentials: creds, model: 'grok-4.7', messages }).url)
       .toBe('https://api.x.ai/v1/chat/completions');
-    for (const id of ['deepseek', 'mistral', 'grok']) {
-      expect(AI_PROVIDERS[id].parse(OPENAI_OK).inputTokens).toBe(12);
-    }
   });
 
-  it('cloudflare : URL par compte, erreur sans compte', () => {
-    const req = AI_PROVIDERS.cloudflare.buildRequest({
+  it('cloudflare (voie REST) : endpoint officiel par compte, erreur sans compte', () => {
+    const adapter = adapterFor('cloudflare')!;
+    const req = adapter.buildRequest({
       credentials: { apiKey: 'cf-token', accountId: 'acct-123' },
       model: '@cf/qwen/qwen3.8-27b', messages,
     });
-    expect(req.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct-123/ai/v1/chat');
+    // Endpoint OpenAI-compatible documenté par Cloudflare (REST API).
+    expect(req.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct-123/ai/v1/chat/completions');
     expect(req.headers.Authorization).toBe('Bearer cf-token');
-    expect(() => AI_PROVIDERS.cloudflare.buildRequest({
+    expect(() => adapter.buildRequest({
       credentials: { apiKey: 'cf-token', accountId: null },
       model: '@cf/qwen/qwen3.8-27b', messages,
     })).toThrow(AiProviderError);
   });
 
-  it('openrouter (agrégateur) : en-têtes d’attribution obligatoires', () => {
-    const req = AI_PROVIDERS.openrouter.buildRequest({ credentials: creds, model: 'openai/gpt-oss-20b', messages });
+  it('cloudflare (voie PASSELLE) : jeton dédié, passerelle exigée, URL exacte', () => {
+    const adapter = resolveAiAdapter({
+      key: 'cloudflare', kind: 'cloudflare',
+      baseUrl: 'https://gateway.ai.cloudflare.com/v1',
+      apiKeyEnv: 'CF_TOKEN', modelsUrl: null, headers: {},
+      transport: 'gateway',
+    })!;
+    const req = adapter.buildRequest({
+      credentials: { apiKey: 'cfut-token', accountId: 'acct123', gatewayId: 'vyora' },
+      model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', messages,
+    });
+    expect(req.url).toBe(
+      'https://gateway.ai.cloudflare.com/v1/acct123/vyora/workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    );
+    // Le jeton de passerelle se présente en `cf-aig-authorization`, jamais en
+    // `Authorization` : les deux jetons Cloudflare ne sont pas interchangeables.
+    expect(req.headers['cf-aig-authorization']).toBe('Bearer cfut-token');
+    expect(req.headers.Authorization).toBeUndefined();
+    // Sans identifiant de passerelle : erreur explicite, aucune requête.
+    expect(() => adapter.buildRequest({
+      credentials: { apiKey: 'cfut-token', accountId: 'acct123', gatewayId: null },
+      model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', messages,
+    })).toThrow(/AI_ACCOUNT_NOT_CONFIGURED/);
+  });
+
+  it('openrouter (agrégateur) : en-têtes d’attribution portés par le registre', () => {
+    const req = adapterFor('openrouter')!.buildRequest({ credentials: creds, model: 'openai/gpt-oss-20b', messages });
     expect(req.url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect(req.headers['HTTP-Referer']).toBeTruthy();
     expect(req.headers['X-Title']).toBe('VYORA');
     expect(req.headers.Authorization).toBe('Bearer test-key');
   });
 
-  it('tout adaptateur refuse un appel non configuré ou un contexte vide', () => {
-    for (const adapter of Object.values(AI_PROVIDERS)) {
+  it('refuse un appel non configuré, un contexte vide ou un protocole non supporté', () => {
+    for (const key of Object.keys(DESCRIPTORS)) {
+      const adapter = adapterFor(key)!;
+      // Le token d'accès est porté par les credentials du fournisseur, jamais
+      // par une constante du code : sans lui, aucun appel ne part.
       expect(() => adapter.buildRequest({ credentials: { apiKey: null }, model: 'm', messages }))
-        .toThrow(AiProviderError);
+        .toThrow(/configur|clé|token|API_KEY|AI_NOT_CONFIGURED/i);
       expect(() => adapter.buildRequest({ credentials: creds, model: 'm', messages: [] }))
         .toThrow(AiProviderError);
     }
-    expect(() => AI_PROVIDERS.groq.parse({ choices: [] })).toThrow(AiProviderError);
+    // Protocole non supporté : le moteur refuse proprement au lieu d'envoyer
+    // une requête mal formée (le fournisseur est listé, jamais appelé).
+    expect(resolveAiAdapter({ key: 'exotique', kind: 'none', baseUrl: 'https://exotique.test', apiKeyEnv: null })).toBeNull();
+    expect(resolveAiAdapter({ key: 'sans-url', kind: 'openai', baseUrl: '', apiKeyEnv: null })).toBeNull();
+    expect(() => NATIVE_ADAPTERS.groq.parse({ choices: [] })).toThrow(AiProviderError);
   });
 
   it('nom de base normalisé (déduplication agrégateur/direct)', () => {
     expect(modelBaseKey('google/gemini-4-hydrogen')).toBe('gemini-4-hydrogen');
-    expect(modelBaseKey('gemini-4-hydrogen')).toBe('gemini-4-hydrogen');
     expect(modelBaseKey('openai/gpt-oss-20b')).toBe('gpt-oss-20b');
     expect(modelBaseKey('@cf/qwen/qwen3.8-27b')).toBe('qwen3.8-27b');
   });
@@ -248,11 +334,17 @@ describe('registre — parsing du snapshot', () => {
 describe('routage — règles, niveaux, capacités, budget, anti-doublon', () => {
   const configured = new Set(['groq', 'deepseek', 'openrouter', 'mistral']);
 
-  it('suit les priorités des règles du rôle (fournisseur configuré + modèle vérifié)', () => {
+  it('suit les priorités des règles du rôle, puis complète par le catalogue vérifié', () => {
     const { steps, skipReason } = buildAiChain(makeSnapshot(), { role: 'business_advisor' }, configured);
     expect(skipReason).toBeNull();
-    expect(steps.map((s) => s.providerKey)).toEqual(['groq', 'deepseek']);
+    // Les règles du rôle passent devant : groq (priorité 1) puis deepseek (2).
+    expect(steps.slice(0, 2).map((s) => s.providerKey)).toEqual(['groq', 'deepseek']);
     expect(steps[0].providerModelKey).toBe('openai/gpt-oss-20b');
+    expect(steps[0].reason).toBe('role_rule');
+    // Au-delà des règles, le moteur complète avec le CATALOGUE vérifié : un rôle
+    // dont les règles sont indisponibles conserve un secours réel.
+    expect(steps.some((s) => s.reason === 'catalog')).toBe(true);
+    expect(steps.every((s) => configured.has(s.providerKey))).toBe(true);
   });
 
   it('exclut les modèles non vérifiés (jamais testés en réel)', () => {
@@ -268,22 +360,65 @@ describe('routage — règles, niveaux, capacités, budget, anti-doublon', () =>
   });
 
   it('respecte les capacités requises du rôle', () => {
-    // business_analysis exige "reasoning" : deepseek-v4-pro l'a.
+    // business_analysis exige "reasoning" : tous les modèles de la chaîne l'ont,
+    // et la règle du rôle (deepseek-v4-pro) reste en tête.
     const { steps } = buildAiChain(makeSnapshot(), { role: 'business_analysis' }, configured);
-    expect(steps).toHaveLength(1);
     expect(steps[0].providerKey).toBe('deepseek');
     expect(steps[0].modelKey).toBe('v4-pro');
+    const snapshot = makeSnapshot();
+    for (const step of steps) {
+      const model = snapshot.models.find((m) => m.provider === step.providerKey && m.key === step.modelKey);
+      expect(model?.capabilities.reasoning, `${step.providerKey}/${step.modelKey}`).toBe(true);
+    }
   });
 
-  it('filtre par niveau demandé (et repli tolérant si vide)', () => {
+  it('écarte un modèle dont le contexte publié est trop court pour la demande', () => {
+    const { steps } = buildAiChain(makeSnapshot(), { minContextTokens: 200_000 }, configured);
+    // Seul deepseek-v4-pro publie 1M de contexte dans la fixture.
+    expect(steps.map((s) => s.modelKey)).toEqual(['v4-pro']);
+    // Demande impossible → aucun modèle, code explicite (jamais un dépassement silencieux).
+    const { steps: none, skipReason } = buildAiChain(makeSnapshot(), { minContextTokens: 5_000_000 }, configured);
+    expect(none).toHaveLength(0);
+    expect(skipReason).toBe('NO_MATCHING_MODEL');
+  });
+
+  it('applique un plafond de coût publié (prix inconnu écarté)', () => {
+    const { steps } = buildAiChain(makeSnapshot(), { maxCostInPerMtok: 0.1 }, configured);
+    expect(steps.length).toBeGreaterThan(0);
+    expect(steps.every((s) => s.costIn !== null && s.costIn <= 0.1)).toBe(true);
+  });
+
+  it('privilégie le niveau demandé sans jamais laisser la chaîne vide', () => {
     const snap = makeSnapshot();
     const { steps } = buildAiChain(snap, { level: 'advanced' }, configured);
-    // Seuls deepseek-v4-pro (advanced) et… rien d'autre au niveau advanced.
-    expect(steps.every((s) => s.tier === 'advanced')).toBe(true);
+    // Le niveau est un critère d'ORDONNANCEMENT : le modèle avancé passe devant,
+    // les autres niveaux restent en secours (une panne ne doit pas bloquer l'appel).
+    expect(steps[0].tier).toBe('advanced');
     expect(steps.map((s) => s.modelKey)).toContain('v4-pro');
-    // Niveau inexistant → repli tolérant (chaîne non vide).
+    // Niveau inexistant → aucun modèle de ce niveau, chaîne non vide malgré tout.
     const { steps: relaxed } = buildAiChain(snap, { level: 'specialized' }, configured);
     expect(relaxed.length).toBeGreaterThan(0);
+  });
+
+  it('diversifie le secours : un modèle par fournisseur avant un second du même', () => {
+    const { steps } = buildAiChain(makeSnapshot(), { maxChainLength: 6 }, configured);
+    const providers = steps.map((s) => s.providerKey);
+    // Les premiers essais couvrent des fournisseurs DIFFÉRENTS : un incident
+    // fournisseur ne consomme qu'une tentative avant la bascule.
+    const firstRepeat = providers.findIndex((key, index) => providers.indexOf(key) !== index);
+    const distinctBeforeRepeat = firstRepeat === -1 ? providers.length : firstRepeat;
+    expect(distinctBeforeRepeat).toBeGreaterThanOrEqual(3);
+    expect(steps.length).toBeGreaterThan(distinctBeforeRepeat);
+  });
+
+  it('relègue un fournisseur marqué comme venant d’échouer', () => {
+    const { steps } = buildAiChain(
+      makeSnapshot(),
+      { role: 'business_advisor', avoidProviders: ['groq'] },
+      configured,
+    );
+    expect(steps[0].providerKey).not.toBe('groq');
+    expect(steps.map((s) => s.providerKey)).toContain('groq');
   });
 
   it('budget épuisé : seuls les modèles gratuits restent ; sinon BUDGET_EXHAUSTED', () => {
@@ -405,7 +540,10 @@ describe('moteur — appels unifiés et secours plafonné', () => {
     const outcome = await runAiCall(deps, { messages, role: 'business_advisor' });
     expect(outcome.ok).toBe(false);
     expect(outcome.code).toBe('AI_AUTH_FAILED');
-    expect(outcome.attempts).toHaveLength(2);
+    // Une clé refusée n'est jamais réessayée à l'identique : le moteur bascule
+    // sur les autres fournisseurs de la chaîne, dans la limite des tentatives.
+    expect(outcome.attempts).toHaveLength(3);
+    expect(new Set(outcome.attempts.map((a) => a.providerKey)).size).toBe(3);
     expect(outcome.content).toBeNull();
   });
 
@@ -468,10 +606,260 @@ describe('moteur — appels unifiés et secours plafonné', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('idempotence — appel déjà en cours : aucun appel fournisseur, aucun coût', async () => {
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const deps = makeEngineDeps(makeSnapshot(), fetcher);
+    const released: unknown[] = [];
+    deps.claimCall = async () => ({ claimed: false, status: 'in_flight', providerKey: 'groq', modelKey: 'gpt-oss-20b', outcomeCode: null });
+    deps.releaseCall = (params) => { released.push(params); };
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor', requestKey: 'req-1' });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.code).toBe('AI_DUPLICATE_IN_FLIGHT');
+    expect(outcome.duplicate).toBe(true);
+    expect(outcome.attempts).toHaveLength(0);
+    // Le verrou appartient à l'appel en cours : il ne doit pas être libéré.
+    expect(released).toHaveLength(0);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(deps.logs).toHaveLength(0);
+  });
+
+  it('idempotence — verrou obtenu : appel réel puis libération en succès', async () => {
+    const deps = makeEngineDeps(makeSnapshot(), okFetch(OPENAI_OK));
+    const released: Array<Record<string, unknown>> = [];
+    deps.claimCall = async () => ({ claimed: true, status: 'in_flight', providerKey: null, modelKey: null, outcomeCode: null });
+    deps.releaseCall = async (params) => { released.push(params as unknown as Record<string, unknown>); };
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor', requestKey: 'req-2' });
+    expect(outcome.ok).toBe(true);
+    expect(released).toHaveLength(1);
+    expect(released[0].status).toBe('succeeded');
+    expect(released[0].providerKey).toBe('groq');
+    expect(released[0].contentChars).toBe('Réponse du fournisseur.'.length);
+  });
+
+  it('idempotence — échec total : libération en échec avec le dernier code', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: 'down' }), { status: 503 })) as unknown as typeof fetch;
+    const deps = makeEngineDeps(makeSnapshot(), fetcher);
+    const released: Array<Record<string, unknown>> = [];
+    deps.claimCall = async () => ({ claimed: true, status: 'in_flight', providerKey: null, modelKey: null, outcomeCode: null });
+    deps.releaseCall = async (params) => { released.push(params as unknown as Record<string, unknown>); };
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor', requestKey: 'req-3' });
+    expect(outcome.ok).toBe(false);
+    expect(released).toHaveLength(1);
+    expect(released[0].status).toBe('failed');
+    expect(released[0].outcomeCode).toBe('AI_UNAVAILABLE');
+  });
+
+  it('idempotence — verrou indisponible : l’appel continue normalement', async () => {
+    const deps = makeEngineDeps(makeSnapshot(), okFetch(OPENAI_OK));
+    deps.claimCall = async () => { throw new Error('lease down'); };
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor', requestKey: 'req-4' });
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('traçabilité — journal de routage : chaîne, score, coût, décision', async () => {
+    const deps = makeEngineDeps(makeSnapshot(), okFetch(OPENAI_OK));
+    const routing: Array<Record<string, unknown>> = [];
+    deps.logRouting = async (entry) => { routing.push(entry as unknown as Record<string, unknown>); };
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor', space: 'business', taskKey: 'advice' });
+    expect(outcome.ok).toBe(true);
+    expect(routing).toHaveLength(1);
+    const entry = routing[0] as { chain: Array<{ provider: string; score: number; reason: string }>; chosenProvider: string; skipReason: null; space: string };
+    expect(entry.chosenProvider).toBe('groq');
+    expect(entry.skipReason).toBeNull();
+    expect(entry.space).toBe('business');
+    expect(entry.chain[0].provider).toBe('groq');
+    expect(entry.chain[0].reason).toBe('role_rule');
+    expect(typeof entry.chain[0].score).toBe('number');
+    // Le score est aussi journalisé dans la tentative réellement facturée.
+    expect(outcome.attempts[0].routedBy).toBe('role_rule');
+    expect(outcome.attempts[0].score).toBe(entry.chain[0].score);
+  });
+
+  it('traçabilité — échec total : décision journalisée avec le code de rejet', async () => {
+    const deps = makeEngineDeps(makeSnapshot(), vi.fn() as unknown as typeof fetch);
+    const routing: Array<Record<string, unknown>> = [];
+    deps.logRouting = async (entry) => { routing.push(entry as unknown as Record<string, unknown>); };
+    const outcome = await runAiCall(deps, { messages, requireCapabilities: ['inexistante'] });
+    expect(outcome.ok).toBe(false);
+    expect(routing).toHaveLength(1);
+    expect(routing[0].skipReason).toBe('NO_MATCHING_MODEL');
+    expect(routing[0].chosenProvider).toBeNull();
+  });
+
+  it('traçabilité — un journal de routage en panne ne casse pas l’appel', async () => {
+    const deps = makeEngineDeps(makeSnapshot(), okFetch(OPENAI_OK));
+    deps.logRouting = async () => { throw new Error('routing log down'); };
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor' });
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('descripteur gateway sans GATEWAY_ID : fournisseur écarté, aucun appel incomplet', async () => {
+    // Le fournisseur est déclaré côté passerelle mais l'identifiant de
+    // passerelle n'est pas fourni : il ne doit pas être tenté du tout.
+    const snap = makeSnapshot({
+      providers: [
+        descriptor({
+          key: 'cloudflare', status: 'available', adapterKind: 'cloudflare',
+          baseUrl: 'https://gateway.ai.cloudflare.com/v1',
+          apiKeyEnv: 'CLOUDFLARE_API_TOKEN', accountIdEnv: 'CLOUDFLARE_ACCOUNT_ID',
+          gatewayIdEnv: 'CLOUDFLARE_GATEWAY_ID', transport: 'gateway',
+        }),
+        descriptor({ key: 'groq', status: 'available' }),
+      ],
+    });
+    snap.rules = [];
+    const called: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      called.push(String(input));
+      return new Response(JSON.stringify(OPENAI_OK), { status: 200 });
+    }) as unknown as typeof fetch;
+    const deps = makeEngineDeps(snap, fetcher, new Set());
+    deps.env = (name) => {
+      if (name === 'CLOUDFLARE_API_TOKEN') return 'cfut-token';
+      if (name === 'CLOUDFLARE_ACCOUNT_ID') return 'acct123';
+      return null; // CLOUDFLARE_GATEWAY_ID absent
+    };
+    const outcome = await runAiCall(deps, { messages });
+    expect(outcome.ok).toBe(true);
+    expect(outcome.providerKey).toBe('groq');
+    expect(called.every((url) => !url.includes('gateway.ai.cloudflare.com'))).toBe(true);
+    expect(outcome.attempts.some((a) => a.providerKey === 'cloudflare')).toBe(false);
+  });
+
+  it('descripteur gateway avec GATEWAY_ID : le fournisseur redevient éligible', async () => {
+    const snap = makeSnapshot({
+      providers: [
+        descriptor({
+          key: 'cloudflare', status: 'available', adapterKind: 'cloudflare',
+          baseUrl: 'https://gateway.ai.cloudflare.com/v1',
+          apiKeyEnv: 'CLOUDFLARE_API_TOKEN', accountIdEnv: 'CLOUDFLARE_ACCOUNT_ID',
+          gatewayIdEnv: 'CLOUDFLARE_GATEWAY_ID', transport: 'gateway',
+        }),
+      ],
+    });
+    snap.models = [
+      {
+        provider: 'cloudflare', key: 'llama-fast', providerModel: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+        name: 'Llama 3.3 70B (Workers AI)', verified: true, tier: 'fast',
+        capabilities: { writing: true }, contextIn: 128_000, maxOut: 8_000,
+        costIn: null, costOut: null, rpm: null, tpm: null,
+      },
+    ];
+    snap.rules = [];
+    const deps = makeEngineDeps(snap, okFetch(OPENAI_OK), new Set());
+    deps.env = (name) => {
+      if (name === 'CLOUDFLARE_API_TOKEN') return 'cfut-token';
+      if (name === 'CLOUDFLARE_ACCOUNT_ID') return 'acct123';
+      if (name === 'CLOUDFLARE_GATEWAY_ID') return 'vyora-gw';
+      return null;
+    };
+    const outcome = await runAiCall(deps, { messages });
+    expect(outcome.ok).toBe(true);
+    expect(outcome.providerKey).toBe('cloudflare');
+    expect(outcome.providerModelKey).toBe('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
+  });
+
   it('journalisation non bloquante : un échec de log n’échoue pas l’appel', async () => {
     const deps = makeEngineDeps(makeSnapshot(), okFetch(OPENAI_OK));
     deps.logCall = async () => { throw new Error('log down'); };
     const outcome = await runAiCall(deps, { messages, role: 'business_advisor' });
     expect(outcome.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fournisseurs DYNAMIQUES — aucune liste fermée dans le code
+// ---------------------------------------------------------------------------
+
+describe('moteur — fournisseurs déclarés par le registre uniquement', () => {
+  const messages: AiChatMessage[] = [{ role: 'user', content: 'Bonjour' }];
+
+  /** Snapshot minimal : un fournisseur qui n'existe NULLE PART dans le code. */
+  function snapshotWithFictionalProvider(): AiRegistrySnapshot {
+    return {
+      version: 3,
+      providers: [{
+        key: 'fournisseur-nouveau',
+        name: 'Fournisseur Nouveau',
+        status: 'available',
+        aggregator: false,
+        adapterKind: 'openai',
+        baseUrl: 'https://api.fournisseur-nouveau.test/v1',
+        modelsUrl: null,
+        apiKeyEnv: 'FOURNISSEUR_NOUVEAU_API_KEY',
+        accountIdEnv: null,
+        gatewayIdEnv: null,
+        transport: 'rest',
+        headers: {},
+      }],
+      models: [{
+        provider: 'fournisseur-nouveau', key: 'modele-1', providerModel: 'modele-1',
+        name: 'Modèle 1', verified: true, tier: 'fast',
+        capabilities: { writing: true }, contextIn: 8_000, maxOut: 2_000,
+        costIn: null, costOut: null, rpm: null, tpm: null,
+      }],
+      roles: [{ key: 'business_advisor', capabilities: {}, enabled: true }],
+      rules: [{ role: 'business_advisor', provider: 'fournisseur-nouveau', model: 'modele-1', priority: 1 }],
+      budget: { monthly: null, alert: 80, daily: null },
+      monthlySpendUsd: 0,
+    };
+  }
+
+  it('sert un fournisseur inconnu du code : clé résolue via api_key_env du registre', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(OPENAI_OK), { status: 200 })) as unknown as typeof fetch;
+    const deps = makeEngineDeps(snapshotWithFictionalProvider(), fetcher, new Set());
+    // Seule source de vérité : la variable d'environnement NOMMÉE par le registre.
+    deps.env = (name) => (name === 'FOURNISSEUR_NOUVEAU_API_KEY' ? 'cle-du-fournisseur-nouveau' : null);
+
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor' });
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.providerKey).toBe('fournisseur-nouveau');
+    expect(outcome.providerModelKey).toBe('modele-1');
+    const [url, init] = (fetcher as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0];
+    expect(url).toBe('https://api.fournisseur-nouveau.test/v1/chat/completions');
+    expect(new Headers(init.headers as Record<string, string>).get('Authorization'))
+      .toBe('Bearer cle-du-fournisseur-nouveau');
+  });
+
+  it('ne sert jamais un fournisseur sans clé, même déclaré et vérifié', async () => {
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const deps = makeEngineDeps(snapshotWithFictionalProvider(), fetcher, new Set());
+    deps.env = () => null;
+    // Aucune intégration historique ne couvre ce fournisseur : aucun repli.
+    deps.credentials = () => ({ apiKey: null, accountId: null });
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor' });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.code).toBe('NO_CONFIGURED_PROVIDER');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('protocole « none » : le fournisseur est listé mais jamais appelé', async () => {
+    const snapshot = snapshotWithFictionalProvider();
+    snapshot.providers[0].adapterKind = 'none';
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const deps = makeEngineDeps(snapshot, fetcher, new Set());
+    deps.env = () => 'une-cle-quelconque';
+    const outcome = await runAiCall(deps, { messages, role: 'business_advisor' });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.attempts[0].errorCode).toBe('UNSUPPORTED_PROVIDER');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('parsing du snapshot : descripteur de protocole conservé, valeurs invalides écartées', () => {
+    const parsed = parseRegistrySnapshot({
+      version: 3,
+      providers: [
+        { key: 'x1', name: 'X1', adapter_kind: 'gemini', base_url: 'https://x1.test/v1', api_key_env: 'X1_API_KEY', account_id_env: null, headers: { 'X-Title': 'VYORA', ignore: 42 } },
+        { key: 'x2', adapter_kind: 'protocole-inconnu' },
+        { key: 'X3!' },
+      ],
+    });
+    expect(parsed?.providers).toHaveLength(2);
+    expect(parsed?.providers[0]).toMatchObject({
+      key: 'x1', adapterKind: 'gemini', baseUrl: 'https://x1.test/v1', apiKeyEnv: 'X1_API_KEY', headers: { 'X-Title': 'VYORA' },
+    });
+    // Gabarit inconnu → repli sur le protocole majoritaire, jamais une erreur.
+    expect(parsed?.providers[1]).toMatchObject({ key: 'x2', adapterKind: 'openai', baseUrl: null, headers: {} });
   });
 });

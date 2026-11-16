@@ -7,7 +7,7 @@ import { BusinessGrowApiError, type BusinessIntegrationConnection } from '../src
 import type { ReactNode } from 'react';
 import type { Brand, Product } from '../src/lib/types';
 import {
-  BUSINESS_PROVIDERS, isBusinessProviderAvailable,
+  describeRegistryProvider, isBusinessProviderAvailable,
 } from '../src/business/ai/registry';
 import { buildBusinessGrowLocationState } from '../src/contracts/business-grow';
 
@@ -119,7 +119,10 @@ const businessMocks = vi.hoisted(() => {
       throw Object.assign(new Error('Aucun fournisseur vérifié.'), { code: 'NO_VERIFIED_PROVIDER' });
     }),
     verifyProvider: vi.fn(async (providerKey: string) => verifyProviderImpl.current(providerKey)),
-    listModels: vi.fn(async () => ({ models: [], remoteModels: {} })),
+    listModels: vi.fn(async (): Promise<{
+      models: import('../src/business/api').BusinessModelRecord[];
+      remoteModels: Record<string, string[]>;
+    }> => ({ models: [], remoteModels: {} })),
     getQuota: vi.fn(async (): Promise<{
       domain: 'business_grow';
       studio_ugc_untouched: boolean;
@@ -295,7 +298,31 @@ describe('Business Grow', () => {
     expect(await screen.findByText(/1 note\(s\) importée\(s\)/)).toBeTruthy();
   });
 
-  it('charge la mémoire consentie et affiche les statuts vérifiables des services IA', async () => {
+  it('charge la mémoire consentie et affiche les services IA RÉELLEMENT déclarés', async () => {
+    // Le registre serveur est la seule source : on y déclare deux services, et
+    // c'est exactement ce que l'écran doit montrer — rien de plus.
+    businessMocks.getStatus.mockResolvedValue({
+      providers: [
+        {
+          provider_key: 'groq', display_name: 'Groq', enabled: true, status: 'available',
+          config_status: 'configured', checked_at: '2026-11-09T00:00:00Z',
+        },
+        {
+          provider_key: 'fournisseur-nouveau', display_name: 'Fournisseur nouveau', enabled: false,
+          status: 'unverified', config_status: 'missing', checked_at: null,
+        },
+      ],
+    });
+    businessMocks.listModels.mockResolvedValue({
+      models: [{
+        provider_key: 'groq', model_key: 'gpt-oss', provider_model_key: 'openai/gpt-oss-120b',
+        display_name: 'GPT-OSS 120B', capabilities: { writing: true, reasoning: true },
+        enabled: true, verification_status: 'verified', max_input_tokens: 128000, max_output_tokens: 8000,
+        verified_at: '2026-11-09T00:00:00Z',
+      }],
+      remoteModels: {},
+    });
+
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
     expect(screen.getByText('Mémoire métier privée')).toBeTruthy();
@@ -303,10 +330,13 @@ describe('Business Grow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
     expect(screen.getByText('Services IA VYORA')).toBeTruthy();
-    expect(screen.getByTestId('provider-gemini')).toBeTruthy();
     expect(screen.getByTestId('provider-groq')).toBeTruthy();
-    expect(screen.getByText('Rédaction')).toBeTruthy();
-    expect(screen.getByTestId('provider-muapi').textContent).toContain('Génération vidéo');
+    // Un fournisseur inconnu du code apparaît parce qu'il est au registre…
+    expect(screen.getByTestId('provider-fournisseur-nouveau')).toBeTruthy();
+    // …et un service absent du registre n'est jamais affiché.
+    expect(screen.queryByTestId('provider-muapi')).toBeNull();
+    // Les capacités affichées viennent des modèles, pas d'un catalogue figé.
+    await waitFor(() => expect(screen.getByText(/Rédaction/)).toBeTruthy());
   });
 
   it('affiche les marques et produits persistés dans le même espace VYORA', async () => {
@@ -712,18 +742,31 @@ describe('Business Grow', () => {
     expect(businessMocks.deleteConversation).toHaveBeenCalledWith(id, 'workspace-1');
   });
 
-  it('enregistre les rôles initiaux comme propositions et aucun fournisseur comme disponible', () => {
-    expect(BUSINESS_PROVIDERS.map((provider) => provider.id)).toEqual([
-      'gemini', 'groq', 'gonka', 'kilo', 'openrouter', 'llm7', 'muapi',
-    ]);
-    expect(BUSINESS_PROVIDERS.every((provider) => provider.connectionState === 'unverified')).toBe(true);
-    expect(BUSINESS_PROVIDERS.every((provider) => !isBusinessProviderAvailable(provider))).toBe(true);
-    expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'gemini')?.proposedCapabilities)
-      .toEqual(['writing', 'images', 'documents']);
-    expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'groq')?.proposedCapabilities)
-      .toEqual(['scripts', 'hooks', 'reasoning']);
-    expect(BUSINESS_PROVIDERS.find((provider) => provider.id === 'kilo')?.proposedCapabilities)
-      .toEqual(['economic-routing', 'fallback']);
+  it('projette le registre serveur en définitions affichables, sans catalogue figé', () => {
+    // Aucun fournisseur n'est écrit dans le code : la définition vient de la
+    // ligne de registre, y compris pour un fournisseur totalement inconnu.
+    const unknown = describeRegistryProvider({
+      key: 'fournisseur-nouveau',
+      name: null,
+      status: 'unverified',
+      aggregator: false,
+      capabilities: ['writing'],
+    });
+    expect(unknown).toMatchObject({
+      id: 'fournisseur-nouveau',
+      name: 'fournisseur-nouveau',
+      connectionState: 'unverified',
+      statusLabel: 'Non vérifié',
+    });
+    expect(isBusinessProviderAvailable(unknown)).toBe(false);
+
+    // Un agrégateur disponible est signalé comme tel, jamais comme un doublon.
+    const aggregator = describeRegistryProvider({
+      key: 'agregateur', name: 'Agrégateur', status: 'available', aggregator: true,
+    });
+    expect(aggregator.connectionState).toBe('available');
+    expect(isBusinessProviderAvailable(aggregator)).toBe(true);
+    expect(aggregator.note).toContain('Agrégateur');
   });
 
   it('transmet le rôle, le mode manuel de routage et affiche le quota Business Grow isolé', async () => {
@@ -802,7 +845,7 @@ describe('Business Grow', () => {
     await waitFor(() => expect(businessMocks.resolveTool).toHaveBeenCalledWith('tool-handoff-1', 'approved', 'workspace-1'));
   });
 
-  it('permet de vérifier un service réel et présente les services en préparation sans les simuler', async () => {
+  it('permet de vérifier un service réel et n’annonce aucun service non déclaré', async () => {
     businessMocks.getStatus.mockResolvedValue({
       providers: [{
         provider_key: 'groq',
@@ -818,10 +861,10 @@ describe('Business Grow', () => {
     await screen.findByTestId('business-grow');
     fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
 
-    expect(screen.getByTestId('adapter-openai').textContent).toContain('Service VYORA à venir');
-    expect(screen.getByTestId('adapter-anthropic')).toBeTruthy();
-    expect(screen.getByTestId('adapter-deepseek')).toBeTruthy();
-    expect(screen.getByTestId('adapter-mistral')).toBeTruthy();
+    // Aucun « adaptateur préparé » fictif : la section explique seulement que
+    // la liste des services vient du registre.
+    expect(screen.getByText('Comment VYORA choisit un service IA')).toBeTruthy();
+    expect(screen.queryByTestId('adapter-openai')).toBeNull();
 
     const groqCard = screen.getByTestId('provider-groq');
     const verifyBtn = groqCard.querySelector('button');
@@ -832,17 +875,38 @@ describe('Business Grow', () => {
     expect(await screen.findByText(/Connexion vérifiée avec succès/)).toBeTruthy();
   });
 
+  /**
+   * Depuis l'unification, cette section rend le catalogue partagé (26
+   * fournisseurs), plus le sous-ensemble de 6 contrats. Conséquence directe, et
+   * c'est le point de ce test : sans connecteur écrit, le statut n'est plus
+   * « Non connecté » — qui laisserait croire qu'un clic suffirait — mais la
+   * cause réelle du blocage.
+   */
   it('affiche les intégrations sans fausse connexion et propose une demande d’activation', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
     expect(await screen.findByTestId('business-integrations')).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId('connector-facebook').textContent).toContain('Non connecté'));
-    const facebook = screen.getByTestId('connector-facebook').textContent ?? '';
-    expect(facebook).toContain('Non connecté');
-    expect(facebook).toContain('Demander l’activation');
+    // Facebook exige une approbation du fournisseur.
+    await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'));
+    const facebook = screen.getByTestId('integration-facebook').textContent ?? '';
+    expect(facebook).not.toContain('Non connecté');
     expect(facebook).not.toContain('Connecté');
-    expect(screen.getByTestId('connector-shopify').textContent).toContain('Non connecté');
-    expect(screen.getByTestId('connector-woocommerce')).toBeTruthy();
+    // Shopify n'a pas d'approbation externe : il lui manque nos identifiants.
+    expect(screen.getByTestId('integration-shopify').textContent).toContain('Configuration requise');
+    expect(screen.getByTestId('integration-woocommerce')).toBeTruthy();
+  });
+
+  it('le catalogue de 26 fournisseurs est le catalogue principal de Business Grow', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    await screen.findByTestId('business-integrations');
+    // Fournisseurs hors des 6 contrats historiques : preuve que le catalogue
+    // principal est bien celui de 26, pas un sous-ensemble.
+    for (const id of ['gmail', 'google_drive', 'google_calendar', 'notion', 'hubspot', 'prestashop']) {
+      await waitFor(() => expect(screen.getByTestId(`integration-${id}`)).toBeTruthy());
+    }
+    // Et les services Google restent trois fiches distinctes.
+    expect(screen.getByTestId('integration-gmail')).not.toBe(screen.getByTestId('integration-google_drive'));
   });
 
   it('garde les demandes d’intégration dans l’entreprise active et ne prétend pas connecter le service externe', async () => {
@@ -854,14 +918,22 @@ describe('Business Grow', () => {
     });
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('connector-facebook');
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
-    fireEvent.click(within(facebook).getByRole('button', { name: 'Demander l’activation' }));
+    const facebook = await screen.findByTestId('integration-facebook');
+    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
+    // La demande se fait dans la fiche : la carte est un bouton, sans action
+    // imbriquée (un bouton dans un bouton serait invalide en HTML).
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
     expect(await screen.findByText(/Aucun service externe n’a été connecté/)).toBeTruthy();
     expect(businessMocks.requestIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
     expect(businessMocks.listIntegrations).toHaveBeenCalledWith('workspace-1');
-    expect(facebook.textContent).toContain('Demande enregistrée');
-    fireEvent.click(within(facebook).getByRole('button', { name: 'Annuler la demande' }));
+    // La demande est un état réel, distinct d'une connexion.
+    await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Activation demandée'));
+    expect(screen.getByTestId('integration-facebook').textContent).not.toContain('Connecté)');
+    fireEvent.click(screen.getByTestId('integration-facebook'));
+    const fiche2 = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche2).getByRole('button', { name: 'Annuler la demande' }));
     await waitFor(() => expect(businessMocks.cancelIntegration).toHaveBeenCalledWith('facebook', 'workspace-1'));
   });
 
@@ -870,31 +942,49 @@ describe('Business Grow', () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
     expect(await screen.findByText(/État des intégrations indisponible/)).toBeTruthy();
-    const facebook = screen.getByTestId('connector-facebook');
+    const facebook = screen.getByTestId('integration-facebook');
     expect(facebook.textContent).toContain('État inconnu');
     expect(facebook.textContent).not.toContain('Non connecté');
-    expect((within(facebook).getByRole('button', { name: 'Demander l’activation' }) as HTMLButtonElement).disabled).toBe(true);
+    // Aucune action n'est proposée tant que l'état n'est pas lu : la fiche
+    // explique le blocage au lieu d'offrir un bouton qui parierait sur la base.
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    expect(within(fiche).getByText(/État inconnu : la lecture des intégrations a échoué/i)).toBeTruthy();
+    expect(within(fiche).queryByRole('button', { name: 'Demander l’activation' })).toBeNull();
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Retour' }));
     businessMocks.listIntegrations.mockResolvedValueOnce({ connections: [{ id: 'other', workspace_id: 'workspace-2', connector_key: 'facebook', external_account_ref: null, status: 'pending', updated_at: '2026-11-13' }] });
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
     expect(await screen.findByText(/Réponse invalide pour cette entreprise/)).toBeTruthy();
     expect(facebook.textContent).toContain('État inconnu');
     businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+    // Relecture de la carte par requête fraîche : le nœud précédent a pu être
+    // remplacé par le changement d'état.
+    await waitFor(() =>
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+    );
   });
 
   it('ne réessaie pas une mutation d’intégration non confirmée et impose une nouvelle lecture', async () => {
     businessMocks.requestIntegration.mockRejectedValueOnce(new Error('Réponse perdue'));
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('connector-facebook');
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
-    fireEvent.click(within(facebook).getByRole('button', { name: 'Demander l’activation' }));
+    const facebook = await screen.findByTestId('integration-facebook');
+    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
     expect(await screen.findByText(/Opération non confirmée/)).toBeTruthy();
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
-    expect((within(facebook).getByRole('button', { name: 'Demander l’activation' }) as HTMLButtonElement).disabled).toBe(true);
+    // L'état est devenu inconnu : aucune action n'est réessayable avant relecture.
+    expect(screen.getByTestId('integration-facebook').textContent).toContain('État inconnu');
+    expect(within(fiche).queryByRole('button', { name: 'Demander l’activation' })).toBeNull();
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Retour' }));
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+    await waitFor(() =>
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+    );
+    // La mutation n'a jamais été rejouée.
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
   });
 
@@ -907,13 +997,19 @@ describe('Business Grow', () => {
     });
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('connector-facebook');
-    const disconnect = await within(facebook).findByRole('button', { name: 'Retirer l’association locale' });
-    fireEvent.click(disconnect);
+    const facebook = await screen.findByTestId('integration-facebook');
+    // Une ligne `connected` sans compte OAuth vérifié : jamais « Connecté ».
+    await waitFor(() => expect(facebook.textContent).toContain('Autorisation manquante'));
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Retirer l’association locale' }));
     expect(await screen.findByText(/Association locale retirée/)).toBeTruthy();
+    // Le message précise que la révocation distante n'a pas eu lieu.
     expect(screen.getByText(/révoquez-la également auprès de celui-ci/i)).toBeTruthy();
     expect(businessMocks.disconnectIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
-    expect(facebook.textContent).toContain('Déconnecté localement');
+    await waitFor(() =>
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+    );
   });
 
   it('applique le contrat BusinessGrowEntryIntent et permet d’activer le secours auto en routage manuel', async () => {

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, Clapperboard, Coins, FolderKanban, Play, Plus, Sparkles, Wand2,
+  ArrowRight, Clapperboard, Coins, CreditCard, FolderKanban, Image as ImageIcon, History,
+  MessageSquare, Play, Plus, Settings2, Sparkles, SlidersHorizontal, UserRound, Wand2,
   CheckCircle2, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import { StatCard, Card, CardHeader, Badge, Button, LoadingState, ErrorState, EmptyState, ProgressBar, Banner } from '../components/ui';
+import { FeatureCard, SectionHeader } from '../components/ui-premium';
 import { useAuth } from '../context/AuthContext';
 import { BrandLockup } from '../components/Brand';
 import { asAppError } from '../lib/errors';
@@ -12,6 +14,47 @@ import { formatDate, relativeDate, statusLabel, truncate } from '../lib/format';
 import { countAssets, healthCheck, listJobs, listProjects } from '../lib/api';
 import type { GenerationJob, Project } from '../lib/types';
 import { localGreeting } from '../lib/greeting';
+
+/**
+ * Toutes les fonctionnalités du Studio, regroupées par catégorie.
+ * Chaque entrée pointe vers une route réellement implémentée : aucune carte
+ * décorative, aucun bouton sans action.
+ */
+const STUDIO_CATEGORIES: { id: string; title: string; eyebrow: string; items: { to: string; icon: typeof Wand2; title: string; description: string }[] }[] = [
+  {
+    id: 'creer',
+    eyebrow: 'Catégorie 01',
+    title: 'Créer et générer',
+    items: [
+      { to: '/app/studio', icon: Clapperboard, title: 'Générer une vidéo', description: 'Brief, catalogue vérifié, devis avant génération.' },
+      { to: '/app/scripts', icon: Wand2, title: 'Scripts IA', description: 'Accroches, scènes, texte dit et appel à l’action.' },
+      { to: '/app/prompts', icon: MessageSquare, title: 'Prompts', description: 'Bibliothèque de prompts réutilisables.' },
+      { to: '/app/presets', icon: SlidersHorizontal, title: 'Presets', description: 'Réglages de génération prêts à l’emploi.' },
+    ],
+  },
+  {
+    id: 'produire',
+    eyebrow: 'Catégorie 02',
+    title: 'Produire et publier',
+    items: [
+      { to: '/app/studio/montage', icon: Play, title: 'Montage', description: 'Timeline, sous-titres, voix et export.' },
+      { to: '/app/avatars', icon: UserRound, title: 'Avatars', description: 'Présentateurs IA de vos vidéos.' },
+      { to: '/app/bibliotheque', icon: ImageIcon, title: 'Bibliothèque', description: 'Vos créations et médias enregistrés.' },
+      { to: '/app/historique', icon: History, title: 'Historique', description: 'Toutes vos générations et leur statut.' },
+    ],
+  },
+  {
+    id: 'piloter',
+    eyebrow: 'Catégorie 03',
+    title: 'Piloter et financer',
+    items: [
+      { to: '/app/projets', icon: FolderKanban, title: 'Projets', description: 'Reprendre un brief et suivre son avancement.' },
+      { to: '/app/credits', icon: Coins, title: 'Crédits Studio', description: 'Recharger et comprendre la consommation.' },
+      { to: '/app/abonnement', icon: CreditCard, title: 'Abonnement', description: 'Formule, limites et facturation Studio.' },
+      { to: '/app/parametres', icon: Settings2, title: 'Paramètres', description: 'Profil, langue et sécurité du compte.' },
+    ],
+  },
+];
 
 export default function Dashboard() {
   const { profile, quota, refreshQuota } = useAuth();
@@ -96,6 +139,28 @@ export default function Dashboard() {
         <StatCard label="Crédits Studio UGC" value={quota?.credits ?? 0} icon={<Coins size={19} />} hint={`Formule ${quota?.plan?.display_name ?? '—'}`} tone="amber" />
         <StatCard label="Créations en bibliothèque" value={loading ? '…' : assetCount} icon={<Sparkles size={19} />} hint="Total enregistré, fichiers privés" tone="emerald" />
       </div>
+
+      {/* Toutes les fonctionnalités du Studio, par catégorie ------------------ */}
+      <section className="mt-8" aria-label="Toutes les fonctionnalités du Studio">
+        <SectionHeader
+          eyebrow="Catalogue de l’espace"
+          title="Toutes vos fonctionnalités Studio"
+          action={<span className="hidden text-[10.5px] text-slate-500 sm:block">{STUDIO_CATEGORIES.reduce((total, category) => total + category.items.length, 0)} outils opérationnels</span>}
+        />
+        <div className="grid gap-5 lg:grid-cols-3">
+          {STUDIO_CATEGORIES.map((category) => (
+            <div key={category.id}>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{category.eyebrow}</p>
+              <h3 className="mb-2.5 font-display text-[15px] font-medium tracking-[-0.02em] text-white">{category.title}</h3>
+              <div className="grid gap-2">
+                {category.items.map((item, index) => (
+                  <FeatureCard key={item.to} {...item} delay={index * 40} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">

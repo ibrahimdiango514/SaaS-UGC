@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
-  Activity, ArrowUpRight, Brain, Building2, Check, ExternalLink, FileText, Gauge, Lightbulb, Loader2, LockKeyhole,
-  MessageSquare, Package, Pencil, Plug, RefreshCw, Send, ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, X, Zap,
+  Activity, ArrowUpRight, Brain, Building2, ExternalLink, FileText, Gauge, Lightbulb,
+  MessageSquare, Package, Pencil, Plug, RefreshCw, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, Zap,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -14,9 +14,10 @@ import {
   type BusinessGrowEntryIntent,
   type BusinessGrowGrowthTab,
 } from '../contracts/business-grow';
-import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
+import { IntegrationsCenter } from '../integrations/CatalogPage';
 import GrowthWorkspace from './growth/GrowthWorkspace';
 import AgentReports from './agent/AgentReports';
+import { BusinessAssistant } from '../ai/BusinessAssistant';
 import type { Brand, Product, Workspace } from '../lib/types';
 import {
   BusinessGrowApiError, businessGrowApi,
@@ -26,8 +27,8 @@ import {
   type BusinessToolExecution, type BusinessVerificationResult, type BusinessRecommendation, type BusinessReport,
 } from './api';
 import {
-  BUSINESS_PROVIDERS, BUSINESS_ROLES, EXTENSIBLE_PROVIDER_ADAPTERS,
-  type BusinessCapability, type BusinessRoleKey, type RoutingSelectionMode,
+  BUSINESS_ROLES, capabilitiesOf,
+  type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
 
 type BusinessSection = 'chat' | 'growth' | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
@@ -200,21 +201,6 @@ const PROMPT_IDEAS = [
   { label: 'Situation financière', text: 'Analyse les mouvements financiers disponibles sur les 30 derniers jours, en séparant faits et limites.', icon: TrendingUp, categories: ['bg_module_finance_intelligence'] },
 ];
 
-const CAPABILITY_LABELS: Record<BusinessCapability, string> = {
-  writing: 'Rédaction',
-  images: 'Images',
-  documents: 'Documents',
-  scripts: 'Scripts',
-  hooks: 'Hooks',
-  reasoning: 'Raisonnement',
-  analysis: 'Analyse',
-  'economic-routing': 'Routage économique',
-  fallback: 'Secours',
-  'specialized-models': 'Modèles spécialisés',
-  'model-comparison': 'Comparaison de modèles',
-  experimentation: 'Expérimentation',
-  'video-generation': 'Génération vidéo',
-};
 
 const TOOL_LABELS: Record<string, string> = {
   propose_memory_save: 'Enregistrer dans la mémoire métier',
@@ -276,6 +262,8 @@ function describeProviderFailureHint(code: string | null | undefined): string {
       return 'La vérification du service IA a échoué. Contactez le support VYORA si le problème persiste.';
     case 'PROVIDER_RATE_LIMITED':
       return 'Le service IA est temporairement saturé. Réessayez plus tard.';
+    case 'PROVIDER_PAYMENT_REQUIRED':
+      return 'Le crédit du service IA est épuisé. Réessayez plus tard ou contactez le support VYORA.';
     case 'PROVIDER_REQUEST_REJECTED':
       return 'La demande n’a pas été acceptée. Vérifiez votre message puis réessayez.';
     case 'PROVIDER_NOT_CONFIGURED':
@@ -352,14 +340,15 @@ function providerStatus(provider: BusinessProviderStatus | undefined): {
   };
 }
 
-function ProviderStatusList({ statuses, compact = false, loading = false }: {
+function ProviderStatusList({ statuses, compact: _compact = false, loading = false }: {
   statuses: BusinessProviderStatus[] | null;
   compact?: boolean;
   loading?: boolean;
 }) {
-  const providers = compact ? BUSINESS_PROVIDERS.filter((provider) => provider.id !== 'muapi').slice(0, 3) : BUSINESS_PROVIDERS;
-  const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
-  const activeCount = providers.filter((provider) => isVerifiedProvider(byKey.get(provider.id))).length;
+  // La liste vient du service (registre serveur), jamais d'un catalogue figé
+  // côté navigateur : un fournisseur ajouté côté serveur apparaît ici seul.
+  const providers = statuses ?? [];
+  const activeCount = providers.filter((status) => isVerifiedProvider(status)).length;
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
@@ -382,6 +371,25 @@ function ProviderStatusList({ statuses, compact = false, loading = false }: {
   );
 }
 
+/**
+ * Section « Assistant » de Business Grow.
+ *
+ * L'ancienne interface de conversation (fil brut, liste latérale ad hoc,
+ * composeur minimal) a été remplacée par le composant VYORA AI commun
+ * (`BusinessAssistant`), qui fournit la sidebar repliable, les bulles, les
+ * pièces jointes, le mode analyse et la synthèse vocale.
+ *
+ * Ce qui a été conservé volontairement :
+ *   - l'AI Director et le routage : les sélecteurs rôle/routage/service
+ *     restent au-dessus du fil, et pilotent le même envoi serveur ;
+ *   - le quota, le statut des services IA et l'avertissement données privées,
+ *     dans une barre latérale droite ;
+ *   - les propositions d'outils (approbation séparée, transfert Studio UGC) ;
+ *   - les rapports de l'agent et le pré-remplissage du composeur.
+ *
+ * Rien de tout cela n'est réimplémenté ici : ce sont les mêmes rappels et les
+ * mêmes données que la page hôte fournit déjà.
+ */
 function AssistantView({
   workspaceId,
   backendReady,
@@ -417,6 +425,10 @@ function AssistantView({
   onSelectConversation,
   onSend,
   onRetry,
+  draftFromReport,
+  onDraftConsumed,
+  onReportDraft,
+  onOpenIntegrations,
 }: {
   workspaceId: string | null;
   backendReady: boolean;
@@ -450,19 +462,16 @@ function AssistantView({
   onRenameConversation: (id: string, title: string) => Promise<boolean>;
   onDeleteConversation: (id: string) => Promise<boolean>;
   onSelectConversation: (id: string) => void;
-  onSend: (content: string) => Promise<boolean>;
+  /** Envoi réel : `body` contient déjà le mode et les pièces jointes. */
+  onSend: (body: string) => Promise<boolean>;
   onRetry: () => void;
+  /** Texte proposé par un rapport d'agent, transmis au composeur. */
+  draftFromReport: string | null;
+  onDraftConsumed: () => void;
+  onReportDraft: (text: string) => void;
+  onOpenIntegrations: () => void;
 }) {
-  const [draft, setDraft] = useState('');
   const [contextReport, setContextReport] = useState<BusinessReport | null>(null);
-  const ideas = useMemo(() => [...PROMPT_IDEAS].sort((a, b) => {
-    const count = (categories: string[]) => contextReport?.coverage.filter((item) => categories.includes(item.category) && item.status === 'available').reduce((sum, item) => sum + item.count, 0) ?? 0;
-    return count(b.categories) - count(a.categories);
-  }), [contextReport]);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState('');
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const activeConversation = conversations.find((conversation) => conversation.id === selectedConversationId);
   const availableProviders = (providers ?? []).filter((provider) => isVerifiedProvider(provider));
   const verifiedModels = models.filter((model) => model.verification_status === 'verified' && model.enabled);
   const pendingTools = tools.filter((tool) => tool.status === 'pending_approval');
@@ -471,467 +480,282 @@ function AssistantView({
     (tool) => tool.tool_name !== 'handoff_ugc_brief' && tool.status !== 'pending_approval',
   );
 
-  useEffect(() => {
-    if (entryIntent?.initialDraft) {
-      setDraft((current) => current || entryIntent.initialDraft || '');
-    }
-  }, [entryIntent]);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const content = draft.trim();
-    if (!content || busy || !backendReady) return;
-    if (await onSend(content)) setDraft('');
-  };
-
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
-      <section className="flex min-h-[620px] flex-col overflow-hidden rounded-[1.4rem] border border-white/[0.09] bg-[radial-gradient(ellipse_at_55%_0%,rgba(139,92,246,.07),transparent_38%),#090d16] shadow-[0_24px_70px_-48px_rgba(0,0,0,.9)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl border border-violet-200/15 bg-violet-300/[0.08] text-violet-100"><Brain size={19} /></span>
-            <div>
-              <h2 className="font-display text-sm font-semibold text-white">VYORA Business</h2>
-              <p className="text-xs text-slate-500">AI Director · {backendLoading
-                ? 'vérification des services IA…'
-                : providers === null
-                  ? 'statut des services IA indisponible'
-                  : availableProviders.length
-                    ? `${availableProviders.length} service(s) IA vérifié(s)`
-                    : 'aucun service IA vérifié'}</p>
-            </div>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            icon={<MessageSquare size={14} />}
-            onClick={() => { setDraft(''); onNewConversation(); }}
-            disabled={!backendReady || busy}
-            className="border-violet-200/15 hover:border-violet-200/30 hover:bg-violet-300/[0.06]"
-          >
-            Nouvelle conversation
-          </Button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-white/[0.015] px-4 py-2.5 sm:px-6">
-          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
-            <span>Rôle :</span>
-            <select
-              aria-label="Rôle de la tâche IA"
-              value={roleKey}
-              onChange={(event) => onChangeRole(event.target.value as BusinessRoleKey)}
-              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
-            >
-              {BUSINESS_ROLES.map((role) => (
-                <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
-            <span>Routage :</span>
-            <select
-              aria-label="Mode de routage"
-              value={routingMode}
-              onChange={(event) => onChangeRoutingMode(event.target.value as RoutingSelectionMode)}
-              className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
-            >
-              <option value="auto">Automatique (AI Director)</option>
-              <option value="manual">Manuel</option>
-            </select>
-          </label>
-          {routingMode === 'manual' && (
-            <>
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]" data-testid="business-assistant-section">
+      <div className="min-w-0 space-y-3">
+        {/* AI Director : le routage reste visible et pilotable, comme avant.
+            Ce bloc n'est pas décoratif — il change réellement le service
+            interrogé par le serveur à l'envoi suivant. */}
+        <section className="rounded-[1.1rem] border border-white/[0.08] bg-white/[0.02] px-3 py-2.5" aria-label="AI Director">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-violet-200">
+              <Sparkles size={12} />
+              AI Director
+            </span>
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span>Rôle</span>
               <select
-                aria-label="Service IA manuel"
-                value={preferredProviderKey}
-                onChange={(event) => onChangePreferredProvider(event.target.value)}
+                aria-label="Rôle de la tâche IA"
+                value={roleKey}
+                onChange={(event) => onChangeRole(event.target.value as BusinessRoleKey)}
                 className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
               >
-                <option value="">Service IA…</option>
-                {availableProviders.map((provider, index) => (
-                  <option key={provider.provider_key} value={provider.provider_key}>{`Service VYORA ${index + 1}`}</option>
+                {BUSINESS_ROLES.map((role) => (
+                  <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
                 ))}
               </select>
-              {verifiedModels.length > 0 && (
-                <select
-                  aria-label="Modèle manuel"
-                  value={preferredModelKey}
-                  onChange={(event) => onChangePreferredModel(event.target.value)}
-                  className="max-w-[200px] truncate rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
-                >
-                  <option value="">Modèle par défaut</option>
-                  {verifiedModels
-                    .filter((m) => !preferredProviderKey || m.provider_key === preferredProviderKey)
-                    .map((model, index) => (
-                      <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{`Modèle VYORA ${index + 1}`}</option>
-                    ))}
-                </select>
-              )}
-              <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-[11px] text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={manualAllowFallback}
-                  onChange={(event) => onChangeManualAllowFallback(event.target.checked)}
-                  aria-label="Autoriser le secours automatique en mode manuel"
-                  className="accent-violet-400"
-                />
-                <span>Secours auto</span>
-              </label>
-            </>
-          )}
-          {quota && quota.available_units !== null && (
-            <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-violet-200/15 bg-violet-200/[0.05] px-2.5 py-1 text-[11px] text-violet-100" data-testid="business-quota-pill">
-              <Gauge size={12} className="text-violet-200" />
-              Quota Business : {quota.available_units} unités
-            </span>
-          )}
-        </div>
-
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-5 sm:px-6" aria-live="polite">
-          {entryIntent && (entryIntent.projectTitle || entryIntent.brandName || entryIntent.productName || entryIntent.sourceRoute) && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.06] px-3 py-2 text-xs text-brand-100" data-testid="business-entry-intent-banner">
-              <span>
-                Contexte importé
-                {entryIntent.projectTitle ? ` · Projet : ${entryIntent.projectTitle}` : ''}
-                {entryIntent.brandName ? ` · Marque : ${entryIntent.brandName}` : ''}
-                {entryIntent.productName ? ` · Produit : ${entryIntent.productName}` : ''}
-              </span>
-              <button type="button" onClick={onDismissEntryIntent} className="text-[11px] text-brand-200 underline">
-                Masquer
-              </button>
-            </div>
-          )}
-          {error && (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-3 text-xs text-rose-100" role="alert">
-              <span>{error}</span>
-              <button type="button" className="shrink-0 underline" onClick={onRetry}>Réessayer</button>
-            </div>
-          )}
-          {!backendReady && (
-            <div
-              className={cn(
-                'm-auto w-full max-w-xl rounded-2xl border p-4 text-left',
-                backendLoading
-                  ? 'border-white/[0.08] bg-white/[0.02]'
-                  : 'border-amber-400/20 bg-amber-400/[0.06]',
-              )}
-              role="status"
-              data-testid={backendLoading ? 'business-ai-loading' : 'business-ai-unavailable'}
-            >
-              <div className="flex gap-3">
-                {backendLoading
-                  ? <Loader2 size={17} className="mt-0.5 shrink-0 animate-spin text-slate-400" />
-                  : <LockKeyhole size={17} className="mt-0.5 shrink-0 text-amber-300" />}
-                <div>
-                  <p className={cn('text-sm font-semibold', backendLoading ? 'text-slate-200' : 'text-amber-100')}>
-                    {backendLoading ? 'Connexion à Business Grow…' : 'Business Grow ne répond pas pour le moment'}
-                  </p>
-                  <p className={cn('mt-1 text-xs leading-relaxed', backendLoading ? 'text-slate-500' : 'text-amber-100/70')}>
-                    {backendLoading
-                      ? 'L’historique et la mémoire se chargent dès que la session VYORA est confirmée.'
-                      : 'La connexion a été retentée automatiquement. Vérifiez votre connexion puis utilisez « Réessayer » : aucune donnée n’est inventée ni enregistrée localement.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-          <AgentReports key={workspaceId ?? 'personal'} workspaceId={workspaceId} ready={backendReady} busy={busy} onReport={setContextReport} onPropose={onProposeTask} onAsk={setDraft} />
-          {backendReady && messages.length === 0 && (
-            <div className="m-auto max-w-xl text-center">
-              <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-violet-200/20 bg-violet-300/[0.08] text-violet-100">
-                <Sparkles size={24} />
-              </span>
-              <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-violet-200">Intelligence · stratégie · croissance</p>
-              <h3 className="mt-2 font-display text-2xl font-medium tracking-tight text-white sm:text-3xl">Les bonnes décisions commencent par les bonnes questions.</h3>
-              <p className="mt-3 text-sm leading-relaxed text-slate-400">
-                {activeConversation?.title || 'Parlez de vos priorités, explorez vos options et structurez la suite avec votre copilote métier.'}
-              </p>
-              <div className="mt-7 grid gap-2 sm:grid-cols-3">
-                {ideas.map(({ label, text, icon: Icon }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setDraft(text)}
-                    className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-3 py-3 text-left text-xs text-slate-300 transition hover:border-violet-200/25 hover:bg-violet-300/[0.05]"
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span>Routage</span>
+              <select
+                aria-label="Mode de routage"
+                value={routingMode}
+                onChange={(event) => onChangeRoutingMode(event.target.value as RoutingSelectionMode)}
+                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
+              >
+                <option value="auto">Automatique</option>
+                <option value="manual">Manuel</option>
+              </select>
+            </label>
+            {routingMode === 'manual' && (
+              <>
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <span>Service</span>
+                  <select
+                    aria-label="Service IA manuel"
+                    value={preferredProviderKey}
+                    onChange={(event) => onChangePreferredProvider(event.target.value)}
+                    className="max-w-[9rem] rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
                   >
-                    <Icon size={15} className="shrink-0 text-violet-200" />{label}<ArrowUpRight size={12} className="ml-auto text-slate-600" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {loading && <p className="m-auto text-sm text-slate-400">Chargement de la conversation…</p>}
-          {busy && <p className="text-center text-xs text-violet-200" role="status">Demande en attente · traitement par l’AI Director…</p>}
-          {messages.map((message) => (
-            <article
-              key={message.id}
-              className={cn(
-                'max-w-[90%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed',
-                message.author_role === 'user'
-                  ? 'ml-auto border border-violet-200/10 bg-violet-300/[0.10] text-white'
-                  : 'mr-auto border border-white/[0.08] bg-white/[0.03] text-slate-200',
-              )}
-              data-testid={`business-message-${message.author_role}`}
-            >
-              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-                {message.author_role === 'user' ? 'Vous' : 'VYORA Business'}
-              </p>
-              {message.content}
-              {message.request_status && (
-                <p className={cn(
-                  'mt-2 border-t border-white/[0.08] pt-2 text-[10px]',
-                  message.request_status === 'failed' ? 'text-amber-200' : 'text-slate-500',
-                )}>
-                  {message.request_status === 'queued' && 'En attente'}
-                  {message.request_status === 'running' && 'Traitement en cours'}
-                  {message.request_status === 'succeeded' && 'Traitement réussi'}
-                  {message.request_status === 'failed' && humanizeError(message.request_error_code, 'Une erreur est survenue. Réessayez.')}
-                  {message.request_status === 'canceled' && 'Traitement annulé'}
-                  {message.request_status === 'succeeded' && message.author_role === 'assistant' && message.request_provider_key
-                    ? ' · Réponse générée par l’assistant VYORA'
-                    : null}
-                </p>
-              )}
-            </article>
-          ))}
-          {pendingTools.length > 0 && (
-            <div className="space-y-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.05] p-3" data-testid="business-tool-proposals">
-              <p className="text-xs font-semibold text-brand-100">Actions assistées en attente d’approbation</p>
-              {pendingTools.map((tool) => (
-                <div key={tool.id} className="rounded-lg border border-white/[0.08] bg-[#0c111b] p-3 text-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-medium text-white">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
-                    <Badge tone="neutral">{tool.risk_level === 'write_requires_approval' ? 'Validation requise' : 'Publication bloquée'}</Badge>
-                  </div>
-                  <p className="mt-1.5 text-[11px] text-slate-400">
-                    {typeof tool.input_args?.summary === 'string' ? tool.input_args.summary : JSON.stringify(tool.input_args)}
-                  </p>
-                  {tool.tool_name === 'create_follow_up_task' && Boolean(tool.input_args?.task) && typeof tool.input_args.task === 'object' && (
-                    <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/20 p-2.5 text-[11px] leading-relaxed text-slate-300">
-                      <p>Priorité : {String((tool.input_args.task as Record<string, unknown>).priority ?? 'à préciser')} · Échéance : {String((tool.input_args.task as Record<string, unknown>).dueDate ?? 'à préciser')}</p>
-                      <p className="mt-1 text-slate-400">La confirmation crée une tâche interne ; aucun message ni action externe ne sera envoyé.</p>
-                    </div>
-                  )}
-                  <div className="mt-2.5 flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => { void onResolveTool(tool.id, 'approved'); }} disabled={busy}>
-                      {tool.tool_name === 'create_follow_up_task' ? 'Confirmer la création' : 'Approuver'}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { void onResolveTool(tool.id, 'rejected'); }} disabled={busy}>
-                      Rejeter
-                    </Button>
-                    {tool.tool_name === 'handoff_ugc_brief' && (
-                      <Link
-                        to="/app/studio"
-                        state={buildStudioLocationStateFromBrief(tool.input_args, {
-                          executionId: tool.id,
-                          conversationId: tool.conversation_id,
-                        }) ?? { ugcBrief: tool.input_args }}
-                        className="btn btn-outline btn-sm"
-                      >
-                        Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
-                      </Link>
-                    )}
-                  </div>
-                </div>
+                    <option value="">Sélectionner…</option>
+                    {availableProviders.map((provider) => (
+                      <option key={provider.provider_key} value={provider.provider_key}>{provider.provider_key}</option>
+                    ))}
+                  </select>
+                </label>
+                {verifiedModels.length > 0 && (
+                  <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                    <span>Modèle</span>
+                    <select
+                      aria-label="Modèle manuel"
+                      value={preferredModelKey}
+                      onChange={(event) => onChangePreferredModel(event.target.value)}
+                      className="max-w-[10rem] rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
+                    >
+                      <option value="">Modèle par défaut</option>
+                      {verifiedModels
+                        .filter((m) => !preferredProviderKey || m.provider_key === preferredProviderKey)
+                        .map((model, index) => (
+                          <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{`Modèle VYORA ${index + 1}`}</option>
+                        ))}
+                    </select>
+                  </label>
+                )}
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <span>Secours auto</span>
+                  <input
+                    type="checkbox"
+                    aria-label="Autoriser le secours automatique en mode manuel"
+                    checked={manualAllowFallback}
+                    onChange={(event) => onChangeManualAllowFallback(event.target.checked)}
+                  />
+                </label>
+              </>
+            )}
+            <span className="ml-auto flex items-center gap-1 text-[11px] text-slate-500" data-testid="business-quota-pill">
+              <Gauge size={12} className="text-cyan-300" />
+              {quota ? `${quota.available_units ?? 0} unités` : 'quota indisponible'}
+            </span>
+          </div>
+        </section>
+
+        {entryIntent && (entryIntent.projectTitle || entryIntent.brandName || entryIntent.productName || entryIntent.sourceRoute) && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.06] px-3 py-2 text-xs text-brand-100" data-testid="business-entry-intent-banner">
+            <span>
+              Contexte importé
+              {entryIntent.projectTitle ? ` · Projet : ${entryIntent.projectTitle}` : ''}
+              {entryIntent.brandName ? ` · Marque : ${entryIntent.brandName}` : ''}
+              {entryIntent.productName ? ` · Produit : ${entryIntent.productName}` : ''}
+            </span>
+            <button type="button" onClick={onDismissEntryIntent} className="text-[11px] text-brand-200 underline">
+              Masquer
+            </button>
+          </div>
+        )}
+
+        {backendReady && messages.length === 0 && (
+          <div className="flex flex-wrap gap-1.5" data-testid="business-assistant-ideas">
+            {[...PROMPT_IDEAS]
+              .sort((a, b) => {
+                const couverture = (categories: string[]) =>
+                  contextReport?.coverage
+                    .filter((item) => categories.includes(item.category) && item.status === 'available')
+                    .reduce((sum, item) => sum + item.count, 0) ?? 0;
+                return couverture(b.categories) - couverture(a.categories);
+              })
+              .slice(0, 6)
+              .map(({ label, text, icon: Icon }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => onReportDraft(text)}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-slate-300 transition hover:border-violet-200/25 hover:bg-violet-300/[0.05] hover:text-white"
+                >
+                  <Icon size={12} className="text-violet-200" />
+                  {label}
+                </button>
               ))}
-            </div>
-          )}
-          {executedHandoffs.length > 0 && (
-            <div className="space-y-2 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.05] p-3" data-testid="business-handoff-ready">
-              {executedHandoffs.slice(0, 3).map((tool) => {
-                const draftPayload = (tool.output_result?.handoffDraft && typeof tool.output_result.handoffDraft === 'object')
-                  ? tool.output_result.handoffDraft as Record<string, unknown>
-                  : tool.input_args;
-                return (
-                  <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span className="text-emerald-100">Brief approuvé prêt pour Studio UGC</span>
+          </div>
+        )}
+
+        {error && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] px-3 py-2 text-xs text-amber-100">
+            <span className="flex-1">{error}</span>
+            <Button size="sm" variant="ghost" onClick={onRetry}>Réessayer</Button>
+          </div>
+        )}
+
+        {/* Interface de conversation VYORA AI — remplace l'ancienne.
+            L'état et les mutations restent la propriété de Business Grow :
+            l'interface ne fait qu'afficher et déclencher les mêmes rappels. */}
+        <BusinessAssistant
+          workspaceId={workspaceId}
+          backendReady={backendReady}
+          backendLoading={backendLoading}
+          providers={providers}
+          onOpenIntegrations={onOpenIntegrations}
+          draftFromReport={draftFromReport}
+          onDraftConsumed={onDraftConsumed}
+          host={{
+            conversations,
+            conversationsLoaded,
+            selectedConversationId,
+            messages,
+            loading,
+            busy,
+            onSelect: onSelectConversation,
+            onNew: onNewConversation,
+            onRename: onRenameConversation,
+            onDelete: onDeleteConversation,
+            onSend: (body) => onSend(body),
+          }}
+        />
+
+        {/* Rapports de l'agent : inchangés, ils alimentent l'analyse et le
+            pré-remplissage du composeur. */}
+        <AgentReports
+          key={workspaceId ?? 'personal'}
+          workspaceId={workspaceId}
+          ready={backendReady}
+          busy={busy}
+          onReport={setContextReport}
+          onPropose={onProposeTask}
+          onAsk={onReportDraft}
+        />
+
+        {pendingTools.length > 0 && (
+          <div className="space-y-2 rounded-xl border border-brand-400/20 bg-brand-500/[0.05] p-3" data-testid="business-tool-proposals">
+            <p className="text-xs font-semibold text-brand-100">Actions assistées en attente d’approbation</p>
+            {pendingTools.map((tool) => (
+              <div key={tool.id} className="rounded-lg border border-white/[0.08] bg-[#0c111b] p-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-white">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
+                  <Badge tone="neutral">{tool.risk_level === 'write_requires_approval' ? 'Validation requise' : 'Publication bloquée'}</Badge>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  {typeof tool.input_args?.summary === 'string' ? tool.input_args.summary : JSON.stringify(tool.input_args)}
+                </p>
+                {tool.tool_name === 'create_follow_up_task' && Boolean(tool.input_args?.task) && typeof tool.input_args.task === 'object' && (
+                  <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/20 p-2.5 text-[11px] leading-relaxed text-slate-300">
+                    <p>Priorité : {String((tool.input_args.task as Record<string, unknown>).priority ?? 'à préciser')} · Échéance : {String((tool.input_args.task as Record<string, unknown>).dueDate ?? 'à préciser')}</p>
+                    <p className="mt-1 text-slate-400">La confirmation crée une tâche interne ; aucun message ni action externe ne sera envoyé.</p>
+                  </div>
+                )}
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => { void onResolveTool(tool.id, 'approved'); }} disabled={busy}>
+                    {tool.tool_name === 'create_follow_up_task' ? 'Confirmer la création' : 'Approuver'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => { void onResolveTool(tool.id, 'rejected'); }} disabled={busy}>
+                    Rejeter
+                  </Button>
+                  {tool.tool_name === 'handoff_ugc_brief' && (
                     <Link
                       to="/app/studio"
-                      state={buildStudioLocationStateFromBrief(draftPayload, {
+                      state={buildStudioLocationStateFromBrief(tool.input_args, {
                         executionId: tool.id,
                         conversationId: tool.conversation_id,
-                      }) ?? { ugcBrief: draftPayload }}
+                      }) ?? { ugcBrief: tool.input_args }}
                       className="btn btn-outline btn-sm"
                     >
                       Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
                     </Link>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {resolvedOtherTools.length > 0 && (
-            <div className="space-y-1.5 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-xs" data-testid="business-tools-history">
-              <p className="font-semibold text-slate-300">Historique des actions traitées</p>
-              {resolvedOtherTools.slice(0, 4).map((tool) => {
-                const statusBadge = tool.status === 'executed'
-                  ? 'Exécutée'
-                  : tool.status === 'rejected'
-                    ? 'Rejetée'
-                    : tool.status === 'failed'
-                      ? 'Échec'
-                      : 'Approuvée';
-                return (
-                  <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-[#0c111b] px-2.5 py-2">
-                    <span className="text-slate-200">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
-                    {tool.tool_name === 'create_follow_up_task' && tool.status === 'executed' && typeof tool.output_result?.taskId === 'string' && (
-                      <Link to="/app/business/modules/operations-manager" className="text-violet-200 underline">Voir la tâche</Link>
-                    )}
-                    <Badge tone={tool.status === 'executed' ? 'success' : 'neutral'}>{statusBadge}</Badge>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {backendReady && providers !== null && !availableProviders.length && (
-            <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs leading-relaxed text-amber-100/80" role="status">
-              Aucun service IA vérifié n’est actuellement disponible. Votre demande sera conservée dans l’historique, mais aucune réponse ne sera simulée.
-            </div>
-          )}
-        </div>
-
-        <form onSubmit={handleSubmit} className="border-t border-white/[0.07] bg-black/20 p-3 sm:p-5">
-          <label htmlFor="business-chat-draft" className="sr-only">Votre demande</label>
-          <div className="flex items-end gap-2 rounded-2xl border border-white/[0.10] bg-[#0c111b] p-2 focus-within:border-violet-200/35">
-            <textarea
-              id="business-chat-draft"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Partagez une question, un objectif ou un défi métier…"
-              rows={2}
-              maxLength={12_000}
-              disabled={!backendReady || busy}
-              className="max-h-40 min-h-12 flex-1 resize-y bg-transparent px-2 py-2 text-sm leading-relaxed text-white outline-none placeholder:text-slate-600 disabled:opacity-50"
-            />
-            <Button type="submit" disabled={!backendReady || busy || !draft.trim()} loading={busy} icon={<Send size={15} />}>
-              Envoyer
-            </Button>
-          </div>
-          <p className="mt-2 text-center text-[10px] text-slate-600">
-            {!backendReady ? 'Envoi indisponible tant que le service n’est pas prêt.' : 'Sans service IA vérifié, aucune réponse ne sera générée.'}
-          </p>
-        </form>
-      </section>
-
-      <aside className="space-y-4">
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-white">Conversations</h2>
-            <span className="text-[10px] text-slate-500">{conversationsLoaded ? `${conversations.length} enregistrée(s)` : '—'}</span>
-          </div>
-          {conversationsLoaded && conversations.length ? (
-            <div className="max-h-64 space-y-1 overflow-y-auto">
-              {conversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  className={cn(
-                    'w-full rounded-xl px-3 py-2 text-left text-xs transition',
-                    conversation.id === selectedConversationId ? 'bg-violet-300/[0.10] text-violet-100 ring-1 ring-inset ring-violet-200/10' : 'text-slate-400 hover:bg-white/[0.04]',
-                  )}
-                >
-                  {editingId === conversation.id ? (
-                    <form
-                      className="flex items-center gap-1"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        const title = editingTitle.trim();
-                        if (title) void onRenameConversation(conversation.id, title).then((success) => { if (success) setEditingId(null); });
-                      }}
-                    >
-                      <input
-                        aria-label="Nouveau titre de conversation"
-                        autoFocus
-                        maxLength={160}
-                        value={editingTitle}
-                        onChange={(event) => setEditingTitle(event.target.value)}
-                        className="min-w-0 flex-1 rounded border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-white"
-                      />
-                      <button type="submit" aria-label="Enregistrer le titre" disabled={!editingTitle.trim()} className="rounded p-1 text-emerald-300 hover:bg-white/10 disabled:opacity-40">
-                        <Check size={14} />
-                      </button>
-                      <button type="button" aria-label="Annuler le renommage" onClick={() => setEditingId(null)} className="rounded p-1 text-slate-400 hover:bg-white/10">
-                        <X size={14} />
-                      </button>
-                    </form>
-                  ) : deletingId === conversation.id ? (
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="text-rose-200">Supprimer cette conversation ?</span>
-                      <span className="flex gap-1">
-                        <button
-                          type="button"
-                          aria-label="Confirmer la suppression"
-                          onClick={() => {
-                            void onDeleteConversation(conversation.id).then((success) => { if (success) setDeletingId(null); });
-                          }}
-                          className="rounded px-2 py-1 text-rose-200 hover:bg-rose-500/15"
-                        >
-                          Oui
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Annuler la suppression"
-                          onClick={() => setDeletingId(null)}
-                          className="rounded px-2 py-1 text-slate-400 hover:bg-white/10"
-                        >
-                          Non
-                        </button>
-                      </span>
-                    </span>
-                  ) : (
-                    <>
-                      <span className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => onSelectConversation(conversation.id)}
-                          aria-current={conversation.id === selectedConversationId ? 'page' : undefined}
-                          className="block min-w-0 flex-1 truncate text-left font-medium"
-                        >
-                          {conversation.title || 'Nouvelle conversation'}
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Renommer la conversation"
-                          onClick={() => {
-                            setEditingId(conversation.id);
-                            setEditingTitle(conversation.title || '');
-                            setDeletingId(null);
-                          }}
-                          className="rounded p-1 text-slate-500 hover:bg-white/10 hover:text-white"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Supprimer la conversation"
-                          onClick={() => {
-                            setDeletingId(conversation.id);
-                            setEditingId(null);
-                          }}
-                          className="rounded p-1 text-slate-500 hover:bg-rose-500/10 hover:text-rose-300"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </span>
-                      {conversation.last_message && <span className="mt-1 block truncate text-[10px] text-slate-600">{conversation.last_message}</span>}
-                    </>
                   )}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-white/[0.10] px-4 py-6 text-center">
-              <MessageSquare size={18} className="mx-auto text-slate-600" />
-              <p className="mt-2 text-xs font-medium text-slate-400">
-                {conversationsLoaded ? 'Aucune conversation enregistrée' : backendLoading ? 'Chargement de vos conversations…' : 'Historique indisponible'}
-              </p>
-              <p className="mt-1 text-[10px] leading-relaxed text-slate-600">
-                {conversationsLoaded ? 'Créez une conversation pour commencer.' : backendLoading ? 'Connexion au service…' : 'Réessayez quand la connexion est rétablie.'}
-              </p>
-            </div>
-          )}
-        </section>
+              </div>
+            ))}
+          </div>
+        )}
 
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        {executedHandoffs.length > 0 && (
+          <div className="space-y-2 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.05] p-3" data-testid="business-handoff-ready">
+            {executedHandoffs.slice(0, 3).map((tool) => {
+              const draftPayload = (tool.output_result?.handoffDraft && typeof tool.output_result.handoffDraft === 'object')
+                ? tool.output_result.handoffDraft as Record<string, unknown>
+                : tool.input_args;
+              return (
+                <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="text-emerald-100">Brief approuvé prêt pour Studio UGC</span>
+                  <Link
+                    to="/app/studio"
+                    state={buildStudioLocationStateFromBrief(draftPayload, {
+                      executionId: tool.id,
+                      conversationId: tool.conversation_id,
+                    }) ?? { ugcBrief: draftPayload }}
+                    className="btn btn-outline btn-sm"
+                  >
+                    Ouvrir dans Studio UGC (sans débit) <ArrowUpRight size={13} />
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {resolvedOtherTools.length > 0 && (
+          <div className="space-y-1.5 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-xs" data-testid="business-tools-history">
+            <p className="font-semibold text-slate-300">Historique des actions traitées</p>
+            {resolvedOtherTools.slice(0, 4).map((tool) => {
+              const statusBadge = tool.status === 'executed'
+                ? 'Exécutée'
+                : tool.status === 'rejected'
+                  ? 'Rejetée'
+                  : tool.status === 'failed'
+                    ? 'Échec'
+                    : 'Approuvée';
+              return (
+                <div key={tool.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-[#0c111b] px-2.5 py-2">
+                  <span className="text-slate-200">{TOOL_LABELS[tool.tool_name] ?? tool.tool_name}</span>
+                  {tool.tool_name === 'create_follow_up_task' && tool.status === 'executed' && typeof tool.output_result?.taskId === 'string' && (
+                    <Link to="/app/business/modules/operations-manager" className="text-violet-200 underline">Voir la tâche</Link>
+                  )}
+                  <Badge tone={tool.status === 'executed' ? 'success' : 'neutral'}>{statusBadge}</Badge>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {backendReady && providers !== null && !availableProviders.length && (
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs leading-relaxed text-amber-100/80" role="status">
+            Aucun service IA vérifié n’est actuellement disponible. Votre demande sera conservée dans l’historique, mais aucune réponse ne sera simulée.
+          </div>
+        )}
+      </div>
+
+      {/* Barre latérale droite : les informations métier restent visibles à côté
+          du fil, comme dans l'ancienne interface. */}
+      <aside className="space-y-4">
+        <section className="vy-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <Zap size={15} className="text-cyan-300" />
             <h2 className="text-sm font-semibold text-white">Services IA VYORA</h2>
@@ -948,7 +772,7 @@ function AssistantView({
           </p>
         </section>
 
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        <section className="vy-surface p-4">
           <div className="flex items-center gap-2">
             <ShieldCheck size={15} className="text-emerald-300" />
             <h2 className="text-sm font-semibold text-white">Données privées</h2>
@@ -956,6 +780,30 @@ function AssistantView({
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
             À l’envoi, la conversation, le contexte d’entreprise et la mémoire consentie peuvent être transmis au fournisseur IA sélectionné. Évitez les données sensibles ; aucune action externe n’est exécutée automatiquement.
           </p>
+        </section>
+
+        <section className="vy-surface p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <MessageSquare size={15} className="text-violet-300" />
+            <h2 className="text-sm font-semibold text-white">Historique</h2>
+          </div>
+          <p className="text-xs leading-relaxed text-slate-500">
+            {/* L'état vide est rendu par la sidebar de l'assistant, qui liste
+                réellement les conversations : le dupliquer ici afficherait deux
+                fois la même information. */}
+            {conversationsLoaded
+              ? `${conversations.length} conversation(s) conservée(s) pour cette entreprise.`
+              : backendLoading
+                ? 'Chargement de vos conversations…'
+                // Ni vide ni en chargement : la lecture a échoué. Le dire
+                // évite de présenter une panne comme un historique vide.
+                : 'Historique indisponible'}
+          </p>
+          {contextReport && (
+            <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
+              Contexte métier analysé : {contextReport.coverage.filter((c) => c.status === 'available').length} source(s) disponible(s).
+            </p>
+          )}
         </section>
       </aside>
     </div>
@@ -1034,7 +882,7 @@ function MemoryView({
   };
 
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+    <section className="vy-surface p-5 sm:p-7">
       <div className="max-w-2xl">
         <h2 className="text-lg font-semibold text-white">Mémoire métier privée</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
@@ -1147,15 +995,15 @@ function ProvidersView({
   onVerifyProvider: (providerKey: string, modelKey?: string) => Promise<void>;
   onSaveRouting: (pref: BusinessRoutingPreference) => Promise<void>;
 }) {
-  const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
   const [routingRole, setRoutingRole] = useState<BusinessRoleKey>('business_advisor');
   const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
   const [routingProvider, setRoutingProvider] = useState('');
   const [routingModel, setRoutingModel] = useState('');
   const [routingAllowFallback, setRoutingAllowFallback] = useState(true);
 
+  // Servables = ceux que le serveur considère configurés (registre + secret).
   const configurableProviders = (statuses ?? []).filter(
-    (status) => status.provider_key !== 'muapi' && (status.config_status === 'configured' || status.enabled),
+    (status) => status.config_status === 'configured' || status.enabled,
   );
   const modelsForSelectedProvider = models.filter(
     (model) => model.enabled && (!routingProvider || model.provider_key === routingProvider),
@@ -1175,7 +1023,7 @@ function ProvidersView({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+      <section className="vy-surface p-5 sm:p-7">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-white">Services IA VYORA</h2>
@@ -1212,16 +1060,20 @@ function ProvidersView({
           </div>
         )}
         <div className="space-y-3">
-          {BUSINESS_PROVIDERS.map((provider, providerIndex) => {
-            const rawStatus = byKey.get(provider.id);
-            const status = providerStatus(rawStatus);
-            const providerModels = models.filter((model) => model.provider_key === provider.id);
-            const canProbe = backendReady && provider.id !== 'muapi' && (rawStatus?.config_status === 'configured' || provider.id === 'groq' || provider.id === 'gemini');
+          {(statuses ?? []).length === 0 ? (
+            <p className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5 text-xs text-slate-400" role="status">
+              Aucun service IA n’est encore déclaré. L’administrateur peut en ajouter depuis l’espace Admin ; ils
+              apparaîtront ici dès qu’ils seront configurés.
+            </p>
+          ) : (statuses ?? []).map((provider) => {
+            const status = providerStatus(provider);
+            const providerModels = models.filter((model) => model.provider_key === provider.provider_key);
+            const canProbe = backendReady && provider.config_status === 'configured';
             return (
-              <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
+              <article key={provider.provider_key} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.provider_key}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold text-white">Moteur VYORA {providerIndex + 1}</h3>
+                    <h3 className="font-semibold text-white">{provider.display_name || provider.provider_key}</h3>
                     <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.label === 'Vérifié' ? 'Disponibilité confirmée.' : 'Disponibilité non confirmée.'}</p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1230,21 +1082,14 @@ function ProvidersView({
                       <Button
                         size="sm"
                         variant="outline"
-                        loading={verifyingKey === provider.id}
+                        loading={verifyingKey === provider.provider_key}
                         disabled={Boolean(verifyingKey)}
-                        onClick={() => { void onVerifyProvider(provider.id); }}
+                        onClick={() => { void onVerifyProvider(provider.provider_key); }}
                       >
                         Vérifier la connexion
                       </Button>
                     )}
                   </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {provider.proposedCapabilities.map((capability) => (
-                    <span key={capability} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-400">
-                      {CAPABILITY_LABELS[capability]}
-                    </span>
-                  ))}
                 </div>
                 {providerModels.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
@@ -1254,6 +1099,7 @@ function ProvidersView({
                         : model.verification_status === 'unavailable'
                           ? 'Indisponible'
                           : 'Non vérifié';
+                      const capabilities = capabilitiesOf(model.capabilities);
                       return (
                         <button
                           key={model.model_key}
@@ -1261,7 +1107,7 @@ function ProvidersView({
                           disabled={!canProbe || Boolean(verifyingKey)}
                           title={canProbe ? 'Vérifier ce modèle IA VYORA' : undefined}
                           onClick={() => {
-                            if (canProbe) void onVerifyProvider(provider.id, model.provider_model_key);
+                            if (canProbe) void onVerifyProvider(provider.provider_key, model.provider_model_key);
                           }}
                           className={cn(
                             'rounded-md border px-2 py-0.5 text-[10px] transition',
@@ -1273,7 +1119,8 @@ function ProvidersView({
                             (!canProbe || Boolean(verifyingKey)) && 'cursor-default opacity-80',
                           )}
                         >
-                          Modèle VYORA {providerModels.indexOf(model) + 1} ({modelStateLabel})
+                          {model.display_name || model.model_key} ({modelStateLabel})
+                          {capabilities.length > 0 ? ` · ${capabilities.slice(0, 2).join(', ')}` : ''}
                         </button>
                       );
                     })}
@@ -1285,29 +1132,20 @@ function ProvidersView({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+      <section className="vy-surface p-5 sm:p-7">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal size={16} className="text-brand-300" />
-          <h3 className="text-sm font-semibold text-white">Adaptateurs extensibles préparés</h3>
+          <h3 className="text-sm font-semibold text-white">Comment VYORA choisit un service IA</h3>
         </div>
-        <p className="mb-4 text-xs text-slate-400">
-          Ces adaptateurs disposent d’une interface prête côté serveur, sans clé ni exécution distante active tant qu’ils ne sont pas configurés et vérifiés.
+        <p className="text-xs leading-relaxed text-slate-400">
+          Le catalogue des services n’est pas figé : la plateforme lit le registre central, qui décrit pour chaque
+          fournisseur son protocole, son URL et le nom de son secret. Un service ajouté par l’administrateur apparaît
+          donc dans cette liste sans mise à jour de l’application — et n’est utilisé qu’après une vérification réelle.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {EXTENSIBLE_PROVIDER_ADAPTERS.map((adapter) => (
-            <article key={adapter.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-3.5" data-testid={`adapter-${adapter.id}`}>
-              <div className="flex items-center justify-between gap-2">
-                <h4 className="text-sm font-medium text-white">Service VYORA à venir</h4>
-                <Badge tone="neutral">À venir</Badge>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-400">Cette capacité pourra être activée après vérification côté serveur.</p>
-            </article>
-          ))}
-        </div>
       </section>
 
       {backendReady && (
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+        <section className="vy-surface p-5 sm:p-7">
           <h3 className="text-sm font-semibold text-white">Préférence de routage par rôle</h3>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <select
@@ -1345,15 +1183,11 @@ function ProvidersView({
                   className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
                 >
                   <option value="">Service IA…</option>
-                  {(configurableProviders.length > 0
-                    ? configurableProviders
-                    : BUSINESS_PROVIDERS.filter((p) => p.id !== 'muapi').map((p) => ({
-                        provider_key: p.id,
-                        display_name: p.name,
-                      }))
-                  ).map((provider) => (
+                  {configurableProviders.length === 0 ? (
+                    <option value="" disabled>Aucun service configuré</option>
+                  ) : configurableProviders.map((provider) => (
                     <option key={provider.provider_key} value={provider.provider_key}>
-                        {`Moteur VYORA ${configurableProviders.findIndex((entry) => entry.provider_key === provider.provider_key) + 1}`}
+                      {provider.display_name || provider.provider_key}
                     </option>
                   ))}
                 </select>
@@ -1366,7 +1200,7 @@ function ProvidersView({
                   <option value="">Modèle par défaut</option>
                   {modelsForSelectedProvider.map((model) => (
                     <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>
-                      {`Modèle VYORA ${modelsForSelectedProvider.indexOf(model) + 1}`}
+                      {model.display_name || model.model_key}
                     </option>
                   ))}
                 </select>
@@ -1433,107 +1267,6 @@ function ProvidersView({
   );
 }
 
-function IntegrationsView({
-  connections, loadError, busyKey, notice, onRetry, onRequest, onCancel, onDisconnect,
-}: {
-  connections: BusinessIntegrationConnection[] | null;
-  loadError: string | null;
-  busyKey: string | null;
-  notice: { tone: 'success' | 'error'; text: string } | null;
-  onRetry: () => void;
-  onRequest: (connectorKey: string) => void;
-  onCancel: (connectorKey: string) => void;
-  onDisconnect: (connectorKey: string) => void;
-}) {
-  const statusPriority: Record<string, number> = { connected: 4, pending: 3, error: 2, disconnected: 1, unconfigured: 0 };
-  const byConnector = new Map<string, BusinessIntegrationConnection>();
-  for (const conn of connections ?? []) {
-    const prev = byConnector.get(conn.connector_key);
-    if (!prev || (statusPriority[conn.status] ?? 0) > (statusPriority[prev.status] ?? 0)) {
-      byConnector.set(conn.connector_key, conn);
-    }
-  }
-  return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="business-integrations">
-      <div className="mb-5 max-w-3xl">
-        <h2 className="text-lg font-semibold text-white">Intégrations et connexions sécurisées</h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Une demande est enregistrée pour votre compte et cette entreprise. Elle ne lance pas de connexion OAuth
-          et n’importe aucune donnée externe automatiquement.
-        </p>
-        <p className="mt-2 text-xs leading-relaxed text-amber-100/75">
-          La déconnexion retire uniquement l’association locale. Si une autorisation existe chez un fournisseur,
-          révoquez-la également auprès de celui-ci : aucune révocation externe n’est effectuée ici.
-        </p>
-      </div>
-
-      {loadError && (
-        <div role="alert" className="mb-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">
-          État des intégrations indisponible : {loadError}{' '}
-          <button type="button" className="underline" onClick={onRetry}>Réessayer</button>
-        </div>
-      )}
-      {!connections && !loadError && <p role="status" className="mb-4 text-xs text-slate-400">Chargement des intégrations…</p>}
-      {notice && (
-        <div className={`mb-4 rounded-xl border px-3.5 py-2.5 text-xs ${notice.tone === 'success' ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100' : 'border-rose-400/20 bg-rose-400/[0.06] text-rose-100'}`} role="status">
-          {notice.text}
-        </div>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {INTEGRATION_DEFINITIONS.map((contract: IntegrationDefinition) => {
-          const persisted = byConnector.get(contract.id);
-          const status = connections ? persisted?.status ?? 'unconfigured' : null;
-          const busy = busyKey?.startsWith(`${contract.id}:`) ?? false;
-          const disabled = Boolean(busyKey) || !connections;
-          const tone = status === 'connected' ? 'success' : status === 'pending' ? 'warning' : status === 'error' ? 'danger' : 'neutral';
-          const label = status === null ? 'État inconnu' : status === 'connected' ? 'Connecté' : status === 'pending' ? 'Demande enregistrée' : status === 'error' ? 'Erreur de connexion' : status === 'disconnected' ? 'Déconnecté localement' : 'Non connecté';
-          return (
-            <article key={contract.id} className="flex flex-col rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`connector-${contract.id}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-white">{contract.name}</h3>
-                  <p className="mt-1 text-[11px] text-slate-500">Authentification : {contract.authorization}</p>
-                </div>
-                <Badge tone={tone}>{label}</Badge>
-              </div>
-              <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                Capacités proposées : {contract.proposedCapabilities.join(', ')}
-              </p>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{contract.note}</p>
-              {persisted?.updated_at && (
-                <p className="mt-2 text-[10px] text-slate-600">Dernière activité : {new Date(persisted.updated_at).toLocaleString('fr-FR')}</p>
-              )}
-              <div className="mt-auto pt-3">
-                {status === 'connected' ? (
-                  <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onDisconnect(contract.id)}>
-                    {busy ? 'Déconnexion locale…' : 'Retirer l’association locale'}
-                  </Button>
-                ) : status === 'pending' ? (
-                  <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onCancel(contract.id)}>
-                    {busy ? 'Annulation…' : 'Annuler la demande'}
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onRequest(contract.id)}>
-                    {busy ? 'Enregistrement…' : status === 'error' || status === 'disconnected' ? 'Redemander l’activation' : 'Demander l’activation'}
-                  </Button>
-                )}
-              </div>
-            </article>
-          );
-        })}
-      </div>
-
-      <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-300/15 bg-amber-400/[0.04] px-3.5 py-3 text-[11px] leading-relaxed text-amber-100/80">
-        <ShieldAlert size={14} className="mt-0.5 shrink-0" />
-        <p>
-          Les connexions et synchronisations fournisseur ne sont pas configurées ici. Une demande enregistrée
-          ne signifie pas qu’un service externe est connecté.
-        </p>
-      </div>
-    </section>
-  );
-}
 
 /**
  * A6 — Contrôle IA : le centre de contrôle de l'AI CORE, côté utilisateur.
@@ -1600,7 +1333,7 @@ function AiControlCenterView({
   return (
     <div className="space-y-4">
       {/* Mémoire de l'agent */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-memory-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-memory-panel">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-white">Mémoire de l’agent</h2>
@@ -1687,7 +1420,7 @@ function AiControlCenterView({
       </section>
 
       {/* Règles de routage */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-routing-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-routing-panel">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <SlidersHorizontal size={16} className="text-brand-300" />
@@ -1719,7 +1452,7 @@ function AiControlCenterView({
       </section>
 
       {/* Activité IA récente */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-activity-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-activity-panel">
         <div className="mb-4 flex items-center gap-2">
           <Activity size={16} className="text-cyan-300" />
           <h3 className="text-sm font-semibold text-white">Activité IA récente</h3>
@@ -1760,6 +1493,9 @@ export default function BusinessGrowWorkspace() {
 }
 
 function ScopedBusinessGrowWorkspace({ section, setSection }: { section: BusinessSection; setSection: (value: BusinessSection) => void }) {
+  // Texte préparé par un rapport d'agent, transmis au composeur de l'assistant.
+  // Texte préparé par un rapport d'agent OU par le contexte transmis à l'arrivée.
+  const [reportDraft, setReportDraft] = useState<string | null>(null);
   const location = useLocation();
   const { user, session, workspace, workspaceId } = useAuth();
   const accountScope = `${user?.id ?? ''}:${workspaceId ?? ''}`;
@@ -1829,6 +1565,10 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
     setEntryIntent(parsedIntent);
     if (parsedIntent.section) setSection(parsedIntent.section);
     if (parsedIntent.roleKey) setRoleKey(parsedIntent.roleKey);
+    // Le contexte transmis pré-remplit le composeur de l'assistant. Sans cela,
+    // arriver depuis un projet ouvrirait une conversation vide — le contexte
+    // serait affiché mais inutilisable.
+    if (parsedIntent.initialDraft) setReportDraft((current) => current ?? parsedIntent.initialDraft ?? null);
   }, [parsedIntent]);
 
   // Les liens de découverte (Integrations Hub, Smart CRM) peuvent cibler une
@@ -1989,7 +1729,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         if (typeof result.disconnected !== 'boolean') throw new Error('Réponse de déconnexion invalide.');
         tone = result.disconnected ? 'success' : 'error';
         text = result.disconnected
-          ? 'Association locale retirée. Révoquez aussi l’autorisation chez le fournisseur si nécessaire.'
+          ? 'Association locale retirée. Aucune révocation n’a été effectuée chez le fournisseur : révoquez-la également auprès de celui-ci si nécessaire.'
           : 'Aucune association locale à retirer dans cette entreprise.';
       }
       if (accountScopeRef.current !== scope) return;
@@ -2338,6 +2078,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         'PROVIDER_MODEL_MISMATCH',
         'PROVIDER_AUTH_FAILED',
         'PROVIDER_RATE_LIMITED',
+        'PROVIDER_PAYMENT_REQUIRED',
         'PROVIDER_UNAVAILABLE',
         'PROVIDER_TIMEOUT',
         'PROVIDER_NETWORK_ERROR',
@@ -2644,17 +2385,20 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
 
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
-      <header className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#080d15] px-5 py-6 sm:px-7">
+      <header className="relative overflow-hidden rounded-[1.6rem] border border-violet-200/[0.14] bg-[#080a12] px-5 py-6 sm:px-7">
         <img src="/brand/vyora-growth.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 [mask-image:linear-gradient(to_right,transparent,black)]" />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#080d15_20%,rgba(8,13,21,0.4))]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-brand-500/25 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-violet-500/25 blur-[90px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 right-0 h-56 w-56 rounded-full bg-cyan-400/15 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/50 to-transparent" />
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-200">
-              <Brain size={14} /> VYORA · Business Grow
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-400/15 text-violet-200 ring-1 ring-violet-300/25"><Brain size={14} /></span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-200/90">VYORA · Business Grow</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-slate-400">Espace pilotage</span>
             </div>
-            <h1 className="vyora-display text-2xl tracking-tight text-white sm:text-3xl">Votre copilote business</h1>
+            <h1 className="vy-title text-[1.75rem] leading-tight sm:text-[2.15rem]">Votre copilote business</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
               Intelligence, stratégie et croissance, reliées à votre contexte métier.
             </p>
@@ -2674,10 +2418,10 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
 
       <Link
         to="/app/business/modules"
-        className="group flex flex-col gap-3 rounded-2xl border border-brand-400/20 bg-brand-500/[0.06] px-4 py-4 transition hover:border-brand-400/40 hover:bg-brand-500/[0.1] sm:flex-row sm:items-center sm:justify-between"
+        className="group flex flex-col gap-3 rounded-2xl border border-violet-300/20 bg-violet-400/[0.06] px-4 py-4 transition hover:border-violet-300/40 hover:bg-violet-400/[0.1] sm:flex-row sm:items-center sm:justify-between"
       >
         <span className="flex min-w-0 items-start gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/15 text-brand-200"><Package size={19} /></span>
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-violet-300/25 bg-violet-400/12 text-violet-200"><Package size={19} /></span>
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-white">13 modules métier opérationnels</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
@@ -2685,7 +2429,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
             </span>
           </span>
         </span>
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-brand-200">
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-violet-200">
           Ouvrir les modules <ArrowUpRight size={15} className="transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </span>
       </Link>
@@ -2713,19 +2457,31 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
       )}
 
       <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><MessageSquare size={14} className="text-cyan-300" /> Conversations</div>
-          <p className="mt-2 text-xl font-semibold text-white">{conversationsLoaded ? conversations.length : '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Conversations</p>
+            <span className="vy-icon-tile h-8 w-8"><MessageSquare size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">{conversationsLoaded ? conversations.length : '—'}</p>
           <p className="mt-1 text-[11px] text-slate-500">Historique de votre espace métier</p>
         </div>
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><Zap size={14} className="text-emerald-300" /> Services vérifiés</div>
-          <p className="mt-2 text-xl font-semibold text-white">{providers ? availableProviderCount : '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Services vérifiés</p>
+            <span className="vy-icon-tile h-8 w-8"><Zap size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">
+            {providers ? availableProviderCount : '—'}
+            <span className="ml-1 text-[11px] font-normal text-slate-500">service(s)</span>
+          </p>
           <p className="mt-1 text-[11px] text-slate-500">Disponibilité contrôlée côté serveur</p>
         </div>
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><Brain size={14} className="text-violet-300" /> Quota métier</div>
-          <p className="mt-2 text-xl font-semibold text-white">{quota?.available_units ?? '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Quota métier</p>
+            <span className="vy-icon-tile h-8 w-8"><Brain size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">{quota?.available_units ?? '—'}</p>
           <p className="mt-1 text-[11px] text-slate-500">
             {quota
               ? `Unités disponibles · crédits Studio ${quota.studio_ugc_untouched ? 'intacts' : 'distincts'}`
@@ -2734,8 +2490,8 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="Navigation Business Grow" className="flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
+      <div className="grid gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
+        <nav aria-label="Navigation Business Grow" className="no-scrollbar flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -2745,7 +2501,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
               className={cn(
                 'relative flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
                 section === id
-                  ? 'bg-gradient-to-r from-brand-500/25 to-cyan-500/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]'
+                  ? 'bg-gradient-to-r from-violet-400/20 to-cyan-400/[0.06] text-white shadow-[inset_0_0_0_1px_rgba(196,181,253,0.18)]'
                   : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
               )}
             >
@@ -2803,6 +2559,10 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
               onSelectConversation={(id) => { if (selectedConversationRef.current === id) return; selectionRevision.current++; messageLoadSequence.current++; toolLoadSequence.current++; selectedConversationRef.current = id; setSelectedConversationId(id); setMessages([]); setTools([]); }}
               onSend={sendMessage}
               onRetry={() => { void refreshWorkspace(); void loadMessages(); }}
+              draftFromReport={reportDraft}
+              onDraftConsumed={() => setReportDraft(null)}
+              onReportDraft={setReportDraft}
+              onOpenIntegrations={() => setSection('integrations')}
             />
           )}
           {workspaceId && section === 'growth' && (
@@ -2868,16 +2628,27 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
             />
           )}
           {workspaceId && section === 'integrations' && (
-            <IntegrationsView
-              connections={integrations}
-              loadError={integrationLoadError}
-              onRetry={() => { void loadIntegrations().catch(() => {}); }}
-              busyKey={integrationBusyKey}
-              notice={integrationNotice}
-              onRequest={(connectorKey) => { void handleIntegrationAction('request', connectorKey); }}
-              onCancel={(connectorKey) => { void handleIntegrationAction('cancel', connectorKey); }}
-              onDisconnect={(connectorKey) => { void handleIntegrationAction('disconnect', connectorKey); }}
-            />
+            /*
+             * Même composant que `/app/connect`, même source de vérité : un
+             * seul catalogue. Business Grow fournit ici l'entreprise active et
+             * son contrôleur d'état (compteurs de séquence, verrou de mutation).
+             */
+            <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">
+              <IntegrationsCenter
+                workspaceId={workspaceId}
+                embedded
+                controller={{
+                  connections: integrations,
+                  loadError: integrationLoadError,
+                  busyKey: integrationBusyKey,
+                  notice: integrationNotice,
+                  onRetry: () => { void loadIntegrations().catch(() => {}); },
+                  onRequest: (connectorKey) => { void handleIntegrationAction('request', connectorKey); },
+                  onCancel: (connectorKey) => { void handleIntegrationAction('cancel', connectorKey); },
+                  onDisconnect: (connectorKey) => { void handleIntegrationAction('disconnect', connectorKey); },
+                }}
+              />
+            </section>
           )}
         </div>
       </div>

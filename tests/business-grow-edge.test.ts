@@ -46,6 +46,12 @@ function fixture() {
     updateModuleRecord: vi.fn(async () => true),
     deleteModuleRecord: vi.fn(async () => true),
   };
+  let groqConfig: ProviderConfig | null = {
+    apiKey: 'test-groq-secret', model: 'verified-groq-model', baseUrl: 'https://api.groq.com/openai/v1',
+  };
+  let geminiConfig: ProviderConfig | null = {
+    apiKey: 'test-gemini-secret', model: 'verified-gemini-model', adapterKind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+  };
   const dependencies: BusinessGrowDependencies = {
     store,
     getUserId: vi.fn(async (authorization) => authorization === 'Bearer valid-user-session' ? userA : null),
@@ -54,14 +60,17 @@ function fixture() {
       'http://localhost:5173',
       'http://127.0.0.1:5173',
     ],
-    providerConfigs: {
-      groq: { apiKey: 'test-groq-secret', model: 'verified-groq-model' },
-      gemini: { apiKey: 'test-gemini-secret', model: 'verified-gemini-model' },
-    },
-    providerOrder: ['groq', 'gemini'],
+    providerConfigs: () => ({
+      ...(groqConfig ? { groq: groqConfig } : {}),
+      ...(geminiConfig ? { gemini: geminiConfig } : {}),
+    }),
+    providerOrder: () => ['groq', 'gemini'],
     complete: vi.fn(async () => ({ content: 'Réponse de test.', inputTokens: 10, outputTokens: 12 })),
   };
-  return { store, dependencies, handler: createBusinessGrowHandler(dependencies) };
+  const setConfig = (provider: 'groq' | 'gemini', config: ProviderConfig | null) => {
+    if (provider === 'groq') groqConfig = config; else geminiConfig = config;
+  };
+  return { store, dependencies, setConfig, handler: createBusinessGrowHandler(dependencies) };
 }
 
 function request(body: unknown, authorization = 'Bearer valid-user-session') {
@@ -237,7 +246,7 @@ describe('Business Grow Edge handler', () => {
       status: 'succeeded',
       provider: { key: 'groq', model: 'verified-groq-model' },
     });
-    expect(dependencies.complete).toHaveBeenCalledWith('groq', dependencies.providerConfigs.groq, [
+    expect(dependencies.complete).toHaveBeenCalledWith('groq', dependencies.providerConfigs().groq, [
       expect.objectContaining({ role: 'system' }),
       { role: 'user', content: 'Contexte précédent' },
       { role: 'assistant', content: 'Réponse précédente' },
@@ -322,14 +331,14 @@ describe('Business Grow Edge handler', () => {
   });
 
   it('does not call an API when the key is missing', async () => {
-    const { dependencies, store } = fixture();
+    const { dependencies, store, setConfig } = fixture();
     vi.mocked(store.selectRoute).mockResolvedValue({
       attemptId: '99999999-9999-4999-8999-999999999999',
       providerKey: 'groq',
       modelKey: 'groq-logical-key',
       providerModelKey: 'verified-groq-model',
     });
-    dependencies.providerConfigs.groq = { apiKey: '', model: 'verified-groq-model' };
+    setConfig('groq', { apiKey: '', model: 'verified-groq-model' });
 
     const response = await createBusinessGrowHandler(dependencies)(request({
       action: 'messages.send', conversationId: conversationA, content: 'Test', idempotencyKey,
@@ -427,7 +436,7 @@ describe('Business Grow Edge handler', () => {
   });
 
   it('verifies providers live via probeProvider and persists verification result', async () => {
-    const { dependencies, store } = fixture();
+    const { dependencies, store, setConfig } = fixture();
     const recordHealthCheck = vi.fn(async () => undefined);
     store.recordHealthCheck = recordHealthCheck;
     const probeMock = vi.fn(async (providerKey: BusinessProvider, config: ProviderConfig): Promise<ProviderProbeResult> => {
@@ -464,7 +473,7 @@ describe('Business Grow Edge handler', () => {
       status: 'healthy',
     }));
 
-    dependencies.providerConfigs.gemini = { apiKey: '', model: '' };
+    setConfig('gemini', { apiKey: '', model: '' });
     const missingRes = await handler(request({ action: 'providers.verify', providerKey: 'gemini' }));
     expect(missingRes.status).toBe(503);
     expect(await missingRes.json()).toMatchObject({ error: { code: 'PROVIDER_NOT_CONFIGURED' } });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  AlertCircle, CheckCircle2, ChevronDown, Coins, Database, ImagePlus, Info,
+  AlertCircle, CheckCircle2, ChevronDown, Coins, Database, Film, ImagePlus, Info,
   Lock, RefreshCw, RotateCcw, Search, SlidersHorizontal, Upload, X,
 } from 'lucide-react';
 import { Badge, Button, cn } from '../../components/ui';
@@ -70,7 +70,7 @@ export function CatalogBrowser({ models, catalog, selectedId, onSelect, onClose,
   };
 
   return (
-    <section id="catalog-muapi" data-testid="catalog-muapi" className="studio-v2 mt-5 rounded-[24px] border border-cyan-400/15 bg-[#05090e] p-3 sm:p-5">
+    <section id="catalog-muapi" data-testid="catalog-muapi" className="studio-v2 mt-5 rounded-[24px] border border-cyan-400/20 bg-[#05090e] p-3 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Création vidéo VYORA</p>
@@ -181,14 +181,26 @@ export function CatalogBrowser({ models, catalog, selectedId, onSelect, onClose,
                 return (
                   <button key={m.model_id} id={`model-card-${m.model_id}`} data-testid="catalog-model-card" type="button"
                     disabled={!selectable} onClick={() => selectable && onSelect(m.model_id)}
-                    className={cn('relative min-w-0 rounded-2xl border p-3 text-left transition',
-                      active ? 'border-cyan-400/50 bg-cyan-400/[0.09] shadow-[0_0_0_1px_rgba(34,211,238,0.12)]'
-                        : 'border-white/[0.07] bg-[#080d14] hover:border-cyan-400/25',
-                      !selectable && 'cursor-not-allowed opacity-60')}>
+                    className={cn('group relative min-w-0 overflow-hidden rounded-2xl border p-3 text-left transition duration-300',
+                      active
+                        ? 'border-cyan-400/55 bg-cyan-400/[0.10] shadow-[0_0_0_1px_rgba(34,211,238,0.14),0_18px_40px_-30px_rgba(34,211,238,0.7)]'
+                        : 'border-white/[0.07] bg-gradient-to-b from-white/[0.035] to-white/[0.012] hover:-translate-y-0.5 hover:border-cyan-400/30',
+                      !selectable && 'cursor-not-allowed opacity-60 hover:translate-y-0')}>
+                    {active && <span aria-hidden="true" className="absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300 to-transparent" />}
                     <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-[12px] font-semibold text-white">Modèle vidéo {index + 1}</p>
-                        <p className="mt-0.5 truncate text-[10px] text-cyan-200/80">{MODE_LABELS[modelModes(m)[0]] ?? 'Vidéo'}</p>
+                      <div className="flex min-w-0 items-start gap-2.5">
+                        <span className={cn(
+                          'grid h-8 w-8 shrink-0 place-items-center rounded-lg border transition',
+                          selectable
+                            ? 'border-cyan-300/25 bg-cyan-400/10 text-cyan-200 group-hover:bg-cyan-400/15'
+                            : 'border-white/10 bg-white/[0.04] text-slate-500',
+                        )}>
+                          <Film size={14} />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-[12px] font-semibold text-white">Modèle vidéo {index + 1}</p>
+                          <p className="mt-0.5 truncate text-[10px] text-cyan-200/80">{MODE_LABELS[modelModes(m)[0]] ?? 'Vidéo'}</p>
+                        </div>
                       </div>
                       {active ? <CheckCircle2 size={16} className="shrink-0 text-cyan-300" />
                         : selectable ? <Badge tone="success">Actif</Badge>

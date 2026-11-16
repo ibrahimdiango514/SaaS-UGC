@@ -9,12 +9,12 @@ function StudioTab({ to, label, icon: Icon, status, end }: {
 }) {
   return (
     <NavLink to={to} end={end} className={({ isActive }) => cn(
-      'group flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-[13px] font-medium transition-all duration-200',
+      'group flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-[12.5px] font-medium transition-all duration-200',
       isActive
-        ? 'border-brand-400/40 bg-brand-500/20 text-white shadow-[0_0_0_1px_rgba(34,211,238,0.12)]'
+        ? 'border-cyan-300/40 bg-cyan-400/[0.14] text-white shadow-[0_0_0_1px_rgba(34,211,238,0.12)]'
         : 'border-white/[0.06] bg-white/[0.02] text-slate-400 hover:border-white/15 hover:bg-white/[0.05] hover:text-white',
     )}>
-      <Icon size={15} className={cn('transition-colors', status === 'live' ? 'text-brand-300' : 'text-slate-500')} />
+      <Icon size={15} className={cn('transition-colors', status === 'live' ? 'text-cyan-300' : 'text-slate-500')} />
       <span>{label}</span>
       {status === 'prepared' && <Lock size={11} className="ml-0.5 opacity-60" aria-label="Espace préparé, non opérationnel" />}
     </NavLink>
@@ -29,19 +29,21 @@ export function StudioShell({ children, title, eyebrow, actions }: {
 
   return (
     <div className="animate-fadeUp">
-      {/* VYORA studio identity — original aurora/grain composition, not a copy of MuAPI */}
-      <div className="relative mb-5 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0b0d18] px-5 py-6 sm:px-7 sm:py-7">
-        <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-28 h-64 w-64 rounded-full bg-brand-500/20 blur-[90px]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 right-0 h-64 w-64 rounded-full bg-cyan-400/10 blur-[100px]" />
+      {/* Identité VYORA Studio — composition cyan, profondeur et grille discrète. */}
+      <div className="relative mb-5 overflow-hidden rounded-[1.6rem] border border-cyan-200/[0.14] bg-[#080d15] px-5 py-6 sm:px-7 sm:py-7">
+        <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-28 h-64 w-64 rounded-full bg-cyan-400/[0.18] blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 right-0 h-64 w-64 rounded-full bg-sky-400/[0.12] blur-[100px]" />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.035] [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:18px_18px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/60 to-transparent" />
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="mb-2 flex items-center gap-2">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-500/20 text-brand-200 ring-1 ring-brand-400/25"><Sparkles size={14} /></span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-brand-200/90">VYORA · Studio UGC</span>
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-cyan-400/15 text-cyan-200 ring-1 ring-cyan-300/25"><Sparkles size={14} /></span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200/90">VYORA · Studio UGC</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-slate-400">Espace création</span>
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">{title}</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
+            <h1 className="vy-title text-[1.65rem] leading-tight sm:text-[2rem]">{title}</h1>
+            <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-slate-400">
               {active?.description ?? eyebrow ?? 'Un espace de création sobre, rapide et pensé pour le mobile.'}
             </p>
           </div>

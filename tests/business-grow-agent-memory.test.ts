@@ -62,8 +62,8 @@ function fixture(overrides: {
     store,
     getUserId: vi.fn(async (authorization) => authorization === 'Bearer valid-user-session' ? userA : null),
     allowedOrigins: ['https://reelora.test'],
-    providerConfigs: { groq: { apiKey: 'k', model: 'verified-groq-model' } },
-    providerOrder: ['groq'],
+    providerConfigs: () => ({ groq: { apiKey: 'k', model: 'verified-groq-model' } }),
+    providerOrder: () => ['groq'],
     complete,
   };
   return { store, complete, searchAgentMemory, saveAgentMemory, listAgentMemories, forgetAgentMemory, handler: createBusinessGrowHandler(dependencies) };

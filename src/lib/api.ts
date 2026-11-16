@@ -927,6 +927,31 @@ export function adminAiCoreCalls(limit = 50): Promise<AiCoreCallEntry[]> {
   return rpc<AiCoreCallEntry[]>('vyora_ai_admin_calls_list', { p_limit: limit });
 }
 
+/**
+ * VYORA AI CORE — enregistrement d'un fournisseur dans le registre.
+ *
+ * Seul le DESCRIPTEUR est transmis (gabarit de protocole, URL, nom de la
+ * variable de secret). La clé elle-même reste un secret Edge : elle n'est
+ * jamais saisie ni stockée par le navigateur.
+ */
+export function adminAiCoreProviderUpsert(args: {
+  provider_key: string;
+  display_name: string;
+  adapter_kind: 'openai' | 'gemini' | 'cloudflare' | 'none';
+  base_url: string;
+  models_url?: string | null;
+  api_key_env?: string | null;
+  account_id_env?: string | null;
+  aggregator?: boolean;
+}): Promise<{ provider_key: string; enabled: boolean; status: string; adapter_kind: string; base_url: string }> {
+  return rpc('vyora_ai_admin_provider_upsert', { p_payload: args });
+}
+
+/** VYORA AI CORE — désactivation d'un fournisseur (jamais de suppression). */
+export function adminAiCoreProviderDisable(providerKey: string): Promise<{ provider_key: string; enabled: boolean }> {
+  return rpc('vyora_ai_admin_provider_disable', { p_provider_key: providerKey });
+}
+
 /** VYORA AI CORE — réglages d'administration IA (lecture). */
 export function adminAiCoreSettingsGet(): Promise<AiCoreAdminSettings> {
   return rpc<AiCoreAdminSettings>('vyora_ai_admin_settings_get');

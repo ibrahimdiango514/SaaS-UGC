@@ -8,9 +8,9 @@ const registrySnapshot: AiCoreRegistrySnapshot = {
   version: 2,
   generated_at: '2026-11-15T12:00:00Z',
   providers: [
-    { key: 'groq', name: 'Groq', status: 'active', aggregator: false },
-    { key: 'gemini', name: 'Gemini', status: 'active', aggregator: false },
-    { key: 'openrouter', name: 'OpenRouter', status: 'active', aggregator: true },
+    { key: 'groq', name: 'Groq', status: 'active', aggregator: false, adapter_kind: 'openai', base_url: 'https://api.groq.com/openai/v1', api_key_env: 'GROQ_API_KEY' },
+    { key: 'gemini', name: 'Gemini', status: 'active', aggregator: false, adapter_kind: 'gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta', api_key_env: 'GEMINI_API_KEY' },
+    { key: 'openrouter', name: 'OpenRouter', status: 'active', aggregator: true, adapter_kind: 'openai', base_url: 'https://openrouter.ai/api/v1', api_key_env: 'OPENROUTER_API_KEY' },
   ],
   models: [
     { provider: 'groq', key: 'gpt-oss-120b', provider_model: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B', verified: true, tier: 'primary' },
@@ -50,10 +50,16 @@ const apiMocks = vi.hoisted(() => ({
   calls: vi.fn(),
   settingsGet: vi.fn(),
   settingsSet: vi.fn(),
+  providerUpsert: vi.fn(),
+  providerDisable: vi.fn(),
 }));
 
 beforeEach(() => {
   (apiMocks.registry as Mock).mockImplementation(async () => registrySnapshot);
+  (apiMocks.providerUpsert as Mock).mockImplementation(async (args: { provider_key: string }) => ({
+    provider_key: args.provider_key, enabled: false, status: 'unverified', adapter_kind: 'openai', base_url: 'https://api.exemple.test/v1',
+  }));
+  (apiMocks.providerDisable as Mock).mockImplementation(async (providerKey: string) => ({ provider_key: providerKey, enabled: false }));
   (apiMocks.calls as Mock).mockImplementation(async () => callEntries);
   (apiMocks.settingsGet as Mock).mockImplementation(async () => adminSettings);
   (apiMocks.settingsSet as Mock).mockImplementation(async (args: {
@@ -76,6 +82,8 @@ vi.mock('../src/lib/api', async (importOriginal) => {
     adminAiCoreCalls: apiMocks.calls,
     adminAiCoreSettingsGet: apiMocks.settingsGet,
     adminAiCoreSettingsSet: apiMocks.settingsSet,
+    adminAiCoreProviderUpsert: apiMocks.providerUpsert,
+    adminAiCoreProviderDisable: apiMocks.providerDisable,
   };
 });
 
@@ -93,7 +101,8 @@ describe('admin — Contrôle IA (AI CORE)', () => {
     expect(await screen.findByText('Registre multi-fournisseurs')).toBeTruthy();
     expect(screen.getByText('Groq')).toBeTruthy();
     expect(screen.getByText('OpenRouter')).toBeTruthy();
-    expect(screen.getByText('Agrégateur')).toBeTruthy();
+    // Agrégateur et gabarit de protocole sont affichés sur la même ligne.
+    expect(screen.getByText(/openai · agrégateur/)).toBeTruthy();
     // 3 fournisseurs, 3 modèles, 2 vérifiés.
     const cards = screen.getAllByText('fournisseur(s) actif(s)');
     expect(cards.length).toBe(1);
@@ -144,6 +153,52 @@ describe('admin — Contrôle IA (AI CORE)', () => {
 
     await waitFor(() => expect(screen.getByText('Budget invalide : montant positif ou vide.')).toBeTruthy());
     expect(apiMocks.settingsSet).not.toHaveBeenCalled();
+  });
+
+  it('déclare un fournisseur depuis le registre, sans transmettre aucune clé', async () => {
+    render(<ToastProvider><AiCoreControl /></ToastProvider>);
+    await screen.findByText('Registre multi-fournisseurs');
+
+    fireEvent.click(screen.getByRole('button', { name: /Ajouter un fournisseur/i }));
+    const panel = screen.getByLabelText('Déclarer un fournisseur');
+
+    fireEvent.change(within(panel).getByPlaceholderText('ex. fournisseur-x'), { target: { value: 'fournisseur-x' } });
+    fireEvent.change(within(panel).getByPlaceholderText('ex. Fournisseur X'), { target: { value: 'Fournisseur X' } });
+    fireEvent.change(within(panel).getByPlaceholderText('https://api.exemple.com/v1'), { target: { value: 'https://api.exemple.test/v1' } });
+    fireEvent.change(within(panel).getByPlaceholderText('ex. FOURNISSEUR_X_API_KEY'), { target: { value: 'FOURNISSEUR_X_API_KEY' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Enregistrer le fournisseur' }));
+
+    await waitFor(() => expect(apiMocks.providerUpsert).toHaveBeenCalledWith({
+      provider_key: 'fournisseur-x',
+      display_name: 'Fournisseur X',
+      adapter_kind: 'openai',
+      base_url: 'https://api.exemple.test/v1',
+      api_key_env: 'FOURNISSEUR_X_API_KEY',
+    }));
+    // Le seul secret manipulé est le NOM de la variable, jamais sa valeur.
+    const payload = JSON.stringify((apiMocks.providerUpsert as Mock).mock.calls[0][0]);
+    expect(payload).not.toMatch(/sk-|secret|token=/i);
+  });
+
+  it('refuse un descripteur invalide sans appel serveur', async () => {
+    render(<ToastProvider><AiCoreControl /></ToastProvider>);
+    await screen.findByText('Registre multi-fournisseurs');
+
+    fireEvent.click(screen.getByRole('button', { name: /Ajouter un fournisseur/i }));
+    const panel = screen.getByLabelText('Déclarer un fournisseur');
+    fireEvent.change(within(panel).getByPlaceholderText('ex. fournisseur-x'), { target: { value: 'Majuscule Invalide' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Enregistrer le fournisseur' }));
+
+    expect(await within(panel).findByRole('alert')).toBeTruthy();
+    expect(apiMocks.providerUpsert).not.toHaveBeenCalled();
+  });
+
+  it('désactive un fournisseur sans le supprimer du registre', async () => {
+    render(<ToastProvider><AiCoreControl /></ToastProvider>);
+    await screen.findByText('Registre multi-fournisseurs');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Désactiver Groq' }));
+    await waitFor(() => expect(apiMocks.providerDisable).toHaveBeenCalledWith('groq'));
   });
 
   it('affiche l’état d’erreur avec relance quand le registre est refusé', async () => {
