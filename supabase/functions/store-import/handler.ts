@@ -145,10 +145,19 @@ export interface StoreImportDependencies {
     products: NormalizedProduct[],
     /** Origine réelle, enregistrée dans les faits du produit (audit). */
     kind?: 'url' | 'file',
+    /**
+     * `updateExisting` remplace les produits déjà présents au lieu d'en créer
+     * un doublon. Absent = création (comportement historique).
+     */
+    options?: { updateExisting?: boolean },
   ): Promise<{
     created: number;
     /** Nombre de VARIANTES réellement écrites, pas seulement détectées. */
     variantsCreated?: number;
+    /** Produits EXISTANTS mis à jour (mode mise à jour uniquement). */
+    updated?: number;
+    /** Variantes ajoutées à des produits existants (mode mise à jour). */
+    variantsUpdated?: number;
     failed: Array<{ name: string; reason: string }>;
   }>;
   /**
@@ -214,6 +223,16 @@ export interface StoreImportRequest {
   previewId?: string;
   /** Obligatoire pour `import`, strictement `true`. */
   confirmed?: boolean;
+  /**
+   * Mise à jour des produits déjà présents.
+   *
+   * Absent = comportement historique : un produit déjà au catalogue est créé
+   * à côté (l'avertissement de l'aperçu le dit). `{ updateExisting: true }`
+   * remplace le produit existant au lieu d'en créer un second — c'est la
+   * demande « import et mise à jour des variantes » : réimporter un catalogue
+   * qui a changé de tailles ne doit pas produire deux fiches.
+   */
+  updateExisting?: boolean;
   /** Indices de produits à écrire ; absent = tous les importables. */
   selection?: number[];
 }
@@ -562,7 +581,12 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
 
       // Un aperçu ne se rejoue pas : la confirmation le consomme.
       await apercus.delete(previewId);
-      const resultat = await dependencies.insertProducts(workspaceId, retenus, enregistrement.kind);
+      // Le mode est volontairement explicite : `true` seul l'active, tout le
+      // reste retombe sur la création, comme avant.
+      const mode = { updateExisting: body.updateExisting === true };
+      const resultat = await dependencies.insertProducts(
+        workspaceId, retenus, enregistrement.kind, mode,
+      );
 
       // L'historique est écrit APRÈS coup et ne fait jamais échouer l'import :
       // les produits sont déjà en base, une panne du journal ne doit pas
@@ -575,9 +599,9 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
             userId,
             source: enregistrement.kind,
             reference: enregistrement.origin?.reference ?? null,
-            created: resultat.created,
+            created: resultat.created + (resultat.updated ?? 0),
             failed: resultat.failed.length,
-            variantsCreated: resultat.variantsCreated ?? 0,
+            variantsCreated: (resultat.variantsCreated ?? 0) + (resultat.variantsUpdated ?? 0),
             failures: resultat.failed,
           });
         } catch (erreur) {

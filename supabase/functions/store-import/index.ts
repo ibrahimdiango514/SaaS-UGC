@@ -274,16 +274,85 @@ const store: StoreImportDependencies = {
    * Le découpage reste **par produit**, pas par fichier : une ligne invalide
    * ne doit pas annuler les 200 autres.
    */
-  async insertProducts(workspaceId: string, produits: NormalizedProduct[], origine: 'url' | 'file' = 'url') {
+  /**
+   * Écrit les produits ET leurs variantes.
+   *
+   * Mode `updateExisting` : le produit est retrouvé par son nom dans
+   * l'entreprise, mis à jour, et ses variantes sont réécrites à partir du
+   * fichier. C'est ce qui permet de « mettre à jour les variantes depuis
+   * CSV/XLSX » : réimporter un catalogue dont les tailles ont changé ne doit
+   * pas créer une seconde fiche produit.
+   *
+   * Les variantes existantes sont SUPPRIMÉES puis réécrites — et non
+   * désactivées — uniquement dans ce mode explicite : le fichier fait foi sur
+   * la composition du produit. Hors de ce mode, rien n'est jamais supprimé.
+   */
+  async insertProducts(
+    workspaceId: string,
+    produits: NormalizedProduct[],
+    origine: 'url' | 'file' = 'url',
+    options: { updateExisting?: boolean } = {},
+  ) {
     const db = requiredSql();
     let created = 0;
+    let updated = 0;
     let variantsCreated = 0;
+    let variantsUpdated = 0;
     const failed: Array<{ name: string; reason: string }> = [];
+
+    // Mise à jour : les identifiants des produits déjà présents, par nom
+    // normalisé (casse et espaces ignorés, comme l'aperçu qui les signale).
+    // Interrogation directe plutôt que `this.listExistingProducts` : la
+    // méthode ne dépend ainsi pas de la façon dont la fonction est appelée, ce
+    // qu'une minification ou un appel détaché rendrait fragile.
+    let parNom = new Map<string, string>();
+    if (options.updateExisting) {
+      const existants = await db<{ id: string; name: string }[]>`
+        select id, name from saas_ugc.ugc_products
+        where workspace_id = ${workspaceId}::uuid
+      `;
+      parNom = new Map(existants.map((p) => [String(p.name).trim().toLowerCase(), String(p.id)]));
+    }
 
     for (const produit of produits) {
       const variantes = variantRows(produit);
+      const cible = options.updateExisting
+        ? parNom.get(produit.name.trim().toLowerCase()) ?? null
+        : null;
       try {
         const ecrites = await db.begin(async (tx) => {
+          if (cible) {
+            // Remplacement : les champs du fichier écrasent le produit, et les
+            // variantes repartent de zéro. Le produit garde son identifiant,
+            // donc ses vidéos et son historique de contenu restent liés.
+            //
+            // On réutilise `productRow` pour la conversion de prix : réécrire
+            // `minorToDecimal` ici aurait fait diverger le prix mis à jour de
+            // celui créé (l'erreur « 12 000 devient 120 » est déjà arrivée).
+            const champs = productRow(workspaceId, produit, origine);
+            await tx`
+              update saas_ugc.ugc_products
+                 set name = ${champs.name},
+                     description = ${champs.description},
+                     price_amount = ${champs.price_amount},
+                     price_currency = ${champs.price_currency},
+                     product_url = ${champs.product_url},
+                     product_facts = ${champs.product_facts},
+                     updated_at = now()
+               where id = ${cible}::uuid
+                 and workspace_id = ${workspaceId}::uuid
+            `;
+            await tx`
+              delete from saas_ugc.ugc_product_variants
+               where product_id = ${cible}::uuid
+            `;
+            for (const variante of variantes) {
+              await tx`
+                insert into saas_ugc.ugc_product_variants ${tx({ product_id: cible, ...variante })}
+              `;
+            }
+            return variantes.length;
+          }
           const ligne = productRow(workspaceId, produit, origine);
           await tx`
             insert into saas_ugc.ugc_products ${tx(ligne)}
@@ -299,8 +368,13 @@ const store: StoreImportDependencies = {
           }
           return variantes.length;
         });
-        created += 1;
-        variantsCreated += ecrites;
+        if (cible) {
+          updated += 1;
+          variantsUpdated += ecrites;
+        } else {
+          created += 1;
+          variantsCreated += ecrites;
+        }
       } catch (erreur) {
         // Un échec n'annule pas les autres : on rapporte précisément, en
         // conservant la raison lisible plutôt qu'un message générique.
@@ -315,7 +389,7 @@ const store: StoreImportDependencies = {
         });
       }
     }
-    return { created, variantsCreated, failed };
+    return { created, updated, variantsCreated, variantsUpdated, failed };
   },
 
   /**

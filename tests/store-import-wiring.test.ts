@@ -61,12 +61,16 @@ interface Scenario {
   canWrite?: boolean;
   /** Droits d'abonnement, tels que les rend `bg_import_access`. */
   subscription?: { allowed: boolean; reason: string; message?: string };
+  /** Produits déjà au catalogue (mode mise à jour). */
+  existants?: Array<{ id: string; name: string }>;
 }
 
 function fausseBase(
   enregistrements: Array<Record<string, unknown>>,
   variantes: Array<Record<string, unknown>> = [],
   scenario: Scenario = {},
+  misesAJour: Array<{ params: unknown[]; texte: string }> = [],
+  suppressionsVariantes: unknown[][] = [],
 ): Fabrique {
   // Aperçus persistés : le bundle les écrit et les relit, comme en production.
   const apercus = new Map<string, { payload: unknown; expires: string }>();
@@ -139,6 +143,20 @@ function fausseBase(
       const exploitable = trouve && typeof trouve.payload === 'object';
       return Promise.resolve(exploitable ? [{ payload: trouve.payload }] : []);
     }
+    // Lecture du catalogue existant pour le mode mise à jour.
+    if (texte.includes('select id, name from saas_ugc.ugc_products')) {
+      return Promise.resolve(scenario.existants ?? []);
+    }
+    // Mise à jour d'un produit existant : capture des valeurs, pas de ligne.
+    if (texte.includes('update saas_ugc.ugc_products')) {
+      misesAJour.push({ params, texte });
+      return Promise.resolve([]);
+    }
+    // Réécriture des variantes d'un produit existant.
+    if (texte.includes('delete from saas_ugc.ugc_product_variants')) {
+      suppressionsVariantes.push(params);
+      return Promise.resolve([]);
+    }
     if (texte.includes('bg_import_access')) {
       const droits = scenario.subscription
         ?? { allowed: true, reason: 'OK', message: 'actif' };
@@ -189,11 +207,13 @@ function chargerBundle(
   enregistrements: Array<Record<string, unknown>> = [],
   variantes: Array<Record<string, unknown>> = [],
   scenario: Scenario = {},
+  misesAJour: Array<{ params: unknown[]; texte: string }> = [],
+  suppressionsVariantes: unknown[][] = [],
 ) {
   type Gestionnaire = (request: Request) => Promise<Response>;
   let gestionnaire: Gestionnaire | null = null;
   const contexte = {
-    __edgePostgres: fausseBase(enregistrements, variantes, scenario),
+    __edgePostgres: fausseBase(enregistrements, variantes, scenario, misesAJour, suppressionsVariantes),
     Deno: {
       serve: (h: Gestionnaire) => { gestionnaire = h; },
       env: { get: (nom: string) => (nom === 'SUPABASE_URL' ? 'https://exemple.invalid' : 'cle') },
@@ -352,6 +372,93 @@ describe('bundle store-import exécuté', () => {
     expect(variantes.every((v) => v.price_currency === 'XOF')).toBe(true);
     // `position` conserve l'ordre du fichier : « S, M, L » et non « L, M, S ».
     expect(variantes.map((v) => v.position)).toEqual([0, 1, 2]);
+  });
+
+  it('met à jour un produit existant au lieu d’en créer un second', async () => {
+    // ## Ce que ce test protège
+    // Sans mode mise à jour, réimporter un catalogue dont les tailles ont changé
+    // crée une SECONDE fiche du même produit : le catalogue se dédouble à chaque
+    // réimport. On vérifie ici qu'aucune insertion de produit n'a lieu, que
+    // l'UPDATE porte sur l'identifiant existant, et que les variantes repartent
+    // du fichier.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const variantes: Array<Record<string, unknown>> = [];
+    const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
+    const suppressions: unknown[][] = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, variantes,
+      { existants: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Chemise indigo' }] },
+      misesAJour, suppressions,
+    );
+
+    const csv = [
+      'name,price,currency,stock,variant_name,variant_option,sku',
+      'Chemise indigo,7000,XOF,5,Taille,S,CH-S',
+      'Chemise indigo,7000,XOF,8,Taille,XL,CH-XL',
+    ].join('\n');
+
+    const apercu = await (await gestionnaire(requeteApercu(csv))).json() as { data: { previewId: string } };
+    const confirmation = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+        updateExisting: true,
+      }),
+    }));
+    const corps = await confirmation.json() as { data?: { created: number; updated: number; variantsUpdated: number } };
+
+    // Aucun nouveau produit : la fiche existante est reprise.
+    expect(enregistrements).toHaveLength(0);
+    expect(corps.data?.created).toBe(0);
+    expect(corps.data?.updated).toBe(1);
+
+    // L'UPDATE porte sur l'identifiant existant, avec le prix du fichier
+    // (7 000, et non 70 : la conversion de devise est la même qu'à la création).
+    expect(misesAJour).toHaveLength(1);
+    expect(misesAJour[0].texte).toContain('update saas_ugc.ugc_products');
+    expect(misesAJour[0].params).toContain(7000);
+    expect(misesAJour[0].params).toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+
+    // Les variantes du fichier remplacent les précédentes, rattachées au MÊME
+    // produit.
+    expect(suppressions).toHaveLength(1);
+    expect(suppressions[0]).toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(variantes.map((v) => v.attribute_value)).toEqual(['S', 'XL']);
+    expect(variantes.every((v) => v.product_id === 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')).toBe(true);
+    expect(corps.data?.variantsUpdated).toBe(2);
+  });
+
+  it('crée par défaut, même quand un produit porte déjà le nom', async () => {
+    // Le mode mise à jour doit rester EXPLICITE : sans `updateExisting`, le
+    // comportement historique (création + avertissement d'aperçu) ne change pas.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [],
+      { existants: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Sable fin' }] },
+      misesAJour,
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSable fin,2500,XOF',
+    ))).json() as { data: { previewId: string } };
+    await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+      }),
+    }));
+
+    expect(misesAJour).toHaveLength(0);
+    expect(enregistrements).toHaveLength(1);
   });
 
   it('n’écrit rien quand l’aperçu a expiré', async () => {
