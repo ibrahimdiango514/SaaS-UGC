@@ -1,9 +1,29 @@
-# `vyora-mcp` — écart entre la source de référence et la source déployée
+# `vyora-mcp` — source déployée et pipeline d'artefacts
 
-**Déploiement vérifié le 2026-11-16** : slug `vyora-mcp`, version **1**,
-`status: ACTIVE`, `verify_jwt: false`.
+**État au 2026-11-16** : slug `vyora-mcp`, version **2**, `status: ACTIVE`,
+`verify_jwt: false`, **publié par chargeur** (la divergence est close).
 
-## Pourquoi deux sources
+## Résolution de l'écart (version 2)
+
+La version 1 était un monofichier publié à la main : dépôt et production
+pouvaient diverger. C'est corrigé :
+
+1. `vyora-mcp` a rejoint `LOADER_TARGETS` dans `scripts/build-edge-loader.mjs` ;
+2. le bundle est généré de façon déterministe (gzip MTIME=0, SHA-256) ;
+3. les 4 tranches ont été publiées dans `_edge_function_artifact_slices`
+   (6 728 caractères base64, **MD5 vérifié `09f486e1d13dd83297ec6afaa6a7651a`**) ;
+4. la fonction déployée n'est plus le code métier mais le **chargeur** de
+   3 523 octets, qui recompose les tranches et **vérifie le SHA-256 avant
+   exécution** (`artifact_digest_mismatch` sinon).
+
+Conséquence : une divergence entre le dépôt et la production est désormais
+**détectée à l'exécution**. Pour modifier le serveur, il faut régénérer le
+bundle (`node scripts/build-edge-loader.mjs vyora-mcp`), republier les tranches
+et redéployer le chargeur — jamais éditer la production à la main.
+
+Vérifié après bascule : `tools/list` → **HTTP 200, 5 outils** sur la version 2.
+
+## Historique : pourquoi deux sources au départ
 
 Le canal de déploiement du connecteur Supabase altère les sources longues
 (constat déjà documenté dans `scripts/build-edge-loader.mjs`). La fonction

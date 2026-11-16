@@ -1,9 +1,9 @@
 // VYORA — parité des chargeurs Edge publiés par tranches.
 //
 // Le canal de déploiement altère les sources longues : `vyora-ai`,
-// `vyora-ai-providers` et `vyora-provider-health` sont donc livrés par un
-// chargeur court qui recompose des tranches gzip+base64 et vérifie le SHA-256
-// avant exécution. Ces tests garantissent que :
+// `vyora-ai-providers`, `vyora-provider-health` et désormais `vyora-mcp` sont
+// livrés par un chargeur court qui recompose des tranches gzip+base64 et vérifie
+// le SHA-256 avant exécution. Ces tests garantissent que :
 //   * le chargeur committé est EXACTEMENT celui que le générateur produit ;
 //   * la migration de publication contient les tranches exactes du bundle ;
 //   * le chargeur refuse un artefact dont l'empreinte ne correspond pas.

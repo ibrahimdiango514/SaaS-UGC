@@ -44,6 +44,11 @@ export const LOADER_TARGETS = {
   'vyora-ai': { migration: '20261115220000' },
   'vyora-ai-providers': { migration: '20261115220100' },
   'vyora-provider-health': { migration: '20261115220200' },
+  // Serveur MCP : publié par chargeur comme les trois fonctions IA. Le code
+  // exécuté est exactement le bundle du dépôt, recomposé depuis les tranches et
+  // vérifié par SHA-256 avant exécution — la divergence entre source du dépôt et
+  // source déployée devient donc détectable et, en pratique, impossible.
+  'vyora-mcp': { migration: '20261116020000' },
 };
 
 /**
