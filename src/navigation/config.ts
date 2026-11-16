@@ -40,6 +40,20 @@ export interface WorkspaceShortcut {
 
 export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
   {
+    id: 'assistant',
+    label: 'Assistant IA',
+    hint: 'Chat, analyse et rédaction',
+    icon: Bot,
+    defaultOpen: true,
+    items: [{
+      to: '/app/ai',
+      label: 'Assistant VYORA',
+      description: 'Conversations, pièces jointes et analyse',
+      icon: Bot,
+      keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
+    }],
+  },
+  {
     id: 'overview',
     label: 'Vue d’ensemble',
     icon: LayoutDashboard,
