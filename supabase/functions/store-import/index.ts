@@ -24,7 +24,7 @@
 import postgres from 'npm:postgres@3.4.5';
 import {
   createStoreImportHandler, denoResolveHost,
-  type ImportAccess, type StoreImportDependencies,
+  type ImportAccess, type PreviewRecord, type PreviewStore, type StoreImportDependencies,
 } from './handler.ts';
 import type { NormalizedProduct } from '../../../src/business/importer/normalize.ts';
 import { minorToDecimal } from '../../../src/business/importer/normalize.ts';
@@ -118,6 +118,54 @@ function productRow(workspaceId: string, produit: NormalizedProduct, origine: 'u
   };
 }
 
+/**
+ * Aperçus partagés entre instances Edge.
+ *
+ * ## Le défaut que cela corrige
+ * Les aperçus vivaient dans une `Map` locale. Supabase lance plusieurs
+ * instances : la confirmation arrivait souvent sur une autre que celle qui
+ * avait produit l'aperçu, et répondait `PREVIEW_EXPIRED`. Mesuré ici même :
+ * sur quatre tentatives réelles, trois ont échoué pour cette seule raison.
+ * Aucune donnée sensible n'est en jeu — le payload est exactement ce que
+ * l'aperçu a déjà renvoyé au client — mais l'import devenait inutilisable.
+ *
+ * ## Pourquoi la base
+ * Elle est déjà là, elle est transactionnelle, et elle survit au redémarrage
+ * d'une instance. Une purge paresseuse sur `expires_at` suffit : inutile
+ * d'ajouter un ordonnanceur pour une table de quelques lignes.
+ */
+function postgresPreviewStore(): PreviewStore {
+  return {
+    async get(id) {
+      const db = requiredSql();
+      const [ligne] = await db<{ payload: PreviewRecord }[]>`
+        select payload from saas_ugc.ugc_import_previews
+        where id = ${id} and expires_at > now()
+      `;
+      return ligne?.payload;
+    },
+    async set(id, record, expiresAt) {
+      const db = requiredSql();
+      const expire = new Date(expiresAt).toISOString();
+      await db`
+        insert into saas_ugc.ugc_import_previews (id, user_id, workspace_id, payload, expires_at)
+        values (${id}, ${record.userId}::uuid, ${record.workspaceId}::uuid,
+                ${JSON.stringify(record)}::jsonb, ${expire}::timestamptz)
+        on conflict (id) do update
+          set payload = excluded.payload, expires_at = excluded.expires_at
+      `;
+    },
+    async delete(id) {
+      const db = requiredSql();
+      await db`delete from saas_ugc.ugc_import_previews where id = ${id}`;
+    },
+    async purge() {
+      const db = requiredSql();
+      await db`delete from saas_ugc.ugc_import_previews where expires_at <= now()`;
+    },
+  };
+}
+
 const store: StoreImportDependencies = {
   getUserId,
 
@@ -196,6 +244,7 @@ const store: StoreImportDependencies = {
   // différemment selon le chemin qui l'apporte.
   parseFile: (bytes: Uint8Array, filename: string) => importFile(bytes, filename),
   resolveHost: denoResolveHost(),
+  previewStore: postgresPreviewStore(),
   allowedOrigins,
 };
 

@@ -102,6 +102,29 @@ export interface ImportAccess {
   currentPeriodEnd?: string | null;
 }
 
+/**
+ * Stockage des aperçus.
+ *
+ * ## Pourquoi une interface, et pas une `Map` en dur
+ * Un aperçu vivait uniquement dans la mémoire de l'instance Edge qui l'avait
+ * produit. Or Supabase Edge Functions en font tourner plusieurs : la
+ * confirmation, servie par une autre instance, ne retrouvait pas l'aperçu et
+ * répondait `PREVIEW_EXPIRED`. Un import de fichier devenait donc **impossible
+ * à confirmer** dès que deux requêtes tombaient sur deux instances — ce qui
+ * était exactement le cas en production, et pas dans les tests à une instance.
+ *
+ * L'interface permet une implémentation partagée (la base) sans changer le
+ * contrat du handler ; la `Map` reste le repli quand aucune n'est fournie.
+ */
+export interface PreviewStore {
+  get(id: string): Promise<PreviewRecord | undefined>;
+  /** `expiresAt` est absolu : le stockage n'a pas à connaître la durée de vie. */
+  set(id: string, record: PreviewRecord, expiresAt: number): Promise<void>;
+  delete(id: string): Promise<void>;
+  /** Appelé avant lecture/écriture : retire les aperçus échus. */
+  purge(limite: number, ttl: number): Promise<void>;
+}
+
 export interface StoreImportDependencies {
   /** Vérifie l'utilisateur à partir de l'en-tête Authorization. */
   getUserId(authorization: string): Promise<string | null>;
@@ -131,6 +154,12 @@ export interface StoreImportDependencies {
    * qu'un fichier ne puisse pas être lu différemment selon le chemin.
    */
   parseFile?: (bytes: Uint8Array, filename: string) => Promise<FileImportResult>;
+  /**
+   * Stockage des aperçus. Absent ⇒ mémoire de l'instance (repli), ce qui suffit
+   * aux tests et au développement local, mais **pas** à plusieurs instances :
+   * la confirmation tombait alors sur `PREVIEW_EXPIRED`.
+   */
+  previewStore?: PreviewStore;
   /** Résolveur DNS serveur. Absent = import refusé (fail-closed). */
   resolveHost?: (hostname: string) => Promise<string[]>;
   /** Connexion TCP+TLS, injectable pour les tests. */
@@ -261,27 +290,46 @@ function failure(code: string, message: string): { error: { code: string; messag
 
 /* --------------------------------- handler -------------------------------- */
 
+/**
+ * Repli en mémoire, utilisé quand aucun stockage partagé n'est fourni.
+ *
+ * Il conserve exactement le comportement d'origine (et les tests existants),
+ * tout en rendant explicite sa limite : deux instances ne le partagent pas.
+ */
+function memoireLocale(): PreviewStore {
+  const carte = new Map<string, PreviewRecord>();
+  return {
+    async get(id) {
+      return carte.get(id);
+    },
+    async set(id, record) {
+      carte.set(id, record);
+      // Garde-fou : la carte ne doit jamais grossir sans fin.
+      if (carte.size > MAX_PREVIEWS_PER_USER) {
+        const tri = [...carte.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+        for (const [cle] of tri.slice(0, carte.size - MAX_PREVIEWS_PER_USER)) carte.delete(cle);
+      }
+    },
+    async delete(id) {
+      carte.delete(id);
+    },
+    async purge(limite, duree) {
+      for (const [id, enregistrement] of carte) {
+        if (limite - enregistrement.createdAt > duree) carte.delete(id);
+      }
+    },
+  };
+}
+
 export function createStoreImportHandler(dependencies: StoreImportDependencies) {
   const allowedOrigins = dependencies.allowedOrigins;
   const now = dependencies.now ?? (() => Date.now());
   const ttl = dependencies.previewTtlMs ?? PREVIEW_TTL_MS;
-  // Aperçus en mémoire. Une instance peut redémarrer : le client reçoit alors
-  // `PREVIEW_EXPIRED` et doit relancer l'aperçu — jamais d'import à l'aveugle.
-  const apercus = new Map<string, PreviewRecord>();
-
-  function purge(): void {
-    const limite = now();
-    for (const [id, enregistrement] of apercus) {
-      if (limite - enregistrement.createdAt > ttl) apercus.delete(id);
-    }
-  }
-
-  /** Garde-fou : la table ne doit jamais grossir sans fin. */
-  function evincer(): void {
-    if (apercus.size <= MAX_PREVIEWS_PER_USER) return;
-    const tri = [...apercus.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
-    for (const [id] of tri.slice(0, apercus.size - MAX_PREVIEWS_PER_USER)) apercus.delete(id);
-  }
+  // Aperçus : stockage partagé quand il est fourni (base), mémoire locale sinon.
+  // Le repli mémoire suffit à une instance unique ; il ne suffit pas en
+  // production, où plusieurs instances se relaient.
+  const apercus: PreviewStore = dependencies.previewStore ?? memoireLocale();
+  const purge = () => apercus.purge(now(), ttl);
 
   return async function handle(request: Request): Promise<Response> {
     const origin = request.headers.get('Origin');
@@ -411,7 +459,7 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
         if (!grant.canWrite) {
           return jsonResponse(failure('WORKSPACE_ACCESS_DENIED', 'Rôle insuffisant pour importer dans cette entreprise.'), 403, corsOrigin);
         }
-        purge();
+        await purge();
         // Deux sources, une seule garde : l'abonnement a déjà été vérifié
         // ci-dessus, avant même de savoir de quel type d'import il s'agit.
         const fichier = typeof body.fileBase64 === 'string' && body.fileBase64.length > 0;
@@ -423,12 +471,11 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
             nom: text(body.fileName, 200),
           })
           : await faireApercu(dependencies, { userId, workspaceId, url: text(body.url, 2048), now, ttl });
-        apercus.set(payload.data.previewId, {
+        await apercus.set(payload.data.previewId, {
           ...payload.record,
           kind: fichier ? 'file' : 'url',
           importables: payload.data.products.map((p) => p.importable),
-        });
-        evincer();
+        }, payload.record.createdAt + ttl);
         return jsonResponse({ data: payload.data }, 200, corsOrigin);
       }
 
@@ -447,14 +494,14 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
       if (!previewId) {
         return jsonResponse(failure('PREVIEW_REQUIRED', 'Relancez l’aperçu : aucun produit n’est importé sans prévisualisation.'), 400, corsOrigin);
       }
-      purge();
-      const enregistrement = apercus.get(previewId);
+      await purge();
+      const enregistrement = await apercus.get(previewId);
       // Un aperçu appartient à UN utilisateur et UNE entreprise.
       if (!enregistrement || enregistrement.userId !== userId || enregistrement.workspaceId !== workspaceId) {
         return jsonResponse(failure('PREVIEW_EXPIRED', 'Aperçu introuvable ou expiré : relancez la prévisualisation.'), 409, corsOrigin);
       }
       if (now() - enregistrement.createdAt > ttl) {
-        apercus.delete(previewId);
+        await apercus.delete(previewId);
         return jsonResponse(failure('PREVIEW_EXPIRED', 'Aperçu expiré : relancez la prévisualisation.'), 409, corsOrigin);
       }
 
@@ -472,7 +519,7 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
       }
 
       // Un aperçu ne se rejoue pas : la confirmation le consomme.
-      apercus.delete(previewId);
+      await apercus.delete(previewId);
       const resultat = await dependencies.insertProducts(workspaceId, retenus, enregistrement.kind);
       return jsonResponse({ data: resultat }, 200, corsOrigin);
     } catch (cause) {

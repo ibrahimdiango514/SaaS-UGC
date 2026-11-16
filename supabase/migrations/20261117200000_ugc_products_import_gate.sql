@@ -129,3 +129,39 @@ begin
   raise notice 'ugc_products : écriture soumise à l''abonnement Business Ground.';
 end
 $verif$;
+
+
+-- -----------------------------------------------------------------------------
+-- 4) Aperçus d'import persistés.
+--
+--    Ils vivaient en mémoire de l'instance Edge. Supabase en fait tourner
+--    plusieurs : la confirmation, servie par une autre instance, ne retrouvait
+--    pas l'aperçu et répondait `PREVIEW_EXPIRED`. Mesuré en production : sur
+--    4 tentatives, 3 ont échoué ainsi. Un import devenait donc impossible à
+--    confirmer, sans qu'aucune donnée ne soit en cause.
+--
+--    La table ne contient que des produits normalisés déjà envoyés au client
+--    dans la réponse d'aperçu : aucune donnée nouvelle n'est exposée. Aucun
+--    rôle client n'y accède ; seules les Edge Functions (service_role) écrivent
+--    et lisent.
+-- -----------------------------------------------------------------------------
+create table if not exists saas_ugc.ugc_import_previews (
+  id text primary key,
+  user_id uuid not null,
+  workspace_id uuid not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
+
+comment on table saas_ugc.ugc_import_previews is
+  'Aperçus d''import en attente de confirmation. Partagés entre instances Edge, expirants, jamais lisibles par un client.';
+
+create index if not exists ugc_import_previews_expires_idx
+  on saas_ugc.ugc_import_previews (expires_at);
+
+alter table saas_ugc.ugc_import_previews enable row level security;
+
+-- Aucune politique : la RLS refuse tout par défaut, y compris à `authenticated`.
+-- `service_role` la contourne, ce qui est exactement le besoin (Edge Functions).
+revoke all on table saas_ugc.ugc_import_previews from public, anon, authenticated;

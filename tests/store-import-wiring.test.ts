@@ -43,7 +43,9 @@ type Fabrique = () => {
 };
 
 function fausseBase(enregistrements: Array<Record<string, unknown>>): Fabrique {
-  const requete = (gabarit: unknown) => {
+  // Aperçus persistés : le bundle les écrit et les relit, comme en production.
+  const apercus = new Map<string, { payload: unknown; expires: string }>();
+  const requete = (gabarit: unknown, ...valeurs: unknown[]) => {
     if (!Array.isArray(gabarit)) {
       // Forme réelle observée dans le bundle : `db(row)` — la ligne est le
       // PREMIER argument, et c'est le `this` de l'appel qui porte la clause
@@ -56,6 +58,21 @@ function fausseBase(enregistrements: Array<Record<string, unknown>>): Fabrique {
       return Promise.resolve([]);
     }
     const texte = gabarit.join('? ');
+    const params = valeurs as unknown[];
+    if (texte.includes('insert into saas_ugc.ugc_import_previews')) {
+      // (id, user_id, workspace_id, payload, expires_at)
+      apercus.set(String(params[0]), { payload: JSON.parse(String(params[3])), expires: String(params[4]) });
+      return Promise.resolve([]);
+    }
+    if (texte.includes('from saas_ugc.ugc_import_previews')) {
+      const trouve = apercus.get(String(params[0]));
+      return Promise.resolve(trouve ? [{ payload: trouve.payload }] : []);
+    }
+    if (texte.includes('delete from saas_ugc.ugc_import_previews')) {
+      if (params.length === 0) apercus.clear();
+      else apercus.delete(String(params[0]));
+      return Promise.resolve([]);
+    }
     if (texte.includes('bg_import_access')) {
       return Promise.resolve([{ droits: { allowed: true, reason: 'OK', message: 'actif', status: 'active' } }]);
     }
