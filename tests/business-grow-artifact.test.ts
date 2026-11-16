@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { HOSTED_LOADER, LOADER, artifact, renderLoader, renderHostedLoader } from '../scripts/build-business-grow-artifact.mjs';
+import { GITHUB_LOADER, HOSTED_LOADER, LOADER, artifact, renderGithubLoader, renderLoader, renderHostedLoader } from '../scripts/build-business-grow-artifact.mjs';
 
 /**
  * Le canal de déploiement peut tronquer une source longue : le code réellement
@@ -118,5 +118,83 @@ describe('artefact déployable business-grow', () => {
     const source = gunzipSync(Buffer.from(payload as string, 'base64')).toString('utf8');
     expect(source).toContain('forceAllowOrigin');
     expect(source).toContain('ORIGIN_NOT_ALLOWED');
+  });
+});
+
+/**
+ * Chargeur GitHub épinglé.
+ *
+ * Ce chargeur existe parce que le canal de déploiement n'accepte pas 88 k de
+ * bundle. Sa faiblesse potentielle est connue : si l'empreinte ne correspond
+ * plus au fichier committé, la fonction refuse de démarrer — c'est-à-dire
+ * qu'elle tombe en panne plutôt que d'exécuter autre chose. Ces tests
+ * verrouillent l'accord entre les trois valeurs épinglées.
+ */
+describe('chargeur GitHub épinglé', () => {
+  const loader = readFileSync(join(process.cwd(), GITHUB_LOADER), 'utf8');
+  const built = artifact();
+
+  const valeur = (nom: string): string => {
+    // Les valeurs épinglées sont soit des chaînes, soit un nombre
+    // (`ARTIFACT_CHARS`) : les deux formes sont acceptées ici pour que le test
+    // porte sur l'accord des valeurs, pas sur leur syntaxe.
+    const m = new RegExp(`const ${nom} = (?:"([^"]+)"|(\\d+));`).exec(loader);
+    if (!m) throw new Error(`${nom} absent du chargeur GitHub`);
+    return m[1] ?? m[2];
+  };
+
+  it('est identique à ce que produit le script de build', () => {
+    const commit = valeur('COMMIT');
+    expect(commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(loader).toBe(renderGithubLoader(built, commit));
+  });
+
+  it('épingle l’empreinte et la taille réelles du bundle du dépôt', () => {
+    // C'est l'accord qui rend le chargement possible : une empreinte périmée
+    // ferait refuser le bundle pourtant légitime.
+    expect(valeur('ARTIFACT_SHA256')).toBe(built.sha256);
+    expect(Number(valeur('ARTIFACT_CHARS'))).toBe(built.chars);
+    expect(built.source.length).toBe(built.chars);
+  });
+
+  it('n’épingle ni `main` ni une branche mouvante', () => {
+    // Une URL sur `main` servirait demain un autre contenu : l'empreinte
+    // deviendrait fausse et le service tomberait en panne au déploiement
+    // suivant, sans que personne n'ait touché au code.
+    const commit = valeur('COMMIT');
+    expect(['main', 'develop', 'master', 'HEAD']).not.toContain(commit);
+    expect(loader).not.toMatch(/raw\.githubusercontent\.com[^"]*\/(main|develop|master)\//);
+  });
+
+  it('vérifie la taille et l’empreinte AVANT d’exécuter le code', () => {
+    const ordreTaille = loader.indexOf('source.length !== ARTIFACT_CHARS');
+    const ordreEmpreinte = loader.indexOf('hex !== ARTIFACT_SHA256');
+    const execution = loader.indexOf('new Function(CODE)()');
+    expect(ordreTaille).toBeGreaterThan(-1);
+    expect(ordreEmpreinte).toBeGreaterThan(ordreTaille);
+    expect(execution).toBeGreaterThan(ordreEmpreinte);
+  });
+
+  it('échoue fermé : aucune exécution si le chargement échoue', () => {
+    // Le `else` sert un 503 ; il n'exécute jamais un code vide ou partiel.
+    expect(loader).toContain('BUSINESS_GROW_ARTIFACT_UNAVAILABLE');
+    expect(loader).toContain('status: 503');
+    expect(loader).toMatch(/if \(CODE\) \{/);
+  });
+
+  it('ne contient aucun placeholder ni valeur fictive', () => {
+    // Leçon des tours précédents : un `__PAYLOAD__` ou un `__PROBE__` envoyé
+    // en production casse le service. Le test refuse désormais ces marqueurs.
+    expect(loader).not.toMatch(/__[A-Z_]+__/);
+    expect(loader).not.toContain('PLACEHOLDER');
+    expect(loader).not.toContain('TODO');
+  });
+
+  it('compare le fichier tel qu’il est committé, saut de ligne final compris', () => {
+    // Piège rencontré chez `store-import` : retirer le dernier caractère
+    // change l'empreinte et bloque le chargement.
+    const brut = readFileSync(join(process.cwd(), 'supabase/functions/business-grow.edge.js'), 'utf8');
+    expect(brut).toBe(built.source);
+    expect(loader).not.toContain('endsWith("\\n")');
   });
 });

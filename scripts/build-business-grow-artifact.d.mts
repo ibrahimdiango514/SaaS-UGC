@@ -6,6 +6,10 @@ export declare const LOADER: string;
 export declare const HOSTED_LOADER: string;
 /** Bundle exact, publié dans `public._edge_function_artifact`. */
 export declare const BUNDLE: string;
+/** Chargeur épinglé sur un commit du dépôt public (`loader-github.ts`). */
+export declare const GITHUB_LOADER: string;
+/** Dépôt public dont le bundle est téléchargé. */
+export declare const GITHUB_REPO: string;
 export declare const ARTIFACT_TABLE: string;
 export declare const ARTIFACT_NAME: string;
 /** Bundle ES2022 minifié, sans import relatif. */
@@ -31,3 +35,8 @@ export declare function renderHostedLoader(input: {
   sha256: string;
   chars: number;
 }): string;
+/** Contenu exact du chargeur GitHub épinglé (`loader-github.ts`). */
+export declare function renderGithubLoader(input: {
+  sha256: string;
+  chars: number;
+}, commit: string): string;

@@ -42,6 +42,16 @@ export const ENTRY = 'supabase/functions/business-grow/index.ts';
 export const LOADER = 'supabase/functions/business-grow/bootstrap.ts';
 export const HOSTED_LOADER = 'supabase/functions/business-grow/loader.ts';
 export const BUNDLE = 'supabase/functions/business-grow.edge.js';
+/**
+ * Chargeur épinglé sur un commit du dépôt public.
+ *
+ * Ajouté parce que le canal de déploiement n'accepte que des corps courts : ni
+ * le bundle (88 k) ni son SQL d'insertion ne passent. `store-import` résout ce
+ * problème depuis des mois via une URL contenant un SHA de commit — une telle
+ * URL ne peut pas changer de contenu.
+ */
+export const GITHUB_LOADER = 'supabase/functions/business-grow/loader-github.ts';
+export const GITHUB_REPO = 'ibrahimdiango514/SaaS-UGC';
 export const ARTIFACT_TABLE = '_edge_function_artifact';
 export const ARTIFACT_NAME = 'business-grow';
 const POSTGRES = 'npm:postgres@3.4.5';
@@ -235,6 +245,110 @@ export function renderHostedLoader({ sha256, chars }) {
   ].join('\n');
 }
 
+/**
+ * Chargeur GitHub épinglé — seul texte qui transite par le canal de déploiement.
+ *
+ * ## Pourquoi le fichier est comparé TEL QUEL
+ * `store-import` retire le saut de ligne final avant de calculer l'empreinte.
+ * Ce détail est invisible tant qu'on ne l'a pas rencontré : appliqué ici, il
+ * donnait `9429baaf…` au lieu de `5578a53b…`, donc un refus de chargement en
+ * production. L'empreinte porte ici sur le fichier exactement tel qu'il est
+ * committé, saut de ligne compris.
+ *
+ * ## Pourquoi le commit et jamais `main`
+ * `main` avance : la même URL servirait demain un autre contenu, et une
+ * vérification par empreinte transforme alors le service en panne. Un SHA de
+ * commit est immuable, donc l'empreinte reste valable.
+ */
+export function renderGithubLoader({ sha256, chars }, commit) {
+  return [
+    '// business-grow — chargeur épinglé sur un commit du dépôt public.',
+    '//',
+    '// Le code métier est le bundle du dépôt, lu à un commit PRÉCIS (jamais `main`',
+    '// ni une branche mouvante) : une URL contenant un SHA de commit ne peut pas',
+    '// changer de contenu, et la taille + l\'empreinte SHA-256 sont vérifiées avant',
+    '// toute exécution. Un bundle absent, tronqué, reformaté ou modifié n\'est',
+    '// JAMAIS exécuté.',
+    '//',
+    '// Régénérer avec : node scripts/build-business-grow-artifact.mjs',
+    'import postgres from "' + POSTGRES + '";',
+    '',
+    'const REPO = "' + GITHUB_REPO + '";',
+    'const COMMIT = "' + commit + '";',
+    'const PATH = "supabase/functions/business-grow.edge.js";',
+    'const ARTIFACT_SHA256 = "' + sha256 + '";',
+    'const ARTIFACT_CHARS = ' + chars + ';',
+    '',
+    '// Le fichier est comparé caractère pour caractère, saut de ligne final COMPRIS :',
+    '// l\'empreinte porte sur le fichier tel qu\'il est committé.',
+    'async function charger(): Promise<string> {',
+    '  const urls = [',
+    '    "https://raw.githubusercontent.com/" + REPO + "/" + COMMIT + "/" + PATH,',
+    '    "https://api.github.com/repos/" + REPO + "/contents/" + PATH + "?ref=" + COMMIT,',
+    '  ];',
+    '  const echecs: string[] = [];',
+    '  for (const url of urls) {',
+    '    try {',
+    '      const res = await fetch(url, {',
+    '        headers: url.startsWith("https://api.github.com/")',
+    '          ? { accept: "application/vnd.github.raw+json" }',
+    '          : {},',
+    '        signal: AbortSignal.timeout(15000),',
+    '      });',
+    '      if (!res.ok) { echecs.push("http_" + res.status); continue; }',
+    '      const source = await res.text();',
+    '      if (source.length !== ARTIFACT_CHARS) { echecs.push("taille_" + source.length); continue; }',
+    '      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));',
+    '      const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");',
+    '      if (hex !== ARTIFACT_SHA256) { echecs.push("empreinte_" + hex.slice(0, 8)); continue; }',
+    '      return source;',
+    '    } catch (error) {',
+    '      echecs.push(error instanceof Error ? error.name : "reseau");',
+    '    }',
+    '  }',
+    '  throw new Error(echecs.join(","));',
+    '}',
+    '',
+    'let CODE = "";',
+    'let failure = "";',
+    'for (let essai = 1; essai <= 3 && !CODE; essai++) {',
+    '  try {',
+    '    CODE = await charger();',
+    '    failure = "";',
+    '  } catch (error) {',
+    '    failure = error instanceof Error ? error.message : String(error);',
+    '    if (essai < 3) await new Promise((r) => setTimeout(r, 400 * essai));',
+    '  }',
+    '}',
+    '',
+    'if (CODE) {',
+    '  (globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;',
+    '  new Function(CODE)();',
+    '} else {',
+    '  // Panne explicite et lisible, jamais un accès ouvert ni un 500 opaque.',
+    '  console.error("business-grow artifact load failed: " + failure);',
+    '  const headers = {',
+    '    "Content-Type": "application/json",',
+    '    "Access-Control-Allow-Origin": "*",',
+    '    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
+    '    "Access-Control-Allow-Methods": "POST, OPTIONS",',
+    '  };',
+    '  const body = JSON.stringify({',
+    '    error: {',
+    '      code: "BUSINESS_GROW_ARTIFACT_UNAVAILABLE",',
+    '      message: "Le service Business Grow n\'a pas pu charger son code (" + failure + ").",',
+    '    },',
+    '  });',
+    '  Deno.serve((request: Request) =>',
+    '    request.method === "OPTIONS"',
+    '      ? new Response("ok", { headers })',
+    '      : new Response(body, { status: 503, headers })',
+    '  );',
+    '}',
+    '',
+  ].join('\n');
+}
+
 const isMain = process.argv[1] && process.argv[1].endsWith('build-business-grow-artifact.mjs');
 if (isMain) {
   const built = artifact();
@@ -242,6 +356,29 @@ if (isMain) {
   console.log(`gzip       : ${built.gzBytes} octets`);
   console.log(`payload    : ${built.payload.length} caractères base64`);
   console.log(`sha256     : ${built.sha256}`);
+  if (process.argv.includes('--github')) {
+    // Le commit d'épinglage est celui que l'opérateur désigne explicitement :
+    // on ne devine ni ne fige automatiquement HEAD, qui pourrait ne pas être
+    // encore poussé (le chargeur téléchargerait alors un 404).
+    const commit = (process.env.BG_PIN_COMMIT || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{40}$/.test(commit)) {
+      console.error('BG_PIN_COMMIT doit être un SHA de commit complet (40 hexadécimaux).');
+      process.exit(1);
+    }
+    const code = renderGithubLoader(built, commit);
+    if (process.argv.includes('--check')) {
+      const current = readFileSync(join(process.cwd(), GITHUB_LOADER), 'utf8');
+      if (current !== code) {
+        console.error(`chargeur GitHub désynchronisé : ${GITHUB_LOADER} (commit épinglé ${commit})`);
+        process.exit(1);
+      }
+      console.log(`chargeur GitHub à jour (commit ${commit.slice(0, 12)}, ${code.length} caractères)`);
+      process.exit(0);
+    }
+    writeFileSync(join(process.cwd(), GITHUB_LOADER), code);
+    console.log(`écrit      : ${GITHUB_LOADER} (${code.length} caractères, commit ${commit.slice(0, 12)})`);
+    process.exit(0);
+  }
   if (process.argv.includes('--print')) process.exit(0);
 
   const outputs = [
