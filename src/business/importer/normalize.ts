@@ -112,9 +112,26 @@ export function parsePriceMinor(raw: unknown, currency: string): { minor: number
   const separateur = Math.max(dernierPoint, derniereVirgule);
   let entier: string;
   let decimales = '';
+  /** Arrondi pour une devise sans décimales (voir plus bas). */
+  let arrondi = 0;
 
   if (separateur === -1) {
     entier = nettoye;
+  } else if (exponent === 0) {
+    // Devise sans unité subdivisionnaire (XOF, JPY…). Les branches ci-dessous
+    // supposent `exponent > 0` : sans ce cas dédié, « 12000.00 » (prix Shopify
+    // en XOF) était lu 1 200 000 — facteur 100.
+    // Le DERNIER groupe décide : 1 ou 2 chiffres après le dernier séparateur
+    // sont une décimale (« 12,000.00 »), arrondie à l'unité ; 3 chiffres sont
+    // des milliers (« 1.200.000 »). Les séparateurs précédents sont des
+    // milliers et disparaissent au nettoyage.
+    const apres = nettoye.slice(separateur + 1);
+    if (apres.length > 0 && apres.length <= 2) {
+      entier = nettoye.slice(0, separateur);
+      arrondi = apres[0] >= '5' ? 1 : 0;
+    } else {
+      entier = nettoye;
+    }
   } else {
     const apres = nettoye.slice(separateur + 1);
     // « 1,500 » avec 3 chiffres après la virgule : c'est un séparateur de
@@ -137,7 +154,7 @@ export function parsePriceMinor(raw: unknown, currency: string): { minor: number
   const valeur = Number(chiffres);
   if (!Number.isFinite(valeur) || valeur < 0) return { minor: null, warning: 'prix négatif ou hors limites' };
   const dec = Number(decimales || '0');
-  const minor = valeur * 10 ** exponent + (exponent > 0 ? dec : 0);
+  const minor = valeur * 10 ** exponent + (exponent > 0 ? dec : arrondi);
   if (!Number.isSafeInteger(minor)) return { minor: null, warning: 'prix hors limites' };
   return { minor };
 }
