@@ -225,11 +225,12 @@ describe('XML — XXE et expansion d’entités refusées', () => {
 /* ---------------------------------- XLSX ---------------------------------- */
 
 /** Construit un XLSX minimal (ZIP stocké) pour tester la lecture réelle. */
-function buildXlsx(sheetXml: string): Uint8Array {
+function buildXlsx(sheetXml: string, extra: Array<{ nom: string; contenu: string }> = []): Uint8Array {
   const fichiers: Array<{ nom: string; contenu: Uint8Array }> = [
     { nom: '[Content_Types].xml', contenu: encodeur.encode('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>') },
     { nom: 'xl/workbook.xml', contenu: encodeur.encode('<?xml version="1.0"?><workbook><sheets><sheet name="Produits" sheetId="1"/></sheets></workbook>') },
     { nom: 'xl/worksheets/sheet1.xml', contenu: encodeur.encode(sheetXml) },
+    ...extra.map((f) => ({ nom: f.nom, contenu: encodeur.encode(f.contenu) })),
   ];
 
   // ZIP en mode « stocké » (méthode 0) : plus simple à produire, et le lecteur
@@ -345,6 +346,48 @@ describe('XLSX — lecture réelle d’un classeur', () => {
     const resultat = await importXlsx(zip);
     expect(resultat.ok).toBe(true);
     if (resultat.ok) expect(resultat.products).toHaveLength(2);
+  });
+
+  it('lit les chaînes partagées (mode réel d’Excel et LibreOffice)', async () => {
+    // Sans sharedStrings, tout le texte d'un vrai classeur serait perdu : les
+    // noms de produits seraient lus comme des index numériques.
+    const sharedStrings = `<?xml version="1.0"?>
+<sst count="6">
+  <si><t>Nom</t></si>
+  <si><t>Prix</t></si>
+  <si><t>Sérum éclat</t></si>
+  <si><t>Baume lèvres</t></si>
+</sst>`;
+    const feuillePartagee = `<?xml version="1.0"?>
+<worksheet><sheetData>
+  <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+  <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>12000</v></c></row>
+  <row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>4500</v></c></row>
+</sheetData></worksheet>`;
+
+    const resultat = await importXlsx(buildXlsx(feuillePartagee, [
+      { nom: 'xl/sharedStrings.xml', contenu: sharedStrings },
+    ]));
+    expect(resultat.ok).toBe(true);
+    if (!resultat.ok) return;
+    expect(resultat.products).toHaveLength(2);
+    // Le nom vient bien de la table de chaînes, pas de l'index 2.
+    expect(resultat.products[0].name).toBe('Sérum éclat');
+    expect(resultat.products[1].name).toBe('Baume lèvres');
+    expect(resultat.products[0].priceMinor).toBe(12000);
+  });
+
+  it('un index de chaîne hors limites ne produit pas de nom inventé', async () => {
+    const feuilleCassee = `<?xml version="1.0"?>
+<worksheet><sheetData>
+  <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+  <row r="2"><c r="A2" t="s"><v>99</v></c><c r="B2"><v>1000</v></c></row>
+</sheetData></worksheet>`;
+    const resultat = await importXlsx(buildXlsx(feuilleCassee, [
+      { nom: 'xl/sharedStrings.xml', contenu: '<sst><si><t>Nom</t></si></sst>' },
+    ]));
+    // La ligne est écartée faute de nom : aucun produit vide n'est créé.
+    expect(resultat.ok).toBe(false);
   });
 
   it('refuse un ZIP qui n’est pas un classeur', async () => {
