@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowUpRight, Building2, Check, Clapperboard, Download, ExternalLink, FileText, Lightbulb, Package,
-  Pencil, Plus, RefreshCw, Search, Target, Trash2, TrendingUp, Upload, Users, X, Link2,
+  History, Pencil, Plus, RefreshCw, Search, Target, Trash2, TrendingUp, Upload, Users, X, Link2,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
-import { createProduct, deleteProduct, listProducts, updateProduct } from '../../lib/api';
+import { createProduct, deleteProduct, listProducts, loadCatalog, updateProduct } from '../../lib/api';
 import { buildStudioLocationStateFromBrief } from '../../contracts/business-grow';
 import { StoreImportPanel } from '../importer/StoreImportPanel';
+import { ProductVariantsSection } from '../importer/ProductVariantsSection';
+import { ImportHistoryPanel } from '../importer/ImportHistoryPanel';
+import type { ProductVariant } from '../importer/variants-model';
 import { ImportAccessBanner, ImportConnectGate } from '../import-connect/ImportConnectGate';
 import { useImportAccess } from '../import-connect/useImportAccess';
 import type { Product, Workspace } from '../../lib/types';
@@ -325,6 +328,15 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
    * sert à reprendre un catalogue réel avec prévisualisation.
    */
   const [universalOpen, setUniversalOpen] = useState(false);
+  /**
+   * Variantes par produit et état d'écriture, tels que la RPC du catalogue les
+   * renvoie. Séparés des produits eux-mêmes : `listProducts` reste la seule
+   * source pour nom et prix du parent, la RPC n'ajoute que les déclinaisons.
+   */
+  const [variants, setVariants] = useState<Record<string, ProductVariant[]>>({});
+  const [readOnly, setReadOnly] = useState(false);
+  /** Onglet actif du catalogue : produits, historique des imports. */
+  const [vue, setVue] = useState<'produits' | 'historique'>('produits');
 
   const load = async () => {
     if (!workspaceId) { setProducts([]); setLoading(false); return; }
@@ -335,6 +347,17 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
       setError(asAppError(loadError).message);
     } finally {
       setLoading(false);
+    }
+    // Les variantes sont chargées à part : si la RPC échoue, le catalogue
+    // reste consultable au lieu de disparaître derrière une erreur.
+    try {
+      const catalogue = await loadCatalog(workspaceId);
+      const parProduit: Record<string, ProductVariant[]> = {};
+      for (const entree of catalogue.products) parProduit[entree.id] = entree.variants;
+      setVariants(parProduit);
+      if (catalogue.readOnly !== null) setReadOnly(catalogue.readOnly);
+    } catch {
+      setVariants({});
     }
   };
 
@@ -463,6 +486,29 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
             <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => openForm()} disabled={!workspaceId}>Ajouter</Button>
           </div>
         </div>
+        {/* Deux vues d'un même écran : les produits et l'historique de leurs
+            imports. Le second ne remplace pas le premier, il le complète. */}
+        <div className="mt-3 flex gap-1 rounded-lg border border-white/[0.07] bg-black/20 p-1" role="tablist">
+          {([
+            ['produits', `Produits${products.length > 0 ? ` (${products.length})` : ''}`],
+            ['historique', 'Historique des imports'],
+          ] as const).map(([cle, libelle]) => (
+            <button
+              key={cle}
+              type="button"
+              role="tab"
+              aria-selected={vue === cle}
+              onClick={() => setVue(cle)}
+              data-testid={`catalog-tab-${cle}`}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition',
+                vue === cle ? 'bg-white/[0.08] text-white' : 'text-slate-400 hover:text-slate-200',
+              )}
+            >
+              {libelle}
+            </button>
+          ))}
+        </div>
         <div className="mt-3"><ImportAccessBanner access={access} /></div>
         {/* Défense en profondeur : même si l'état des boutons était contourné,
             le panneau d'import n'est monté que si le serveur a accordé l'accès. */}
@@ -507,7 +553,20 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
         )}
       </section>
 
-      {loading ? <LoadingState label="Chargement du catalogue…" /> : error ? (
+      {vue === 'historique' ? (
+        <section className="vyora-card p-4">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+            <History size={14} className="text-cyan-300" /> Historique des imports
+          </h3>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Chaque import confirmé, avec son origine, son statut et son rapport d’erreurs.
+            L’historique reste consultable même quand l’abonnement a expiré.
+          </p>
+          <div className="mt-3">
+            <ImportHistoryPanel workspaceId={workspaceId} />
+          </div>
+        </section>
+      ) : loading ? <LoadingState label="Chargement du catalogue…" /> : error ? (
         <ErrorState message={error} onRetry={() => void load()} />
       ) : products.length === 0 ? (
         <EmptyState icon={<Package size={22} />} title="Catalogue vide" description="Ajoutez vos produits ou importez votre catalogue pour que l’IA comprenne votre offre."
@@ -541,6 +600,15 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
                   <ExternalLink size={10} /> Voir la fiche produit
                 </a>
               )}
+              <ProductVariantsSection
+                productId={product.id}
+                productName={product.name}
+                productPrice={product.price_amount === null || product.price_amount === undefined ? null : Number(product.price_amount)}
+                productCurrency={product.price_currency ?? null}
+                variants={variants[product.id] ?? []}
+                readOnly={readOnly}
+                onChanged={load}
+              />
               <Link
                 to="/app/studio"
                 state={buildStudioLocationStateFromBrief({

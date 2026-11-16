@@ -7,6 +7,7 @@ import type {
   ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
   Workspace, WorkspaceMember, MuApiParamDef, ProviderQuote, ReeloraModelStatus,
 } from './types';
+import { normalizeVariants, type ProductVariant } from '../business/importer/variants-model';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyResult = { data: any; error: any };
@@ -326,6 +327,51 @@ export async function deleteProduct(id: string) {
     supabase.from('ugc_products').delete().eq('id', id).select('id').maybeSingle() as unknown as PromiseLike<AnyResult>,
   );
   if (!deleted) throw new AppError('Produit introuvable ou inaccessible.', 'NOT_FOUND');
+}
+
+/**
+ * Catalogue avec ses variantes, par la RPC `vyora_ugc_catalog`.
+ *
+ * ## Pourquoi une RPC et pas une lecture de table
+ * `ugc_product_variants` n'est pas exposée à PostgREST. La RPC vérifie en base
+ * l'appartenance à l'espace de travail et renvoie les variantes de chaque
+ * produit, dans l'ordre voulu par la source. Le client ne filtre rien.
+ *
+ * ## `read_only`
+ * La RPC dit elle-même si l'abonnement ouvre l'écriture. L'interface s'en sert
+ * pour désactiver les boutons ; elle ne décide d'aucun droit.
+ */
+export interface CatalogSnapshot {
+  products: Array<{ id: string; variants: ProductVariant[] }>;
+  /** `true` = abonnement expiré : consultation seule. `null` = inconnu. */
+  readOnly: boolean | null;
+}
+
+export async function loadCatalog(workspaceId: string): Promise<CatalogSnapshot> {
+  const raw = await rpc<unknown>('vyora_ugc_catalog', { p_workspace_id: workspaceId });
+  return normalizeCatalog(raw);
+}
+
+/**
+ * Lit la réponse du catalogue.
+ *
+ * Forme attendue : `{ read_only, products: [{ id, variants: [...] }] }`. Un
+ * produit sans identifiant est ignoré : sans identifiant, aucune variante ne
+ * peut lui être rattachée, et l'afficher créerait une entrée fantôme.
+ */
+export function normalizeCatalog(raw: unknown): CatalogSnapshot {
+  const source = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const lignes = Array.isArray(source.products) ? source.products : Array.isArray(raw) ? raw : [];
+  const products = lignes.flatMap((entree) => {
+    const ligne = (entree && typeof entree === 'object' ? entree : {}) as Record<string, unknown>;
+    const id = typeof ligne.id === 'string' ? ligne.id : '';
+    if (!id) return [];
+    return [{ id, variants: normalizeVariants(ligne.variants, id) }];
+  });
+  return {
+    products,
+    readOnly: typeof source.read_only === 'boolean' ? source.read_only : null,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
