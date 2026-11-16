@@ -1,9 +1,9 @@
 // VYORA — parité des chargeurs Edge publiés par tranches.
 //
 // Le canal de déploiement altère les sources longues : `vyora-ai`,
-// `vyora-ai-providers` et `vyora-provider-health` sont donc livrés par un
-// chargeur court qui recompose des tranches gzip+base64 et vérifie le SHA-256
-// avant exécution. Ces tests garantissent que :
+// `vyora-ai-providers`, `vyora-provider-health` et désormais `vyora-mcp` sont
+// livrés par un chargeur court qui recompose des tranches gzip+base64 et vérifie
+// le SHA-256 avant exécution. Ces tests garantissent que :
 //   * le chargeur committé est EXACTEMENT celui que le générateur produit ;
 //   * la migration de publication contient les tranches exactes du bundle ;
 //   * le chargeur refuse un artefact dont l'empreinte ne correspond pas.
@@ -51,6 +51,24 @@ describe('chargeurs Edge — parité générateur / dépôt', () => {
         `${LOADER_TARGETS[slug].migration}_${slug.replace(/-/g, '_')}_artifact.sql`,
       );
       const sql = readFileSync(migrationPath, 'utf8');
+
+      // Exception documentée : `vyora-oauth` ne publie plus d'artefact ici.
+      //
+      // Cette branche livrait le bundle d'origine, sans vérification de
+      // l'identité de l'appelant. La version corrigée est publiée par la
+      // PR #12 (`20261116060000`), avec une épingle de publication. Republier
+      // depuis cette branche ferait doublon et rouvrirait la course entre les
+      // deux migrations. La migration est donc devenue un no-op documenté.
+      //
+      // Ce test vérifie donc l'absence de publication, pas son contenu.
+      if (slug === 'vyora-oauth') {
+        expect(sql).not.toMatch(/insert into public\._edge_function_artifact_slices/);
+        expect(sql).not.toMatch(/delete from public\._edge_function_artifact_slices/);
+        expect(sql).toContain('publication RETIRÉE');
+        expect(slicesFromSql(sql, slug)).toBe('');
+        return;
+      }
+
       expect(sql).toBe(renderSeedSql(slug, built));
       // Les tranches se recomposent en un gzip valide dont le contenu est le
       // bundle exact : le SHA-256 du chargeur est donc vérifiable en production.
@@ -129,5 +147,40 @@ describe('chargeurs Edge — garde-fous du contrat de déploiement', () => {
       // Le SQL ne contient que des tranches base64 + une empreinte.
       expect(/sk-[A-Za-z0-9]|gnk-|cfut_|Bearer [A-Za-z0-9]{8,}/.test(sql)).toBe(false);
     }
+  });
+});
+
+describe('chargeurs Edge — la publication obsolète de vyora-oauth est neutralisée', () => {
+  const chemin = join(ROOT, 'supabase/migrations', '20261116040000_vyora_oauth_artifact.sql');
+
+  it('la migration ne publie plus aucun artefact', () => {
+    const sql = readFileSync(chemin, 'utf8');
+    expect(sql).not.toMatch(/^\s*delete from public\._edge_function_artifact_slices/m);
+    expect(sql).not.toMatch(/^\s*insert into public\._edge_function_artifact_slices/m);
+  });
+
+  it('aucune donnée de bundle ne subsiste dans le fichier', () => {
+    // Le base64 du bundle vulnérable ne doit pas rester : même inutilisé, il
+    // constituerait une source de republication accidentelle.
+    const sql = readFileSync(chemin, 'utf8');
+    expect(sql).not.toContain('H4sIA');
+    expect(sql).not.toMatch(/\('[A-Za-z0-9+/=]{200,}'\)/);
+  });
+
+  it('le SHA-256 vulnérable ne figure que dans le commentaire explicatif', () => {
+    const sql = readFileSync(chemin, 'utf8');
+    const lignes = sql.split('\n').filter((l) => l.includes('4a3f6206'));
+    expect(lignes.length).toBeGreaterThan(0);
+    for (const ligne of lignes) expect(ligne.trim().startsWith('--')).toBe(true);
+  });
+
+  it('la migration tolère l’absence du manifeste (cas où #10 passe avant #12)', () => {
+    const sql = readFileSync(chemin, 'utf8');
+    expect(sql).toContain("to_regclass('public._edge_function_artifact_manifest')");
+  });
+
+  it('la migration lève si l’épingle est inattendue', () => {
+    const sql = readFileSync(chemin, 'utf8');
+    expect(sql).toMatch(/raise exception/);
   });
 });
