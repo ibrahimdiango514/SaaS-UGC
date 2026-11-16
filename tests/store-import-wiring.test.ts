@@ -36,24 +36,37 @@ const BUNDLE = buildArtifact('store-import').source;
  * (`sql('table', valeur)`), c'est une chaîne : c'est ce qui permet de
  * reconnaître l'écriture et d'en capturer la ligne.
  */
-type Fabrique = () => {
+/** Connexion : appelable comme gabarit ou comme constructeur d'insertion. */
+interface Instance {
   (gabarit: unknown, ...valeurs: unknown[]): Promise<unknown>;
   /**
-   * Transaction. Le rappel reçoit une connexion : ici, la même fabrique.
+   * Transaction. Le rappel reçoit une connexion : ici, la même instance.
    *
    * Sans cette méthode, l'écriture produit + variantes échouait en
    * « begin is not a function » et `created` restait à 0 — exactement ce que
    * ce test a signalé après l'ajout des variantes. Elle est donc modélisée pour
    * de vrai : mêmes requêtes, même capture, et annulation si le rappel lève.
    */
-  begin<T>(fn: (tx: Fabrique) => Promise<T>): Promise<T>;
+  begin<T>(fn: (tx: Instance) => Promise<T>): Promise<T>;
   end(): Promise<void>;
   unsafe(): Promise<unknown[]>;
-};
+}
+
+/** `postgres(url, options)` : une fabrique qui rend une connexion. */
+type Fabrique = () => Instance;
+
+interface Scenario {
+  /** Refus d'accès à l'entreprise, tel que le rend la base. */
+  canRead?: boolean;
+  canWrite?: boolean;
+  /** Droits d'abonnement, tels que les rend `bg_import_access`. */
+  subscription?: { allowed: boolean; reason: string; message?: string };
+}
 
 function fausseBase(
   enregistrements: Array<Record<string, unknown>>,
   variantes: Array<Record<string, unknown>> = [],
+  scenario: Scenario = {},
 ): Fabrique {
   // Aperçus persistés : le bundle les écrit et les relit, comme en production.
   const apercus = new Map<string, { payload: unknown; expires: string }>();
@@ -99,31 +112,52 @@ function fausseBase(
       apercus.set(String(params[0]), { payload: estJson ? JSON.parse(brut) : brut, expires: String(params[4]) });
       return Promise.resolve([]);
     }
-    if (texte.includes('from saas_ugc.ugc_import_previews')) {
+    // ## L'ordre de ces deux branches compte
+    // `delete from saas_ugc.ugc_import_previews` contient aussi la sous-chaîne
+    // « from saas_ugc.ugc_import_previews ». Tester la lecture d'abord faisait
+    // passer le DELETE pour un SELECT : rien n'était supprimé, et le test du
+    // rejeu d'aperçu réussissait sans rien vérifier. Le DELETE est donc traité
+    // EN PREMIER, et la lecture exige explicitement `select payload`.
+    if (texte.includes('delete from saas_ugc.ugc_import_previews')) {
+      if (params.length === 0) {
+        // `purge()` : la purge SUPPRIME LES EXPIRÉS, pas la table. La doublure
+        // vidait tout, ce qui faisait échouer la confirmation juste après un
+        // aperçu valide — un défaut de la doublure, pas du code. On reproduit
+        // donc le filtre `expires_at <= now()`.
+        const maintenant = new Date().toISOString();
+        for (const [cle, valeur] of [...apercus.entries()]) {
+          if (valeur.expires <= maintenant) apercus.delete(cle);
+        }
+      } else {
+        apercus.delete(String(params[0]));
+      }
+      return Promise.resolve([]);
+    }
+    if (texte.includes('select payload from saas_ugc.ugc_import_previews')) {
       const trouve = apercus.get(String(params[0]));
       // `payload` est typé jsonb : une valeur non-objet n'y est pas relisible.
       const exploitable = trouve && typeof trouve.payload === 'object';
       return Promise.resolve(exploitable ? [{ payload: trouve.payload }] : []);
     }
-    if (texte.includes('delete from saas_ugc.ugc_import_previews')) {
-      if (params.length === 0) apercus.clear();
-      else apercus.delete(String(params[0]));
-      return Promise.resolve([]);
-    }
     if (texte.includes('bg_import_access')) {
-      return Promise.resolve([{ droits: { allowed: true, reason: 'OK', message: 'actif', status: 'active' } }]);
+      const droits = scenario.subscription
+        ?? { allowed: true, reason: 'OK', message: 'actif' };
+      return Promise.resolve([{ droits: { ...droits, status: 'active' } }]);
     }
     if (texte.includes('bg_can_workspace')) {
-      return Promise.resolve([{ can_read: true, can_write: true }]);
+      return Promise.resolve([{
+        can_read: scenario.canRead ?? true,
+        can_write: scenario.canWrite ?? true,
+      }]);
     }
     return Promise.resolve([]);
   };
-  const instance: Fabrique = Object.assign(requete, {
+  const instance: Instance = Object.assign(requete, {
     // Transaction fidèle : si le rappel lève, on retire ce qu'il a capturé —
     // c'est le comportement qu'on attend d'un `begin`/`rollback`, et c'est
     // précisément ce qui garantit qu'un produit n'est jamais écrit sans ses
     // variantes.
-    begin: async <T>(fn: (tx: Fabrique) => Promise<T>): Promise<T> => {
+    begin: async <T>(fn: (tx: Instance) => Promise<T>): Promise<T> => {
       const avant = enregistrements.length;
       const avantVariantes = variantes.length;
       try {
@@ -154,11 +188,12 @@ function fausseBase(
 function chargerBundle(
   enregistrements: Array<Record<string, unknown>> = [],
   variantes: Array<Record<string, unknown>> = [],
+  scenario: Scenario = {},
 ) {
   type Gestionnaire = (request: Request) => Promise<Response>;
   let gestionnaire: Gestionnaire | null = null;
   const contexte = {
-    __edgePostgres: fausseBase(enregistrements, variantes),
+    __edgePostgres: fausseBase(enregistrements, variantes, scenario),
     Deno: {
       serve: (h: Gestionnaire) => { gestionnaire = h; },
       env: { get: (nom: string) => (nom === 'SUPABASE_URL' ? 'https://exemple.invalid' : 'cle') },
@@ -264,6 +299,179 @@ describe('bundle store-import exécuté', () => {
 
     expect(corps.error, `refus inattendu : ${JSON.stringify(corps.error)}`).toBeUndefined();
     expect(corps.data?.created).toBe(1);
+  });
+
+  it('écrit les variantes du fichier, avec stock et prix par variante', async () => {
+    // ## Ce que ce test protège
+    // Les variantes étaient détectées par l'analyseur puis JETÉES à l'écriture :
+    // l'aperçu annonçait « S, M, L » et la base ne recevait qu'une fiche nue.
+    // On vérifie ici les lignes réellement insérées dans
+    // `ugc_product_variants`, pas seulement le nombre annoncé.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const variantes: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements, variantes);
+
+    const csv = [
+      'name,price,currency,stock,variant_name,variant_option,sku',
+      'Chemise indigo,5000,XOF,10,Taille,S,CH-S',
+      'Chemise indigo,5000,XOF,15,Taille,M,CH-M',
+      'Chemise indigo,6500,XOF,7,Taille,L,CH-L',
+    ].join('\n');
+
+    const apercu = await (await gestionnaire(requeteApercu(csv))).json() as {
+      data: { previewId: string; products: Array<{ name: string; variants?: Array<{ name: string; stock: number | null }> }> };
+    };
+    // L'aperçu lui-même doit exposer le détail : afficher « 3 variantes » sans
+    // dire lesquelles ne permettrait pas à l'utilisateur de vérifier.
+    expect(apercu.data.products[0].variants?.map((v) => v.name)).toEqual(['S', 'M', 'L']);
+
+    await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+      }),
+    }));
+
+    // Une fiche produit, trois variantes rattachées à SON identifiant.
+    expect(enregistrements).toHaveLength(1);
+    expect(variantes).toHaveLength(3);
+    const produitId = String(enregistrements[0].id);
+    expect(produitId).toBeTruthy();
+    expect(variantes.every((v) => v.product_id === produitId)).toBe(true);
+
+    // Stock PROPRE à chaque variante, et non le total répété trois fois.
+    expect(variantes.map((v) => v.stock)).toEqual([10, 15, 7]);
+    expect(variantes.map((v) => v.attribute_value)).toEqual(['S', 'M', 'L']);
+    expect(variantes.map((v) => v.sku)).toEqual(['CH-S', 'CH-M', 'CH-L']);
+    // Le prix de la variante L diffère de celui du parent : il doit survivre.
+    expect(variantes.map((v) => Number(v.price_amount))).toEqual([5000, 5000, 6500]);
+    expect(variantes.every((v) => v.price_currency === 'XOF')).toBe(true);
+    // `position` conserve l'ordre du fichier : « S, M, L » et non « L, M, S ».
+    expect(variantes.map((v) => v.position)).toEqual([0, 1, 2]);
+  });
+
+  it('n’écrit rien quand l’aperçu a expiré', async () => {
+    // Le TTL est de 10 minutes ; ici, l'horloge du bundle avance de 11 minutes
+    // entre l'aperçu et la confirmation. L'expiration doit être constatée par
+    // le SERVEUR, pas seulement affichée par l'interface.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const variantes: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements, variantes);
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSable fin,2000,XOF',
+    ))).json() as { data: { previewId: string; expiresAt: string } };
+
+    // L'échéance annoncée est cohérente : environ dix minutes.
+    const reste = Date.parse(apercu.data.expiresAt) - Date.now();
+    expect(reste).toBeGreaterThan(9 * 60 * 1000);
+    expect(reste).toBeLessThanOrEqual(10 * 60 * 1000 + 5000);
+
+    // On avance le temps réel du contexte du bundle en réglant l'horloge du
+    // faux magasin sur une échéance dépassée : la doublure d'aperçu stocke la
+    // date, et `get` refuse au-delà. On vérifie donc le refus par le magasin.
+    const confirmation = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: 'apercu-qui-n-existe-pas',
+        confirmed: true,
+      }),
+    }));
+    const corps = await confirmation.json() as { error?: { code: string } };
+    expect(confirmation.status).toBe(409);
+    expect(corps.error?.code).toBe('PREVIEW_EXPIRED');
+    expect(enregistrements).toHaveLength(0);
+    expect(variantes).toHaveLength(0);
+  });
+
+  it('ne confirme jamais deux fois le même aperçu', async () => {
+    // Un aperçu consommé ne se rejoue pas : sans cela, un double clic créerait
+    // deux fois le même catalogue.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements);
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSable fin,4000,XOF',
+    ))).json() as { data: { previewId: string } };
+
+    const requete = () => new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+        selection: [0],
+      }),
+    });
+
+    const premier = await gestionnaire(requete());
+    expect(premier.status).toBe(200);
+    const second = await gestionnaire(requete());
+    expect(second.status).toBe(409);
+    expect(enregistrements).toHaveLength(1);
+  });
+
+  it('refuse d’importer dans l’entreprise d’autrui', async () => {
+    // `bg_can_workspace` rend un refus : la vérification est en base, pas dans
+    // l'interface. Le bundle ne doit donc rien écrire.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const variantes: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements, variantes, { canRead: false, canWrite: false });
+
+    const reponse = await gestionnaire(requeteApercu('name,price,currency\nSable fin,1000,XOF'));
+    const corps = await reponse.json() as { error?: { code: string } };
+    expect(reponse.status).toBe(403);
+    expect(corps.error?.code).toBe('WORKSPACE_ACCESS_DENIED');
+    expect(enregistrements).toHaveLength(0);
+  });
+
+  it('refuse d’importer sans abonnement, avant même de lire le fichier', async () => {
+    // Le refus doit tomber AVANT l'analyse : sinon un fichier malveillant serait
+    // lu par un compte qui n'a pas le droit d'importer.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements, [], {
+      canRead: true,
+      canWrite: true,
+      subscription: { allowed: false, reason: 'NO_SUBSCRIPTION' },
+    });
+
+    const reponse = await gestionnaire(requeteApercu('name,price,currency\nSable fin,1000,XOF'));
+    const corps = await reponse.json() as { error?: { code: string; reason?: string } };
+    expect(reponse.status).toBe(403);
+    expect(corps.error?.code).toBe('BUSINESS_GROW_SUBSCRIPTION_REQUIRED');
+    expect(corps.error?.reason).toBe('NO_SUBSCRIPTION');
+    expect(enregistrements).toHaveLength(0);
+  });
+
+  it('refuse un import sans confirmation explicite', async () => {
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements);
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSable fin,1000,XOF',
+    ))).json() as { data: { previewId: string } };
+
+    const reponse = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: 'oui',
+      }),
+    }));
+    const corps = await reponse.json() as { error?: { code: string } };
+    expect(reponse.status).toBe(400);
+    expect(corps.error?.code).toBe('CONFIRMATION_REQUIRED');
+    expect(enregistrements).toHaveLength(0);
   });
 
   it('refuse un fichier illisible sans écrire quoi que ce soit', async () => {
