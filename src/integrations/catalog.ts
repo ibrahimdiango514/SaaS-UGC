@@ -1,0 +1,600 @@
+/**
+ * VYORA — catalogue des intégrations.
+ *
+ * ## Ce que ce fichier est, et n'est pas
+ *
+ * C'est un **catalogue déclaratif** : il décrit les fournisseurs, leurs
+ * capacités et les permissions qu'ils exigent. Il ne contient aucun secret, et
+ * ne prétend pas qu'une connexion est possible là où elle ne l'est pas.
+ *
+ * ## Le principe qui gouverne tout le fichier
+ *
+ * Chaque fournisseur déclare **le mode d'authentification réellement
+ * disponible** et, s'il n'y en a aucun, la raison. Trois états en découlent,
+ * calculés — jamais saisis à la main :
+ *
+ *   - `available`      : un mode de connexion existe et ses prérequis sont remplis ;
+ *   - `needs_config`   : le mode existe mais les identifiants VYORA manquent ;
+ *   - `needs_approval` : le fournisseur exige une validation externe (Meta, TikTok…) ;
+ *   - `unavailable`    : aucun mode légal n'existe pour l'instant.
+ *
+ * Un fournisseur sans mode de connexion **n'affiche pas** de bouton actif. C'est
+ * la règle « ne jamais simuler une connexion », appliquée au niveau du modèle
+ * plutôt que de l'interface : une fiche ne peut pas mentir sur son état, car
+ * l'état n'est pas une donnée qu'on saisit, il est dérivé.
+ *
+ * ## Extension
+ *
+ * Ajouter un fournisseur ne demande aucune modification du moteur ni de
+ * l'interface : il suffit d'ajouter une entrée dans `INTEGRATIONS`. Les
+ * catégories, la recherche, les filtres et les fiches s'en déduisent.
+ */
+
+/** Familles affichées dans le catalogue. */
+export type CatalogCategory = 'social' | 'commerce' | 'productivity' | 'business';
+
+export const CATEGORY_LABELS: Record<CatalogCategory, string> = {
+  social: 'Réseaux sociaux',
+  commerce: 'Boutiques en ligne',
+  productivity: 'Productivité',
+  business: 'Business et commerce',
+};
+
+export const CATEGORY_DESCRIPTIONS: Record<CatalogCategory, string> = {
+  social: 'Publier, planifier et mesurer sur vos réseaux.',
+  commerce: 'Importer vos produits, suivre commandes et stocks.',
+  productivity: 'Messagerie, fichiers, agendas et documents.',
+  business: 'CRM, facturation, paiements, stocks et commandes.',
+};
+
+/** Nature du mécanisme d'authentification. */
+export type AuthMode =
+  | 'oauth2'
+  | 'api-key'
+  | 'app-install'
+  | 'public-catalog'
+  | 'file-import'
+  | 'none';
+
+/** Ce qu'un fournisseur permet de faire une fois connecté. */
+export type Capability =
+  | 'account-read'
+  | 'content-publish'
+  | 'publication-schedule'
+  | 'analytics-read'
+  | 'catalog-read'
+  | 'catalog-write'
+  | 'orders-read'
+  | 'inventory-read'
+  | 'inventory-write'
+  | 'messages-read'
+  | 'messages-send'
+  | 'files-read'
+  | 'calendar-read'
+  | 'calendar-write'
+  | 'contacts-read';
+
+export const CAPABILITY_LABELS: Record<Capability, string> = {
+  'account-read': 'Lire les informations du compte',
+  'content-publish': 'Publier du contenu',
+  'publication-schedule': 'Planifier des publications',
+  'analytics-read': 'Lire les statistiques',
+  'catalog-read': 'Lire le catalogue produits',
+  'catalog-write': 'Modifier les produits',
+  'orders-read': 'Lire les commandes',
+  'inventory-read': 'Lire les stocks',
+  'inventory-write': 'Mettre à jour les stocks',
+  'messages-read': 'Lire les messages',
+  'messages-send': 'Envoyer des messages',
+  'files-read': 'Lire les fichiers',
+  'calendar-read': 'Lire les événements',
+  'calendar-write': 'Créer des événements',
+  'contacts-read': 'Lire les contacts',
+};
+
+/**
+ * Prérequis d'un mode d'authentification.
+ *
+ * `configured` est renseigné à l'exécution à partir de la configuration réelle
+ * (variables d'environnement côté serveur, drapeau d'approbation). Il n'est
+ * jamais saisi en dur « true » pour faire joli.
+ */
+export interface AuthRequirement {
+  mode: AuthMode;
+  /** Libellé de ce que l'utilisateur devra fournir ou autoriser. */
+  label: string;
+  /** Nom de la variable serveur attendue, si le mode en dépend. */
+  serverConfigKey?: string;
+  /** Validation externe connue du fournisseur. */
+  externalApproval?: string;
+}
+
+export interface IntegrationEntry {
+  /** Identifiant stable, utilisé en base et par le futur moteur. */
+  id: string;
+  name: string;
+  category: CatalogCategory;
+  /** Description courte, affichée sur la fiche. */
+  description: string;
+  /** Ce que la connexion permettra réellement. */
+  capabilities: Capability[];
+  /** Modes d'authentification, du plus complet au plus simple. */
+  auth: AuthRequirement[];
+  /**
+   * Mode effectivement utilisé par le moteur, quand il est implémenté.
+   * `null` = aucun connecteur écrit : la fiche l'indique explicitement.
+   */
+  engine: AuthMode | null;
+  /** Documentation officielle, pour que l'utilisateur puisse vérifier. */
+  docsUrl?: string;
+  /** Particularité à connaître avant de connecter. */
+  caveat?: string;
+}
+
+/**
+ * Le catalogue.
+ *
+ * `engine: null` partout au départ : la Livraison 2 construit le catalogue et
+ * la couche d'état ; les connecteurs arrivent avec le moteur (Livraison 3).
+ * Aucune fiche ne prétend donc être connectable tant que le moteur ne l'est pas.
+ */
+export const INTEGRATIONS: IntegrationEntry[] = [
+  /* ------------------------------ Réseaux sociaux ------------------------ */
+  {
+    id: 'instagram',
+    name: 'Instagram',
+    category: 'social',
+    description: 'Publications, stories et statistiques de votre compte professionnel.',
+    capabilities: ['account-read', 'content-publish', 'publication-schedule', 'analytics-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Compte professionnel Instagram relié à une page Facebook',
+        serverConfigKey: 'META_APP_ID',
+        externalApproval: 'App Review Meta : instagram_content_publish, pages_show_list',
+      },
+      {
+        mode: 'public-catalog',
+        label: 'Aucune alternative : la publication exige une autorisation Meta.',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.facebook.com/docs/instagram-api',
+    caveat: 'Compte professionnel obligatoire. L’approbation Meta conditionne la publication.',
+  },
+  {
+    id: 'facebook',
+    name: 'Facebook Pages',
+    category: 'social',
+    description: 'Publier sur vos pages et lire leurs statistiques.',
+    capabilities: ['account-read', 'content-publish', 'publication-schedule', 'analytics-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Page Facebook dont vous êtes administrateur',
+        serverConfigKey: 'META_APP_ID',
+        externalApproval: 'App Review Meta : pages_manage_posts, pages_read_engagement',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.facebook.com/docs/pages-api',
+    caveat: 'Rôle administrateur de la page requis.',
+  },
+  {
+    id: 'tiktok',
+    name: 'TikTok',
+    category: 'social',
+    description: 'Envoi de vidéos et consultation des performances.',
+    capabilities: ['account-read', 'content-publish', 'analytics-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Compte TikTok creator ou business',
+        serverConfigKey: 'TIKTOK_CLIENT_KEY',
+        externalApproval: 'Audit d’application TikTok : video.publish',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.tiktok.com/doc/content-posting-api-get-started',
+    caveat: 'L’audit TikTok peut prendre plusieurs semaines. Aucun contournement n’est prévu.',
+  },
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    category: 'social',
+    description: 'Publication de vidéos et lecture des statistiques de chaîne.',
+    capabilities: ['account-read', 'content-publish', 'analytics-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Chaîne YouTube via un compte Google',
+        serverConfigKey: 'GOOGLE_CLIENT_ID',
+        externalApproval: 'Vérification Google : youtube.upload',
+      },
+      {
+        mode: 'public-catalog',
+        label: 'Lecture d’une chaîne publique sans connexion',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.google.com/youtube/v3',
+    caveat: 'Le quota Google limite le nombre d’envois quotidiens.',
+  },
+  {
+    id: 'linkedin',
+    name: 'LinkedIn',
+    category: 'social',
+    description: 'Publications sur votre profil et vos pages entreprise.',
+    capabilities: ['account-read', 'content-publish', 'analytics-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Profil LinkedIn ou page entreprise',
+        serverConfigKey: 'LINKEDIN_CLIENT_ID',
+        externalApproval: 'Accès Marketing Developer Platform LinkedIn',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://learn.microsoft.com/linkedin/',
+    caveat: 'L’accès API est restreint et soumis à candidature.',
+  },
+  {
+    id: 'pinterest',
+    name: 'Pinterest',
+    category: 'social',
+    description: 'Épingles, tableaux et statistiques.',
+    capabilities: ['account-read', 'content-publish', 'analytics-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Compte Pinterest',
+        serverConfigKey: 'PINTEREST_APP_ID',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.pinterest.com/',
+  },
+
+  /* -------------------------------- Boutiques ---------------------------- */
+  {
+    id: 'shopify',
+    name: 'Shopify',
+    category: 'commerce',
+    description: 'Import du catalogue, commandes et stocks de votre boutique.',
+    capabilities: ['catalog-read', 'catalog-write', 'orders-read', 'inventory-read', 'inventory-write'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Installation de l’application sur votre boutique',
+        serverConfigKey: 'SHOPIFY_API_KEY',
+      },
+      {
+        mode: 'public-catalog',
+        label: 'Lecture du catalogue public via /products.json',
+      },
+      {
+        mode: 'file-import',
+        label: 'Import d’un export CSV Shopify',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://shopify.dev/docs/api',
+    caveat: 'Le catalogue public suffit pour importer les produits, pas pour lire les commandes.',
+  },
+  {
+    id: 'woocommerce',
+    name: 'WooCommerce',
+    category: 'commerce',
+    description: 'Produits, commandes et stocks de votre boutique WordPress.',
+    capabilities: ['catalog-read', 'catalog-write', 'orders-read', 'inventory-read', 'inventory-write'],
+    auth: [
+      {
+        mode: 'api-key',
+        label: 'Clé REST WooCommerce (consumer key + secret)',
+        serverConfigKey: 'WOOCOMMERCE_ALLOW_KEYS',
+      },
+      {
+        mode: 'file-import',
+        label: 'Import d’un export CSV WooCommerce',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://woocommerce.github.io/woocommerce-rest-api-docs/',
+    caveat: 'Les clés REST ne doivent jamais transiter par le navigateur : elles sont saisies côté serveur.',
+  },
+  {
+    id: 'prestashop',
+    name: 'PrestaShop',
+    category: 'commerce',
+    description: 'Catalogue et commandes de votre boutique PrestaShop.',
+    capabilities: ['catalog-read', 'orders-read', 'inventory-read'],
+    auth: [
+      { mode: 'api-key', label: 'Clé Webservice PrestaShop', serverConfigKey: 'PRESTASHOP_ALLOW_KEYS' },
+      { mode: 'file-import', label: 'Import CSV PrestaShop' },
+    ],
+    engine: null,
+    docsUrl: 'https://devdocs.prestashop-project.org/',
+  },
+  {
+    id: 'magento',
+    name: 'Magento / Adobe Commerce',
+    category: 'commerce',
+    description: 'Catalogue, commandes et stocks Magento.',
+    capabilities: ['catalog-read', 'orders-read', 'inventory-read'],
+    auth: [
+      { mode: 'api-key', label: 'Jeton d’intégration Magento', serverConfigKey: 'MAGENTO_ALLOW_KEYS' },
+      { mode: 'file-import', label: 'Import CSV Magento' },
+    ],
+    engine: null,
+    docsUrl: 'https://developer.adobe.com/commerce/webapi/',
+  },
+  {
+    id: 'opencart',
+    name: 'OpenCart',
+    category: 'commerce',
+    description: 'Produits et commandes OpenCart.',
+    capabilities: ['catalog-read', 'orders-read'],
+    auth: [
+      { mode: 'api-key', label: 'Clé API OpenCart', serverConfigKey: 'OPENCART_ALLOW_KEYS' },
+      { mode: 'file-import', label: 'Import CSV OpenCart' },
+    ],
+    engine: null,
+    docsUrl: 'https://docs.opencart.com/',
+  },
+  {
+    id: 'wix',
+    name: 'Wix',
+    category: 'commerce',
+    description: 'Catalogue Wix Stores.',
+    capabilities: ['catalog-read', 'orders-read'],
+    auth: [
+      { mode: 'api-key', label: 'Clé API Wix', serverConfigKey: 'WIX_API_KEY' },
+      { mode: 'public-catalog', label: 'Catalogue public Wix Stores' },
+    ],
+    engine: null,
+    docsUrl: 'https://dev.wix.com/docs/rest',
+  },
+  {
+    id: 'bigcommerce',
+    name: 'BigCommerce',
+    category: 'commerce',
+    description: 'Catalogue et commandes BigCommerce.',
+    capabilities: ['catalog-read', 'orders-read', 'inventory-read'],
+    auth: [
+      { mode: 'api-key', label: 'Jeton API BigCommerce', serverConfigKey: 'BIGCOMMERCE_API_KEY' },
+      { mode: 'file-import', label: 'Import CSV BigCommerce' },
+    ],
+    engine: null,
+    docsUrl: 'https://developer.bigcommerce.com/docs',
+  },
+  {
+    id: 'squarespace',
+    name: 'Squarespace',
+    category: 'commerce',
+    description: 'Produits et commandes Squarespace.',
+    capabilities: ['catalog-read', 'orders-read'],
+    auth: [
+      { mode: 'api-key', label: 'Clé API Squarespace Commerce', serverConfigKey: 'SQUARESPACE_API_KEY' },
+      { mode: 'file-import', label: 'Import CSV Squarespace' },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.squarespace.com/commerce-apis',
+    caveat: 'L’accès API Commerce est réservé aux offres compatibles.',
+  },
+  {
+    id: 'ecwid',
+    name: 'Ecwid',
+    category: 'commerce',
+    description: 'Catalogue et commandes Ecwid.',
+    capabilities: ['catalog-read', 'orders-read'],
+    auth: [
+      { mode: 'api-key', label: 'Jeton secret Ecwid', serverConfigKey: 'ECWID_API_KEY' },
+      { mode: 'public-catalog', label: 'Catalogue public Ecwid' },
+    ],
+    engine: null,
+    docsUrl: 'https://api-docs.ecwid.com/',
+  },
+
+  /* ------------------------------- Productivité -------------------------- */
+  {
+    id: 'gmail',
+    name: 'Gmail',
+    category: 'productivity',
+    description: 'Lire, classer et rédiger des messages.',
+    capabilities: ['account-read', 'messages-read', 'messages-send'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Compte Google',
+        serverConfigKey: 'GOOGLE_CLIENT_ID',
+        externalApproval: 'Vérification Google pour gmail.send et gmail.readonly',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.google.com/gmail/api',
+    caveat: 'Les scopes sensibles Gmail exigent une vérification Google en production.',
+  },
+  {
+    id: 'google_drive',
+    name: 'Google Drive',
+    category: 'productivity',
+    description: 'Parcourir et récupérer vos fichiers.',
+    capabilities: ['account-read', 'files-read'],
+    auth: [
+      { mode: 'oauth2', label: 'Compte Google', serverConfigKey: 'GOOGLE_CLIENT_ID' },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.google.com/drive/api',
+  },
+  {
+    id: 'google_calendar',
+    name: 'Google Calendar',
+    category: 'productivity',
+    description: 'Consulter et créer des événements.',
+    capabilities: ['account-read', 'calendar-read', 'calendar-write'],
+    auth: [
+      { mode: 'oauth2', label: 'Compte Google', serverConfigKey: 'GOOGLE_CLIENT_ID' },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.google.com/calendar/api',
+  },
+  {
+    id: 'microsoft365',
+    name: 'Microsoft 365',
+    category: 'productivity',
+    description: 'Outlook, OneDrive et calendrier Microsoft.',
+    capabilities: ['account-read', 'messages-read', 'files-read', 'calendar-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Compte professionnel Microsoft',
+        serverConfigKey: 'MICROSOFT_CLIENT_ID',
+        externalApproval: 'Enregistrement d’application Azure AD et consentement administrateur',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://learn.microsoft.com/graph/overview',
+    caveat: 'Le consentement administrateur de votre organisation peut être nécessaire.',
+  },
+  {
+    id: 'outlook',
+    name: 'Outlook',
+    category: 'productivity',
+    description: 'Boîte mail Outlook personnelle ou professionnelle.',
+    capabilities: ['account-read', 'messages-read', 'messages-send'],
+    auth: [
+      { mode: 'oauth2', label: 'Compte Microsoft', serverConfigKey: 'MICROSOFT_CLIENT_ID' },
+    ],
+    engine: null,
+    docsUrl: 'https://learn.microsoft.com/graph/api/resources/mail-api-overview',
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    category: 'productivity',
+    description: 'Messages et notifications de vos canaux.',
+    capabilities: ['account-read', 'messages-read', 'messages-send'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Installation de l’application sur votre espace Slack',
+        serverConfigKey: 'SLACK_CLIENT_ID',
+      },
+    ],
+    engine: null,
+    docsUrl: 'https://api.slack.com/',
+  },
+  {
+    id: 'notion',
+    name: 'Notion',
+    category: 'productivity',
+    description: 'Lire et enrichir vos pages et bases de données.',
+    capabilities: ['account-read', 'files-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Autorisation d’une intégration Notion',
+        serverConfigKey: 'NOTION_CLIENT_ID',
+      },
+      { mode: 'api-key', label: 'Jeton d’intégration interne', serverConfigKey: 'NOTION_TOKEN' },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.notion.com/',
+  },
+
+  /* --------------------------------- Business ---------------------------- */
+  {
+    id: 'hubspot',
+    name: 'HubSpot',
+    category: 'business',
+    description: 'Contacts, entreprises et pipeline commercial.',
+    capabilities: ['account-read', 'contacts-read'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Application HubSpot installée sur votre compte',
+        serverConfigKey: 'HUBSPOT_CLIENT_ID',
+      },
+      { mode: 'api-key', label: 'Jeton d’application privée', serverConfigKey: 'HUBSPOT_TOKEN' },
+    ],
+    engine: null,
+    docsUrl: 'https://developers.hubspot.com/docs/api/overview',
+  },
+  {
+    id: 'stripe',
+    name: 'Stripe',
+    category: 'business',
+    description: 'Paiements, factures et abonnements.',
+    capabilities: ['account-read', 'orders-read'],
+    auth: [
+      { mode: 'api-key', label: 'Clé restreinte Stripe (lecture)', serverConfigKey: 'STRIPE_RESTRICTED_KEY' },
+    ],
+    engine: null,
+    docsUrl: 'https://stripe.com/docs/api',
+    caveat: 'Utilisez une clé restreinte en lecture, jamais la clé secrète complète.',
+  },
+  {
+    id: 'saspay',
+    name: 'SasPay',
+    category: 'business',
+    description: 'Encaissement mobile money déjà intégré à VYORA.',
+    capabilities: ['account-read', 'orders-read'],
+    auth: [
+      { mode: 'api-key', label: 'Clé marchand SasPay', serverConfigKey: 'SASPAY_API_KEY' },
+    ],
+    engine: null,
+    docsUrl: 'https://saspay.com',
+    caveat: 'Déjà utilisé pour les abonnements VYORA ; le catalogue n’expose que la lecture.',
+  },
+  {
+    id: 'odoo',
+    name: 'Odoo',
+    category: 'business',
+    description: 'CRM, facturation, stocks et commandes.',
+    capabilities: ['account-read', 'catalog-read', 'orders-read', 'inventory-read', 'contacts-read'],
+    auth: [
+      { mode: 'api-key', label: 'Clé API Odoo et URL de votre instance', serverConfigKey: 'ODOO_ALLOW_KEYS' },
+      { mode: 'file-import', label: 'Import CSV Odoo' },
+    ],
+    engine: null,
+    docsUrl: 'https://www.odoo.com/documentation/master/developer.html',
+  },
+];
+
+/** Index par identifiant, pour les recherches ponctuelles. */
+export const INTEGRATION_BY_ID: Record<string, IntegrationEntry> = Object.fromEntries(
+  INTEGRATIONS.map((entry) => [entry.id, entry]),
+);
+
+/** Nombre de fournisseurs par catégorie. */
+export function countByCategory(): Record<CatalogCategory, number> {
+  const counts: Record<CatalogCategory, number> = { social: 0, commerce: 0, productivity: 0, business: 0 };
+  for (const entry of INTEGRATIONS) counts[entry.category] += 1;
+  return counts;
+}
+
+/**
+ * Recherche dans le catalogue.
+ *
+ * Porte sur le nom, la description et les capacités : chercher « stocks » doit
+ * remonter les boutiques qui gèrent l'inventaire, pas seulement celles dont le
+ * nom contient le mot.
+ */
+export function searchIntegrations(
+  entries: IntegrationEntry[],
+  query: string,
+  category: CatalogCategory | 'all',
+): IntegrationEntry[] {
+  const q = query.trim().toLowerCase();
+  return entries.filter((entry) => {
+    if (category !== 'all' && entry.category !== category) return false;
+    if (!q) return true;
+    const capacites = entry.capabilities.map((c) => CAPABILITY_LABELS[c].toLowerCase()).join(' ');
+    return (
+      entry.name.toLowerCase().includes(q)
+      || entry.description.toLowerCase().includes(q)
+      || capacites.includes(q)
+      || CATEGORY_LABELS[entry.category].toLowerCase().includes(q)
+    );
+  });
+}
