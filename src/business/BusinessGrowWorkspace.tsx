@@ -26,8 +26,8 @@ import {
   type BusinessToolExecution, type BusinessVerificationResult, type BusinessRecommendation, type BusinessReport,
 } from './api';
 import {
-  BUSINESS_PROVIDERS, BUSINESS_ROLES, EXTENSIBLE_PROVIDER_ADAPTERS,
-  type BusinessCapability, type BusinessRoleKey, type RoutingSelectionMode,
+  BUSINESS_ROLES, capabilitiesOf,
+  type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
 
 type BusinessSection = 'chat' | 'growth' | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
@@ -200,21 +200,6 @@ const PROMPT_IDEAS = [
   { label: 'Situation financière', text: 'Analyse les mouvements financiers disponibles sur les 30 derniers jours, en séparant faits et limites.', icon: TrendingUp, categories: ['bg_module_finance_intelligence'] },
 ];
 
-const CAPABILITY_LABELS: Record<BusinessCapability, string> = {
-  writing: 'Rédaction',
-  images: 'Images',
-  documents: 'Documents',
-  scripts: 'Scripts',
-  hooks: 'Hooks',
-  reasoning: 'Raisonnement',
-  analysis: 'Analyse',
-  'economic-routing': 'Routage économique',
-  fallback: 'Secours',
-  'specialized-models': 'Modèles spécialisés',
-  'model-comparison': 'Comparaison de modèles',
-  experimentation: 'Expérimentation',
-  'video-generation': 'Génération vidéo',
-};
 
 const TOOL_LABELS: Record<string, string> = {
   propose_memory_save: 'Enregistrer dans la mémoire métier',
@@ -276,6 +261,8 @@ function describeProviderFailureHint(code: string | null | undefined): string {
       return 'La vérification du service IA a échoué. Contactez le support VYORA si le problème persiste.';
     case 'PROVIDER_RATE_LIMITED':
       return 'Le service IA est temporairement saturé. Réessayez plus tard.';
+    case 'PROVIDER_PAYMENT_REQUIRED':
+      return 'Le crédit du service IA est épuisé. Réessayez plus tard ou contactez le support VYORA.';
     case 'PROVIDER_REQUEST_REJECTED':
       return 'La demande n’a pas été acceptée. Vérifiez votre message puis réessayez.';
     case 'PROVIDER_NOT_CONFIGURED':
@@ -352,14 +339,15 @@ function providerStatus(provider: BusinessProviderStatus | undefined): {
   };
 }
 
-function ProviderStatusList({ statuses, compact = false, loading = false }: {
+function ProviderStatusList({ statuses, compact: _compact = false, loading = false }: {
   statuses: BusinessProviderStatus[] | null;
   compact?: boolean;
   loading?: boolean;
 }) {
-  const providers = compact ? BUSINESS_PROVIDERS.filter((provider) => provider.id !== 'muapi').slice(0, 3) : BUSINESS_PROVIDERS;
-  const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
-  const activeCount = providers.filter((provider) => isVerifiedProvider(byKey.get(provider.id))).length;
+  // La liste vient du service (registre serveur), jamais d'un catalogue figé
+  // côté navigateur : un fournisseur ajouté côté serveur apparaît ici seul.
+  const providers = statuses ?? [];
+  const activeCount = providers.filter((status) => isVerifiedProvider(status)).length;
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
@@ -814,7 +802,7 @@ function AssistantView({
       </section>
 
       <aside className="space-y-4">
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        <section className="vy-surface p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-white">Conversations</h2>
             <span className="text-[10px] text-slate-500">{conversationsLoaded ? `${conversations.length} enregistrée(s)` : '—'}</span>
@@ -931,7 +919,7 @@ function AssistantView({
           )}
         </section>
 
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        <section className="vy-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <Zap size={15} className="text-cyan-300" />
             <h2 className="text-sm font-semibold text-white">Services IA VYORA</h2>
@@ -948,7 +936,7 @@ function AssistantView({
           </p>
         </section>
 
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-4">
+        <section className="vy-surface p-4">
           <div className="flex items-center gap-2">
             <ShieldCheck size={15} className="text-emerald-300" />
             <h2 className="text-sm font-semibold text-white">Données privées</h2>
@@ -1034,7 +1022,7 @@ function MemoryView({
   };
 
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+    <section className="vy-surface p-5 sm:p-7">
       <div className="max-w-2xl">
         <h2 className="text-lg font-semibold text-white">Mémoire métier privée</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
@@ -1147,15 +1135,15 @@ function ProvidersView({
   onVerifyProvider: (providerKey: string, modelKey?: string) => Promise<void>;
   onSaveRouting: (pref: BusinessRoutingPreference) => Promise<void>;
 }) {
-  const byKey = new Map((statuses ?? []).map((status) => [status.provider_key, status]));
   const [routingRole, setRoutingRole] = useState<BusinessRoleKey>('business_advisor');
   const [routingMode, setRoutingMode] = useState<RoutingSelectionMode>('auto');
   const [routingProvider, setRoutingProvider] = useState('');
   const [routingModel, setRoutingModel] = useState('');
   const [routingAllowFallback, setRoutingAllowFallback] = useState(true);
 
+  // Servables = ceux que le serveur considère configurés (registre + secret).
   const configurableProviders = (statuses ?? []).filter(
-    (status) => status.provider_key !== 'muapi' && (status.config_status === 'configured' || status.enabled),
+    (status) => status.config_status === 'configured' || status.enabled,
   );
   const modelsForSelectedProvider = models.filter(
     (model) => model.enabled && (!routingProvider || model.provider_key === routingProvider),
@@ -1175,7 +1163,7 @@ function ProvidersView({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+      <section className="vy-surface p-5 sm:p-7">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-white">Services IA VYORA</h2>
@@ -1212,16 +1200,20 @@ function ProvidersView({
           </div>
         )}
         <div className="space-y-3">
-          {BUSINESS_PROVIDERS.map((provider, providerIndex) => {
-            const rawStatus = byKey.get(provider.id);
-            const status = providerStatus(rawStatus);
-            const providerModels = models.filter((model) => model.provider_key === provider.id);
-            const canProbe = backendReady && provider.id !== 'muapi' && (rawStatus?.config_status === 'configured' || provider.id === 'groq' || provider.id === 'gemini');
+          {(statuses ?? []).length === 0 ? (
+            <p className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5 text-xs text-slate-400" role="status">
+              Aucun service IA n’est encore déclaré. L’administrateur peut en ajouter depuis l’espace Admin ; ils
+              apparaîtront ici dès qu’ils seront configurés.
+            </p>
+          ) : (statuses ?? []).map((provider) => {
+            const status = providerStatus(provider);
+            const providerModels = models.filter((model) => model.provider_key === provider.provider_key);
+            const canProbe = backendReady && provider.config_status === 'configured';
             return (
-              <article key={provider.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.id}`}>
+              <article key={provider.provider_key} className="rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`provider-${provider.provider_key}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold text-white">Moteur VYORA {providerIndex + 1}</h3>
+                    <h3 className="font-semibold text-white">{provider.display_name || provider.provider_key}</h3>
                     <p className="mt-1 text-xs leading-relaxed text-slate-400">{status.label === 'Vérifié' ? 'Disponibilité confirmée.' : 'Disponibilité non confirmée.'}</p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1230,21 +1222,14 @@ function ProvidersView({
                       <Button
                         size="sm"
                         variant="outline"
-                        loading={verifyingKey === provider.id}
+                        loading={verifyingKey === provider.provider_key}
                         disabled={Boolean(verifyingKey)}
-                        onClick={() => { void onVerifyProvider(provider.id); }}
+                        onClick={() => { void onVerifyProvider(provider.provider_key); }}
                       >
                         Vérifier la connexion
                       </Button>
                     )}
                   </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {provider.proposedCapabilities.map((capability) => (
-                    <span key={capability} className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1 text-[10px] text-slate-400">
-                      {CAPABILITY_LABELS[capability]}
-                    </span>
-                  ))}
                 </div>
                 {providerModels.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
@@ -1254,6 +1239,7 @@ function ProvidersView({
                         : model.verification_status === 'unavailable'
                           ? 'Indisponible'
                           : 'Non vérifié';
+                      const capabilities = capabilitiesOf(model.capabilities);
                       return (
                         <button
                           key={model.model_key}
@@ -1261,7 +1247,7 @@ function ProvidersView({
                           disabled={!canProbe || Boolean(verifyingKey)}
                           title={canProbe ? 'Vérifier ce modèle IA VYORA' : undefined}
                           onClick={() => {
-                            if (canProbe) void onVerifyProvider(provider.id, model.provider_model_key);
+                            if (canProbe) void onVerifyProvider(provider.provider_key, model.provider_model_key);
                           }}
                           className={cn(
                             'rounded-md border px-2 py-0.5 text-[10px] transition',
@@ -1273,7 +1259,8 @@ function ProvidersView({
                             (!canProbe || Boolean(verifyingKey)) && 'cursor-default opacity-80',
                           )}
                         >
-                          Modèle VYORA {providerModels.indexOf(model) + 1} ({modelStateLabel})
+                          {model.display_name || model.model_key} ({modelStateLabel})
+                          {capabilities.length > 0 ? ` · ${capabilities.slice(0, 2).join(', ')}` : ''}
                         </button>
                       );
                     })}
@@ -1285,29 +1272,20 @@ function ProvidersView({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+      <section className="vy-surface p-5 sm:p-7">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal size={16} className="text-brand-300" />
-          <h3 className="text-sm font-semibold text-white">Adaptateurs extensibles préparés</h3>
+          <h3 className="text-sm font-semibold text-white">Comment VYORA choisit un service IA</h3>
         </div>
-        <p className="mb-4 text-xs text-slate-400">
-          Ces adaptateurs disposent d’une interface prête côté serveur, sans clé ni exécution distante active tant qu’ils ne sont pas configurés et vérifiés.
+        <p className="text-xs leading-relaxed text-slate-400">
+          Le catalogue des services n’est pas figé : la plateforme lit le registre central, qui décrit pour chaque
+          fournisseur son protocole, son URL et le nom de son secret. Un service ajouté par l’administrateur apparaît
+          donc dans cette liste sans mise à jour de l’application — et n’est utilisé qu’après une vérification réelle.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {EXTENSIBLE_PROVIDER_ADAPTERS.map((adapter) => (
-            <article key={adapter.id} className="rounded-xl border border-white/[0.07] bg-black/15 p-3.5" data-testid={`adapter-${adapter.id}`}>
-              <div className="flex items-center justify-between gap-2">
-                <h4 className="text-sm font-medium text-white">Service VYORA à venir</h4>
-                <Badge tone="neutral">À venir</Badge>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-400">Cette capacité pourra être activée après vérification côté serveur.</p>
-            </article>
-          ))}
-        </div>
       </section>
 
       {backendReady && (
-        <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7">
+        <section className="vy-surface p-5 sm:p-7">
           <h3 className="text-sm font-semibold text-white">Préférence de routage par rôle</h3>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <select
@@ -1345,15 +1323,11 @@ function ProvidersView({
                   className="rounded-lg border border-white/10 bg-[#0c111b] px-3 py-2 text-xs text-white"
                 >
                   <option value="">Service IA…</option>
-                  {(configurableProviders.length > 0
-                    ? configurableProviders
-                    : BUSINESS_PROVIDERS.filter((p) => p.id !== 'muapi').map((p) => ({
-                        provider_key: p.id,
-                        display_name: p.name,
-                      }))
-                  ).map((provider) => (
+                  {configurableProviders.length === 0 ? (
+                    <option value="" disabled>Aucun service configuré</option>
+                  ) : configurableProviders.map((provider) => (
                     <option key={provider.provider_key} value={provider.provider_key}>
-                        {`Moteur VYORA ${configurableProviders.findIndex((entry) => entry.provider_key === provider.provider_key) + 1}`}
+                      {provider.display_name || provider.provider_key}
                     </option>
                   ))}
                 </select>
@@ -1366,7 +1340,7 @@ function ProvidersView({
                   <option value="">Modèle par défaut</option>
                   {modelsForSelectedProvider.map((model) => (
                     <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>
-                      {`Modèle VYORA ${modelsForSelectedProvider.indexOf(model) + 1}`}
+                      {model.display_name || model.model_key}
                     </option>
                   ))}
                 </select>
@@ -1454,7 +1428,7 @@ function IntegrationsView({
     }
   }
   return (
-    <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="business-integrations">
+    <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">
       <div className="mb-5 max-w-3xl">
         <h2 className="text-lg font-semibold text-white">Intégrations et connexions sécurisées</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
@@ -1600,7 +1574,7 @@ function AiControlCenterView({
   return (
     <div className="space-y-4">
       {/* Mémoire de l'agent */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-memory-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-memory-panel">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-white">Mémoire de l’agent</h2>
@@ -1687,7 +1661,7 @@ function AiControlCenterView({
       </section>
 
       {/* Règles de routage */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-routing-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-routing-panel">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <SlidersHorizontal size={16} className="text-brand-300" />
@@ -1719,7 +1693,7 @@ function AiControlCenterView({
       </section>
 
       {/* Activité IA récente */}
-      <section className="rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-7" data-testid="ai-activity-panel">
+      <section className="vy-surface p-5 sm:p-7" data-testid="ai-activity-panel">
         <div className="mb-4 flex items-center gap-2">
           <Activity size={16} className="text-cyan-300" />
           <h3 className="text-sm font-semibold text-white">Activité IA récente</h3>
@@ -2338,6 +2312,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         'PROVIDER_MODEL_MISMATCH',
         'PROVIDER_AUTH_FAILED',
         'PROVIDER_RATE_LIMITED',
+        'PROVIDER_PAYMENT_REQUIRED',
         'PROVIDER_UNAVAILABLE',
         'PROVIDER_TIMEOUT',
         'PROVIDER_NETWORK_ERROR',
@@ -2644,17 +2619,20 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
 
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
-      <header className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#080d15] px-5 py-6 sm:px-7">
+      <header className="relative overflow-hidden rounded-[1.6rem] border border-violet-200/[0.14] bg-[#080a12] px-5 py-6 sm:px-7">
         <img src="/brand/vyora-growth.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 [mask-image:linear-gradient(to_right,transparent,black)]" />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#080d15_20%,rgba(8,13,21,0.4))]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-brand-500/25 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-violet-500/25 blur-[90px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 right-0 h-56 w-56 rounded-full bg-cyan-400/15 blur-[90px]" />
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/50 to-transparent" />
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-200">
-              <Brain size={14} /> VYORA · Business Grow
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-400/15 text-violet-200 ring-1 ring-violet-300/25"><Brain size={14} /></span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-200/90">VYORA · Business Grow</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-slate-400">Espace pilotage</span>
             </div>
-            <h1 className="vyora-display text-2xl tracking-tight text-white sm:text-3xl">Votre copilote business</h1>
+            <h1 className="vy-title text-[1.75rem] leading-tight sm:text-[2.15rem]">Votre copilote business</h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
               Intelligence, stratégie et croissance, reliées à votre contexte métier.
             </p>
@@ -2674,10 +2652,10 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
 
       <Link
         to="/app/business/modules"
-        className="group flex flex-col gap-3 rounded-2xl border border-brand-400/20 bg-brand-500/[0.06] px-4 py-4 transition hover:border-brand-400/40 hover:bg-brand-500/[0.1] sm:flex-row sm:items-center sm:justify-between"
+        className="group flex flex-col gap-3 rounded-2xl border border-violet-300/20 bg-violet-400/[0.06] px-4 py-4 transition hover:border-violet-300/40 hover:bg-violet-400/[0.1] sm:flex-row sm:items-center sm:justify-between"
       >
         <span className="flex min-w-0 items-start gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500/15 text-brand-200"><Package size={19} /></span>
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-violet-300/25 bg-violet-400/12 text-violet-200"><Package size={19} /></span>
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-white">13 modules métier opérationnels</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
@@ -2685,7 +2663,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
             </span>
           </span>
         </span>
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-brand-200">
+        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-violet-200">
           Ouvrir les modules <ArrowUpRight size={15} className="transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </span>
       </Link>
@@ -2713,19 +2691,31 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
       )}
 
       <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><MessageSquare size={14} className="text-cyan-300" /> Conversations</div>
-          <p className="mt-2 text-xl font-semibold text-white">{conversationsLoaded ? conversations.length : '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Conversations</p>
+            <span className="vy-icon-tile h-8 w-8"><MessageSquare size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">{conversationsLoaded ? conversations.length : '—'}</p>
           <p className="mt-1 text-[11px] text-slate-500">Historique de votre espace métier</p>
         </div>
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><Zap size={14} className="text-emerald-300" /> Services vérifiés</div>
-          <p className="mt-2 text-xl font-semibold text-white">{providers ? availableProviderCount : '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Services vérifiés</p>
+            <span className="vy-icon-tile h-8 w-8"><Zap size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">
+            {providers ? availableProviderCount : '—'}
+            <span className="ml-1 text-[11px] font-normal text-slate-500">service(s)</span>
+          </p>
           <p className="mt-1 text-[11px] text-slate-500">Disponibilité contrôlée côté serveur</p>
         </div>
-        <div className="rounded-2xl border border-white/[0.08] bg-panel/60 p-4">
-          <div className="flex items-center gap-2 text-xs text-slate-400"><Brain size={14} className="text-violet-300" /> Quota métier</div>
-          <p className="mt-2 text-xl font-semibold text-white">{quota?.available_units ?? '—'}</p>
+        <div className="vy-surface vy-halo p-4">
+          <div className="flex items-start justify-between gap-2">
+            <p className="vy-metric-label">Quota métier</p>
+            <span className="vy-icon-tile h-8 w-8"><Brain size={14} /></span>
+          </div>
+          <p className="vy-metric-value mt-2">{quota?.available_units ?? '—'}</p>
           <p className="mt-1 text-[11px] text-slate-500">
             {quota
               ? `Unités disponibles · crédits Studio ${quota.studio_ugc_untouched ? 'intacts' : 'distincts'}`
@@ -2734,8 +2724,8 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="Navigation Business Grow" className="flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
+      <div className="grid gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
+        <nav aria-label="Navigation Business Grow" className="no-scrollbar flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -2745,7 +2735,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
               className={cn(
                 'relative flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
                 section === id
-                  ? 'bg-gradient-to-r from-brand-500/25 to-cyan-500/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]'
+                  ? 'bg-gradient-to-r from-violet-400/20 to-cyan-400/[0.06] text-white shadow-[inset_0_0_0_1px_rgba(196,181,253,0.18)]'
                   : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
               )}
             >

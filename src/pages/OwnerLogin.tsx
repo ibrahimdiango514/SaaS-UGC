@@ -1,19 +1,26 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, LockKeyhole } from 'lucide-react';
+import { LockKeyhole, Mail, ShieldCheck } from 'lucide-react';
 import AuthShell from '../components/AuthShell';
-import { Button, Card, ErrorState, Input } from '../components/ui';
+import { AuthField, AuthNotice, AuthSubmit, type AuthSubmitState } from '../components/auth/AuthForm';
 import { useAuth } from '../context/AuthContext';
 import { bootstrap, signIn, signOut } from '../lib/api';
 import { asAppError } from '../lib/errors';
 
+/**
+ * Connexion administrateur.
+ *
+ * **Contrôle d'accès inchangé** : la session est fermée si `bootstrap()` ne
+ * renvoie pas `is_admin` — un compte ordinaire ne peut pas entrer ici. Seul
+ * l'habillage suit désormais le parcours d'authentification VYORA.
+ */
 export default function OwnerLogin() {
   const { user, isAdmin, loading, logout } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [state, setState] = useState<AuthSubmitState>('idle');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -24,6 +31,7 @@ export default function OwnerLogin() {
     event.preventDefault();
     setError('');
     setSubmitting(true);
+    setState('loading');
     try {
       await signIn(email.trim(), password);
       const result = await bootstrap();
@@ -31,8 +39,10 @@ export default function OwnerLogin() {
         await signOut();
         throw new Error('Ce compte ne possède pas le rôle administrateur.');
       }
+      setState('success');
       navigate('/admin', { replace: true });
     } catch (cause) {
+      setState('idle');
       setError(asAppError(cause, 'Connexion administrateur impossible.').message);
     } finally {
       setSubmitting(false);
@@ -42,29 +52,64 @@ export default function OwnerLogin() {
   if (loading) return <div className="grid min-h-screen place-items-center px-4"><p className="text-sm text-slate-400">Vérification de la session…</p></div>;
 
   return (
-    <AuthShell title="Connexion administrateur" subtitle="Seul le rôle administrateur vérifié côté serveur ouvre le dashboard.">
-      <Card className="p-6">
+    <AuthShell
+      variant="secure"
+      eyebrow="Console propriétaire"
+      title="Connexion administrateur"
+      subtitle="Seul le rôle administrateur vérifié côté serveur ouvre le dashboard."
+      footer={<Link to="/connexion" className="font-semibold text-cyan-300 transition hover:text-cyan-200">Connexion utilisateur standard</Link>}
+    >
+      <div className="vy-auth-card p-5 sm:p-7" data-state={state === 'success' ? 'success' : error ? 'error' : undefined}>
         {user && !isAdmin ? (
           <div className="space-y-4">
-            <p className="text-sm text-slate-300">La session ouverte n’a pas le rôle administrateur.</p>
-            <Button className="w-full" variant="outline" onClick={() => void logout()}>Se déconnecter</Button>
+            <AuthNotice tone="info">
+              La session ouverte n’a pas le rôle administrateur. Déconnectez-vous pour utiliser un compte propriétaire.
+            </AuthNotice>
+            <button type="button" onClick={() => void logout()} className="vy-btn vy-btn-ghost-accent min-h-12 w-full text-[13px]">
+              Se déconnecter
+            </button>
           </div>
         ) : (
           <form onSubmit={(event) => void onSubmit(event)} className="space-y-4" noValidate>
-            <Input label="Adresse e-mail" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} />
-            <div className="relative">
-              <Input label="Mot de passe" type={showPassword ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} />
-              <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-[36px] text-slate-500 hover:text-white" aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-            {error && <ErrorState message={error} />}
-            <Button type="submit" className="w-full" size="lg" loading={submitting} icon={<LockKeyhole size={16} />}>Se connecter</Button>
+            <AuthField
+              label="Adresse e-mail"
+              type="email"
+              autoComplete="username"
+              required
+              autoFocus
+              inputMode="email"
+              spellCheck={false}
+              value={email}
+              onChange={(event) => { setEmail(event.target.value); if (error) setError(''); }}
+              placeholder="vous@exemple.com"
+              icon={<Mail size={15} />}
+            />
+            <AuthField
+              label="Mot de passe"
+              autoComplete="current-password"
+              required
+              revealable
+              value={password}
+              onChange={(event) => { setPassword(event.target.value); if (error) setError(''); }}
+              placeholder="••••••••"
+              icon={<LockKeyhole size={15} />}
+            />
+            {error && <AuthNotice>{error}</AuthNotice>}
+            <AuthSubmit
+              state={state}
+              disabled={submitting}
+              loadingLabel="Vérification du rôle…"
+              successLabel="Rôle vérifié — ouverture"
+              icon={<ShieldCheck size={16} />}
+            >
+              Se connecter
+            </AuthSubmit>
           </form>
         )}
-        {!user && error && <div className="sr-only" role="alert">{error}</div>}
-      </Card>
-      <p className="mt-5 text-center text-xs text-slate-500"><Link to="/" className="text-brand-300">Retour à l’accueil</Link></p>
+      </div>
+      <p className="mt-4 text-center text-[10.5px] leading-relaxed text-slate-500">
+        Aucune élévation de privilège n’est possible depuis cette page : le rôle vient du serveur.
+      </p>
     </AuthShell>
   );
 }

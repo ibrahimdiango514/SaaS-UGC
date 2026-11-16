@@ -193,10 +193,16 @@ describe('Reelora AI ↔ Platform contracts', () => {
     ]);
     expect(BUSINESS_ROUTING_DEFAULTS.defaultAllowFallbackInManual).toBe(false);
 
+    // Aucun catalogue d'adaptateurs en dur : la liste décrit ce que
+    // l'environnement porte réellement (une clé + une URL par fournisseur).
+    // Un identifiant présent ici est donc toujours exécutable ; aucun
+    // « adaptateur préparé » fictif n'est annoncé.
     const adapters = listAdapterDescriptors();
-    expect(adapters.find((a) => a.id === 'groq')?.implemented).toBe(true);
-    expect(adapters.find((a) => a.id === 'gemini')?.implemented).toBe(true);
-    expect(adapters.find((a) => a.id === 'openai')?.implemented).toBe(false);
+    expect(Array.isArray(adapters)).toBe(true);
+    for (const adapter of adapters) {
+      expect(adapter.implemented).toBe(true);
+      expect(adapter.envKeyVar).toMatch(/^BUSINESS_GROW_[A-Z0-9_]+_API_KEY$/);
+    }
 
     const extracted = extractToolProposals(
       'Réponse propre.\n---\n<!--REELORA_TOOL_PROPOSALS:[{"toolName":"handoff_ugc_brief","summary":"Brief vidéo","arguments":{"productName":"Huile Karité","ratio":"9:16"}}]-->',
@@ -233,8 +239,8 @@ describe('Reelora AI ↔ Platform contracts', () => {
     const dependencies: BusinessGrowDependencies = {
       allowedOrigins: ['https://reelora.example'],
       getUserId: vi.fn(async () => '11111111-1111-4111-8111-111111111111'),
-      providerOrder: ['groq', 'gemini'],
-      providerConfigs: {},
+      providerOrder: () => ['groq', 'gemini'],
+      providerConfigs: () => ({}),
       store,
       complete: vi.fn(),
     };

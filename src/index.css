@@ -493,3 +493,446 @@
 @media (prefers-reduced-motion: reduce) {
   .vyora-home-orbit { animation: none !important; }
 }
+
+/* =========================================================================
+   VYORA — DESIGN SYSTEM PREMIUM (phase « expérience »)
+   -------------------------------------------------------------------------
+   Ajout strictement additif : aucune règle existante n'est modifiée.
+   Principes :
+   - une seule source de vérité pour les accents (variables CSS par espace) ;
+   - animations limitées à `opacity` / `transform` / `filter` (pas de layout) ;
+   - tout est neutralisé par `prefers-reduced-motion` (voir bloc final) ;
+   - les classes sont préfixées `vy-` pour ne rien heurter de l'existant.
+   ========================================================================= */
+
+:root {
+  /* Accent par défaut = cyan VYORA (Studio). */
+  --vy-accent: 34 211 238;
+  --vy-accent-2: 139 92 246;
+  --vy-accent-ink: 10 22 30;
+  --vy-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --vy-ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --vy-radius: 1.25rem;
+}
+
+/* Identité par espace ------------------------------------------------
+   Deux façon de poser le périmètre : la classe (`.vy-scope-*`) pour les
+   blocs ponctuels, et l'attribut (`data-vy-scope`) posé sur le conteneur
+   racine des espaces — il traverse alors toute l'arborescence. */
+.vy-scope-studio,
+[data-vy-scope='studio'] {
+  --vy-accent: 34 211 238;
+  --vy-accent-2: 56 189 248;
+  --vy-accent-ink: 8 22 30;
+}
+.vy-scope-business,
+[data-vy-scope='business'] {
+  --vy-accent: 167 139 250;
+  --vy-accent-2: 244 114 182;
+  --vy-accent-ink: 20 14 32;
+}
+
+/* Liseré d'identité d'espace (bord gauche de la barre latérale) : une
+   signature visuelle immédiate, sans texte supplémentaire. */
+[data-vy-scope] .vy-scope-rail::after {
+  content: '';
+  position: absolute;
+  inset-block: 18%;
+  left: 0;
+  width: 2px;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, transparent, rgb(var(--vy-accent) / 0.9), transparent);
+}
+
+@layer components {
+  /* ---------------------------------------------------------------- Surfaces */
+  .vy-surface {
+    @apply relative overflow-hidden rounded-[1.35rem] border bg-[#080d15]/80;
+    border-color: rgb(var(--vy-accent) / 0.16);
+    box-shadow:
+      0 28px 70px -50px rgba(0, 0, 0, 0.95),
+      inset 0 1px 0 rgba(255, 255, 255, 0.055);
+    backdrop-filter: blur(18px);
+  }
+  .vy-surface-hover {
+    @apply transition duration-300;
+    transition-timing-function: var(--vy-ease);
+  }
+  .vy-surface-hover:hover {
+    @apply -translate-y-0.5;
+    border-color: rgb(var(--vy-accent) / 0.38);
+    box-shadow:
+      0 34px 80px -46px rgb(var(--vy-accent) / 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  }
+  .vy-surface-quiet {
+    @apply relative overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.022];
+  }
+
+  /* Halo supérieur : donne du relief sans image. */
+  .vy-halo::before {
+    content: '';
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgb(var(--vy-accent) / 0.55), transparent);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+
+  /* Halo lumineux flottant (à placer dans un parent `relative isolate`). */
+  .vy-glow {
+    @apply pointer-events-none absolute rounded-full;
+    background: rgb(var(--vy-accent) / 0.22);
+    filter: blur(80px);
+  }
+
+  /* Révélation à l'entrée : `--vy-delay` en ms. */
+  .vy-in {
+    animation: vyIn 0.68s var(--vy-ease) both;
+    animation-delay: var(--vy-delay, 0ms);
+  }
+  .vy-in-scale {
+    animation: vyInScale 0.62s var(--vy-ease) both;
+    animation-delay: var(--vy-delay, 0ms);
+  }
+
+  /* -------------------------------------------------------- Boutons premium */
+  .vy-btn {
+    @apply relative isolate inline-flex items-center justify-center gap-2 overflow-hidden rounded-xl font-semibold;
+    transition: transform 0.18s var(--vy-ease), box-shadow 0.28s var(--vy-ease),
+      background-color 0.2s var(--vy-ease-soft), border-color 0.2s var(--vy-ease-soft),
+      color 0.2s var(--vy-ease-soft);
+  }
+  .vy-btn:active { transform: scale(0.975); }
+  .vy-btn-accent {
+    color: #04121a;
+    background-image: linear-gradient(120deg, rgb(var(--vy-accent)) 0%, rgb(var(--vy-accent-2)) 100%);
+    box-shadow: 0 12px 34px -16px rgb(var(--vy-accent) / 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+  .vy-btn-accent:hover {
+    box-shadow: 0 18px 42px -14px rgb(var(--vy-accent) / 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    transform: translateY(-1px);
+  }
+  .vy-btn-accent:disabled {
+    opacity: 0.55;
+    box-shadow: none;
+    transform: none;
+  }
+  /* Reflet qui traverse le bouton au survol. */
+  .vy-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-130%) skewX(-18deg);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.75s var(--vy-ease), opacity 0.2s linear;
+  }
+  .vy-btn:hover::after { transform: translateX(130%) skewX(-18deg); opacity: 1; }
+  .vy-btn-ghost-accent {
+    @apply border text-white;
+    border-color: rgb(var(--vy-accent) / 0.22);
+    background: rgb(var(--vy-accent) / 0.07);
+  }
+  .vy-btn-ghost-accent:hover {
+    border-color: rgb(var(--vy-accent) / 0.45);
+    background: rgb(var(--vy-accent) / 0.12);
+  }
+
+  /* ------------------------------------------------------- Champs de saisie */
+  .vy-field {
+    @apply relative flex w-full flex-col gap-1.5;
+  }
+  .vy-field-shell {
+    @apply relative flex items-center rounded-xl border transition;
+    border-color: rgba(148, 163, 184, 0.16);
+    background: rgba(255, 255, 255, 0.035);
+    transition: border-color 0.22s var(--vy-ease-soft), box-shadow 0.28s var(--vy-ease-soft),
+      background-color 0.22s var(--vy-ease-soft);
+  }
+  .vy-field-shell:hover { border-color: rgba(148, 163, 184, 0.28); }
+  .vy-field-shell:focus-within {
+    border-color: rgb(var(--vy-accent) / 0.6);
+    background: rgba(255, 255, 255, 0.055);
+    box-shadow: 0 0 0 4px rgb(var(--vy-accent) / 0.13);
+  }
+  .vy-field-shell[data-invalid='true'] {
+    border-color: rgba(251, 113, 133, 0.65);
+    box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.12);
+  }
+  .vy-field-shell[data-valid='true'] { border-color: rgba(52, 211, 153, 0.5); }
+  .vy-field-input {
+    @apply w-full min-w-0 bg-transparent px-3.5 py-3 text-sm text-white outline-none placeholder:text-slate-500;
+  }
+  .vy-field-icon {
+    @apply grid shrink-0 place-items-center pl-3.5 text-slate-500 transition-colors;
+  }
+  .vy-field-shell:focus-within .vy-field-icon { color: rgb(var(--vy-accent)); }
+  .vy-field-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400;
+  }
+  .vy-field-msg { @apply text-[11.5px] leading-relaxed; }
+
+  /* ------------------------------------------------------------- Travaux UI */
+  .vy-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em];
+    border-color: rgb(var(--vy-accent) / 0.24);
+    background: rgb(var(--vy-accent) / 0.09);
+    color: rgb(var(--vy-accent));
+  }
+  .vy-icon-tile {
+    @apply grid shrink-0 place-items-center rounded-xl border;
+    border-color: rgb(var(--vy-accent) / 0.22);
+    background: rgb(var(--vy-accent) / 0.1);
+    color: rgb(var(--vy-accent));
+    transition: transform 0.3s var(--vy-ease), background-color 0.25s var(--vy-ease-soft);
+  }
+  .vy-surface-hover:hover .vy-icon-tile {
+    transform: translateY(-2px) scale(1.04);
+    background: rgb(var(--vy-accent) / 0.16);
+  }
+  .vy-metric-label {
+    @apply text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500;
+  }
+  .vy-metric-value { @apply font-display text-[1.7rem] font-semibold tracking-[-0.04em] text-white; }
+  .vy-divider {
+    @apply h-px w-full;
+    background: linear-gradient(90deg, transparent, rgb(var(--vy-accent) / 0.3), transparent);
+  }
+
+  /* Titre de page premium */
+  .vy-title {
+    @apply font-display font-semibold tracking-[-0.04em] text-white;
+    text-wrap: balance;
+  }
+  .vy-lede { @apply text-sm leading-relaxed text-slate-400 sm:text-[15px]; }
+
+  /* Carte d'accès rapide : icône + libellé + flèche au survol. */
+  .vy-quick {
+    @apply group relative flex min-h-11 items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.022] px-3 py-2.5 text-[12.5px] font-medium text-slate-300 transition;
+    transition-timing-function: var(--vy-ease);
+  }
+  .vy-quick:hover {
+    border-color: rgb(var(--vy-accent) / 0.35);
+    background: rgb(var(--vy-accent) / 0.07);
+    color: #fff;
+  }
+}
+
+/* =========================================================================
+   VYORA — PARCOURS D'AUTHENTIFICATION IMMERSIF
+   -------------------------------------------------------------------------
+   Composition « atrium » : une scène 3D (ou son repli statique) à gauche,
+   un formulaire net et respirant à droite. Toutes les animations reposent
+   sur `transform` / `opacity` ; le repli statique est identique en structure
+   pour que rien ne casse si WebGL manque.
+   ========================================================================= */
+
+.vy-auth {
+  --vy-auth-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Fond global de la page d'authentification (dégradés superposés). */
+.vy-auth-bg {
+  background:
+    radial-gradient(1100px 700px at 12% -10%, rgba(34, 211, 238, 0.14), transparent 62%),
+    radial-gradient(900px 600px at 92% 8%, rgba(139, 92, 246, 0.13), transparent 60%),
+    radial-gradient(700px 500px at 60% 110%, rgba(56, 189, 248, 0.08), transparent 65%),
+    #04070d;
+}
+
+/* Grille technique très discrète du panneau visuel. */
+.vy-auth-grid {
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 78% 68% at 46% 42%, black 30%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 78% 68% at 46% 42%, black 30%, transparent 100%);
+}
+
+/* Scène 3D : fond translucide, jamais de fond plein (le canvas est alpha). */
+.vy-auth-stage { contain: paint; }
+
+/* Repli statique : anneaux concentriques + noyau lumineux, en pur CSS. */
+.vy-auth-orbit {
+  position: absolute;
+  border-radius: 9999px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: inset 0 0 60px rgba(34, 211, 238, 0.06);
+}
+.vy-auth-orbit::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  height: 6px;
+  width: 6px;
+  margin-left: -3px;
+  border-radius: 9999px;
+  background: #67e8f9;
+  box-shadow: 0 0 14px 3px rgba(103, 232, 249, 0.7);
+}
+.vy-auth-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.85), transparent 42%),
+    radial-gradient(circle at 68% 72%, rgba(167, 139, 250, 0.9), transparent 58%),
+    radial-gradient(circle at 50% 50%, #22d3ee 0%, #0e7490 62%, #082f49 100%);
+  box-shadow:
+    0 40px 90px -30px rgba(34, 211, 238, 0.55),
+    inset 0 -18px 40px rgba(0, 0, 0, 0.35);
+}
+
+/* Carte du formulaire : verre dépoli sur fond profond. */
+.vy-auth-card {
+  position: relative;
+  border-radius: 1.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.012)),
+    rgba(8, 13, 21, 0.86);
+  box-shadow:
+    0 50px 120px -60px rgba(0, 0, 0, 1),
+    0 0 0 1px rgba(255, 255, 255, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(22px);
+}
+/* Liseré lumineux animé en haut de la carte (état de progression). */
+.vy-auth-card::before {
+  content: '';
+  position: absolute;
+  inset-inline: 12%;
+  top: -1px;
+  height: 1.5px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, transparent, #67e8f9, #a78bfa, transparent);
+  opacity: 0.7;
+  transition: opacity 0.4s ease;
+}
+.vy-auth-card[data-state='success']::before {
+  background: linear-gradient(90deg, transparent, #34d399, transparent);
+  opacity: 1;
+}
+.vy-auth-card[data-state='error']::before {
+  background: linear-gradient(90deg, transparent, #fb7185, transparent);
+  opacity: 1;
+}
+
+/* Indicateur d'étapes du parcours d'inscription. */
+.vy-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.vy-stepper-dot {
+  position: relative;
+  height: 4px;
+  flex: 1 1 0%;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+.vy-stepper-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #22d3ee, #a78bfa);
+  transition: transform 0.6s var(--vy-auth-ease);
+}
+.vy-stepper-dot[data-state='done']::after,
+.vy-stepper-dot[data-state='current']::after { transform: scaleX(1); }
+.vy-stepper-dot[data-state='current']::after { background: linear-gradient(90deg, #67e8f9, #38bdf8); }
+
+/* Transition entre étapes du formulaire. */
+.vy-step-enter { animation: vyStepIn 0.42s var(--vy-auth-ease) both; }
+
+/* Bouton de connexion : état « réussite » (coche qui se dessine). */
+.vy-success-check path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: vyDrawCheck 0.42s 0.05s var(--vy-auth-ease) forwards;
+}
+
+/* Secousse discrète en cas d'erreur de validation. */
+.vy-shake { animation: vyShake 0.42s ease-in-out both; }
+
+/* Indicateur de force du mot de passe. */
+.vy-strength {
+  height: 3px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.vy-strength-bar {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.35s var(--vy-auth-ease), background-color 0.35s ease;
+}
+
+@keyframes vyIn {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes vyInScale {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes vyStepIn {
+  from { opacity: 0; transform: translate3d(18px, 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes vyDrawCheck {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes vyShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  45% { transform: translateX(5px); }
+  70% { transform: translateX(-3px); }
+}
+
+/* Mouvement réduit : aucune animation, aucun déplacement. */
+@media (prefers-reduced-motion: reduce) {
+  .vy-btn::after { display: none; }
+  .vy-in, .vy-in-scale, .vy-step-enter, .vy-shake, .vy-success-check path {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+  .vy-surface-hover:hover { transform: none; }
+  .vy-btn:active, .vy-btn-accent:hover { transform: none; }
+}
+
+
+/* =========================================================================
+   VYORA — BARRE D'ESPACE (dock d'identité)
+   -------------------------------------------------------------------------
+   Rappel permanent de l'espace courant : univers, nom, retour au sélecteur.
+   Sur mobile elle devient un bandeau compact au-dessus du contenu.
+   ========================================================================= */
+.vy-dock {
+  @apply relative flex items-center gap-2.5 overflow-hidden rounded-2xl border px-3 py-2.5;
+  border-color: rgb(var(--vy-accent) / 0.22);
+  background:
+    linear-gradient(120deg, rgb(var(--vy-accent) / 0.12), transparent 62%),
+    rgba(255, 255, 255, 0.022);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.vy-dock-mark {
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-lg border;
+  border-color: rgb(var(--vy-accent) / 0.3);
+  background: rgb(var(--vy-accent) / 0.14);
+  color: rgb(var(--vy-accent));
+}

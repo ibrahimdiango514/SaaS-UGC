@@ -1,12 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   callProvider,
   getProviderAdapter,
   listRemoteModels,
   probeProvider,
-  PROVIDER_ADAPTERS,
+  primeProviderRegistry,
+  providerConfigFor,
   ProviderCallError,
   providerOrder,
+  registeredProviderKeys,
   type ChatMessage,
 } from '../supabase/functions/business-grow/providers';
 
@@ -14,6 +16,23 @@ const messages: ChatMessage[] = [
   { role: 'system', content: 'Réponds en français.' },
   { role: 'user', content: 'Bonjour.' },
 ];
+
+/**
+ * Registre minimal : c'est LUI qui décrit le protocole de chaque fournisseur.
+ * Aucun fournisseur n'est écrit dans le code, donc un identifiant inventé ici
+ * fonctionne exactement comme un fournisseur réel.
+ */
+const registryRows = [
+  { provider_key: 'groq', display_name: 'Groq', adapter_kind: 'openai', default_base_url: 'https://api.groq.com/openai/v1' },
+  { provider_key: 'gemini', display_name: 'Gemini', adapter_kind: 'gemini', default_base_url: 'https://generativelanguage.googleapis.com/v1beta' },
+  { provider_key: 'cloudflare', display_name: 'Cloudflare Workers AI', adapter_kind: 'cloudflare', default_base_url: 'https://api.cloudflare.com/client/v4', account_id_env: 'CLOUDFLARE_ACCOUNT_ID' },
+  { provider_key: 'openrouter', display_name: 'OpenRouter', adapter_kind: 'openai', default_base_url: 'https://openrouter.ai/api/v1', is_aggregator: true, default_headers: { 'X-Title': 'VYORA' } },
+  { provider_key: 'deepseek', display_name: 'DeepSeek', adapter_kind: 'openai', default_base_url: 'https://api.deepseek.com' },
+  { provider_key: 'mistral', display_name: 'Mistral AI', adapter_kind: 'openai', default_base_url: 'https://api.mistral.ai/v1' },
+  { provider_key: 'grok', display_name: 'Grok (xAI)', adapter_kind: 'openai', default_base_url: 'https://api.x.ai/v1' },
+];
+
+beforeEach(() => { primeProviderRegistry(registryRows); });
 
 describe('Business Grow provider clients', () => {
   it('calls the official Groq Chat Completions API with configured model and maps usage', async () => {
@@ -119,39 +138,33 @@ describe('Business Grow provider clients', () => {
       .rejects.toMatchObject({ code: 'PROVIDER_TIMEOUT' });
   });
 
-  it('parses a unique, supported server provider order and uses the safe default', () => {
-    expect(providerOrder('gemini,groq,gemini,unknown')).toEqual(['gemini', 'groq']);
-    expect(providerOrder('unknown')).toEqual(['groq', 'gemini']);
+  it('valide la FORME des identifiants de fournisseurs, sans liste figée', () => {
+    // Aucun catalogue : l'ordre fourni est normalisé (doublons, casse, espaces)
+    // et un identifiant inconnu du code reste accepté — c'est le registre qui
+    // décide ensuite s'il est servable.
+    expect(providerOrder('gemini, groq ,gemini')).toEqual(['gemini', 'groq']);
+    expect(providerOrder('fournisseur-inconnu,groq')).toEqual(['fournisseur-inconnu', 'groq']);
+    expect(providerOrder('')).toEqual([]);
+    expect(providerOrder('pas valide!,groq')).toEqual(['groq']);
   });
 
-  it('expose les 7 fournisseurs VYORA AI CORE ; seules OpenAI/Anthropic restent en préparation', () => {
-    expect(getProviderAdapter('groq')?.implemented).toBe(true);
-    expect(getProviderAdapter('gemini')?.implemented).toBe(true);
-    expect(getProviderAdapter('deepseek')?.implemented).toBe(true);
-    expect(getProviderAdapter('mistral')?.implemented).toBe(true);
-    expect(getProviderAdapter('grok')?.implemented).toBe(true);
-    expect(getProviderAdapter('cloudflare')?.implemented).toBe(true);
-    expect(getProviderAdapter('openrouter')?.implemented).toBe(true);
-    expect(PROVIDER_ADAPTERS.get('openai')?.implemented).toBe(false);
-    expect(PROVIDER_ADAPTERS.get('anthropic')?.implemented).toBe(false);
+  it('sert n’importe quel fournisseur décrit par le registre, sans le connaître', () => {
+    // Les fournisseurs viennent du registre : la liste est lue, pas écrite.
+    expect(registeredProviderKeys()).toEqual(
+      ['cloudflare', 'deepseek', 'gemini', 'grok', 'groq', 'mistral', 'openrouter'],
+    );
+    // Un identifiant parfaitement inconnu obtient un adaptateur dès que la
+    // forme est valide : plus aucune liste fermée dans le code.
+    expect(getProviderAdapter('fournisseur-inconnu')?.id).toBe('fournisseur-inconnu');
+    expect(getProviderAdapter('Pas Valide!')).toBeNull();
 
-    // L'ordre serveur accepte les 7 fournisseurs, sans doublon ni inconnu.
-    expect(providerOrder('groq,deepseek,mistral,grok,cloudflare,openrouter,gemini,zzz'))
-      .toEqual(['groq', 'deepseek', 'mistral', 'grok', 'cloudflare', 'openrouter', 'gemini']);
+    // La configuration effective est résolue depuis le registre.
+    expect(providerConfigFor('fournisseur-inconnu')).toBeNull();
+    const config = providerConfigFor('groq', { apiKey: 'secret-groq', model: 'modele-groq' });
+    expect(config).toMatchObject({ apiKey: 'secret-groq', model: 'modele-groq', baseUrl: 'https://api.groq.com/openai/v1' });
   });
 
-  it('refuse toujours d’exécuter un adaptateur non implémenté (sans appel réseau)', async () => {
-    const fetcher = vi.fn();
-    await expect(
-      callProvider('openai' as unknown as 'groq', { apiKey: 'test-key', model: 'gpt-4o-mini' }, messages, fetcher),
-    ).rejects.toMatchObject({ code: 'PROVIDER_ADAPTER_NOT_IMPLEMENTED', retryable: false });
-    await expect(
-      getProviderAdapter('openai')!.complete({ apiKey: 'test-key', model: 'gpt-4o-mini' }, messages, fetcher),
-    ).rejects.toMatchObject({ code: 'PROVIDER_ADAPTER_NOT_IMPLEMENTED', retryable: false });
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
-  it('DeepSeek / Mistral / Grok / OpenRouter : appels locaux conformes à leurs API', async () => {
+  it('les fournisseurs OpenAI-compatibles suivent l’URL fournie par le registre', async () => {
     const ok = {
       choices: [{ message: { role: 'assistant', content: 'Réponse.' } }],
       usage: { prompt_tokens: 3, completion_tokens: 5 },
@@ -192,7 +205,9 @@ describe('Business Grow provider clients', () => {
       messages,
       fetcher,
     );
-    expect(cfUrl).toBe('https://api.cloudflare.com/client/v4/accounts/acct-42/ai/v1/chat');
+    // Endpoint OpenAI-compatible DOCUMENTÉ par Cloudflare (Workers AI) :
+    // `/ai/v1/chat/completions` — et non `/ai/v1/chat`, qui n'existe pas.
+    expect(cfUrl).toBe('https://api.cloudflare.com/client/v4/accounts/acct-42/ai/v1/chat/completions');
     expect(result.content).toBe('Réponse CF.');
 
     const noAccount = vi.fn();
@@ -274,5 +289,44 @@ describe('Business Grow provider clients', () => {
       fetcher,
     );
     expect(result.content).toBe('Réponse finale claire.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 402 : solde fournisseur épuisé
+// ---------------------------------------------------------------------------
+//
+// Cas réel (2026-11-15) : LLM7 répond « Insufficient balance » et Ollama
+// « Add usage credits ». Sans distinction, ce cas était classé « requête
+// rejetée » et l'opérateur cherchait un défaut de configuration inexistant.
+describe('callProvider — 402 facturation', () => {
+  const config = {
+    apiKey: 'test-key',
+    baseUrl: 'https://api.llm7.io/v1',
+    model: 'chat-solid',
+  };
+
+  it('402 → PROVIDER_PAYMENT_REQUIRED (distinct d’un refus de requête)', async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'Insufficient balance. Please top up your balance.' }), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      callProvider('llm7', config as never, [{ role: 'user', content: 'bonjour' }], fetcher),
+    ).rejects.toMatchObject({ code: 'PROVIDER_PAYMENT_REQUIRED', retryable: true });
+  });
+
+  it('400 reste PROVIDER_REQUEST_REJECTED (non réessayable tel quel)', async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(JSON.stringify({ error: { message: 'bad request' } }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      callProvider('llm7', config as never, [{ role: 'user', content: 'bonjour' }], fetcher),
+    ).rejects.toMatchObject({ code: 'PROVIDER_REQUEST_REJECTED' });
   });
 });

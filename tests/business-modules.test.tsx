@@ -7,6 +7,7 @@ import BusinessModuleWorkspace from '../src/business/modules/BusinessModuleWorks
 import {
   FOUNDATION_MODULES,
   MODULE_DEFINITIONS,
+  MODULE_GROUPS,
   buildAutomationTasks,
   computeRevenueLeaks,
   daysSince, displayFieldValue, getModuleDefinition, measuredNumber,
@@ -154,6 +155,38 @@ describe('Catalogue des modules', () => {
     for (const module of MODULE_DEFINITIONS) {
       expect(links).toContain(`/app/business/modules/${module.key}`);
     }
+  });
+
+  it('regroupe les modules par catégorie et filtre sans perdre les liens réels', () => {
+    render(<MemoryRouter><BusinessModules /></MemoryRouter>);
+    // Chaque groupe annonce son intitulé et son compteur.
+    for (const group of MODULE_GROUPS) {
+      expect(screen.getByRole('heading', { name: group.label })).toBeTruthy();
+      expect(screen.getByText(group.description)).toBeTruthy();
+    }
+
+    // Filtrer sur « Opérations » ne doit laisser que ce groupe.
+    fireEvent.click(screen.getByRole('button', { name: 'Opérations' }));
+    const operations = MODULE_DEFINITIONS.filter((module) => module.group === 'operations');
+    for (const module of operations) {
+      expect(screen.getByRole('heading', { name: module.title })).toBeTruthy();
+    }
+    for (const module of MODULE_DEFINITIONS.filter((item) => item.group !== 'operations')) {
+      expect(screen.queryByRole('heading', { name: module.title })).toBeNull();
+    }
+  });
+
+  it('propose une recherche qui isole un module puis se réinitialise', () => {
+    render(<MemoryRouter><BusinessModules /></MemoryRouter>);
+    fireEvent.change(screen.getByPlaceholderText(/Rechercher un module/), { target: { value: 'stock' } });
+    expect(screen.getByRole('heading', { name: /Smart Inventory/ })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: /Dispute Shield/ })).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText(/Rechercher un module/), { target: { value: 'zzz-introuvable' } });
+    expect(screen.getByText('Aucun module ne correspond à cette recherche.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Réinitialiser les filtres' }));
+    expect(screen.getByRole('heading', { name: /Smart Inventory/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Dispute Shield/ })).toBeTruthy();
   });
 });
 

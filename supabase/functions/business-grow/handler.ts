@@ -258,8 +258,16 @@ export interface BusinessGrowDependencies {
   store: BusinessGrowStore;
   getUserId: (authorization: string) => Promise<string | null>;
   allowedOrigins: string[];
-  providerConfigs: Partial<Record<BusinessProvider, ProviderConfig>>;
-  providerOrder: BusinessProvider[];
+  /**
+   * Fournisseurs servables, résolus à l'exécution (registre + secrets).
+   * Aucune liste n'est figée : l'appelant fournit la résolution.
+   */
+  providerConfigs: () => Record<string, ProviderConfig | null>;
+  /**
+   * Ordre des fournisseurs à tenter — résolu à l'exécution (registre +
+   * secrets), jamais figé au démarrage de la fonction.
+   */
+  providerOrder: () => BusinessProvider[];
   complete: (
     provider: BusinessProvider,
     config: ProviderConfig,
@@ -509,11 +517,16 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               dependencies.allowedOrigins,
             );
           }
-          const baseConfig = dependencies.providerConfigs[providerKey];
+          const baseConfig = dependencies.providerConfigs()[providerKey] ?? null;
           const requestedModel = string(body.modelKey, 120);
           const config: ProviderConfig = {
             apiKey: baseConfig?.apiKey ?? '',
             model: requestedModel || baseConfig?.model || '',
+            ...(baseConfig?.baseUrl ? { baseUrl: baseConfig.baseUrl } : {}),
+            ...(baseConfig?.adapterKind ? { adapterKind: baseConfig.adapterKind } : {}),
+            ...(baseConfig?.modelsUrl ? { modelsUrl: baseConfig.modelsUrl } : {}),
+            ...(baseConfig?.headers ? { headers: baseConfig.headers } : {}),
+            ...(baseConfig?.accountId ? { accountId: baseConfig.accountId } : {}),
           };
           const probeFn = dependencies.probe ?? ((p, cfg) => probeProvider(p, cfg));
           const probeResult = await probeFn(providerKey, config);
@@ -548,11 +561,17 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             : [];
           const remote: Record<string, string[]> = {};
           if (includeRemote) {
-            const targets: BusinessProvider[] = providerKey && isProvider(providerKey)
+            // Un fournisseur explicite est accepté tel quel (aucun catalogue
+            // d'autorisation) ; sinon on interroge tous les fournisseurs
+            // réellement configurés.
+            const resolved = Object.entries(dependencies.providerConfigs())
+              .filter(([, cfg]) => Boolean(cfg?.apiKey))
+              .map(([key]) => key);
+            const targets: BusinessProvider[] = providerKey
               ? [providerKey]
-              : dependencies.providerOrder;
+              : (resolved.length ? resolved : dependencies.providerOrder());
             for (const target of targets) {
-              const cfg = dependencies.providerConfigs[target];
+              const cfg = dependencies.providerConfigs()[target];
               if (!cfg?.apiKey) continue;
               try {
                 const discoverFn = dependencies.discoverModels ?? ((p, c) => listRemoteModels(p, c));
@@ -1103,10 +1122,10 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             ? [
                 routing.preferredProviderKey,
                 ...(routing.allowFallback !== false
-                  ? dependencies.providerOrder.filter((p) => p !== routing.preferredProviderKey)
+                  ? dependencies.providerOrder().filter((p) => p !== routing.preferredProviderKey)
                   : []),
               ]
-            : dependencies.providerOrder;
+            : dependencies.providerOrder();
           const maxAttempts = routing.selectionMode === 'manual' && routing.allowFallback === false
             ? 1
             : preferredOrder.length;
@@ -1190,7 +1209,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             }
 
             const provider = route.providerKey;
-            const config = dependencies.providerConfigs[provider];
+            const config = dependencies.providerConfigs()[provider] ?? null;
             const selectedModel = route.providerModelKey || config?.model || '';
             if (!config || !config.apiKey || !selectedModel) {
               lastErrorCode = 'PROVIDER_NOT_CONFIGURED';
