@@ -35,6 +35,7 @@ const StudioGenerations = lazy(() => import('./studio/StudioPages').then(({ Stud
 const StudioLegacy = lazy(() => import('./studio/StudioPages').then(({ StudioLegacy: component }) => ({ default: component })));
 const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioProjects: component }) => ({ default: component })));
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
+const Assistant = lazy(() => import('./pages/Assistant'));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
 const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
@@ -64,6 +65,7 @@ export default function App() {
                   <Route element={<Layout />}>
                     <Route path="/app">
                       <Route index element={<Home />} />
+                      <Route path="ai" element={<Assistant />} />
                       <Route path="studio/accueil" element={<Dashboard />} />
                       <Route path="projets" element={<StudioProjects />} />
                       <Route path="projets/:id" element={<ProjectDetail />} />
