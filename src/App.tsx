@@ -35,6 +35,7 @@ const StudioGenerations = lazy(() => import('./studio/StudioPages').then(({ Stud
 const StudioLegacy = lazy(() => import('./studio/StudioPages').then(({ StudioLegacy: component }) => ({ default: component })));
 const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioProjects: component }) => ({ default: component })));
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
+const Assistant = lazy(() => import('./pages/Assistant'));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
 const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
@@ -90,6 +91,10 @@ export default function App() {
                       <Route path="paiement/retour" element={<PaymentReturn />} />
                       <Route path="parametres" element={<Settings />} />
                     </Route>
+                    {/* L'espace assistant a sa propre coquille : sidebar VYORA AI,
+                        pas la navigation Studio. Imbrique dans <Layout>, il heritait
+                        de l'ancienne sidebar et paraissait inchange. */}
+                    <Route path="/app/ai" element={<Assistant />} />
                     <Route element={<AdminRoute />}>
                       <Route path="/admin" element={<Admin />} />
                       <Route path="/app/admin" element={<Navigate to="/admin" replace />} />
