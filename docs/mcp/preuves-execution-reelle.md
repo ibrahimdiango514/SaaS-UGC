@@ -149,6 +149,22 @@ l'empreinte, et `mcp_tokens.token_prefix` les 8 premiers caractères publics.
 
 ---
 
+## 13. Nettoyage de la campagne
+
+Les jetons de vérification (`verif-A`, `verif-B`, `test-A`) ont été **révoqués**,
+puis supprimés avec les connexions, le journal et les données de test :
+
+| Contrôle final | Valeur |
+| --- | --- |
+| `mcp_resolve_token` sur l'ancien jeton A | 0 ligne |
+| `mcp_resolve_token` sur l'ancien jeton B | 0 ligne |
+| Jetons MCP restants | 0 |
+| Connexions MCP restantes | 0 |
+| Lignes de journal restantes | 0 |
+
+Aucune donnée de démonstration ne subsiste : la section MCP du dashboard
+s'affichera à l'état vide tant qu'un utilisateur n'aura pas créé son jeton.
+
 ## Ce que ces preuves ne couvrent pas
 
 - **Aucun client MCP tiers** (Claude Desktop, Cursor, VS Code) n'a encore été
