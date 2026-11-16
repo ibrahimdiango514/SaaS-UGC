@@ -46,6 +46,7 @@ import {
 } from '../../../src/business/importer/pipeline.ts';
 import { fetchPublicCatalog } from '../../../src/business/importer/sources.ts';
 import { DEFAULT_CURRENCY, type NormalizedProduct } from '../../../src/business/importer/normalize.ts';
+import { matchBatch, type MatchResult } from '../../../src/business/importer/matching.ts';
 import type { FileParseResult } from '../../../src/business/importer/files.ts';
 import { pinnedFetchLike, type EgressDeps } from './safe-egress.ts';
 import { MAX_CATALOG_BYTES, MAX_HTML_BYTES } from '../../../src/business/importer/sources.ts';
@@ -56,6 +57,12 @@ import { MAX_CATALOG_BYTES, MAX_HTML_BYTES } from '../../../src/business/importe
 export interface ExistingProduct {
   id: string;
   name: string;
+  /** Référence produit en base (peut être absente sur un ancien import). */
+  sku?: string | null;
+  /** Identifiant de la plateforme d'origine, s'il a été conservé. */
+  platformId?: string | null;
+  /** Références des déclinaisons : un SKU de variante identifie le produit. */
+  variantSkus?: string[];
 }
 
 export interface WorkspaceGrant {
@@ -63,6 +70,17 @@ export interface WorkspaceGrant {
   canRead: boolean;
   /** L'utilisateur peut-il ÉCRIRE dans cette entreprise ? */
   canWrite: boolean;
+}
+
+/** Une ligne de progression : un produit réellement traité. */
+export interface ProgressRecord {
+  workspaceId: string;
+  userId: string;
+  importKey: string;
+  lineKey: string;
+  productId: string;
+  outcome: 'created' | 'updated';
+  variantsWritten: number;
 }
 
 export interface PreviewRecord {
@@ -81,6 +99,15 @@ export interface PreviewRecord {
    * change entre-temps.
    */
   importables?: boolean[];
+  /**
+   * Décisions de rapprochement, par position dans `products`.
+   *
+   * Mémorisées avec l'aperçu, et pas recalculées à la confirmation : la cible
+   * d'une mise à jour doit rester celle qui a été montrée. Un catalogue qui
+   * change entre l'aperçu et la confirmation ne doit pas déplacer l'écriture
+   * sur une autre fiche.
+   */
+  matches?: Array<{ match: string; targetId: string | null }>;
   origin: ImportBatch['origin'];
 }
 
@@ -148,8 +175,11 @@ export interface StoreImportDependencies {
     /**
      * `updateExisting` remplace les produits déjà présents au lieu d'en créer
      * un doublon. Absent = création (comportement historique).
+     *
+     * `indexes` restreint l'écriture à ces positions du lot : c'est le
+     * mécanisme de reprise — on ne retraite que ce qui reste.
      */
-    options?: { updateExisting?: boolean },
+    options?: { updateExisting?: boolean; indexes?: number[] },
   ): Promise<{
     created: number;
     /** Nombre de VARIANTES réellement écrites, pas seulement détectées. */
@@ -158,8 +188,23 @@ export interface StoreImportDependencies {
     updated?: number;
     /** Variantes ajoutées à des produits existants (mode mise à jour). */
     variantsUpdated?: number;
+    /**
+     * Lignes réellement écrites, dans l'ordre. Sert à journaliser la
+     * progression : sans elles, une reprise ne saurait pas ce qui est fait.
+     */
+    written?: Array<{ index: number; productId: string; outcome: 'created' | 'updated'; variantsWritten: number }>;
     failed: Array<{ name: string; reason: string }>;
   }>;
+  /**
+   * Progression d'un lot : lignes déjà écrites, pour reprendre sans doublon.
+   *
+   * Optionnel : sans cette dépendance, la reprise se comporte comme avant —
+   * elle retraite tout le lot, ce que le rapprochement transforme en mises à
+   * jour plutôt qu'en doublons. On perd la reprise fine, pas la sûreté.
+   */
+  readProgress?(workspaceId: string, userId: string, importKey: string): Promise<ProgressRecord[]>;
+  /** Écrit une ligne de progression après une écriture réussie. */
+  recordProgress?(line: ProgressRecord): Promise<void>;
   /**
    * Journalise l'import confirmé (produits créés, échecs, variantes).
    *
@@ -248,8 +293,25 @@ export interface PreviewPayload {
     price: string;
     currency: string;
     productUrl: string | null;
+    /** Référence produit (SKU) lue à la source, si elle existe. */
+    sku?: string | null;
+    /** Identifiant du produit dans la plateforme d'origine. */
+    platformId?: string | null;
     warnings: string[];
     duplicate: 'in-batch' | 'existing' | null;
+    /**
+     * Décision de rapprochement avec le catalogue existant.
+     *
+     * `ambiguous` n'écrit rien : la ligne est présentée pour décision, jamais
+     * fusionnée d'office sur une ressemblance de nom.
+     */
+    match?: 'create' | 'update' | 'ambiguous' | 'duplicate-in-batch';
+    /** Pourquoi cette décision — en français, lisible à l'écran. */
+    matchReason?: string;
+    /** Produits du catalogue proposés quand la décision est ambiguë. */
+    candidates?: Array<{ id: string; name: string }>;
+    /** Produit visé quand la décision est `update`. */
+    targetId?: string | null;
     importable: boolean;
     /**
      * Déclinaisons détectées, telles qu'elles seront écrites.
@@ -491,7 +553,7 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
     }
 
     const action = text(body.action, 20);
-    if (action !== 'preview' && action !== 'import') {
+    if (action !== 'preview' && action !== 'import' && action !== 'resume') {
       return jsonResponse(failure('UNKNOWN_ACTION', 'Opération d’import inconnue.'), 400, corsOrigin);
     }
     const workspaceId = uuid(body.workspaceId);
@@ -540,6 +602,55 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
         return jsonResponse({ data: payload.data }, 200, corsOrigin);
       }
 
+      /* ---------------------------------------------------------------- */
+      /* `resume` — état d'un lot, sans aucune écriture                     */
+      /* ---------------------------------------------------------------- */
+      // Volontairement en LECTURE seule : cette action dit où l'import s'est
+      // arrêté. Elle n'écrit pas, et elle n'est jamais appelée
+      // automatiquement — une opération dont le résultat est incertain ne se
+      // relance pas sans vérifier son état.
+      if (action === 'resume') {
+        const lotKey = text(body.importKey, 80);
+        if (!lotKey) {
+          return jsonResponse(failure('IMPORT_KEY_REQUIRED', 'Identifiant de lot requis pour reprendre.'), 400, corsOrigin);
+        }
+        if (typeof dependencies.readProgress !== 'function') {
+          // Sans journal, on ne prétend pas savoir : on le dit et on laisse
+          // l'import normal se charger du rapprochement.
+          return jsonResponse({
+            data: {
+              importKey: lotKey,
+              progressAvailable: false,
+              total: 0,
+              lines: [],
+              message: 'La progression de cet import n’est pas disponible : relancez l’aperçu, les produits déjà présents seront mis à jour et non dupliqués.',
+            },
+          }, 200, corsOrigin);
+        }
+        let lignes: ProgressRecord[] = [];
+        try {
+          lignes = await dependencies.readProgress(workspaceId, userId, lotKey);
+        } catch {
+          return jsonResponse(
+            failure('PROGRESS_UNAVAILABLE', 'La progression de cet import est momentanément illisible.'),
+            503, corsOrigin,
+          );
+        }
+        return jsonResponse({
+          data: {
+            importKey: lotKey,
+            progressAvailable: true,
+            total: lignes.length,
+            lines: lignes.map((ligne) => ({
+              lineKey: ligne.lineKey,
+              productId: ligne.productId,
+              outcome: ligne.outcome,
+              variantsWritten: ligne.variantsWritten,
+            })),
+          },
+        }, 200, corsOrigin);
+      }
+
       // `import`
       if (!grant.canWrite) {
         return jsonResponse(failure('WORKSPACE_ACCESS_DENIED', 'Rôle insuffisant pour importer dans cette entreprise.'), 403, corsOrigin);
@@ -579,14 +690,109 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
         return jsonResponse(failure('NOTHING_SELECTED', 'Aucun produit retenu pour l’import.'), 400, corsOrigin);
       }
 
+      /*
+       * Reprise : quand le client fournit une clé de lot et que le journal est
+       * disponible, on RELIT la progression et on ne retraite que ce qui
+       * reste. C'est la vérification d'état exigée avant toute reprise : on ne
+       * relance pas une écriture incertaine, on regarde d'abord ce qui est
+       * réellement en base.
+       *
+       * Si la lecture échoue, on ne reprend pas « à l'aveugle » : le lot est
+       * traité entièrement, et le rapprochement transforme les produits déjà
+       * présents en mises à jour. Moins efficace, jamais dupliquant.
+       */
+      const lotKey = text(body.importKey, 80);
+      let indexes: number[] | undefined;
+      let dejaFaits = 0;
+      if (lotKey && typeof dependencies.readProgress === 'function') {
+        try {
+          const lignes = await dependencies.readProgress(workspaceId, userId, lotKey);
+          const faites = new Set(lignes.map((ligne) => ligne.lineKey));
+          const restants: number[] = [];
+          selection.forEach((index) => {
+            const produit = enregistrement.products[index];
+            if (!produit) return;
+            const cle = progressLineKey(produit);
+            if (faites.has(cle)) { dejaFaits += 1; return; }
+            restants.push(index);
+          });
+          // Tous les produits retenus sont déjà écrits : on ne réécrit RIEN et
+          // on le dit. C'est l'idempotence demandée — répéter ne duplique pas.
+          if (restants.length === 0) {
+            await apercus.delete(previewId);
+            return jsonResponse({
+              data: {
+                created: 0, updated: 0, variantsCreated: 0, variantsUpdated: 0,
+                failed: [], alreadyDone: dejaFaits,
+                message: 'Tous les produits de ce lot sont déjà écrits : rien n’a été réécrit.',
+              },
+            }, 200, corsOrigin);
+          }
+          indexes = restants;
+        } catch {
+          indexes = undefined;
+        }
+      }
+
       // Un aperçu ne se rejoue pas : la confirmation le consomme.
       await apercus.delete(previewId);
       // Le mode est volontairement explicite : `true` seul l'active, tout le
       // reste retombe sur la création, comme avant.
-      const mode = { updateExisting: body.updateExisting === true };
+      /*
+       * Cibles du rapprochement : pour chaque produit retenu que l'aperçu a
+       * décidé de mettre à jour, l'identifiant exact du produit visé.
+       *
+       * C'est ce qui remplace la recherche par nom à l'écriture : deux fiches
+       * homonymes ne peuvent plus être confondues, et un produit que le
+       * rapprochement n'a pas retenu n'est jamais écrasé.
+       */
+      const targets: Record<number, string> = {};
+      selection.forEach((position) => {
+        const decision = enregistrement.matches?.[position];
+        if (decision?.match === 'update' && decision.targetId) {
+          targets[position] = decision.targetId;
+        }
+      });
+      const aDesCibles = Object.keys(targets).length > 0;
+      const mode = {
+        updateExisting: body.updateExisting === true || aDesCibles,
+        // `undefined` = tout le lot ; sinon, seulement ce qui reste à faire.
+        indexes,
+        targets,
+      };
       const resultat = await dependencies.insertProducts(
         workspaceId, retenus, enregistrement.kind, mode,
       );
+
+      /*
+       * Progression : une ligne par produit réellement écrit, APRÈS coup.
+       *
+       * Une panne de ce journal ne fait pas échouer l'import (les produits sont
+       * en base) ; elle prive seulement la reprise suivante du détail. Le
+       * rapprochement reste le filet : les produits déjà présents seront mis à
+       * jour, pas dupliqués.
+       */
+      if (lotKey && typeof dependencies.recordProgress === 'function' && resultat.written) {
+        for (const ligne of resultat.written) {
+          const produit = enregistrement.products[ligne.index];
+          if (!produit) continue;
+          try {
+            await dependencies.recordProgress({
+              workspaceId,
+              userId,
+              importKey: lotKey,
+              lineKey: progressLineKey(produit),
+              productId: ligne.productId,
+              outcome: ligne.outcome,
+              variantsWritten: ligne.variantsWritten,
+            });
+          } catch (erreur) {
+            console.error('store-import: progression non enregistrée', {
+              erreur: erreur instanceof Error ? erreur.message : 'inconnue',
+            });
+          }
+        }
+      }
 
       // L'historique est écrit APRÈS coup et ne fait jamais échouer l'import :
       // les produits sont déjà en base, une panne du journal ne doit pas
@@ -612,7 +818,14 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
       }
 
       return jsonResponse({
-        data: { ...resultat, variantsCreated: resultat.variantsCreated ?? 0 },
+        data: {
+          ...resultat,
+          variantsCreated: resultat.variantsCreated ?? 0,
+          // Le détail des lignes écrites est interne : il sert au journal, pas
+          // à l'affichage. On n'expose donc ni index ni identifiants.
+          written: undefined,
+          alreadyDone: dejaFaits,
+        },
       }, 200, corsOrigin);
     } catch (cause) {
       if (cause instanceof StoreImportError) {
@@ -622,6 +835,126 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
       return jsonResponse(failure('STORE_IMPORT_BACKEND_ERROR', 'Le service d’import est temporairement indisponible.'), 500, corsOrigin);
     }
   };
+}
+
+/**
+ * Clé stable d'une ligne de lot : référence d'abord, puis identifiant de
+ * source, puis nom normalisé.
+ *
+ * Elle ne sert qu'à reconnaître une ligne DÉJÀ traitée dans un même lot — pas à
+ * décider d'une fusion. Les décisions de rapprochement passent par
+ * `matching.ts` et restent soumises à la décision de l'utilisateur.
+ */
+export function progressLineKey(produit: { name: string; sku?: string | null; platformId?: string | null }): string {
+  const reference = String(produit.sku ?? '').trim().toUpperCase().replace(/[\s\-_.]+/g, '');
+  if (reference) return `ref:${reference}`;
+  const identifiant = String(produit.platformId ?? '').trim();
+  if (identifiant) return `pid:${identifiant}`;
+  const nom = String(produit.name ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return `nom:${nom}`;
+}
+
+/**
+ * Rapproche un lot du catalogue existant.
+ *
+ * Remplace l'ancienne comparaison « nom exact minuscule » par les niveaux de
+ * `matching.ts`. Deux garanties pour l'appelant :
+ *
+ *  - `duplicate` et `importable` gardent leur sens historique, donc
+ *    l'interface et les tests existants continuent de fonctionner ;
+ *  - une correspondance AMBIGUË n'est jamais importable : elle est affichée
+ *    pour décision, et l'import la refuse tant qu'elle n'est pas tranchée.
+ *
+ * Une ligne rapprochée reste importable (elle sera mise à jour) ; c'est
+ * `match: 'update'` qui le dit, et l'interface peut le présenter ainsi.
+ */
+function rapprocher(
+  produits: NormalizedProduct[],
+  existants: ExistingProduct[],
+): ReturnType<typeof matchBatch> {
+  const catalogue = existants.map((produit) => ({
+    id: produit.id,
+    name: produit.name,
+    sku: produit.sku ?? null,
+    platformId: produit.platformId ?? null,
+    variantSkus: produit.variantSkus ?? [],
+  }));
+  return matchBatch(
+    produits.map((produit) => ({
+      name: produit.name,
+      sku: produit.sku ?? null,
+      platformId: produit.platformId ?? null,
+      variantSkus: (produit.variants ?? []).flatMap((v) => (v.sku ? [v.sku] : [])),
+    })),
+    catalogue,
+  );
+}
+
+/**
+ * Traduit une décision de rapprochement en champs d'aperçu.
+ *
+ * `matchReason` est en français et destiné à l'écran : il explique POURQUOI
+ * rien ne sera écrit pour une ligne ambiguë, sans jargon.
+ */
+function decisionApercu(
+  resultat: MatchResult | undefined,
+  existants: ExistingProduct[],
+): {
+  duplicate: 'in-batch' | 'existing' | null;
+  match: 'create' | 'update' | 'ambiguous' | 'duplicate-in-batch';
+  matchReason: string;
+  candidates: Array<{ id: string; name: string }>;
+  targetId: string | null;
+} {
+  if (!resultat) {
+    return { duplicate: null, match: 'create', matchReason: 'Aucun produit correspondant.', candidates: [], targetId: null };
+  }
+  switch (resultat.decision) {
+    case 'update':
+      return {
+        duplicate: 'existing',
+        match: 'update',
+        matchReason: resultat.reason,
+        candidates: [],
+        targetId: resultat.targetId,
+      };
+    case 'ambiguous':
+      return {
+        // Historiquement, un nom déjà présent était marqué « existing ». On
+        // conserve ce marquage pour l'affichage, sans en faire une décision.
+        duplicate: 'existing',
+        match: 'ambiguous',
+        matchReason: resultat.reason,
+        candidates: resultat.candidates.flatMap((id) => {
+          const produit = existants.find((existant) => existant.id === id);
+          return produit ? [{ id: produit.id, name: produit.name }] : [];
+        }),
+        targetId: null,
+      };
+    case 'duplicate-in-batch':
+      return {
+        duplicate: 'in-batch',
+        match: 'duplicate-in-batch',
+        matchReason: resultat.reason,
+        candidates: [],
+        targetId: null,
+      };
+    case 'create':
+    default:
+      return {
+        duplicate: null,
+        match: 'create',
+        matchReason: resultat.reason,
+        candidates: [],
+        targetId: null,
+      };
+  }
 }
 
 /**
@@ -748,26 +1081,31 @@ async function faireApercu(
     );
   }
 
-  // 4) Doublons : lecture seule du catalogue existant, aucune écriture.
+  // 4) Rapprochement : lecture seule du catalogue existant, aucune écriture.
   const existants = await dependencies.listExistingProducts(contexte.workspaceId);
-  const parNom = new Map(existants.map((p) => [p.name.trim().toLowerCase(), p.id]));
-  const vusDansLeLot = new Set<string>();
+  const rapprochements = rapprocher(produits, existants);
 
   const lignes = produits.map((produit, index) => {
-    const cle = produit.name.trim().toLowerCase();
-    let duplicate: 'in-batch' | 'existing' | null = null;
-    if (parNom.has(cle)) duplicate = 'existing';
-    else if (vusDansLeLot.has(cle)) duplicate = 'in-batch';
-    vusDansLeLot.add(cle);
+    const decision = decisionApercu(rapprochements[index], existants);
     return {
       index,
       name: produit.name,
       price: formatPreviewPrice(produit),
       currency: produit.currency,
       productUrl: produit.productUrl,
+      sku: produit.sku ?? null,
+      platformId: produit.platformId ?? null,
       warnings: produit.warnings,
-      duplicate,
-      importable: isImportable(produit) && duplicate !== 'in-batch',
+      duplicate: decision.duplicate,
+      match: decision.match,
+      matchReason: decision.matchReason,
+      candidates: decision.candidates,
+      targetId: decision.targetId,
+      // Une ligne ambiguë n'est pas importable : rien n'est fusionné tant que
+      // l'utilisateur n'a pas tranché. Un doublon interne non plus.
+      importable: isImportable(produit)
+        && decision.match !== 'ambiguous'
+        && decision.match !== 'duplicate-in-batch',
       // Une place de marché ne décrit pas ses déclinaisons de la même façon
       // qu'un fichier : on n'en invente pas ici.
       variants: (produit.variants ?? []).map((variante) => ({
@@ -835,6 +1173,9 @@ async function faireApercu(
       createdAt: contexte.now(),
       kind: 'url',
       products: produits,
+      // Décisions figées avec l'aperçu : la confirmation applique exactement ce
+      // qui a été montré.
+      matches: lignes.map((ligne) => ({ match: ligne.match, targetId: ligne.targetId })),
       origin,
     },
   };
@@ -917,24 +1258,27 @@ async function faireApercuFichier(
   //    réponse, pour que l'interface n'ait qu'un seul affichage à gérer.
   const produits = resultat.products;
   const existants = await dependencies.listExistingProducts(contexte.workspaceId);
-  const parNom = new Map(existants.map((p) => [p.name.trim().toLowerCase(), p.id]));
-  const vusDansLeLot = new Set<string>();
+  const rapprochements = rapprocher(produits, existants);
 
   const lignes = produits.map((produit, index) => {
-    const cle = produit.name.trim().toLowerCase();
-    let duplicate: 'in-batch' | 'existing' | null = null;
-    if (parNom.has(cle)) duplicate = 'existing';
-    else if (vusDansLeLot.has(cle)) duplicate = 'in-batch';
-    vusDansLeLot.add(cle);
+    const decision = decisionApercu(rapprochements[index], existants);
     return {
       index,
       name: produit.name,
       price: formatPreviewPrice(produit),
       currency: produit.currency,
       productUrl: produit.productUrl,
+      sku: produit.sku ?? null,
+      platformId: produit.platformId ?? null,
       warnings: produit.warnings,
-      duplicate,
-      importable: isImportable(produit) && duplicate !== 'in-batch',
+      duplicate: decision.duplicate,
+      match: decision.match,
+      matchReason: decision.matchReason,
+      candidates: decision.candidates,
+      targetId: decision.targetId,
+      importable: isImportable(produit)
+        && decision.match !== 'ambiguous'
+        && decision.match !== 'duplicate-in-batch',
       // Variantes du FICHIER : ce sont elles qu'on persiste. Le chemin URL
       // n'en expose pas (une place de marché ne les fournit pas de la même
       // façon) ; un tableau vide y est donc la réponse juste, pas un oubli.
@@ -1010,6 +1354,7 @@ async function faireApercuFichier(
       createdAt: contexte.now(),
       kind: 'file',
       products: produits,
+      matches: lignes.map((ligne) => ({ match: ligne.match ?? 'create', targetId: ligne.targetId ?? null })),
       origin,
     },
   };

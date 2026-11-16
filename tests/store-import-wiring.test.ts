@@ -62,7 +62,15 @@ interface Scenario {
   /** Droits d'abonnement, tels que les rend `bg_import_access`. */
   subscription?: { allowed: boolean; reason: string; message?: string };
   /** Produits déjà au catalogue (mode mise à jour). */
-  existants?: Array<{ id: string; name: string }>;
+  existants?: Array<{
+    id: string;
+    name: string;
+    sku?: string | null;
+    platformId?: string | null;
+    variantSkus?: string[];
+  }>;
+  /** Lignes de progression déjà présentes pour le lot. */
+  progress?: Array<{ line_key: string; product_id: string; outcome: string; variants_written: number }>;
 }
 
 function fausseBase(
@@ -71,6 +79,7 @@ function fausseBase(
   scenario: Scenario = {},
   misesAJour: Array<{ params: unknown[]; texte: string }> = [],
   suppressionsVariantes: unknown[][] = [],
+  progressions: unknown[][] = [],
 ): Fabrique {
   // Aperçus persistés : le bundle les écrit et les relit, comme en production.
   const apercus = new Map<string, { payload: unknown; expires: string }>();
@@ -143,8 +152,19 @@ function fausseBase(
       const exploitable = trouve && typeof trouve.payload === 'object';
       return Promise.resolve(exploitable ? [{ payload: trouve.payload }] : []);
     }
-    // Lecture du catalogue existant pour le mode mise à jour.
-    if (texte.includes('select id, name from saas_ugc.ugc_products')) {
+    // Lecture de la progression d'un lot (reprise).
+    if (texte.includes('from saas_ugc.ugc_import_progress')) {
+      return Promise.resolve(scenario.progress ?? []);
+    }
+    // Écriture d'une ligne de progression.
+    if (texte.includes('insert into saas_ugc.ugc_import_progress')) {
+      progressions.push(params);
+      return Promise.resolve([]);
+    }
+    // Lecture du catalogue existant : sert au rapprochement ET au mode mise à
+    // jour. Reconnue sur la table lue, pas sur la liste de colonnes — celle-ci
+    // porte désormais l'identité (`sku`, `platform_id`, SKU des variantes).
+    if (texte.includes('from saas_ugc.ugc_products')) {
       return Promise.resolve(scenario.existants ?? []);
     }
     // Mise à jour d'un produit existant : capture des valeurs, pas de ligne.
@@ -209,11 +229,14 @@ function chargerBundle(
   scenario: Scenario = {},
   misesAJour: Array<{ params: unknown[]; texte: string }> = [],
   suppressionsVariantes: unknown[][] = [],
+  progressions: unknown[][] = [],
 ) {
   type Gestionnaire = (request: Request) => Promise<Response>;
   let gestionnaire: Gestionnaire | null = null;
   const contexte = {
-    __edgePostgres: fausseBase(enregistrements, variantes, scenario, misesAJour, suppressionsVariantes),
+    __edgePostgres: fausseBase(
+      enregistrements, variantes, scenario, misesAJour, suppressionsVariantes, progressions,
+    ),
     Deno: {
       serve: (h: Gestionnaire) => { gestionnaire = h; },
       env: { get: (nom: string) => (nom === 'SUPABASE_URL' ? 'https://exemple.invalid' : 'cle') },
@@ -432,9 +455,20 @@ describe('bundle store-import exécuté', () => {
     expect(corps.data?.variantsUpdated).toBe(2);
   });
 
-  it('crée par défaut, même quand un produit porte déjà le nom', async () => {
-    // Le mode mise à jour doit rester EXPLICITE : sans `updateExisting`, le
-    // comportement historique (création + avertissement d'aperçu) ne change pas.
+  it('met à jour une correspondance exacte, mais crée les autres', async () => {
+    /*
+     * ## Ce test a changé de sens, volontairement
+     *
+     * Il vérifiait que SANS `updateExisting`, un produit homonyme était créé en
+     * double — une régression, pas une garantie. La déduplication intelligente
+     * renverse la règle : une correspondance EXACTE est appliquée d'office,
+     * parce qu'elle est sûre (nom identique normalisé, référence identique ou
+     * identifiant de source identique). C'est ce que la commande demande.
+     *
+     * Ce qui reste vrai, et que l'ancien test protégeait : aucune fusion sur
+     * une RESSEMBLANCE. Cette garantie est testée plus haut (« présente un nom
+     * proche comme ambigu »).
+     */
     const enregistrements: Array<Record<string, unknown>> = [];
     const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
     const gestionnaire = chargerBundle(
@@ -457,8 +491,343 @@ describe('bundle store-import exécuté', () => {
       }),
     }));
 
-    expect(misesAJour).toHaveLength(0);
+    expect(misesAJour).toHaveLength(1);
+    expect(enregistrements).toHaveLength(0);
+    // Le produit garde son identifiant : vidéos et historique restent liés.
+    expect(misesAJour[0].params).toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  });
+
+  it('rapproche par SKU : met à jour le bon produit au lieu d’en créer un', async () => {
+    // ## Ce que ce test protège
+    // L'ancienne déduplication ne regardait que le nom. Un produit renommé à la
+    // source — même référence, nouveau libellé — était donc CRÉÉ une seconde
+    // fois. Ici la référence identifie le produit : il est mis à jour, et son
+    // identifiant interne est réutilisé (donc ses vidéos et son historique
+    // restent attachés).
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [],
+      { existants: [{ id: '99999999-9999-4999-8999-999999999999', name: 'Ancien nom', sku: 'SAB-1' }] },
+      misesAJour,
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency,reference\nNouveau nom,2500,XOF,SAB-1',
+    ))).json() as { data: { products: Array<{ match: string; targetId: string | null; importable: boolean }> } };
+
+    expect(apercu.data.products[0].match).toBe('update');
+    expect(apercu.data.products[0].targetId).toBe('99999999-9999-4999-8999-999999999999');
+    // Un produit rapproché reste importable : il sera mis à jour, pas dupliqué.
+    expect(apercu.data.products[0].importable).toBe(true);
+
+    const reponse = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: (apercu as unknown as { data: { previewId: string } }).data.previewId,
+        confirmed: true,
+      }),
+    }));
+    await reponse.json();
+
+    // Aucune création : la cible du rapprochement est mise à jour.
+    expect(enregistrements).toHaveLength(0);
+    expect(misesAJour).toHaveLength(1);
+    expect(misesAJour[0].params).toContain('99999999-9999-4999-8999-999999999999');
+  });
+
+  it('présente un nom proche comme ambigu et n’écrit rien', async () => {
+    // Jamais de fusion automatique sur une ressemblance de nom. La ligne est
+    // montrée avec ses candidats et n'est pas importable tant qu'elle n'est pas
+    // tranchée : c'est une décision, pas une devinette.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [],
+      { existants: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'Chemise indigo' }] },
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nChemise indigo premium,4500,XOF',
+    ))).json() as {
+      data: {
+        previewId: string;
+        products: Array<{ match: string; matchReason: string; importable: boolean; candidates: Array<{ id: string; name: string }> }>;
+        summary: { importable: number };
+      };
+    };
+
+    const ligne = apercu.data.products[0];
+    expect(ligne.match).toBe('ambiguous');
+    expect(ligne.importable).toBe(false);
+    expect(ligne.candidates[0]).toMatchObject({ name: 'Chemise indigo' });
+    // La raison est lisible, en français : elle dit ce qui empêche d'écrire.
+    expect(ligne.matchReason.length).toBeGreaterThan(10);
+    expect(apercu.data.summary.importable).toBe(0);
+
+    // Confirmer le lot ne doit rien écrire : la ligne ambiguë est exclue.
+    const reponse = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+      }),
+    }));
+    expect(reponse.status).toBe(400);
+    expect(enregistrements).toHaveLength(0);
+  });
+
+  it('ne fusionne pas deux produits différents qui portent le même nom', async () => {
+    // Deux fiches homonymes au catalogue et une seule ligne entrante : le
+    // rapprochement ne peut pas choisir. Il le dit, au lieu d'écraser l'une au
+    // hasard.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [],
+      { existants: [
+        { id: '11111111-1111-4111-8111-111111111111', name: 'Sac cuir' },
+        { id: '22222222-2222-4222-8222-222222222222', name: 'Sac cuir' },
+      ] },
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSac cuir,9000,XOF',
+    ))).json() as { data: { products: Array<{ match: string; importable: boolean; candidates: unknown[] }> } };
+
+    expect(apercu.data.products[0].match).toBe('ambiguous');
+    expect(apercu.data.products[0].importable).toBe(false);
+    expect(apercu.data.products[0].candidates).toHaveLength(2);
+  });
+
+  it('garde le comportement historique : nom identique, casse ignorée', async () => {
+    // Aucun identifiant stable nulle part : le nom exact reste le seul indice,
+    // et il rapproche comme avant — sans créer de doublon.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [],
+      { existants: [{ id: '33333333-3333-4333-8333-333333333333', name: 'SÉRUM ÉCLAT' }] },
+      misesAJour,
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nsérum éclat,2500,XOF',
+    ))).json() as { data: { products: Array<{ match: string; importable: boolean }> } };
+
+    expect(apercu.data.products[0].match).toBe('update');
+    expect(apercu.data.products[0].importable).toBe(true);
+  });
+
+  it('signale un doublon interne au lot sans l’écrire deux fois', async () => {
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements);
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSable fin,2500,XOF\nSable fin,2500,XOF',
+    ))).json() as { data: { products: Array<{ match: string; importable: boolean }>; summary: { importable: number } } };
+
+    expect(apercu.data.products[0].importable).toBe(true);
+    expect(apercu.data.products[1].match).toBe('duplicate-in-batch');
+    expect(apercu.data.products[1].importable).toBe(false);
+    expect(apercu.data.summary.importable).toBe(1);
+  });
+
+  it('n’écrase pas une description connue par une valeur absente', async () => {
+    // Une source qui ne publie pas de description ne doit pas effacer celle
+    // saisie par le commerçant. La garde est dans le SQL (`coalesce`) : on
+    // vérifie qu'elle est bien présente dans l'instruction envoyée.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [],
+      { existants: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Sable fin', sku: 'SAB-1' }] },
+      misesAJour,
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency,reference\nSable fin,2500,XOF,SAB-1',
+    ))).json() as { data: { previewId: string } };
+    await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+      }),
+    }));
+
+    expect(misesAJour).toHaveLength(1);
+    const texte = misesAJour[0].texte.replace(/\s+/g, ' ');
+    expect(texte).toMatch(/description = coalesce\(nullif\(/);
+    expect(texte).toMatch(/product_url = coalesce\(nullif\(/);
+    // Le prix n'est remplacé que s'il est connu.
+    expect(texte).toMatch(/case when .* then price_amount/);
+  });
+
+  it('reprend un lot et ne réécrit que les lignes restantes', async () => {
+    // ## Ce que ce test protège
+    // Une reprise qui retraite tout le lot réécrit les produits déjà faits.
+    // Ici le journal dit que « Sable fin » est écrit : la reprise ne doit
+    // écrire QUE « Brise matinale ».
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const progressions: unknown[][] = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [], { progress: [
+        { line_key: 'ref:SAB1', product_id: 'deja-ecrit', outcome: 'created', variants_written: 0 },
+      ] }, [], [], progressions,
+    );
+
+    const csv = [
+      'name,price,currency,reference',
+      'Sable fin,2500,XOF,SAB-1',
+      'Brise matinale,7500,XOF,BRI-1',
+    ].join('\n');
+    const apercu = await (await gestionnaire(requeteApercu(csv))).json() as { data: { previewId: string } };
+
+    const reponse = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+        importKey: 'lot-42',
+      }),
+    }));
+    const corps = await reponse.json() as { data?: { created: number; alreadyDone: number } };
+
+    // Un seul produit écrit : celui qui restait.
     expect(enregistrements).toHaveLength(1);
+    expect(enregistrements[0].name).toBe('Brise matinale');
+    expect(corps.data?.created).toBe(1);
+    expect(corps.data?.alreadyDone).toBe(1);
+    // La progression est journalisée pour la ligne écrite, et pour elle seule.
+    expect(progressions).toHaveLength(1);
+    expect(progressions[0]).toContain('ref:BRI1');
+    expect(progressions[0]).not.toContain('ref:SAB1');
+  });
+
+  it('est idempotent : un lot entièrement fait n’écrit rien', async () => {
+    // Rejouer une confirmation ne doit ni dupliquer ni réécrire. C'est la
+    // propriété qui autorise à proposer « reprendre » sans réserve.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const progressions: unknown[][] = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [], { progress: [
+        { line_key: 'ref:SAB1', product_id: 'deja', outcome: 'created', variants_written: 0 },
+      ] }, [], [], progressions,
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency,reference\nSable fin,2500,XOF,SAB-1',
+    ))).json() as { data: { previewId: string } };
+
+    const reponse = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+        importKey: 'lot-fait',
+      }),
+    }));
+    const corps = await reponse.json() as { data?: { created: number; updated: number; alreadyDone: number; message?: string } };
+
+    expect(enregistrements).toHaveLength(0);
+    expect((corps.data?.created ?? 0) + (corps.data?.updated ?? 0)).toBe(0);
+    expect(corps.data?.alreadyDone).toBe(1);
+    expect(corps.data?.message).toMatch(/déjà écrits/);
+    // Aucune nouvelle ligne de progression : rejouer n'ajoute rien.
+    expect(progressions).toHaveLength(0);
+  });
+
+  it('reprend tout quand le journal est vide, sans dupliquer', async () => {
+    // Journal perdu (panne, purge) : on retraite le lot, mais le rapprochement
+    // transforme les produits déjà présents en mises à jour.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [],
+      { progress: [], existants: [{ id: 'aaaa-aaaa', name: 'Sable fin' }] },
+      misesAJour,
+    );
+
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSable fin,2500,XOF',
+    ))).json() as { data: { previewId: string } };
+    await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+        importKey: 'lot-perdu',
+        updateExisting: true,
+      }),
+    }));
+
+    expect(enregistrements).toHaveLength(0);
+    expect(misesAJour).toHaveLength(1);
+  });
+
+  it('répond à `resume` en lecture seule, sans rien écrire', async () => {
+    // L'état est consulté AVANT de reprendre : une action dont le résultat est
+    // incertain ne se relance pas sans vérifier à quoi ressemble la base.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const progressions: unknown[][] = [];
+    const gestionnaire = chargerBundle(
+      enregistrements, [], { progress: [
+        { line_key: 'ref:SAB1', product_id: 'p-1', outcome: 'created', variants_written: 2 },
+      ] }, [], [], progressions,
+    );
+
+    const reponse = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'resume',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        importKey: 'lot-42',
+      }),
+    }));
+    const corps = await reponse.json() as {
+      data?: { total: number; progressAvailable: boolean; lines: Array<{ lineKey: string; variantsWritten: number }> };
+    };
+
+    expect(reponse.status).toBe(200);
+    expect(corps.data?.progressAvailable).toBe(true);
+    expect(corps.data?.total).toBe(1);
+    expect(corps.data?.lines[0]).toMatchObject({ lineKey: 'ref:SAB1', variantsWritten: 2 });
+    // Lecture seule : aucune écriture, même de progression.
+    expect(enregistrements).toHaveLength(0);
+    expect(progressions).toHaveLength(0);
+  });
+
+  it('refuse `resume` sans identifiant de lot', async () => {
+    const gestionnaire = chargerBundle();
+    const reponse = await gestionnaire(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'resume',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+      }),
+    }));
+    expect(reponse.status).toBe(400);
+    const corps = await reponse.json() as { error?: { code: string } };
+    expect(corps.error?.code).toBe('IMPORT_KEY_REQUIRED');
   });
 
   it('n’écrit rien quand l’aperçu a expiré', async () => {

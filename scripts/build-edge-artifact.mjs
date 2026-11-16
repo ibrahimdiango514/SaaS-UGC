@@ -60,8 +60,12 @@ export const FUNCTIONS = {
 
 // esbuild peut placer l'import en fin de ligne, après d'autres instructions :
 // le motif n'est donc pas ancré en début de ligne.
-const IMPORT_SIMPLE = new RegExp(`import\\s+(\\w+)\\s+from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
-const IMPORT_NAMED = new RegExp(`import\\s*\\{\\s*default\\s+as\\s+(\\w+)\\s*\\}\\s*from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
+// Le nom de liaison peut contenir `$` : esbuild renomme en `$r`, `$a`… quand un
+// export du module d'entrée occupe déjà le nom court. Ne pas restreindre à `\w`,
+// sous peine de laisser une instruction `import` dans le bundle (erreur levée
+// plus bas, sans indiquer la vraie cause).
+const IMPORT_SIMPLE = new RegExp(`import\\s+([\\w$]+)\\s+from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
+const IMPORT_NAMED = new RegExp(`import\\s*\\{\\s*default\\s+as\\s+([\\w$]+)\\s*\\}\\s*from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
 const IMPORT_BARE = new RegExp(`(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`, 'g');
 
 /** Bundle ES2022 exécutable par `new Function`, sans aucune instruction import. */

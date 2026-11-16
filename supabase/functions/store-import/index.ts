@@ -122,6 +122,12 @@ function productRow(workspaceId: string, produit: NormalizedProduct, origine: 'u
       platform: produit.source?.platform ?? null,
       reference: produit.source?.reference ?? null,
       imported_at: new Date().toISOString(),
+      // Identité stable du produit chez sa source, conservée pour les imports
+      // suivants : sans elle, un produit renommé à la source serait recréé au
+      // lieu d'être mis à jour. `sku` reste `null` quand la source n'en donne
+      // pas — on n'invente jamais de référence.
+      sku: produit.sku ? produit.sku.slice(0, 120) : null,
+      platform_id: produit.platformId ? String(produit.platformId).slice(0, 200) : null,
     }),
   };
 }
@@ -252,13 +258,41 @@ const store: StoreImportDependencies = {
 
   async listExistingProducts(workspaceId: string) {
     const db = requiredSql();
-    const lignes = await db<{ id: string; name: string }[]>`
-      select id, name from saas_ugc.ugc_products
-      where workspace_id = ${workspaceId}::uuid
-      order by name
-      limit 5000
+    /*
+     * L'identité du produit vit dans `product_facts` : elle y a été écrite par
+     * un import précédent. On la relit ICI, en une requête, plutôt que de
+     * faire N requêtes par produit — un catalogue de 5 000 lignes ne doit pas
+     * produire 5 000 allers-retours.
+     *
+     * `ugc_products` n'a pas de colonne `sku` : la référence est donc
+     * `product_facts->>'sku'`. Un produit créé à la main n'en a pas, et sera
+     * rapproché par son nom exact ou signalé ambigu — jamais fusionné d'office.
+     */
+    const lignes = await db<{
+      id: string; name: string; sku: string | null; platform_id: string | null;
+      variant_skus: string[] | null;
+    }[]>`
+      select p.id,
+             p.name,
+             nullif(p.product_facts->>'sku', '') as sku,
+             nullif(p.product_facts->>'platform_id', '') as platform_id,
+             coalesce(
+               (select array_agg(v.sku) from saas_ugc.ugc_product_variants v
+                 where v.product_id = p.id and v.sku is not null),
+               '{}'::text[]
+             ) as variant_skus
+        from saas_ugc.ugc_products p
+       where p.workspace_id = ${workspaceId}::uuid
+       order by p.name
+       limit 5000
     `;
-    return lignes.map((ligne) => ({ id: String(ligne.id), name: String(ligne.name) }));
+    return lignes.map((ligne) => ({
+      id: String(ligne.id),
+      name: String(ligne.name),
+      sku: ligne.sku ? String(ligne.sku) : null,
+      platformId: ligne.platform_id ? String(ligne.platform_id) : null,
+      variantSkus: Array.isArray(ligne.variant_skus) ? ligne.variant_skus.map(String) : [],
+    }));
   },
 
   /**
@@ -291,22 +325,45 @@ const store: StoreImportDependencies = {
     workspaceId: string,
     produits: NormalizedProduct[],
     origine: 'url' | 'file' = 'url',
-    options: { updateExisting?: boolean } = {},
+    options: {
+      updateExisting?: boolean;
+      indexes?: number[];
+      /**
+       * Cibles décidées par le rapprochement : position dans le lot → id du
+       * produit à mettre à jour.
+       *
+       * Prioritaire sur la recherche par nom. C'est ce qui permet de mettre à
+       * jour le BON produit quand deux fiches portent le même nom, et de ne
+       * jamais écraser un homonyme que le rapprochement n'a pas retenu.
+       */
+      targets?: Record<number, string>;
+    } = {},
   ) {
     const db = requiredSql();
+    /*
+     * Reprise : `indexes` restreint l'écriture aux positions restantes du lot.
+     * Les positions d'origine sont conservées (on ne réindexe pas), parce que
+     * c'est l'index dans l'aperçu que le client a vu — le journal de
+     * progression s'y réfère directement.
+     */
+    const positions = options.indexes
+      ? options.indexes.filter((i) => Number.isInteger(i) && i >= 0 && i < produits.length)
+      : produits.map((_, i) => i);
     let created = 0;
     let updated = 0;
     let variantsCreated = 0;
     let variantsUpdated = 0;
     const failed: Array<{ name: string; reason: string }> = [];
+    const written: Array<{ index: number; productId: string; outcome: 'created' | 'updated'; variantsWritten: number }> = [];
 
     // Mise à jour : les identifiants des produits déjà présents, par nom
     // normalisé (casse et espaces ignorés, comme l'aperçu qui les signale).
     // Interrogation directe plutôt que `this.listExistingProducts` : la
     // méthode ne dépend ainsi pas de la façon dont la fonction est appelée, ce
     // qu'une minification ou un appel détaché rendrait fragile.
+    const cibles = options.targets ?? {};
     let parNom = new Map<string, string>();
-    if (options.updateExisting) {
+    if (options.updateExisting && Object.keys(cibles).length === 0) {
       const existants = await db<{ id: string; name: string }[]>`
         select id, name from saas_ugc.ugc_products
         where workspace_id = ${workspaceId}::uuid
@@ -314,11 +371,16 @@ const store: StoreImportDependencies = {
       parNom = new Map(existants.map((p) => [String(p.name).trim().toLowerCase(), String(p.id)]));
     }
 
-    for (const produit of produits) {
+    for (const position of positions) {
+      const produit = produits[position];
+      if (!produit) continue;
       const variantes = variantRows(produit);
-      const cible = options.updateExisting
-        ? parNom.get(produit.name.trim().toLowerCase()) ?? null
-        : null;
+      /*
+       * Priorité à la cible du rapprochement. Le repli sur le nom n'existe que
+       * pour le mode « mise à jour » historique, sans rapprochement fourni.
+       */
+      const cible = cibles[position]
+        ?? (options.updateExisting ? parNom.get(produit.name.trim().toLowerCase()) ?? null : null);
       try {
         const ecrites = await db.begin(async (tx) => {
           if (cible) {
@@ -330,13 +392,23 @@ const store: StoreImportDependencies = {
             // `minorToDecimal` ici aurait fait diverger le prix mis à jour de
             // celui créé (l'erreur « 12 000 devient 120 » est déjà arrivée).
             const champs = productRow(workspaceId, produit, origine);
+            /*
+             * Aucune valeur connue n'est écrasée par une valeur vide.
+             *
+             * Une source qui ne publie pas de description, d'URL ou de prix ne
+             * doit pas effacer ce que le commerçant avait saisi : `coalesce`
+             * et `nullif` conservent la valeur en place quand l'entrante est
+             * absente ou vide. Le prix, lui, n'est remplacé que s'il est
+             * réellement connu (`priceMinor !== null`).
+             */
             await tx`
               update saas_ugc.ugc_products
                  set name = ${champs.name},
-                     description = ${champs.description},
-                     price_amount = ${champs.price_amount},
-                     price_currency = ${champs.price_currency},
-                     product_url = ${champs.product_url},
+                     description = coalesce(nullif(${champs.description}, ''), description),
+                     price_amount = case when ${produit.priceMinor === null} then price_amount
+                                         else ${champs.price_amount} end,
+                     price_currency = coalesce(nullif(${champs.price_currency}, ''), price_currency),
+                     product_url = coalesce(nullif(${champs.product_url}, ''), product_url),
                      product_facts = ${champs.product_facts},
                      updated_at = now()
                where id = ${cible}::uuid
@@ -351,7 +423,7 @@ const store: StoreImportDependencies = {
                 insert into saas_ugc.ugc_product_variants ${tx({ product_id: cible, ...variante })}
               `;
             }
-            return variantes.length;
+            return { productId: cible, variants: variantes.length, outcome: 'updated' as const };
           }
           const ligne = productRow(workspaceId, produit, origine);
           await tx`
@@ -366,15 +438,23 @@ const store: StoreImportDependencies = {
               insert into saas_ugc.ugc_product_variants ${tx({ product_id: productId, ...variante })}
             `;
           }
-          return variantes.length;
+          return { productId, variants: variantes.length, outcome: 'created' as const };
         });
-        if (cible) {
+        if (ecrites.outcome === 'updated') {
           updated += 1;
-          variantsUpdated += ecrites;
+          variantsUpdated += ecrites.variants;
         } else {
           created += 1;
-          variantsCreated += ecrites;
+          variantsCreated += ecrites.variants;
         }
+        // Journalisé seulement après COMMIT de la transaction : une ligne en
+        // échec ne doit pas laisser une trace de progression.
+        written.push({
+          index: position,
+          productId: ecrites.productId,
+          outcome: ecrites.outcome,
+          variantsWritten: ecrites.variants,
+        });
       } catch (erreur) {
         // Un échec n'annule pas les autres : on rapporte précisément, en
         // conservant la raison lisible plutôt qu'un message générique.
@@ -389,7 +469,68 @@ const store: StoreImportDependencies = {
         });
       }
     }
-    return { created, updated, variantsCreated, variantsUpdated, failed };
+    return { created, updated, variantsCreated, variantsUpdated, written, failed };
+  },
+
+  /**
+   * Progression d'un lot : lignes déjà écrites.
+   *
+   * Filtrée sur l'utilisateur ET l'entreprise : une clé de lot reçue du client
+   * ne peut pas donner accès à la progression d'un autre.
+   */
+  /**
+   * Clé de progression d'une ligne — visible hors du module d'écriture, parce
+   * que le handler en a besoin AVANT d'écrire (pour savoir ce qui reste).
+   */
+  async readProgress(workspaceId: string, userId: string, importKey: string) {
+    const db = requiredSql();
+    const lignes = await db<{
+      line_key: string; product_id: string; outcome: string; variants_written: number;
+    }[]>`
+      select line_key, product_id, outcome, variants_written
+        from saas_ugc.ugc_import_progress
+       where workspace_id = ${workspaceId}::uuid
+         and user_id = ${userId}::uuid
+         and import_key = ${importKey}
+       order by created_at, line_key
+    `;
+    return lignes.map((ligne) => ({
+      workspaceId,
+      userId,
+      importKey,
+      lineKey: String(ligne.line_key),
+      productId: String(ligne.product_id),
+      outcome: ligne.outcome === 'updated' ? 'updated' as const : 'created' as const,
+      variantsWritten: Number(ligne.variants_written) || 0,
+    }));
+  },
+
+  /**
+   * Journalise une ligne de progression.
+   *
+   * `on conflict do nothing` : rejouer la même ligne ne crée pas de doublon —
+   * c'est ce qui rend la reprise idempotente côté base, et pas seulement côté
+   * code.
+   */
+  async recordProgress(ligne: {
+    workspaceId: string; userId: string; importKey: string; lineKey: string;
+    productId: string; outcome: 'created' | 'updated'; variantsWritten: number;
+  }) {
+    const db = requiredSql();
+    await db`
+      insert into saas_ugc.ugc_import_progress
+        (workspace_id, user_id, import_key, line_key, product_id, outcome, variants_written)
+      values (
+        ${ligne.workspaceId}::uuid,
+        ${ligne.userId}::uuid,
+        ${ligne.importKey},
+        ${ligne.lineKey},
+        ${ligne.productId}::uuid,
+        ${ligne.outcome},
+        ${ligne.variantsWritten}
+      )
+      on conflict on constraint ugc_import_progress_unique_line do nothing
+    `;
   },
 
   /**
