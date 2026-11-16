@@ -77,6 +77,9 @@ jobs:
           else
             echo "OK: le site public sert la révision de main."
           fi
+          # Annotation de succès : un constat favorable doit être aussi lisible
+          # et citable qu'un échec, sinon il n'est pas une preuve.
+          echo "::notice::site HTTP $site_code · cachet servi ${cachet:-absent} · main ${attendu:-inconnu}"
 
           # --- Edge Function ---------------------------------------------------
           # verify_jwt = true : un appel anonyme DOIT être refusé en 401.
@@ -104,6 +107,7 @@ jobs:
               503) echo "::warning::Fonction joignable mais artefact indisponible (503)." ;;
               *)   echo "::warning::Code inattendu ($fn_code) pour un appel anonyme." ;;
             esac
+            echo "::notice::store-import HTTP $fn_code · réponse ${fn_body:-vide}"
           fi
 
       - name: Détails réseau (DNS et TLS), pour trancher une absence de réponse
