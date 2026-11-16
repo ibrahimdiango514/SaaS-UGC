@@ -42,29 +42,31 @@ const HISTORY_KEY = 'vyora.ai.history.v1';
 /**
  * Liste les conversations de l'utilisateur.
  *
- * `workspaceId` reste `null` : l'assistant personnel est distinct de l'espace
- * Business Growth. Le socle accepte explicitement ce cas.
+ * `workspaceId` vaut `null` pour l'espace assistant autonome, et l'identifiant
+ * de l'entreprise active lorsque l'interface est hébergée dans Business Grow :
+ * les conversations y sont alors rattachées à cette entreprise, et la RLS
+ * serveur garantit qu'un membre d'une autre entreprise ne les voit pas.
  */
-export async function listConversations(): Promise<BusinessConversation[]> {
-  const { conversations } = await businessGrowApi.listConversations(null);
+export async function listConversations(workspaceId: string | null = null): Promise<BusinessConversation[]> {
+  const { conversations } = await businessGrowApi.listConversations(workspaceId);
   return conversations ?? [];
 }
 
-export async function createConversation(title: string): Promise<string> {
-  const { conversationId } = await businessGrowApi.createConversation(title, null);
+export async function createConversation(title: string, workspaceId: string | null = null): Promise<string> {
+  const { conversationId } = await businessGrowApi.createConversation(title, workspaceId);
   return conversationId;
 }
 
-export async function renameConversation(conversationId: string, title: string): Promise<void> {
-  await businessGrowApi.renameConversation(conversationId, title, null);
+export async function renameConversation(conversationId: string, title: string, workspaceId: string | null = null): Promise<void> {
+  await businessGrowApi.renameConversation(conversationId, title, workspaceId);
 }
 
-export async function deleteConversation(conversationId: string): Promise<void> {
-  await businessGrowApi.deleteConversation(conversationId, null);
+export async function deleteConversation(conversationId: string, workspaceId: string | null = null): Promise<void> {
+  await businessGrowApi.deleteConversation(conversationId, workspaceId);
 }
 
-export async function listMessages(conversationId: string): Promise<BusinessMessage[]> {
-  const { messages } = await businessGrowApi.listMessages(conversationId, null);
+export async function listMessages(conversationId: string, workspaceId: string | null = null): Promise<BusinessMessage[]> {
+  const { messages } = await businessGrowApi.listMessages(conversationId, workspaceId);
   return messages ?? [];
 }
 
@@ -82,12 +84,17 @@ export async function sendMessage(params: {
   content: string;
   mode: AiMode;
   attachments: AiAttachment[];
+  workspaceId?: string | null;
 }): Promise<{ providerAvailable: boolean; provider?: { key: string; model: string } }> {
   const body = composeMessageBody(params.content, params.mode, params.attachments);
   const result = await businessGrowApi.sendMessage(
     params.conversationId,
     body,
     crypto.randomUUID(),
+    // `workspaceId` rattache l'échange à l'entreprise active quand l'interface
+    // est hébergée dans Business Grow. Absent pour l'assistant autonome, le
+    // socle retombe sur son comportement d'origine.
+    params.workspaceId ? { workspaceId: params.workspaceId } : undefined,
   );
   return { providerAvailable: result.providerAvailable, provider: result.provider };
 }

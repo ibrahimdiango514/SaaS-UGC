@@ -15,10 +15,17 @@ export function MessageList({
   messages,
   loading,
   sending,
+  testIdPrefix = 'message',
 }: {
   messages: AiMessage[];
   loading: boolean;
   sending: boolean;
+  /**
+   * Préfixe des marqueurs de test. Business Grow conserve son préfixe
+   * historique (`business-message-`), qui identifie déjà l'espace dans les
+   * tests existants : on ne renomme pas un contrat en place.
+   */
+  testIdPrefix?: string;
 }) {
   const fin = useRef<HTMLDivElement>(null);
 
@@ -43,7 +50,7 @@ export function MessageList({
   return (
     <div className="space-y-5 px-3 py-6 sm:px-5">
       {messages.map((message) => (
-        <Bubble key={message.id} message={message} />
+        <Bubble key={message.id} message={message} testIdPrefix={testIdPrefix} />
       ))}
 
       {sending && (
@@ -80,7 +87,7 @@ function Avatar({ role }: { role: string }) {
   );
 }
 
-function Bubble({ message }: { message: AiMessage }) {
+function Bubble({ message, testIdPrefix }: { message: AiMessage; testIdPrefix: string }) {
   const assistant = message.author_role === 'assistant';
   const enEchec = message.request_status === 'failed';
   const [copie, setCopie] = useState(false);
@@ -125,7 +132,12 @@ function Bubble({ message }: { message: AiMessage }) {
   const voixDisponible = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
   return (
-    <div className={cn('vy-enter group flex gap-3', !assistant && 'flex-row-reverse')}>
+    <div
+      className={cn('vy-enter group flex gap-3', !assistant && 'flex-row-reverse')}
+      // Marqueur stable pour les tests et le débogage : il identifie l'auteur
+      // réel du message sans exposer son contenu.
+      data-testid={`${testIdPrefix}-${message.author_role === 'assistant' ? 'assistant' : 'user'}`}
+    >
       <Avatar role={message.author_role} />
 
       <div className={cn('min-w-0 max-w-[min(46rem,88%)]', !assistant && 'flex flex-col items-end')}>
@@ -150,8 +162,17 @@ function Bubble({ message }: { message: AiMessage }) {
               réponse incomplète
             </span>
           )}
-          {assistant && message.request_provider_key && (
-            <span className="mr-1">{message.request_provider_key}</span>
+
+          {/* Statut réel du traitement, tel que conservé par le serveur.
+              Masquer ces états reviendrait à présenter un message « en attente »
+              comme une réponse, ou un échec comme un succès. */}
+          {statutLibelle(message) && (
+            <span className={cn('mr-1', statutTonalite(message))}>
+              {statutLibelle(message)}
+            </span>
+          )}
+          {assistant && message.request_status === 'succeeded' && (
+            <span className="mr-1">Réponse générée par l’assistant VYORA</span>
           )}
           <span>{heure(message.created_at)}</span>
 
@@ -183,6 +204,33 @@ function Bubble({ message }: { message: AiMessage }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Libellé du statut de traitement, ou `null` s'il n'y a rien à dire.
+ *
+ * Les codes d'erreur restent lisibles par l'utilisateur ; les identifiants de
+ * fournisseur et de modèle, eux, ne sont jamais exposés — c'est un détail
+ * technique interne, et l'ancienne interface ne les montrait pas non plus.
+ */
+function statutLibelle(message: AiMessage): string | null {
+  switch (message.request_status) {
+    case 'queued': return 'En attente';
+    case 'running': return 'Traitement en cours';
+    case 'succeeded': return 'Traitement réussi';
+    case 'canceled': return 'Traitement annulé';
+    case 'failed':
+      return message.request_error_code === 'NO_VERIFIED_PROVIDER'
+        ? 'Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.'
+        : 'Le traitement a échoué. Réessayez.';
+    default: return null;
+  }
+}
+
+function statutTonalite(message: AiMessage): string {
+  if (message.request_status === 'failed') return 'text-rose-300';
+  if (message.request_status === 'succeeded') return 'text-slate-500';
+  return 'text-amber-300/90';
 }
 
 function heure(iso: string): string {

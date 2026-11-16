@@ -57,7 +57,12 @@ function messageOf(error: unknown): string {
   return 'Opération impossible pour le moment.';
 }
 
-export function useAssistant(): AssistantState {
+/**
+ * @param workspaceId Entreprise active lorsque l'interface est hébergée dans
+ *   Business Grow. `null` conserve l'assistant autonome. Les conversations
+ *   sont alors rattachées à cette entreprise côté serveur.
+ */
+export function useAssistant(workspaceId: string | null = null): AssistantState {
   const [conversations, setConversations] = useState<AiConversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
@@ -73,7 +78,7 @@ export function useAssistant(): AssistantState {
   const loadList = useCallback(async () => {
     setLoadingList(true);
     try {
-      const items = await listConversations();
+      const items = await listConversations(workspaceId);
       setConversations(items);
       setError(null);
     } catch (e) {
@@ -82,13 +87,15 @@ export function useAssistant(): AssistantState {
     } finally {
       setLoadingList(false);
     }
-  }, []);
+    // `workspaceId` en dépendance : changer d'entreprise doit recharger la
+    // liste, pas conserver celle de l'entreprise précédente.
+  }, [workspaceId]);
 
   const loadThread = useCallback(async (id: string) => {
     const token = ++threadToken.current;
     setLoadingThread(true);
     try {
-      const items = await listMessages(id);
+      const items = await listMessages(id, workspaceId);
       if (token === threadToken.current) setMessages(items);
     } catch (e) {
       if (token === threadToken.current) {
@@ -98,7 +105,7 @@ export function useAssistant(): AssistantState {
     } finally {
       if (token === threadToken.current) setLoadingThread(false);
     }
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     void loadList();
@@ -129,13 +136,14 @@ export function useAssistant(): AssistantState {
       try {
         let id = activeId;
         if (!id) {
-          id = await createConversation(titleFromMessage(texte) || defaultTitle());
+          id = await createConversation(titleFromMessage(texte) || defaultTitle(), workspaceId);
           setActiveId(id);
           rememberConversation(id);
         }
 
         const { providerAvailable } = await sendMessage({
           conversationId: id,
+          workspaceId,
           content: texte || '(fichiers joints sans texte)',
           mode,
           attachments,
@@ -163,7 +171,7 @@ export function useAssistant(): AssistantState {
   const remove = useCallback(
     async (id: string) => {
       try {
-        await deleteConversation(id);
+        await deleteConversation(id, workspaceId);
         if (activeId === id) {
           setActiveId(null);
           setMessages([]);
@@ -173,7 +181,7 @@ export function useAssistant(): AssistantState {
         setError(`Suppression impossible : ${messageOf(e)}`);
       }
     },
-    [activeId, loadList],
+    [activeId, loadList, workspaceId],
   );
 
   const rename = useCallback(
@@ -181,13 +189,13 @@ export function useAssistant(): AssistantState {
       const propre = title.trim();
       if (!propre) return;
       try {
-        await renameConversation(id, propre);
+        await renameConversation(id, propre, workspaceId);
         await loadList();
       } catch (e) {
         setError(`Renommage impossible : ${messageOf(e)}`);
       }
     },
-    [loadList],
+    [loadList, workspaceId],
   );
 
   const filtered = useMemo(() => filterConversations(conversations, query), [conversations, query]);
