@@ -6,22 +6,22 @@ name: Vérification de production
 #
 # Cet environnement de développement n'a pas d'accès réseau aux domaines de
 # production : la vérification est donc exécutée par un runner GitHub, qui lui
-# a un accès normal, et la sortie est lisible directement dans les logs.
+# a un accès normal.
+#
+# Toutes les mesures sont écrites dans le RÉSUMÉ du run : les journaux bruts ne
+# sont pas toujours récupérables par l'API, et un constat qu'on ne peut pas lire
+# ne sert à rien.
 #
 # Aucun secret n'est utilisé : ces deux points d'entrée sont publics et leur
 # réponse anonyme est précisément ce qu'on veut mesurer.
 
 on:
+  # Le jeton du dépôt n'a pas la permission `actions: write` : un dispatch
+  # manuel est refusé (403). Un push produit la même mesure sans permission
+  # supplémentaire, et couvre chaque publication future.
+  push:
+    branches: ["main", "arena/**"]
   workflow_dispatch:
-    inputs:
-      site_url:
-        description: "URL du site public à contrôler"
-        required: false
-        default: "https://vyora-ugc.netlify.app"
-      function_url:
-        description: "URL de l'Edge Function store-import"
-        required: false
-        default: "https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import"
 
 permissions:
   contents: read
@@ -31,56 +31,94 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Site public — code HTTP et cachet de révision
+      - name: Constat (site public + Edge Function)
         env:
-          SITE: ${{ inputs.site_url }}
+          SITE: ${{ inputs.site_url || 'https://vyora-ugc.netlify.app' }}
+          FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
         run: |
           set -u
-          echo "URL: $SITE"
-          code=$(curl -sS -o /tmp/site.html -w '%{http_code}' --max-time 30 "$SITE" || echo "000")
-          echo "HTTP: $code"
-          echo "Octets: $(wc -c < /tmp/site.html 2>/dev/null || echo 0)"
+          summary="$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Constat de production"
+            echo
+            echo "| Mesure | Valeur |"
+            echo "| --- | --- |"
+          } >> "$summary"
 
-          # Le commit attendu est celui de la tête de main, lu depuis l'API
-          # publique du dépôt : on compare deux faits, sans rien supposer.
-          attendu=$(curl -sS --max-time 30 https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main \
-            | grep -o '"sha": *"[0-9a-f]*"' | head -1 | grep -o '[0-9a-f]\{40\}' | cut -c1-7 || true)
-          echo "Commit attendu (main): ${attendu:-inconnu}"
+          # --- Site public -----------------------------------------------------
+          site_rc=0
+          site_code=$(curl -sS -o /tmp/site.html -w '%{http_code}' --max-time 30 "$SITE" 2>/tmp/site.err) || site_rc=$?
+          site_bytes=$(wc -c < /tmp/site.html 2>/dev/null || echo 0)
+          echo "site: $SITE -> HTTP $site_code (curl rc=$site_rc, $site_bytes octets)" || true
+          {
+            echo "| Site | \`$SITE\` |"
+            echo "| HTTP site | $site_code (curl rc=$site_rc) |"
+            echo "| Octets reçus | $site_bytes |"
+            echo "| Erreur curl | \`$(head -c 300 /tmp/site.err 2>/dev/null | tr '\n' ' ')\` |"
+          } >> "$summary"
 
+          # Le commit attendu vient de l'API publique du dépôt : on compare deux
+          # faits mesurés, on ne suppose rien.
+          attendu=$(curl -sS --max-time 30 "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | grep -o '"sha": *"[0-9a-f]\{40\}"' | head -1 | grep -o '[0-9a-f]\{40\}' | cut -c1-7) || attendu=""
           cachet=$(grep -o 'name="vyora-revision" content="[^"]*"' /tmp/site.html 2>/dev/null \
-            | sed 's/.*content="//; s/"//' || true)
-          echo "Cachet servi: ${cachet:-absent}"
+            | sed 's/.*content="//; s/"//') || cachet=""
+          {
+            echo "| Commit de \`main\` | ${attendu:-inconnu} |"
+            echo "| Cachet servi | ${cachet:-absent} |"
+          } >> "$summary"
 
           if [ -z "$cachet" ]; then
-            echo "::warning::Aucun cachet de révision servi — le déploiement ne contient pas cette livraison (ou le site sert un build antérieur)."
+            echo "::warning::Aucun cachet de révision servi — le site sert un build antérieur à cette livraison."
           elif [ "$cachet" = "dev" ]; then
             echo "::warning::Cachet « dev » : build sans référence de commit."
           elif [ -n "$attendu" ] && [ "$cachet" != "$attendu" ]; then
-            echo "::warning::Le site sert $cachet alors que main est à $attendu — propagation en cours ou déploiement non déclenché."
+            echo "::warning::Le site sert $cachet alors que main est à $attendu."
           else
-            echo "OK: le site public sert bien la révision de main."
+            echo "OK: le site public sert la révision de main."
+          fi
+          # Annotation de succès : un constat favorable doit être aussi lisible
+          # et citable qu'un échec, sinon il n'est pas une preuve.
+          echo "::notice::site HTTP $site_code · cachet servi ${cachet:-absent} · main ${attendu:-inconnu}"
+
+          # --- Edge Function ---------------------------------------------------
+          # verify_jwt = true : un appel anonyme DOIT être refusé en 401.
+          # 503 = fonction joignable mais artefact non chargeable.
+          # rc != 0 = aucune réponse (réseau, DNS, TLS) : ce n'est pas un refus.
+          fn_rc=0
+          fn_code=$(curl -sS -o /tmp/fn.json -w '%{http_code}' --max-time 30 \
+            -X POST "$FN" -H 'content-type: application/json' \
+            --data '{"action":"preview"}' 2>/tmp/fn.err) || fn_rc=$?
+          fn_body=$(head -c 300 /tmp/fn.json 2>/dev/null | tr '\n' ' ')
+          {
+            echo "| Edge Function | \`$FN\` |"
+            echo "| HTTP fonction | $fn_code (curl rc=$fn_rc) |"
+            echo "| Réponse | \`${fn_body:-vide}\` |"
+            echo "| Erreur curl | \`$(head -c 300 /tmp/fn.err 2>/dev/null | tr '\n' ' ')\` |"
+            echo
+          } >> "$summary"
+
+          echo "function: $FN -> HTTP $fn_code (curl rc=$fn_rc) $fn_body"
+          if [ "$fn_rc" -ne 0 ]; then
+            echo "::warning::Aucune réponse de la fonction (curl rc=$fn_rc) : réseau, DNS ou TLS. Ce n'est pas un refus d'authentification."
+          else
+            case "$fn_code" in
+              401) echo "OK: jeton exigé (verify_jwt actif), chargeur démarré." ;;
+              503) echo "::warning::Fonction joignable mais artefact indisponible (503)." ;;
+              *)   echo "::warning::Code inattendu ($fn_code) pour un appel anonyme." ;;
+            esac
+            echo "::notice::store-import HTTP $fn_code · réponse ${fn_body:-vide}"
           fi
 
-      - name: Edge Function store-import — refus anonyme attendu
+      - name: Détails réseau (DNS et TLS), pour trancher une absence de réponse
         env:
-          FN: ${{ inputs.function_url }}
+          FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
         run: |
           set -u
-          # verify_jwt = true : un appel sans jeton DOIT être refusé en 401.
-          # Un 503 STORE_IMPORT_ARTIFACT_UNAVAILABLE signifierait que la fonction
-          # répond mais que son artefact n'est pas chargeable.
-          # Un 5xx générique ou une erreur TLS signifierait un problème distinct.
-          body=$(mktemp)
-          code=$(curl -sS -o "$body" -w '%{http_code}' --max-time 30 \
-            -X POST "$FN" \
-            -H 'content-type: application/json' \
-            --data '{"action":"preview"}' || echo "000")
-          echo "HTTP: $code"
-          echo "Réponse: $(head -c 400 "$body" 2>/dev/null)"
-
-          case "$code" in
-            401) echo "OK: jeton exigé (verify_jwt actif), chargeur démarré." ;;
-            503) echo "::warning::Fonction joignable mais artefact indisponible (503)." ;;
-            000) echo "::error::Aucune réponse HTTP (réseau ou fonction absente)." ; exit 1 ;;
-            *)   echo "::warning::Code inattendu ($code) pour un appel anonyme." ;;
-          esac
+          host=$(printf '%s' "$FN" | sed -E 's#https?://([^/]+).*#\1#')
+          summary="$GITHUB_STEP_SUMMARY"
+          echo "### Diagnostic réseau : $host" >> "$summary"
+          echo '```' >> "$summary"
+          getent hosts "$host" >> "$summary" 2>&1 || echo "DNS: échec de résolution" >> "$summary"
+          curl -sS -I --max-time 20 "https://$host/" >> "$summary" 2>&1 | head -15 || echo "pas de réponse sur /" >> "$summary"
+          echo '```' >> "$summary"
