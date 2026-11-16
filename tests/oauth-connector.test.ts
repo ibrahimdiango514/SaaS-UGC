@@ -3,7 +3,7 @@
 // Le store est en mémoire et `fetch` est simulé : ces tests vérifient le
 // comportement réel du code déployé (routage, CSRF, PKCE, capacités, isolation,
 // révocation) sans dépendre du réseau ni d'un secret Google.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   OAuthError,
   loadUsableAccount,
@@ -148,9 +148,15 @@ function googleFetch(spec: {
   revokeOk?: boolean;
   profile?: unknown;
 } = {}) {
-  const calls: Array<{ url: string; body: string | null }> = [];
+  // Les en-têtes sont enregistrés : c'est ce qui permet de vérifier que le
+  // jeton Google voyage bien en `Authorization` et jamais dans l'URL.
+  const calls: Array<{ url: string; body: string | null; init: RequestInit }> = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
-    calls.push({ url: String(url), body: typeof init.body === 'string' ? init.body : null });
+    calls.push({
+      url: String(url),
+      body: typeof init.body === 'string' ? init.body : null,
+      init,
+    });
     if (String(url).includes('/revoke')) {
       return { ok: spec.revokeOk ?? true, status: spec.revokeOk === false ? 400 : 200, json: async () => ({}) } as Response;
     }
@@ -819,5 +825,158 @@ describe('connecteur OAuth / statut de configuration', () => {
     expect(text).not.toContain('client-id-google');
     expect(text).not.toContain(KEY);
     expect(text).not.toContain('service-key-factice');
+  });
+});
+
+describe('connecteur OAuth / outils Google exposés en MCP', () => {
+  /** Crée un compte réel dans le store mémoire, jetons réellement chiffrés. */
+  async function makeAccount(
+    store: MemoryStore,
+    accessToken: string,
+    opts: { userId?: string; provider?: string; capabilities?: string[]; status?: string } = {},
+  ) {
+    const spec = {
+      userId: opts.userId ?? USER_A,
+      provider: opts.provider ?? 'gmail',
+      capabilities: opts.capabilities ?? ['read'],
+      status: opts.status ?? 'connected',
+    };
+    const access = await encryptSecret(accessToken, KEY);
+    const id = await store.upsertAccount({
+      user_id: spec.userId,
+      provider: spec.provider,
+      external_account_id: `ext-${Math.random().toString(36).slice(2)}`,
+      access_token_cipher: access.cipher,
+      access_token_iv: access.iv,
+      access_token_tag: access.tag,
+      capabilities: spec.capabilities,
+      status: spec.status,
+    });
+    return id!;
+  }
+
+  it('tools_list expose les six outils Google', async () => {
+    // `tools/list` ne dépend d'aucun compte : la découverte est publique au
+    // sein de la fonction, l'autorisation n'intervient qu'à l'appel.
+    const { handleToolsList } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = handleToolsList();
+    expect(response.status).toBe(200);
+    const body = await response.json() as { count: number; tools: Array<{ name: string; annotations: Record<string, boolean> }> };
+    expect(body.count).toBe(6);
+    expect(body.tools.map((t) => t.name)).toContain('vyora_gmail_search');
+    expect(body.tools.map((t) => t.name)).toContain('vyora_gmail_send');
+  });
+
+  it('tools_call refuse un outil inconnu', async () => {
+    const store = createMemoryStore();
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = await handleToolCall({ name: 'vyora_supprimer_tout' }, deps(store), USER_A);
+    expect(response.status).toBe(404);
+    expect((await response.json() as { error: string }).error).toBe('tool_unknown');
+  });
+
+  it('tools_call refuse le compte d’un autre utilisateur AVANT tout appel Google', async () => {
+    const store = createMemoryStore();
+    const fetchImpl = vi.fn();
+    const accountId = await makeAccount(store, 'ya29.jeton');
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = await handleToolCall(
+      { name: 'vyora_gmail_search', account_id: accountId, arguments: {} },
+      deps(store, fetchImpl as unknown as typeof fetch),
+      USER_B,
+    );
+    expect(response.status).toBe(403);
+    expect((await response.json() as { error: string }).error).toBe('forbidden');
+    // Aucune requête réseau n'a été tentée.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('tools_call refuse une capacité non accordée, sans appel réseau', async () => {
+    const store = createMemoryStore();
+    const fetchImpl = vi.fn();
+    const accountId = await makeAccount(store, 'ya29.jeton', { capabilities: ['read'] });
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = await handleToolCall(
+      { name: 'vyora_gmail_send', account_id: accountId, arguments: { to: 'a@b.co', body: 'x' } },
+      deps(store, fetchImpl as unknown as typeof fetch),
+      USER_A,
+    );
+    expect(response.status).toBe(403);
+    expect((await response.json() as { error: string }).error).toBe('capability_not_granted');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    // Le refus est journalisé : c'est une tentative d'action, pas un oubli.
+    expect(store.audits.some((a) => a.action === 'denied' && a.capability === 'send')).toBe(true);
+  });
+
+  it('tools_call exécute une recherche et journalise le succès', async () => {
+    const store = createMemoryStore();
+    const accountId = await makeAccount(store, 'ya29.jeton-valide', { capabilities: ['read'] });
+    const { impl, calls } = googleFetch({
+      profile: { messages: [{ id: 'm1', threadId: 't1' }], resultSizeEstimate: 1 },
+    });
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = await handleToolCall(
+      { name: 'vyora_gmail_search', account_id: accountId, arguments: { query: 'from:client@x.co' } },
+      deps(store, impl),
+      USER_A,
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as { tool: string; result: { count: number } };
+    expect(body.tool).toBe('vyora_gmail_search');
+    expect(body.result.count).toBe(1);
+    // Un seul appel réseau, et il porte le jeton DÉCHIFFRÉ : c'est le vrai
+    // chemin (chiffré en base -> déchiffré en mémoire -> en-tête Google).
+    expect(calls).toHaveLength(1);
+    const headers = calls[0].init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer ya29.jeton-valide');
+    // La réponse HTTP ne contient jamais le jeton.
+    expect(JSON.stringify(body)).not.toContain('ya29');
+    expect(store.audits.some((a) => a.action === 'read' && a.outcome === 'ok')).toBe(true);
+  });
+
+  it('tools_call refuse un compte révoqué', async () => {
+    const store = createMemoryStore();
+    const accountId = await makeAccount(store, 'ya29.jeton', { status: 'revoked' });
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = await handleToolCall(
+      { name: 'vyora_gmail_search', account_id: accountId, arguments: {} },
+      deps(store),
+      USER_A,
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json() as { error: string }).error).toBe('account_revoked');
+  });
+
+  it('tools_call refuse un outil Gmail sur un compte Drive', async () => {
+    const store = createMemoryStore();
+    const accountId = await makeAccount(store, 'ya29.jeton', { provider: 'google_drive', capabilities: ['read'] });
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = await handleToolCall(
+      { name: 'vyora_gmail_search', account_id: accountId, arguments: {} },
+      deps(store),
+      USER_A,
+    );
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: string }).error).toBe('provider_mismatch');
+  });
+
+  it('tools_call exige l’identifiant de compte', async () => {
+    const store = createMemoryStore();
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const response = await handleToolCall({ name: 'vyora_gmail_search' }, deps(store), USER_A);
+    expect(response.status).toBe(400);
+    expect((await response.json() as { error: string }).error).toBe('account_id_required');
+  });
+
+  it('un refus d’envoi ne divulgue jamais le jeton', async () => {
+    const store = createMemoryStore();
+    const accountId = await makeAccount(store, 'ya29.TRES-SECRET', { capabilities: ['read'] });
+    const { handleToolCall } = await import('../supabase/functions/vyora-oauth/index.ts');
+    const text = await (await handleToolCall(
+      { name: 'vyora_gmail_send', account_id: accountId, arguments: { to: 'a@b.co', body: 'x' } },
+      deps(store),
+      USER_A,
+    )).text();
+    expect(text).not.toContain('TRES-SECRET');
   });
 });

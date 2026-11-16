@@ -47,6 +47,13 @@ import {
   type GoogleProvider,
   type OAuthCapability,
 } from '../_shared/oauth/index.ts';
+import {
+  GOOGLE_TOOLS,
+  GoogleToolError,
+  executeGoogleTool,
+  googleToolsListPayload,
+  type GoogleToolName,
+} from './google-tools.ts';
 
 const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -478,6 +485,133 @@ export async function handleCheck(input: { account_id: unknown; capability: unkn
   }
 }
 
+/**
+ * `tools/list` — outils Google exposables en MCP.
+ *
+ * La liste ne dépend PAS de l'utilisateur : elle décrit ce que VYORA sait faire
+ * si l'utilisateur accorde les permissions. C'est volontaire — un client MCP
+ * doit pouvoir découvrir les outils avant toute connexion. L'autorisation réelle
+ * est vérifiée à chaque appel, jamais à la découverte.
+ */
+export function handleToolsList(): Response {
+  return json(200, { ...googleToolsListPayload(), count: GOOGLE_TOOLS.length });
+}
+
+/**
+ * `tools/call` — exécute un outil Google pour l'utilisateur courant.
+ *
+ * Ordre des contrôles, du moins coûteux au plus coûteux :
+ *   1. l'outil existe ;
+ *   2. le compte appartient à l'appelant (comparaison `user_id`) ;
+ *   3. le compte est utilisable et la capacité accordée ;
+ *   4. seulement ensuite, le jeton est déchiffré et Google est appelé.
+ *
+ * Aucun identifiant de compte n'est accepté depuis le client : `account_id`
+ * désigne un compte que l'appelant possède déjà, et la comparaison (2) le
+ * vérifie explicitement. Il n'y a donc pas de chemin pour atteindre le compte
+ * d'un autre utilisateur.
+ */
+export async function handleToolCall(
+  input: { name: unknown; arguments?: unknown; account_id?: unknown },
+  deps: HandlerDeps,
+  userId: string,
+): Promise<Response> {
+  const name = String(input.name ?? '');
+  const tool = GOOGLE_TOOLS.find((entry) => entry.name === name);
+  if (!tool) return fail(404, 'tool_unknown', `Outil inconnu : ${name}`);
+
+  const accountId = String(input.account_id ?? '').trim();
+  if (!accountId) return fail(400, 'account_id_required');
+
+  const row = await deps.store.getAccountSecret(accountId);
+  if (!row) return fail(404, 'account_not_found');
+  if (row.user_id !== userId) return fail(403, 'forbidden');
+  if (row.status === 'revoked') return fail(409, 'account_revoked');
+  if (row.status !== 'connected' && row.status !== 'error') {
+    return fail(409, `account_not_usable:${row.status}`);
+  }
+  if (row.provider !== tool.provider) {
+    return fail(400, 'provider_mismatch', 'Ce compte ne correspond pas à cet outil.');
+  }
+
+  // La capacité est revérifiée ici ET dans `executeGoogleTool` : la première
+  // barrière donne un message clair, la seconde garantit qu'aucun appel réseau
+  // ne part même si l'ordre des contrôles changeait un jour.
+  const granted = row.capabilities ?? [];
+  if (!granted.includes(tool.capability)) {
+    await deps.store.audit({
+      userId,
+      accountId: row.id,
+      provider: row.provider,
+      action: 'denied',
+      capability: tool.capability,
+      outcome: 'denied',
+      detail: 'capacite_non_accordee',
+    });
+    return fail(403, 'capability_not_granted',
+      `Cette action demande la permission « ${tool.capability} », que ce compte n’a pas accordée.`);
+  }
+
+  // Déchiffrement seulement maintenant : un refus ci-dessus ne coûte rien.
+  // Le contrôle de présence est fait AVANT de construire l'objet : TypeScript
+  // ne peut pas rétrécir un type à travers un objet intermédiaire.
+  if (!row.access_token_cipher || !row.access_token_iv || !row.access_token_tag) {
+    return fail(409, 'access_token_missing');
+  }
+  const accessSealed = {
+    cipher: row.access_token_cipher,
+    iv: row.access_token_iv,
+    tag: row.access_token_tag,
+  };
+  let accessToken: string;
+  try {
+    accessToken = await decryptSecret(accessSealed, deps.config.encryptionKey);
+  } catch {
+    await deps.store.setAccountStatus(row.id, 'error', 'jeton_indechiffrable');
+    return fail(500, 'decrypt_failed');
+  }
+
+  try {
+    const result = await executeGoogleTool(name as GoogleToolName, input.arguments, {
+      grantedCapabilities: granted,
+      provider: tool.provider,
+      accessToken,
+      fetchImpl: deps.config.fetchImpl,
+    });
+    await deps.store.audit({
+      userId,
+      accountId: row.id,
+      provider: row.provider,
+      action: tool.capability,
+      capability: tool.capability,
+      outcome: 'ok',
+      detail: name,
+    });
+    return json(200, { tool: name, result });
+  } catch (error) {
+    if (error instanceof GoogleToolError) {
+      await deps.store.audit({
+        userId,
+        accountId: row.id,
+        provider: row.provider,
+        action: 'denied',
+        capability: tool.capability,
+        outcome: 'error',
+        detail: error.code,
+      });
+      // 403 pour un refus d'autorisation, 400 pour des arguments invalides.
+      const status = error.code === 'capability_not_granted' ? 403
+        : error.code === 'google_unreachable' || error.code === 'google_error' ? 502
+        : error.code === 'google_unauthorized' ? 401
+        : error.code === 'google_forbidden' ? 403
+        : error.code === 'google_rate_limited' ? 429
+        : 400;
+      return json(status, { error: error.code, message: error.message });
+    }
+    return fail(500, 'tool_error');
+  }
+}
+
 /** Fabrique du handler, séparée de `Deno.serve` pour être testable. */
 export function createHandler(override: Partial<Config> = {}) {
   return async function handle(request: Request): Promise<Response> {
@@ -535,6 +669,14 @@ export function createHandler(override: Partial<Config> = {}) {
         );
       case 'status':
         return handleStatus(deps);
+      case 'tools_list':
+        return handleToolsList();
+      case 'tools_call':
+        return handleToolCall(
+          { name: body.name, arguments: body.arguments, account_id: body.account_id },
+          deps,
+          bearer,
+        );
       case 'list':
         return handleList(deps, bearer);
       case 'revoke':
