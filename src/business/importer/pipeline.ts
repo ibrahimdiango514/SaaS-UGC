@@ -159,6 +159,11 @@ export function normalizeCatalogProduct(
         ? (v.price === null ? null : Math.round(Number(String(v.price).replace(/[^\d.-]/g, '')) || 0))
         : parsePriceMinor(v.price, currency).minor,
       sku: v.sku,
+      // Une source distante ne fournit pas de stock par variante : `null`
+      // (inconnu) et non 0, qui afficherait « rupture » partout.
+      stock: null,
+      currency: null,
+      attributeName: null,
       available: v.available,
     })),
     source: { platform, reference: origin.reference },

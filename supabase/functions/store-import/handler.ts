@@ -145,7 +145,29 @@ export interface StoreImportDependencies {
     products: NormalizedProduct[],
     /** Origine réelle, enregistrée dans les faits du produit (audit). */
     kind?: 'url' | 'file',
-  ): Promise<{ created: number; failed: Array<{ name: string; reason: string }> }>;
+  ): Promise<{
+    created: number;
+    /** Nombre de VARIANTES réellement écrites, pas seulement détectées. */
+    variantsCreated?: number;
+    failed: Array<{ name: string; reason: string }>;
+  }>;
+  /**
+   * Journalise l'import confirmé (produits créés, échecs, variantes).
+   *
+   * Optionnel pour ne pas casser les doublures de test existantes, mais
+   * `index.ts` le fournit toujours : sans historique, « consulter son
+   * historique après expiration » n'aurait rien à consulter.
+   */
+  recordImport?(job: {
+    workspaceId: string;
+    userId: string;
+    source: 'file' | 'url';
+    reference: string | null;
+    created: number;
+    failed: number;
+    variantsCreated: number;
+    failures: Array<{ name: string; reason: string }>;
+  }): Promise<{ status: string }>;
   /**
    * Analyse d'un fichier (CSV/TSV/XML/XLSX).
    *
@@ -210,6 +232,21 @@ export interface PreviewPayload {
     warnings: string[];
     duplicate: 'in-batch' | 'existing' | null;
     importable: boolean;
+    /**
+     * Déclinaisons détectées, telles qu'elles seront écrites.
+     *
+     * Exposer le détail — et pas seulement un nombre — est ce qui permet de
+     * vérifier à l'écran que « S, M, L » seront bien persistés. Afficher
+     * « 3 variantes » sans dire lesquelles ne prouve rien.
+     */
+    variants: Array<{
+      name: string;
+      price: string;
+      currency: string;
+      sku: string | null;
+      stock: number | null;
+      attributeName: string | null;
+    }>;
   }>;
   rejected: Array<{ line: number; reason: string }>;
   warnings: string[];
@@ -469,6 +506,11 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
             workspaceId,
             base64: body.fileBase64 as string,
             nom: text(body.fileName, 200),
+            // Horloge et TTL injectés : sans eux, `expiresAt` renvoyé au client
+            // pouvait ne pas correspondre à l'échéance réelle du stockage, et
+            // l'interface aurait décompté un temps faux.
+            now,
+            ttl,
           })
           : await faireApercu(dependencies, { userId, workspaceId, url: text(body.url, 2048), now, ttl });
         await apercus.set(payload.data.previewId, {
@@ -521,7 +563,33 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
       // Un aperçu ne se rejoue pas : la confirmation le consomme.
       await apercus.delete(previewId);
       const resultat = await dependencies.insertProducts(workspaceId, retenus, enregistrement.kind);
-      return jsonResponse({ data: resultat }, 200, corsOrigin);
+
+      // L'historique est écrit APRÈS coup et ne fait jamais échouer l'import :
+      // les produits sont déjà en base, une panne du journal ne doit pas
+      // transformer un succès en erreur (l'utilisateur relancerait et
+      // créerait des doublons).
+      if (dependencies.recordImport) {
+        try {
+          await dependencies.recordImport({
+            workspaceId,
+            userId,
+            source: enregistrement.kind,
+            reference: enregistrement.origin?.reference ?? null,
+            created: resultat.created,
+            failed: resultat.failed.length,
+            variantsCreated: resultat.variantsCreated ?? 0,
+            failures: resultat.failed,
+          });
+        } catch (erreur) {
+          console.error('store-import: historique non enregistré', {
+            erreur: erreur instanceof Error ? erreur.message : 'inconnue',
+          });
+        }
+      }
+
+      return jsonResponse({
+        data: { ...resultat, variantsCreated: resultat.variantsCreated ?? 0 },
+      }, 200, corsOrigin);
     } catch (cause) {
       if (cause instanceof StoreImportError) {
         return jsonResponse(failure(cause.code, cause.message), cause.status, corsOrigin);
@@ -676,6 +744,21 @@ async function faireApercu(
       warnings: produit.warnings,
       duplicate,
       importable: isImportable(produit) && duplicate !== 'in-batch',
+      // Une place de marché ne décrit pas ses déclinaisons de la même façon
+      // qu'un fichier : on n'en invente pas ici.
+      variants: (produit.variants ?? []).map((variante) => ({
+        name: variante.name,
+        // Le prix d'une variante est formaté avec SA devise, qui retombe sur
+        // celle du parent quand elle est absente.
+        price: formatPreviewPrice({
+          priceMinor: variante.priceMinor,
+          currency: (variante.currency ?? produit.currency),
+        } as NormalizedProduct),
+        currency: variante.currency ?? produit.currency,
+        sku: variante.sku,
+        stock: variante.stock ?? null,
+        attributeName: variante.attributeName ?? null,
+      })),
     };
   });
 
@@ -748,7 +831,10 @@ async function faireApercu(
  */
 async function faireApercuFichier(
   dependencies: StoreImportDependencies,
-  contexte: { userId: string; workspaceId: string; base64: string; nom: string },
+  contexte: {
+    userId: string; workspaceId: string; base64: string; nom: string;
+    now: () => number; ttl: number;
+  },
 ): Promise<{ data: PreviewPayload; record: PreviewRecord }> {
   if (typeof dependencies.parseFile !== 'function') {
     // Fail-closed : sans analyseur, aucun fichier n'est accepté.
@@ -825,6 +911,20 @@ async function faireApercuFichier(
       warnings: produit.warnings,
       duplicate,
       importable: isImportable(produit) && duplicate !== 'in-batch',
+      // Variantes du FICHIER : ce sont elles qu'on persiste. Le chemin URL
+      // n'en expose pas (une place de marché ne les fournit pas de la même
+      // façon) ; un tableau vide y est donc la réponse juste, pas un oubli.
+      variants: (produit.variants ?? []).map((variante) => ({
+        name: variante.name,
+        price: formatPreviewPrice({
+          priceMinor: variante.priceMinor,
+          currency: variante.currency ?? produit.currency,
+        } as NormalizedProduct),
+        currency: variante.currency ?? produit.currency,
+        sku: variante.sku,
+        stock: variante.stock ?? null,
+        attributeName: variante.attributeName ?? null,
+      })),
     };
   });
 
@@ -848,9 +948,14 @@ async function faireApercuFichier(
       : []),
   ];
 
+  const previewId = crypto.randomUUID();
+  // Même horloge que le stockage : l'échéance affichée est celle qui décidera
+  // réellement de la validité, y compris quand les tests avancent l'heure.
+  const expire = new Date(contexte.now() + contexte.ttl).toISOString();
+
   const data: PreviewPayload = {
-    previewId: crypto.randomUUID(),
-    expiresAt: new Date(Date.now() + PREVIEW_TTL_MS).toISOString(),
+    previewId,
+    expiresAt: expire,
     origin,
     summary: {
       total: lignes.length,
@@ -874,7 +979,11 @@ async function faireApercuFichier(
     record: {
       userId: contexte.userId,
       workspaceId: contexte.workspaceId,
-      createdAt: Date.now(),
+      // `contexte.now()` et non `Date.now()` : l'horloge injectée est celle
+      // qui décide de l'expiration. Mélanger les deux faisait diverger
+      // l'échéance affichée et l'échéance appliquée dès qu'un test avançait
+      // l'heure.
+      createdAt: contexte.now(),
       kind: 'file',
       products: produits,
       origin,

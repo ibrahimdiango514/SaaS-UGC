@@ -38,11 +38,23 @@ const BUNDLE = buildArtifact('store-import').source;
  */
 type Fabrique = () => {
   (gabarit: unknown, ...valeurs: unknown[]): Promise<unknown>;
+  /**
+   * Transaction. Le rappel reçoit une connexion : ici, la même fabrique.
+   *
+   * Sans cette méthode, l'écriture produit + variantes échouait en
+   * « begin is not a function » et `created` restait à 0 — exactement ce que
+   * ce test a signalé après l'ajout des variantes. Elle est donc modélisée pour
+   * de vrai : mêmes requêtes, même capture, et annulation si le rappel lève.
+   */
+  begin<T>(fn: (tx: Fabrique) => Promise<T>): Promise<T>;
   end(): Promise<void>;
   unsafe(): Promise<unknown[]>;
 };
 
-function fausseBase(enregistrements: Array<Record<string, unknown>>): Fabrique {
+function fausseBase(
+  enregistrements: Array<Record<string, unknown>>,
+  variantes: Array<Record<string, unknown>> = [],
+): Fabrique {
   // Aperçus persistés : le bundle les écrit et les relit, comme en production.
   const apercus = new Map<string, { payload: unknown; expires: string }>();
   const requete = (gabarit: unknown, ...valeurs: unknown[]) => {
@@ -54,6 +66,15 @@ function fausseBase(enregistrements: Array<Record<string, unknown>>): Fabrique {
       const ligne = gabarit as Record<string, unknown>;
       if (ligne && typeof ligne === 'object' && 'workspace_id' in ligne) {
         enregistrements.push(ligne);
+        // `insert … returning id` : le bundle lit l'identifiant pour y attacher
+        // les variantes. Rendre un tableau vide faisait échouer la transaction
+        // (« reading 'id' »), donc `created` restait à 0.
+        return Promise.resolve([{ id: '99999999-9999-4999-8999-999999999999' }]);
+      }
+      // Insertion de variantes : `product_id` + attribut, forme distincte.
+      if (ligne && typeof ligne === 'object' && 'product_id' in ligne) {
+        variantes.push(ligne);
+        return Promise.resolve([]);
       }
       return Promise.resolve([]);
     }
@@ -97,7 +118,22 @@ function fausseBase(enregistrements: Array<Record<string, unknown>>): Fabrique {
     }
     return Promise.resolve([]);
   };
-  const instance = Object.assign(requete, {
+  const instance: Fabrique = Object.assign(requete, {
+    // Transaction fidèle : si le rappel lève, on retire ce qu'il a capturé —
+    // c'est le comportement qu'on attend d'un `begin`/`rollback`, et c'est
+    // précisément ce qui garantit qu'un produit n'est jamais écrit sans ses
+    // variantes.
+    begin: async <T>(fn: (tx: Fabrique) => Promise<T>): Promise<T> => {
+      const avant = enregistrements.length;
+      const avantVariantes = variantes.length;
+      try {
+        return await fn(instance);
+      } catch (erreur) {
+        enregistrements.length = avant;
+        variantes.length = avantVariantes;
+        throw erreur;
+      }
+    },
     end: () => Promise.resolve(),
     unsafe: () => Promise.resolve([]),
   });
@@ -115,11 +151,14 @@ function fausseBase(enregistrements: Array<Record<string, unknown>>): Fabrique {
  * `__edgePostgres` (la connexion, posée par le chargeur). Rien d'autre : si le
  * bundle dépend d'une globale non déclarée, il échoue ici comme en production.
  */
-function chargerBundle(enregistrements: Array<Record<string, unknown>> = []) {
+function chargerBundle(
+  enregistrements: Array<Record<string, unknown>> = [],
+  variantes: Array<Record<string, unknown>> = [],
+) {
   type Gestionnaire = (request: Request) => Promise<Response>;
   let gestionnaire: Gestionnaire | null = null;
   const contexte = {
-    __edgePostgres: fausseBase(enregistrements),
+    __edgePostgres: fausseBase(enregistrements, variantes),
     Deno: {
       serve: (h: Gestionnaire) => { gestionnaire = h; },
       env: { get: (nom: string) => (nom === 'SUPABASE_URL' ? 'https://exemple.invalid' : 'cle') },

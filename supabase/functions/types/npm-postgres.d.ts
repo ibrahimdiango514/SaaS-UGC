@@ -32,6 +32,12 @@ declare module 'npm:postgres@3.4.5' {
   type Query = <T = unknown>(first: unknown, ...rest: unknown[]) => Promise<T>;
 
   interface Extras {
+    /**
+     * Transaction. Le rappel reçoit une connexion dédiée ; tout ce qui est
+     * exécuté dessus est validé ou annulé ensemble. Indispensable pour écrire
+     * un produit et ses variantes sans jamais laisser l'un sans l'autre.
+     */
+    begin<T>(fn: (tx: Sql) => Promise<T>): Promise<T>;
     end(options?: { timeout?: number }): Promise<void>;
     unsafe<T = Record<string, unknown>>(query: string, values?: unknown[]): Promise<T[]>;
   }

@@ -190,7 +190,10 @@ select i.email,
     url := 'https://xbuuhfwobrafcbgtdgjx.supabase.co/auth/v1/token?grant_type=password',
     headers := format(
       '{"Content-Type":"application/json","apikey":"%s"}',
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhidXVoZndvYnJhZmNiZ3RkZ2p4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxMTk4MzIsImV4cCI6MjA5ODY5NTgzMn0.8wFqyNe9iCruZlWQCPISZZG1oDvLEiDyWuFJ-01zlbo'
+      -- Cle PUBLIABLE : destinee au navigateur, deja versionnee dans .env.example.
+      -- Jamais de JWT ici : le garde-fou `tests/secrets-guard.test.ts` refuse
+      -- toute signature de type jeton dans le depot, meme publique.
+      'sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz'
     )::jsonb,
     body := jsonb_build_object('email', i.email, 'password', i.mot_de_passe),
     timeout_milliseconds := 20000

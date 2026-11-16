@@ -211,7 +211,7 @@ export function importDelimited(raw: string, options: { separator?: string; plat
     }
 
     if (optionVariante) {
-      ajouterVariante(produits, nomGroupe, produit, optionVariante, entry.sku);
+      ajouterVariante(produits, nomGroupe, produit, optionVariante, entry.sku, entry.variantName);
       return;
     }
     produits.push(produit);
@@ -236,15 +236,23 @@ function ajouterVariante(
   produit: NormalizedProduct,
   option: string,
   sku: string | undefined,
+  attribut?: string,
 ): void {
   const normaliser = (v: string) => v.trim().toLowerCase();
   const existante = produits.find((p) => normaliser(p.name) === nomGroupe && p.variants.length > 0)
     ?? produits.find((p) => normaliser(p.name) === normaliser(produit.name) && p.variants.length > 0);
+  // La quantité est conservée PAR VARIANTE, et non seulement additionnée sur
+  // le parent : c'est elle qu'on écrit dans `ugc_product_variants`. Sans elle,
+  // l'aperçu afficherait « S: 12 » et la base ne saurait pas combien il reste
+  // en S.
   const variante = {
     name: option.slice(0, 120),
     priceMinor: produit.priceMinor,
+    currency: produit.currency ?? null,
     sku: (sku ?? '').trim().slice(0, 120) || null,
+    stock: produit.stock,
     available: produit.stock === null ? null : produit.stock > 0,
+    attributeName: (attribut ?? '').trim().slice(0, 60) || null,
   };
   if (existante) {
     existante.variants.push(variante);

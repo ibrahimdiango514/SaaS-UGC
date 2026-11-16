@@ -39,14 +39,17 @@
  * - Aucune écriture sans confirmation explicite.
  * - Aucun produit créé pendant l'aperçu, ni côté navigateur ni côté serveur.
  */
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, Link2, Loader2, Package, Upload, X,
+  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, Link2, Loader2, Package, RotateCcw,
+  Upload, X,
 } from 'lucide-react';
 import { Button, cn } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
 import { PLATFORM_LABELS } from './platform';
-import { importStore, previewFile, previewStore, type StorePreview } from './relay';
+import {
+  importStore, previewFile, previewStore, previewValidity, type PreviewValidity, type StorePreview,
+} from './relay';
 
 export interface StoreImportPanelProps {
   workspaceId: string | null;
@@ -77,6 +80,23 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
   const [url, setUrl] = useState('');
   /** Aperçu renvoyé par le serveur : seule source d'une écriture par URL. */
   const [apercuServeur, setApercuServeur] = useState<StorePreview | null>(null);
+  /**
+   * Validité de l'aperçu, recalculée chaque seconde.
+   *
+   * `null` tant qu'aucun aperçu n'existe. L'état `expired` désactive le bouton
+   * de confirmation : on ne propose jamais une action que le serveur refusera.
+   */
+  const [validité, setValidité] = useState<PreviewValidity | null>(null);
+  /**
+   * Dernière source prévisualisée, conservée pour la relance.
+   *
+   * Sans elle, « relancer l'analyse » obligerait l'utilisateur à retrouver son
+   * fichier et à le redéposer — c'est précisément la confusion à éviter quand
+   * un aperçu expire.
+   */
+  const [dernièreSource, setDernièreSource] = useState<
+    { kind: 'file'; fichier: File } | { kind: 'url'; url: string } | null
+  >(null);
 
   /**
    * L'aperçu par URL passe par l'Edge Function `store-import`, seule à disposer
@@ -114,6 +134,7 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
       const apercu = await previewFile({ workspaceId, fileName: fichier.name, bytes: octets });
       setApercuServeur(apercu);
       setAvertissements(apercu.warnings);
+      setDernièreSource({ kind: 'file', fichier });
       setÉtape('apercu');
     } catch (erreur) {
       setErreurs([asAppError(erreur).message]);
@@ -148,6 +169,7 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
       const apercu = await previewStore({ workspaceId, url: saisie });
       setApercuServeur(apercu);
       setAvertissements(apercu.warnings);
+      setDernièreSource({ kind: 'url', url: saisie });
       setÉtape('apercu');
     } catch (erreur) {
       setErreurs([asAppError(erreur).message]);
@@ -187,6 +209,44 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
       setÉtape('source');
     } finally {
       setÉcriture(false);
+    }
+  };
+
+  /**
+   * Recale la validité de l'aperçu, une fois par seconde.
+   *
+   * ## Pourquoi un minuteur côté client alors que le serveur décide
+   * Le serveur reste seul juge (il refuse un aperçu échu, quel que soit
+   * l'affichage). Le minuteur sert uniquement à prévenir avant l'échec et à
+   * désactiver un bouton qui ne mènerait nulle part. Il ne peut donc pas rendre
+   * un aperçu valide : au pire, il l'affiche expiré un instant trop tôt, et
+   * l'utilisateur relance — jamais l'inverse.
+   */
+  useEffect(() => {
+    if (!apercuServeur) {
+      setValidité(null);
+      return;
+    }
+    const recalculer = () => setValidité(previewValidity(apercuServeur.expiresAt, Date.now()));
+    recalculer();
+    const minuteur = setInterval(recalculer, 1000);
+    return () => clearInterval(minuteur);
+  }, [apercuServeur]);
+
+  /**
+   * Relance l'analyse de la même source.
+   *
+   * Conserve la source d'origine pour éviter de faire redéposer le fichier.
+   * Le nouvel aperçu reçoit un nouvel identifiant : l'ancien reste consommable
+   * par le serveur jusqu'à son échéance, mais l'interface n'en propose plus la
+   * confirmation.
+   */
+  const relancer = async () => {
+    if (!dernièreSource) return;
+    if (dernièreSource.kind === 'file') await traiterFichier(dernièreSource.fichier);
+    else {
+      setUrl(dernièreSource.url);
+      await prévisualiserUrl();
     }
   };
 
@@ -342,6 +402,43 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
             Rappel explicite : un aperçu n'écrit rien. Placé dans le bloc unifié
             pour qu'il soit dit aussi bien après un fichier qu'après une URL.
           */}
+          {/*
+            Validité de l'aperçu, affichée en clair.
+
+            Trois états distincts, et pas un seul bandeau : « valable », « ça
+            approche », « expiré ». Le bouton de confirmation suit le dernier —
+            on ne propose jamais une action que le serveur refusera, et le
+            serveur reste seul juge (il revérifie l'échéance).
+          */}
+          {validité && (
+            <div
+              role={validité.state === 'expiring' || validité.state === 'expired' ? 'alert' : 'status'}
+              className={cn(
+                'mt-2 rounded-lg border px-3 py-2 text-[10px]',
+                validité.state === 'expired'
+                  ? 'border-rose-400/25 bg-rose-400/[0.06] text-rose-100'
+                  : validité.state === 'expiring'
+                    ? 'border-amber-400/25 bg-amber-400/[0.06] text-amber-100'
+                    : 'border-white/[0.07] bg-black/20 text-slate-400',
+              )}
+              data-testid="preview-validity"
+              data-state={validité.state}
+            >
+              <p className="flex items-center gap-1.5">
+                {validité.state === 'expired' || validité.state === 'expiring'
+                  ? <AlertTriangle size={11} />
+                  : <Check size={11} />}
+                {validité.label}
+              </p>
+              {validité.state === 'expired' && (
+                <p className="mt-1 text-slate-400">
+                  Rien n’a été enregistré. Relancez l’analyse pour obtenir un nouvel
+                  aperçu — vous n’avez pas à redéposer le fichier.
+                </p>
+              )}
+            </div>
+          )}
+
           <p className="mt-2 text-[10px] text-slate-500">
             Aucun produit n’a été créé à cette étape. L’import n’a lieu qu’après votre
             confirmation, et l’aperçu expire au bout de dix minutes.
@@ -381,6 +478,30 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
                   {produit.warnings.length > 0 && (
                     <p className="mt-0.5 text-[10px] text-amber-200/80">{produit.warnings.join(' · ')}</p>
                   )}
+                  {(produit.variants?.length ?? 0) > 0 && (
+                    /**
+                     * Le détail des déclinaisons, pas seulement leur nombre :
+                     * l'utilisateur doit voir CE QUI sera écrit (option, prix,
+                     * stock) pour pouvoir vérifier avant de confirmer.
+                     */
+                    <ul className="mt-1 flex flex-wrap gap-1" data-testid={`import-variants-${produit.index}`}>
+                      {produit.variants!.slice(0, 8).map((variante, position) => (
+                        <li
+                          key={`${variante.name}-${position}`}
+                          className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-1.5 py-0.5 text-[9px] text-cyan-100/90"
+                        >
+                          {variante.attributeName ? `${variante.attributeName} ` : ''}
+                          {variante.name}
+                          {' · '}{variante.price}
+                          {variante.stock !== null ? ` · stock ${variante.stock}` : ''}
+                          {variante.sku ? ` · ${variante.sku}` : ''}
+                        </li>
+                      ))}
+                      {(produit.variants?.length ?? 0) > 8 && (
+                        <li className="text-[9px] text-slate-500">+{(produit.variants?.length ?? 0) - 8} autre(s)</li>
+                      )}
+                    </ul>
+                  )}
                   {produit.duplicate && (
                     <p className="mt-0.5 text-[10px] text-amber-300">
                       {produit.duplicate === 'in-batch'
@@ -405,12 +526,30 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
               variant="primary"
               // Rien d'importable ⇒ rien à confirmer : un bouton « Importer 0
               // produit(s) » serait un piège, pas une action.
-              disabled={écriture || !workspaceId || apercuServeur.summary.importable === 0}
+              // Un aperçu échu n'est pas confirmable : le serveur le refuse, et
+              // proposer le bouton ferait perdre le clic. Rien d'importable ⇒
+              // rien à confirmer non plus.
+              disabled={
+                écriture
+                || !workspaceId
+                || apercuServeur.summary.importable === 0
+                || validité?.state === 'expired'
+              }
               onClick={() => void confirmer()}
               icon={<Check size={13} />}
               data-testid="import-confirm"
             >
               Importer {apercuServeur.summary.importable} produit(s)
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              loading={chargement}
+              onClick={() => void relancer()}
+              icon={<RotateCcw size={13} />}
+              data-testid="preview-restart"
+            >
+              Relancer l’analyse
             </Button>
             <Button size="sm" variant="ghost" onClick={réinitialiser} icon={<ArrowLeft size={13} />}>
               Changer de source

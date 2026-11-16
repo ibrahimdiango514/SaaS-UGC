@@ -62,8 +62,20 @@ export interface NormalizedProduct {
 export interface ProductVariant {
   name: string;
   priceMinor: number | null;
+  /** Devise propre à la variante : `null` = celle du produit parent. */
+  currency: string | null;
   sku: string | null;
+  /**
+   * Quantité propre à la variante.
+   *
+   * Distincte du stock du produit parent, qui est la SOMME des variantes : le
+   * parent répond « combien en tout », la variante répond « combien en M ».
+   * `null` = inconnu, jamais zéro.
+   */
+  stock: number | null;
   available: boolean | null;
+  /** Nom du critère (« Taille », « Couleur »), quand la source le fournit. */
+  attributeName: string | null;
 }
 
 /** Limites hautes : elles protègent la mémoire et l'affichage. */

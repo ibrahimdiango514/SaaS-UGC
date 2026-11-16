@@ -99,6 +99,14 @@ function productRow(workspaceId: string, produit: NormalizedProduct, origine: 'u
   // comme 120,00 — un prix faux, silencieusement, à chaque import.
   const montant = minorToDecimal(produit.priceMinor, produit.currency);
   return {
+    // Identifiant produit généré ici, et non par un `returning id`.
+    //
+    // `db(row)` produit un FRAGMENT de requête ; y accoler `returning id` fait
+    // dépendre la lecture du résultat de la façon dont le pilote compose ce
+    // fragment. Générer l'UUID côté serveur supprime cette dépendance et rend
+    // l'insertion de variantes déterministe : `product_id` est connu avant
+    // l'écriture, dans la même transaction.
+    id: crypto.randomUUID(),
     workspace_id: workspaceId,
     name: produit.name.slice(0, 300),
     description: produit.description ? produit.description.slice(0, 4_000) : null,
@@ -116,6 +124,32 @@ function productRow(workspaceId: string, produit: NormalizedProduct, origine: 'u
       imported_at: new Date().toISOString(),
     }),
   };
+}
+
+/**
+ * Convertit une variante normalisée en ligne `ugc_product_variants`.
+ *
+ * Deux pièges, tous deux dus à la valeur `null` :
+ *   - un prix de variante absent signifie « même prix que le parent », pas
+ *     « gratuit » : on écrit `null`, jamais 0 ;
+ *   - une devise de variante absente retombe sur celle du produit, sinon la
+ *     contrainte `^[A-Z]{3}$` refuserait la ligne.
+ *
+ * `position` conserve l'ordre du fichier : c'est ce qui permet d'afficher
+ * « S, M, L » dans l'ordre voulu par le commerçant plutôt qu'alphabétiquement.
+ */
+function variantRows(produit: NormalizedProduct) {
+  return (produit.variants ?? []).map((variante, index) => ({
+    attribute_value: variante.name.slice(0, 120),
+    sku: variante.sku ? variante.sku.slice(0, 120) : null,
+    // `minorToDecimal` applique le bon exposant de devise : 12 000 XOF reste
+    // 12 000, 24,90 EUR reste 24,90.
+    price_amount: minorToDecimal(variante.priceMinor, produit.currency),
+    price_currency: (produit.currency || 'XOF').slice(0, 3),
+    stock: typeof variante.stock === 'number' && variante.stock >= 0 ? variante.stock : null,
+    available: typeof variante.available === 'boolean' ? variante.available : null,
+    position: index,
+  }));
 }
 
 /**
@@ -227,22 +261,99 @@ const store: StoreImportDependencies = {
     return lignes.map((ligne) => ({ id: String(ligne.id), name: String(ligne.name) }));
   },
 
+  /**
+   * Écrit les produits ET leurs variantes.
+   *
+   * ## Pourquoi tout dans une transaction
+   * Un produit écrit sans ses variantes est un catalogue faux : l'aperçu a
+   * annoncé « S, M, L » et la base ne contiendrait qu'une fiche nue. Un
+   * `begin`/`commit` par produit garantit qu'on n'obtient jamais cet état
+   * intermédiaire — si l'insertion d'une variante échoue (contrainte, conflit
+   * d'unicité), le produit de ce lot est annulé et l'échec est rapporté.
+   *
+   * Le découpage reste **par produit**, pas par fichier : une ligne invalide
+   * ne doit pas annuler les 200 autres.
+   */
   async insertProducts(workspaceId: string, produits: NormalizedProduct[], origine: 'url' | 'file' = 'url') {
     const db = requiredSql();
     let created = 0;
+    let variantsCreated = 0;
     const failed: Array<{ name: string; reason: string }> = [];
+
     for (const produit of produits) {
+      const variantes = variantRows(produit);
       try {
-        await db`
-          insert into saas_ugc.ugc_products ${db(productRow(workspaceId, produit, origine))}
-        `;
+        const ecrites = await db.begin(async (tx) => {
+          const ligne = productRow(workspaceId, produit, origine);
+          await tx`
+            insert into saas_ugc.ugc_products ${tx(ligne)}
+          `;
+          const productId = String(ligne.id);
+          for (const variante of variantes) {
+            // `(valeur::text)::jsonb` n'est pas nécessaire ici : aucune colonne
+            // jsonb n'est écrite dans cette boucle. Le pilote envoie des
+            // scalaires, sérialisés correctement.
+            await tx`
+              insert into saas_ugc.ugc_product_variants ${tx({ product_id: productId, ...variante })}
+            `;
+          }
+          return variantes.length;
+        });
         created += 1;
-      } catch {
-        // Un échec n'annule pas les autres : on rapporte précisément.
-        failed.push({ name: produit.name, reason: 'Enregistrement refusé par la base.' });
+        variantsCreated += ecrites;
+      } catch (erreur) {
+        // Un échec n'annule pas les autres : on rapporte précisément, en
+        // conservant la raison lisible plutôt qu'un message générique.
+        const raison = erreur instanceof Error ? erreur.message : '';
+        failed.push({
+          name: produit.name,
+          reason: raison.includes('ugc_product_variants_unique_option')
+            ? 'Deux variantes portent la même option : produit non créé.'
+            : raison.includes('ugc_product_variants_value_check')
+              ? 'Nom de variante vide ou trop long : produit non créé.'
+              : 'Enregistrement refusé par la base.',
+        });
       }
     }
-    return { created, failed };
+    return { created, variantsCreated, failed };
+  },
+
+  /**
+   * Journalise un import confirmé.
+   *
+   * Écrit par la fonction (service_role) uniquement : la RLS interdit à
+   * `authenticated` d'insérer dans cette table, une ligne d'historique ne peut
+   * donc pas être fabriquée depuis le navigateur.
+   */
+  async recordImport(job: {
+    workspaceId: string;
+    userId: string;
+    source: 'file' | 'url';
+    reference: string | null;
+    created: number;
+    failed: number;
+    variantsCreated: number;
+    failures: Array<{ name: string; reason: string }>;
+  }) {
+    const db = requiredSql();
+    const statut = job.created === 0 ? 'failed' : job.failed > 0 ? 'partial' : 'completed';
+    await db`
+      insert into saas_ugc.ugc_import_jobs
+        (workspace_id, user_id, source, reference, status,
+         products_created, products_failed, variants_created, failures)
+      values (
+        ${job.workspaceId}::uuid,
+        ${job.userId}::uuid,
+        ${job.source},
+        ${job.reference},
+        ${statut},
+        ${job.created},
+        ${job.failed},
+        ${job.variantsCreated},
+        ${JSON.stringify(job.failures)}::text::jsonb
+      )
+    `;
+    return { status: statut };
   },
 
   // Même analyseur que le navigateur : un fichier ne doit pas être lu
