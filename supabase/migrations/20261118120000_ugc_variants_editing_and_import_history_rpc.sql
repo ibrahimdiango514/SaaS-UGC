@@ -366,9 +366,16 @@ begin
   v_limite := least(greatest(coalesce(p_limit, 50), 1), 200);
   v_decalage := greatest(coalesce(p_offset, 0), 0);
 
+  -- ## Portée personnelle
+  -- L'historique est celui de l'appelant : dans une entreprise à plusieurs
+  -- membres, chacun voit SES imports. Un propriétaire qui voudrait l'activité
+  -- de son équipe relèverait d'un écran d'administration distinct, pas de cet
+  -- historique — et la demande est explicite : jamais les imports d'un autre
+  -- utilisateur. Le filtre est donc sur `user_id`, en plus de l'entreprise.
   select count(*)::integer into v_total
     from saas_ugc.ugc_import_jobs j
-   where j.workspace_id = p_workspace_id;
+   where j.workspace_id = p_workspace_id
+     and j.user_id = v_user;
 
   return jsonb_build_object(
     'workspace_id', p_workspace_id,
@@ -401,6 +408,7 @@ begin
         ) as ligne
         from saas_ugc.ugc_import_jobs j
         where j.workspace_id = p_workspace_id
+          and j.user_id = v_user
         order by j.created_at desc
         limit v_limite offset v_decalage
       ) as page
@@ -435,12 +443,18 @@ begin
     raise exception 'history_forbidden:NOT_AUTHENTICATED' using errcode = '42501';
   end if;
 
-  select * into v_job from saas_ugc.ugc_import_jobs where id = p_job_id;
+  -- Même portée que la liste : l'import doit appartenir à l'appelant ET à un
+  -- espace dont il est membre. Sans le filtre sur `user_id`, le rapport
+  -- donnerait le détail d'un import absent de la liste.
+  select * into v_job
+    from saas_ugc.ugc_import_jobs j
+   where j.id = p_job_id
+     and j.user_id = v_user;
 
   if v_job.id is null
      or not (select ugc_private.is_workspace_member(v_job.workspace_id)) then
-    -- Même message dans les deux cas : l'existence d'un import d'une autre
-    -- entreprise n'est pas une information à donner.
+    -- Même message dans tous les cas : l'existence d'un import d'un autre
+    -- utilisateur ou d'une autre entreprise n'est pas une information à donner.
     raise exception 'history_forbidden:NOT_FOUND' using errcode = '42501';
   end if;
 

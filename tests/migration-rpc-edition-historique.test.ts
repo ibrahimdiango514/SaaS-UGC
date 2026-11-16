@@ -106,6 +106,23 @@ describe('migration — écriture contre lecture', () => {
     },
   );
 
+  it('limite l’historique aux imports de l’appelant, pas à ceux de l’entreprise', () => {
+    // Dans une entreprise à plusieurs membres, voir les imports d'un collègue
+    // n'a pas été demandé et exposerait son activité : le filtre porte sur
+    // `user_id`, en plus de l'entreprise.
+    const corps = corpsFonction('vyora_ugc_import_history');
+    expect(corps).toMatch(/j\.user_id = v_user/i);
+    expect(corps.match(/j\.user_id = v_user/gi)).toHaveLength(2); // total + page
+  });
+
+  it('applique la même portée au rapport qu’à la liste', () => {
+    // Sans ce filtre, le rapport donnerait le détail d'un import absent de la
+    // liste : la portée serait contournable en connaissant un identifiant.
+    const corps = corpsFonction('vyora_ugc_import_report');
+    expect(corps).toMatch(/j\.user_id = v_user/i);
+    expect(corps).toMatch(/is_workspace_member/i);
+  });
+
   it('le rapport ne révèle pas l’existence d’un import d’une autre entreprise', () => {
     const corps = corpsFonction('vyora_ugc_import_report');
     // Même refus pour « inexistant » et « pas à vous » : un message distinct
