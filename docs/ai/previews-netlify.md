@@ -1,98 +1,75 @@
-# Previews Netlify — diagnostic et configuration requise
+# Previews Netlify — constat et configuration requise
 
-Ce document explique, preuves à l'appui, pourquoi aucun Deploy Preview n'a pu
-être fourni, et ce qu'il faut activer pour que cela fonctionne.
+**Dernière vérification : commit `4f643e7`** (Livraisons 1 et 2), branche
+`arena/bfcedd89-saas-ugc`, PR #8.
 
-## Ce qui est établi
+## Constat
 
-| Vérification | Résultat |
-|---|---|
-| `netlify.toml` présent, cible `dist`, commande `npm ci && npm run build` | oui |
-| Site Netlify relié au dépôt (`vyora-ugc.netlify.app`) | oui, il a servi `deploy-preview-6--vyora-ugc.netlify.app` |
-| Branche `arena/vyora-ai-interface` exclue par la règle `ignore` | **non**, elle n'est pas filtrée |
-| Statut Netlify sur les commits | **aucun**, sur toute branche |
-| Statut Netlify sur les PR #12 et #13 | **aucun** (`statusCheckRollup` vide) |
-| Hôtes accessibles depuis l'environnement d'exécution | github.com, codeload, api.github.com, npm, pypi, files.pythonhosted |
-| `app.netlify.com` joignable | **non** (code 000) |
-| Jeton Netlify dans l'environnement | **absent** |
-| Chrome/Puppeteer téléchargeable | **non** (ECONNRESET vers googlechromelabs.github.io) |
+| Commit | Branche | Statut GitHub | Check-runs | Deploy Preview |
+|---|---|---|---|---|
+| `4f643e7` | `arena/bfcedd89-saas-ugc` | `pending` | **0** | aucun |
+| `a7818cc` | `arena/vyora-ai-interface` | `pending` | **0** | aucun |
+| `6f0decd` | `develop` | `pending` | **0** | aucun |
+| `cc43bb3` | `main` | `pending` | **0** | aucun |
 
-## Diagnostic
+Aucun commit de ce dépôt, sur aucune branche, ne porte de statut ni de
+check-run Netlify. `statusCheckRollup` est vide sur les PR #8, #12 et #13.
 
-**Le site Netlify existe et a déjà produit des previews** (preuve : le domaine
-`deploy-preview-6--vyora-ugc.netlify.app` cité dans la documentation du dépôt).
-Mais **aucun commit récent ne porte de statut Netlify**, et aucune PR n'en
-porte non plus — y compris la PR #12, ouverte depuis plusieurs jours.
+**Conclusion : l'intégration GitHub ↔ Netlify ne produit aucun événement.**
+Ce n'est pas un problème de branche ni de configuration de build : Netlify
+n'est pas relié au dépôt, ou les Deploy Previews sont désactivés au niveau du
+site. Tant que cela n'est pas corrigé, aucun commit ne peut produire d'URL de
+preview, quel que soit le nombre de push.
 
-Conclusion : l'intégration GitHub ↔ Netlify n'est plus active, ou la
-publication des statuts est désactivée. Sans cela, un push sur une branche ne
-déclenche aucun build.
+## Ce que je ne fais pas
 
-**Point important** : la branche `arena/vyora-ai-interface` n'avait **aucune
-PR** jusqu'au commit `91952e7`. Or les Deploy Previews Netlify sont liés aux
-pull requests : sans PR, il n'y a rien à prévisualiser, même avec
-l'intégration active. La PR #13 a été ouverte pour lever ce point.
+- Je ne fabrique **aucune URL**. `deploy-preview-<n>--<site>.netlify.app` est
+  le schéma habituel, pas une preuve : sans `target_url` renvoyé par l'API
+  GitHub, l'affirmer serait inventer.
+- Je ne considère pas l'URL de production comme un preview du commit.
+- Je ne modifie pas le site de production pour contourner l'absence de preview.
 
-## Configuration minimale à activer (côté Netlify)
+Depuis le bac à sable, `app.netlify.com` et les domaines `*.netlify.app`
+répondent `000` (hors des hôtes autorisés). La seule voie d'observation est
+l'API GitHub — et elle est vide.
 
-Ces actions ne peuvent pas être faites depuis l'environnement d'exécution : il
-faut un accès au tableau de bord Netlify.
+## Configuration minimale à activer (côté tableau de bord Netlify)
 
-1. **Reconnecter le dépôt**
-   Site configuration → Build & deploy → Continuous deployment →
-   Repository → *Link repository* → `ibrahimdiango514/SaaS-UGC`.
-   Si le dépôt est déjà lié, vérifier que l'installation GitHub de Netlify a
-   toujours accès au dépôt (une révocation d'accès coupe les builds sans
-   message).
+1. **Relier le dépôt** : Site configuration → Build & deploy → Continuous
+   deployment → lier `ibrahimdiango514/SaaS-UGC`.
+2. **Activer les Deploy Previews** : Deploys → Deploy Previews → « Any pull
+   request » (ou « All branches »). C'est cette case, désactivée, qui explique
+   l'absence totale d'événement.
+3. **Vérifier la branche de production** : `main` (les PR ciblent `develop` ;
+   les previews ne dépendent pas de ce réglage, mais le déploiement de
+   production, si).
+4. **Build** : `npm ci && npm run build`, répertoire de publication `dist`.
+   Le projet est un SPA : la redirection `/* → /index.html 200` est
+   nécessaire pour que `/app/connect` fonctionne en accès direct.
+5. **Variables** : aucune n'est requise pour le build — l'URL et la clé
+   publique Supabase sont déjà dans le code. **Ne pas ajouter de clé de
+   service** : elle serait exposée au navigateur.
 
-2. **Activer les Deploy Previews**
-   Site configuration → Build & deploy → Deploy previews →
-   *Any pull request against your production branch* (ou *All branches*).
+## Accès nécessaire
 
-3. **Vérifier la branche de production**
-   Elle doit être `main` ou `develop` selon votre choix. Si elle est
-   `develop`, les PR vers `develop` déclenchent des previews ; si elle est
-   `main`, il faut choisir *All branches*.
+Je n'ai aucun jeton Netlify et aucun accès au tableau de bord. Pour que je
+puisse vérifier un preview moi-même, il faut soit :
 
-4. **Vérifier la règle `ignore`**
-   `netlify.toml` exclut déjà `arena/323bad30-saas-ugc` et
-   `arena/ada94e4c-saas-ugc`. Aucune autre branche n'est filtrée : les
-   branches de ce chantier se construiront normalement.
+- activer l'intégration (elle publiera alors un statut GitHub que je peux
+  lire via `gh api`), soit
+- fournir un moyen d'observation côté GitHub — c'est la seule voie autorisée
+  depuis cet environnement.
 
-5. **Vérifier les variables d'environnement du site**
-   Le frontend n'en a pas besoin : `src/lib/supabase.ts` et
-   `public-config.ts` contiennent l'URL Supabase et la clé **publique** en
-   dur. Un preview se connecte donc à la vraie base sans configuration.
-   Ne pas ajouter de clé de service dans les variables du site.
+## Vérification locale de substitution (déjà faite)
 
-## Après activation
+Faute de preview, le build de production a été servi localement et vérifié :
 
-L'URL suivra le modèle :
+- `/app/connect` → HTTP 200 ; chunk `CatalogPage-C4SoN8EM.js` (31,8 kB)
+  contenant « Connectez vos outils », « Boutiques en ligne », « Validation
+  externe requise », « Configuration requise » ;
+- `/app/ai` → HTTP 200 ; chunk `Assistant-Djqy74EA.js` (30,4 kB) contenant
+  « Nouveau chat » et « Navigation de l'assistant » ;
+- aucune occurrence de « Crédits Studio UGC » dans ces deux chunks, ce qui
+  confirme que l'ancienne coquille Studio n'est plus rendue.
 
-```
-https://deploy-preview-<numéro-de-PR>--vyora-ugc.netlify.app
-```
-
-Pour la PR #13 (branche `arena/vyora-ai-interface`), ce sera
-`deploy-preview-13--vyora-ugc.netlify.app`.
-
-**Je n'écris pas cette URL comme si elle existait.** Elle ne sera valide
-qu'une fois le build déclenché. Je vérifie après coup via l'API GitHub
-(`/commits/<sha>/status`), qui expose l'URL réelle dans `target_url`.
-
-## Alternative pendant l'attente
-
-Un build de production est servi localement dans l'environnement de travail
-(`vite preview`), sur un port exposé en aperçu. Ce n'est pas Netlify, mais
-c'est **le même `dist/`** et **la même base Supabase** : la preuve visuelle y
-est aussi valable.
-
-## Ce que je ne peux pas faire
-
-- créer un déploiement sans jeton ni accès réseau à Netlify ;
-- produire une capture d'écran (Chrome non téléchargeable) ;
-- vérifier moi-même une URL `*.netlify.app` depuis cet environnement.
-
-Ces trois limites sont des contraintes d'environnement, pas des choix. Elles
-sont énoncées pour que vous sachiez exactement ce qui a été vérifié et ce qui
-ne l'a pas été.
+Cela prouve que le code livré fonctionne, **pas** qu'un preview existe.
