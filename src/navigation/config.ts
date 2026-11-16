@@ -198,6 +198,23 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
       },
     ],
   },
+  {
+    // VYORA Connect : gestion des comptes externes (Gmail, Drive, Calendar,
+    // réseaux sociaux). L'état affiché est réel : un fournisseur sans
+    // identifiants serveur apparaît « Configuration requise », jamais
+    // « Connecté ».
+    id: 'connect',
+    label: 'Comptes externes',
+    icon: Plug,
+    defaultOpen: true,
+    items: [{
+      to: '/app/connect',
+      label: 'VYORA Connect',
+      description: 'Connecter, autoriser et révoquer vos comptes',
+      icon: Plug,
+      keywords: ['connect', 'connecteurs', 'oauth', 'gmail', 'drive', 'calendar', 'integrations'],
+    }],
+  },
 ];
 
 export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
