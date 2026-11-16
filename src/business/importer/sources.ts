@@ -305,6 +305,20 @@ export interface RawCatalogProduct {
   imageUrl: string | null;
   categories: string[];
   variants: Array<{ name: string; price: string | number | null; sku: string | null; available: boolean | null }>;
+  /**
+   * Référence produit fournie par la source (`sku` Shopify, `sku` Woo).
+   *
+   * Sert au rapprochement : une référence identique désigne le même produit,
+   * même après un renommage. `null` quand la source n'en fournit pas.
+   */
+  sku?: string | null;
+  /**
+   * Identifiant du produit chez la plateforme (`id` Shopify/Woo, `handle`).
+   *
+   * Plus stable qu'un nom, moins qu'une référence choisie par le marchand :
+   * c'est le premier indice de rapprochement, mais il ne décide jamais seul.
+   */
+  platformId?: string | null;
 }
 
 export interface PublicCatalog {
@@ -343,6 +357,14 @@ export function mapShopifyProducts(payload: unknown): RawCatalogProduct[] {
         sku: typeof v.sku === 'string' && v.sku ? v.sku : null,
         available: typeof v.available === 'boolean' ? v.available : null,
       })),
+      // Une variante unique sans titre propre porte le SKU du produit : sur
+      // une boutique sans déclinaisons, c'est LE produit. Avec plusieurs
+      // variantes, le premier SKU appartient à une taille, pas au produit — on
+      // ne le promeut donc pas en référence de fiche.
+      sku: variants.length === 1 && typeof premier?.sku === 'string' && premier.sku ? premier.sku : null,
+      platformId: typeof p.id === 'number' || typeof p.id === 'string'
+        ? String(p.id)
+        : handle,
     };
   }).filter((p) => p.name !== '');
 }
@@ -371,6 +393,8 @@ export function mapWooProducts(payload: unknown): RawCatalogProduct[] {
       imageUrl: images[0] && typeof images[0].src === 'string' ? images[0].src : null,
       categories: categories.map((c) => (typeof c.name === 'string' ? c.name : '')).filter(Boolean),
       variants: [],
+      sku: typeof p.sku === 'string' && p.sku ? p.sku : null,
+      platformId: typeof p.id === 'number' || typeof p.id === 'string' ? String(p.id) : null,
     };
   }).filter((p) => p.name !== '');
 }

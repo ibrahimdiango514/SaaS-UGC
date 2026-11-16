@@ -131,6 +131,12 @@ const COLONNES: Record<string, string[]> = {
   image: ['image', 'image_url', 'photo', 'images', 'image src', 'picture'],
   categories: ['category', 'categories', 'categorie', 'catégorie', 'collection', 'catégories'],
   sku: ['sku', 'reference', 'référence', 'ref'],
+  /**
+   * Identifiant du produit chez la plateforme source. Distinct de `sku` : un
+   * export PrestaShop fournit `id`, un export Shopify un `handle`. Sans cette
+   * colonne, un produit renommé serait recréé au lieur d'être mis à jour.
+   */
+  platformId: ['id', 'product_id', 'platform_id', 'source_id', 'handle', 'external_id'],
   stock: ['stock', 'quantite', 'quantité', 'qty', 'quantity', 'inventory', 'available'],
   variantName: ['variant_name', 'variant', 'variante', "nom de la variante"],
   variantOption: ['variant_option', 'option', 'taille', 'size', 'couleur', 'color', 'pointure'],
@@ -202,6 +208,12 @@ export function importDelimited(raw: string, options: { separator?: string; plat
       imageUrl: entry.image,
       categories: entry.categories,
       stock: entry.stock,
+      // La référence du produit est celle de sa ligne principale. Pour une
+      // ligne de variante, le SKU appartient à la VARIANTE : il ne doit pas
+      // devenir la référence du produit, sinon deux tailles du même produit
+      // produiraient deux clés de rapprochement différentes.
+      sku: optionVariante ? undefined : entry.sku,
+      platformId: optionVariante ? undefined : entry.platformId,
       source: { platform: options.platform ?? 'file', reference: options.reference ?? 'fichier' },
       warnings: localWarnings,
     });

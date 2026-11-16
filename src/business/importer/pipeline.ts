@@ -166,6 +166,10 @@ export function normalizeCatalogProduct(
       attributeName: null,
       available: v.available,
     })),
+    // Identifiants stables transmis tels quels : le rapprochement les utilise,
+    // la normalisation ne les invente pas.
+    sku: raw.sku,
+    platformId: raw.platformId,
     source: { platform, reference: origin.reference },
     warnings,
   });

@@ -53,6 +53,23 @@ export interface NormalizedProduct {
   /** Provenance, pour l'audit et le message d'erreur. */
   source: { platform: StorePlatform | 'file'; reference: string };
   /**
+   * Référence produit fournie par la source (SKU, `reference`, `model`).
+   *
+   * Sert au rapprochement avec le catalogue existant : une référence identique
+   * désigne le même produit, même si son nom a changé. `null` = la source n'en
+   * fournit pas, et on n'en invente pas.
+   */
+  sku?: string | null;
+  /**
+   * Identifiant du produit CHEZ la plateforme source (Shopify `handle`,
+   * PrestaShop `id`, OpenCart `product_id`).
+   *
+   * Conservé d'un import à l'autre dans `product_facts`, ce qui permet de
+   * retrouver un produit renommé. Volontairement distinct de `sku` : un
+   * marchand peut changer de référence sans changer de fiche.
+   */
+  platformId?: string | null;
+  /**
    * Champs dont la valeur a été corrigée ou écartée. L'interface les affiche :
    * un import silencieusement « réparé » est un import qu'on ne peut pas auditer.
    */
@@ -213,6 +230,23 @@ export function parsePriceMinor(raw: unknown, currency: string): { minor: number
   return { minor };
 }
 
+/**
+ * Nettoie une référence stable (SKU, identifiant de plateforme).
+ *
+ * Retourne `null` plutôt qu'une chaîne vide : une référence absente et une
+ * référence vide ne doivent pas produire des clés de rapprochement différentes.
+ * Les caractères de contrôle sont retirés (une référence issue d'un CSV peut
+ * contenir un saut de ligne, qui casserait la comparaison).
+ */
+export function cleanReference(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  const texte = String(raw)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim();
+  return texte === '' ? null : texte.slice(0, 120);
+}
+
 /** Inverse : unité mineure → chaîne décimale, pour l'affichage et l'écriture. */
 export function minorToDecimal(minor: number | null, currency: string): number | null {
   if (minor === null) return null;
@@ -319,6 +353,8 @@ export function buildProduct(input: {
   categories?: unknown;
   variants?: ProductVariant[];
   stock?: unknown;
+  sku?: unknown;
+  platformId?: unknown;
   source: NormalizedProduct['source'];
   warnings?: string[];
 }): NormalizedProduct | { error: string } {
@@ -341,6 +377,10 @@ export function buildProduct(input: {
     categories,
     variants: (input.variants ?? []).slice(0, LIMITS.variants),
     stock: stock.value,
+    // Une référence est bornée et nettoyée : elle vient d'un fichier ou d'une
+    // API tierce, et servira de clé de comparaison.
+    sku: cleanReference(input.sku),
+    platformId: cleanReference(input.platformId),
     fingerprint: productFingerprint(name, categories),
     source: input.source,
     warnings: avertissements,
