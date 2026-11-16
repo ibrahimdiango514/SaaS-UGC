@@ -355,12 +355,41 @@ async function readZipEntry(bytes: Uint8Array, wantedNames: string[]): Promise<U
   return null;
 }
 
-/** Extrait la valeur d'affichage d'une cellule de feuille XLSX. */
-function cellText(xml: string): string {
-  const shares = xml.match(/<t[^>]*>([\s\S]*?)<\/t>/i);
-  if (shares) return decodeXmlEntities(shares[1]);
+/**
+ * Extrait la valeur d'affichage d'une cellule de feuille XLSX.
+ *
+ * Trois cas, tous nécessaires avec de vrais classeurs :
+ *   - `t="s"` : la valeur est un **index dans `sharedStrings.xml`**. C'est le
+ *     mode utilisé par Excel et LibreOffice pour tout texte dès que le fichier
+ *     dépasse quelques cellules — l'ignorer fait lire des nombres à la place
+ *     des noms de produits ;
+ *   - `t="inlineStr"` : le texte est porté par `<is><t>` ;
+ *   - sinon : `<v>` contient une valeur littérale (nombre, date, booléen).
+ */
+function cellText(xml: string, shared: string[]): string {
+  const inline = xml.match(/<t[^>]*>([\s\S]*?)<\/t>/i);
+  if (inline) return decodeXmlEntities(inline[1]);
+
   const valeur = xml.match(/<v>([\s\S]*?)<\/v>/i);
-  return valeur ? decodeXmlEntities(valeur[1]) : '';
+  if (!valeur) return '';
+  const brut = valeur[1];
+
+  // `t="s"` est porté par l'attribut de <c>, donc présent avant <v>.
+  if (/\bt="s"/.test(xml)) {
+    const index = Number(brut);
+    return Number.isInteger(index) && shared[index] !== undefined ? shared[index] : '';
+  }
+  return decodeXmlEntities(brut);
+}
+
+/** Lit `sharedStrings.xml` : une entrée par `<si>`. */
+function parseSharedStrings(xml: string): string[] {
+  const entrees = xml.match(/<si>([\s\S]*?)<\/si>/gi) ?? [];
+  return entrees.map((entree) => {
+    // Une entrée peut contenir plusieurs `<t>` (texte enrichi) : on les joint.
+    const morceaux = entree.match(/<t[^>]*>([\s\S]*?)<\/t>/gi) ?? [];
+    return morceaux.map((m) => decodeXmlEntities(m.replace(/<[^>]+>/g, ''))).join('');
+  });
 }
 
 /**
@@ -375,7 +404,16 @@ export async function importXlsx(
   options: { platform?: StorePlatform | 'file'; reference?: string } = {},
 ): Promise<FileParseResult> {
   let feuille: Uint8Array | null;
+  let shared: string[] = [];
   try {
+    // Les chaînes partagées sont indispensables avec un classeur réel.
+    try {
+      const sharedXml = await readZipEntry(bytes, ['xl/sharedStrings.xml']);
+      if (sharedXml) shared = parseSharedStrings(new TextDecoder('utf-8').decode(sharedXml));
+    } catch {
+      // Absence de sharedStrings est normal pour un classeur en inlineStr.
+      shared = [];
+    }
     // Le nom de la première feuille varie : on cible sheet1.xml, sinon la
     // première feuille listée dans le classeur.
     feuille = await readZipEntry(bytes, ['xl/worksheets/sheet1.xml']);
@@ -400,7 +438,7 @@ export async function importXlsx(
     if (lignes.length > MAX_ROWS) break;
     const cellules: string[] = [];
     for (const celluleXml of ligneXml.match(/<c[^>]*>[\s\S]*?<\/c>/gi) ?? []) {
-      cellules.push(cellText(celluleXml));
+      cellules.push(cellText(celluleXml, shared));
     }
     if (cellules.some((c) => c.trim() !== '')) lignes.push(cellules);
   }
