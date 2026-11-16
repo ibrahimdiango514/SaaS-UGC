@@ -7,8 +7,8 @@
 import postgres from "npm:postgres@3.4.5";
 
 const ARTIFACT_NAME = "store-import";
-const ARTIFACT_SHA256 = "d002522d643d8b72ff5bbafe918f86c9ce1ff386d44bdf72eea67f05ad4c4fb5";
-const ARTIFACT_CHARS = 36292;
+const ARTIFACT_SHA256 = "74dc20bb77c78fcb0f69b31e720279456be9886170f1337ca65fdbf30987d718";
+const ARTIFACT_CHARS = 37387;
 
 async function readArtifact(): Promise<string> {
   const base = Deno.env.get("SUPABASE_URL") ?? "";

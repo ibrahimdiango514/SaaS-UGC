@@ -296,6 +296,24 @@ const store: BusinessGrowStore = {
       output_result?: Record<string, unknown>;
     };
   },
+  /**
+   * Droits Import & Connect : lus en base, jamais déduits d'un en-tête ou d'un
+   * champ de la requête. Une erreur SQL remonte (⇒ 503 côté handler), on ne
+   * renvoie donc jamais un « autorisé » par défaut.
+   */
+  async checkImportConnectAccess(userId: string) {
+    const [row] = await requiredSql()`
+      select * from saas_business.bg_import_access(${userId}::uuid, now())
+    `;
+    if (!row) return { allowed: false, reason: 'UNKNOWN' };
+    return {
+      allowed: row.allowed === true,
+      reason: (row.reason as string | undefined) ?? 'UNKNOWN',
+      status: (row.subscription_status as string | null | undefined) ?? null,
+      planKey: (row.plan_key as string | null | undefined) ?? null,
+      currentPeriodEnd: (row.current_period_end as string | null | undefined) ?? null,
+    };
+  },
   async listIntegrationConnections(userId) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_integration_connections(${userId}::uuid)`);
   },
@@ -699,4 +717,7 @@ Deno.serve(createBusinessGrowHandler({
   complete: (provider, config, messages, meta) => callProvider(provider, config, messages, fetch, undefined, meta),
   probe: probeProvider,
   discoverModels: listRemoteModels,
+  // Import & Connect : la même règle que `store-import`, une seule source en
+  // base (`saas_business.bg_import_access`). Aucun second système d'abonnement.
+  checkImportConnectAccess: (userId: string) => store.checkImportConnectAccess(userId),
 }));

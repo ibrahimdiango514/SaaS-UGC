@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Paperclip, ScanText, X, FileText, ImageIcon } from 'lucide-react';
+import { ArrowUp, Loader2, Paperclip, ScanText, X, FileText, ImageIcon } from 'lucide-react';
 import type { AiAttachment, AiMode } from './api';
-import {
-  MAX_ATTACHMENTS,
-  formatBytes,
-  readAttachment,
-  validateAttachment,
-} from './attachments';
+import { MAX_ATTACHMENTS, formatBytes } from './attachments';
+import { prepareAttachment } from '../files/intoAssistant';
+import { asAppError } from '../lib/errors';
 import { cn } from '../components/ui';
 
 /**
@@ -38,6 +35,8 @@ export function Composer({
   label = 'Votre message',
   placeholder = 'Demandez, analysez, créez… (Entrée pour envoyer, Maj+Entrée pour un retour à la ligne)',
   sendLabel = 'Envoyer le message',
+  workspaceId = null,
+  conversationId = null,
 }: {
   onSend: (content: string, mode: AiMode, attachments: AiAttachment[]) => Promise<boolean>;
   sending: boolean;
@@ -59,10 +58,19 @@ export function Composer({
    * comme dans l'interface qu'il remplace.
    */
   sendLabel?: string;
+  /**
+   * Entreprise active. Sans elle, aucun fichier n'est téléversé : on refuse
+   * plutôt que de faire croire à une pièce jointe conservée.
+   */
+  workspaceId?: string | null;
+  /** Conversation en cours, pour rattacher les fichiers côté base. */
+  conversationId?: string | null;
 }) {
   const [texte, setTexte] = useState('');
   const [attachments, setAttachments] = useState<AiAttachment[]>([]);
   const [erreur, setErreur] = useState<string | null>(null);
+  /** Téléversements en cours, avec leur progression réelle. */
+  const [envois, setEnvois] = useState<Array<{ key: string; name: string; percent: number }>>([]);
   const zone = useRef<HTMLTextAreaElement>(null);
   const fichiers = useRef<HTMLInputElement>(null);
 
@@ -91,26 +99,43 @@ export function Composer({
       const refus: string[] = [];
 
       for (const file of Array.from(files)) {
-        const probleme = validateAttachment(file, attachments.length + ajouts.length);
-        if (probleme) {
-          refus.push(probleme);
+        const total = attachments.length + ajouts.length;
+        if (total >= MAX_ATTACHMENTS) {
+          refus.push(`Maximum ${MAX_ATTACHMENTS} fichiers par message.`);
+          break;
+        }
+
+        // Sans entreprise active, le fichier ne peut pas être stocké de façon
+        // durable : on le dit, au lieu d'ajouter une pièce jointe qui
+        // disparaîtrait au rechargement.
+        if (!workspaceId) {
+          refus.push(`« ${file.name} » — sélectionnez une entreprise pour joindre un fichier durablement.`);
           continue;
         }
-        const lu = await readAttachment(file);
-        ajouts.push({
-          name: file.name,
-          storagePath: null,
-          sizeBytes: file.size,
-          mimeType: file.type || 'application/octet-stream',
-          ...(lu.excerpt ? { excerpt: lu.excerpt } : {}),
-        });
-        if (lu.reason) refus.push(`${file.name} — ${lu.reason}`);
+
+        const cle = `${file.name}-${Date.now()}-${Math.random()}`;
+        setEnvois((prev) => [...prev, { key: cle, name: file.name, percent: 0 }]);
+        try {
+          const prepare = await prepareAttachment(workspaceId, file, {
+            conversationId,
+            onProgress: (percent) => {
+              setEnvois((prev) => prev.map((e) => (e.key === cle ? { ...e, percent } : e)));
+            },
+          });
+          ajouts.push(prepare.attachment);
+          // La limite réelle du modèle est annoncée, pas découverte après envoi.
+          if (!prepare.capability.transmitted) refus.push(`${file.name} — ${prepare.capability.note}`);
+        } catch (error) {
+          refus.push(asAppError(error).message);
+        } finally {
+          setEnvois((prev) => prev.filter((e) => e.key !== cle));
+        }
       }
 
       if (ajouts.length > 0) setAttachments((prev) => [...prev, ...ajouts]);
       if (refus.length > 0) setErreur(refus.join(' '));
     },
-    [attachments.length],
+    [attachments.length, workspaceId, conversationId],
   );
 
   const retirer = (index: number) => {
@@ -153,6 +178,21 @@ export function Composer({
         </div>
       )}
 
+      {envois.length > 0 && (
+        <ul className="mb-2 space-y-1" aria-live="polite">
+          {envois.map((envoi) => (
+            <li key={envoi.key} className="flex items-center gap-2 text-xs text-slate-400">
+              <Loader2 size={12} className="animate-spin" />
+              <span className="max-w-[14rem] truncate">{envoi.name}</span>
+              <span className="tabular-nums">{envoi.percent} %</span>
+              <span className="h-1 w-24 overflow-hidden rounded bg-white/10">
+                <span className="block h-full bg-cyan-400" style={{ width: `${envoi.percent}%` }} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {attachments.length > 0 && (
         <ul className="mb-2 flex flex-wrap gap-2">
           {attachments.map((a, index) => (
@@ -164,9 +204,19 @@ export function Composer({
               <span className="max-w-[12rem] truncate">{a.name}</span>
               <span className="text-slate-500">{formatBytes(a.sizeBytes)}</span>
               {a.excerpt ? (
-                <span className="rounded bg-brand-500/15 px-1 text-[0.65rem] text-brand-200">lu</span>
+                <span
+                  className="rounded bg-brand-500/15 px-1 text-[0.65rem] text-brand-200"
+                  title="Le contenu texte est transmis à l’assistant."
+                >
+                  lu
+                </span>
               ) : (
-                <span className="rounded bg-white/10 px-1 text-[0.65rem] text-slate-400">non extrait</span>
+                <span
+                  className="rounded bg-white/10 px-1 text-[0.65rem] text-slate-400"
+                  title={a.note ?? 'Le contenu de ce fichier n’est pas transmis au modèle.'}
+                >
+                  enregistré, non lu
+                </span>
               )}
               <button
                 type="button"
@@ -200,7 +250,7 @@ export function Composer({
             type="file"
             multiple
             className="hidden"
-            accept=".txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.sql,.log,image/*,application/pdf"
+            accept=".txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.sql,.log,.pdf,.docx,.xlsx,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,application/pdf"
             onChange={(event) => {
               void ajouter(event.target.files);
               event.target.value = '';
