@@ -29,6 +29,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Admin = lazy(() => import('./pages/Admin'));
 const VideoStudio = lazy(() => import('./studio/VideoStudio'));
 const GenerationStudio = lazy(() => import('./studio/GenerationStudio'));
+const FilesPage = lazy(() => import('./pages/Files'));
 const VideoEditor = lazy(() => import('./studio/VideoEditor'));
 const PreparedSpace = lazy(() => import('./studio/components/PreparedSpace').then(({ PreparedSpace: component }) => ({ default: component })));
 const StudioGenerations = lazy(() => import('./studio/StudioPages').then(({ StudioGenerations: component }) => ({ default: component })));
@@ -86,6 +87,7 @@ export default function App() {
                       <Route path="prompts" element={<Prompts />} />
                       <Route path="presets" element={<Presets />} />
                       <Route path="bibliotheque" element={<StudioSaved />} />
+                      <Route path="fichiers" element={<FilesPage />} />
                       <Route path="historique" element={<StudioGenerations />} />
                       <Route path="abonnement" element={<Subscription />} />
                       <Route path="credits" element={<StudioPricing />} />
