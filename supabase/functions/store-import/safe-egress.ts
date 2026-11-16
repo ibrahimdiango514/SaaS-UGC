@@ -67,6 +67,11 @@ export interface EgressDeps {
   resolveHost: ResolveHost;
   connect?: Connect;
   timeoutMs?: number;
+  /**
+   * Appelé avec l'IP réellement contactée, après une réponse reçue. Permet à
+   * l'appelant d'afficher une preuve du contrôle SSRF sans refaire de requête.
+   */
+  onConnected?: (ip: string, hostname: string) => void;
 }
 
 function erreur(code: EgressErrorCode, message: string): EgressError {
@@ -180,6 +185,7 @@ export async function safeGet(
           return { ok: false, error: erreur('unreachable', `La boutique a répondu ${reponse.status}.`) };
         }
 
+        deps.onConnected?.(ip, url.hostname);
         return {
           ok: true,
           value: {
