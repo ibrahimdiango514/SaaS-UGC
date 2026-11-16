@@ -1,11 +1,31 @@
 # VYORA — connecteurs OAuth (phase 3)
 
-Ce document décrit l'**architecture** prévue pour huit fournisseurs, sans les
-déclarer opérationnels. **Aucun connecteur n'est actif à ce jour** : aucune
-autorisation API n'a été obtenue, aucun jeton OAuth n'est stocké, aucune donnée
-tierce n'est lue. La règle du projet s'applique sans exception : on ne simule
-aucune connexion et on ne déclare aucun fournisseur opérationnel sans preuve
-d'un appel réussi.
+Ce document décrit l'**architecture** des connecteurs OAuth. La règle du projet
+s'applique sans exception : on ne simule aucune connexion et on ne déclare aucun
+fournisseur opérationnel sans preuve d'un appel réussi.
+
+## État réel au 14 novembre 2026
+
+| Élément | État |
+|---|---|
+| Socle OAuth (état CSRF, PKCE, chiffrement AES-256-GCM) | **implémenté, déployé, testé** |
+| Tables `oauth_accounts` / `oauth_states` / `oauth_audit_log` | **en production** |
+| Edge Function `vyora-oauth` | **v1 ACTIVE** |
+| Clé `VYORA_OAUTH_ENCRYPTION_KEY` | **créée et vérifiée** |
+| **Identifiants Google** | **absents** |
+| Comptes Google réellement connectés | **aucun** |
+
+Le socle commun aux trois fournisseurs Google est donc en place et prouvé en
+production (401 sur requête non authentifiée, 400 `state_invalid` sur état
+inconnu, 503 `google_not_configured` sur `start` faute d'identifiants).
+**Aucun compte Google n'est connecté**, parce que `GOOGLE_CLIENT_ID` et
+`GOOGLE_CLIENT_SECRET` n'existent pas encore : ils ne peuvent être créés que par
+le propriétaire du projet dans Google Cloud Console.
+
+Voir `supabase/functions/vyora-oauth/DEPLOYED.md` pour la procédure exacte, les
+preuves d'exécution et ce qui reste non testé. Le reste de ce document décrit
+l'architecture cible, y compris pour les cinq fournisseurs non Google qui
+restent bloqués par leurs propres autorisations.
 
 ## Principe commun
 
@@ -81,12 +101,32 @@ flux OAuth inexistant.
 
 ## Ce qui reste à développer
 
-1. Table `mcp_oauth_credentials` (jetons chiffrés, `service_role` seul) et clé de
-   chiffrement en secret Supabase.
-2. Edge Function `vyora-oauth` : `start` (state + PKCE) et `callback`
-   (échange, stockage, vérification réelle).
-3. Tâche planifiée de rafraîchissement et détection d'expiration.
-4. Un parcours de test de bout en bout **par fournisseur**, dès qu'une
-   autorisation est obtenue — pas avant.
-5. Outils MCP de lecture (`vyora_gmail_search`, `vyora_drive_list`…) une fois les
-   jetons disponibles, toujours en lecture seule au départ.
+### Fait (socle Google)
+
+- ~~Table des jetons chiffrés, `service_role` seul, clé en secret Supabase.~~
+  Réalisé : `oauth_accounts` avec IV et étiquette **par jeton**.
+- ~~Edge Function `vyora-oauth` : `start`, `callback`.~~ Réalisé, plus `list`,
+  `revoke`, `refresh`, `check` et `audit`.
+- ~~Garde de capacités à l'usage (`read|draft|send|modify`).~~ Réalisé et testé.
+- ~~Révocation qui efface réellement les cryptogrammes.~~ Réalisé.
+
+### Reste à faire, dans l'ordre
+
+1. **Identifiants Google** (blocage externe) : créer le client OAuth, renseigner
+   `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, déclarer l'URI de redirection.
+2. **Premier essai réel** : connecter un compte Gmail en capacité `read` seule,
+   vérifier que `callback` enregistre le compte et que les jetons sont bien
+   chiffrés en base.
+3. **Rafraîchissement planifié** : le code existe (`refresh`), mais aucune tâche
+   périodique ne l'appelle encore. À brancher sur `pg_cron`.
+4. **Outils MCP de lecture** (`vyora_gmail_search`, `vyora_drive_list`,
+   `vyora_calendar_list`) : ils doivent appeler `check` avant toute requête,
+   rester en lecture seule au départ, et ne jamais republier un jeton.
+5. **Interface VYORA Connect** : connecter / gérer / révoquer, en affichant les
+   capacités réellement accordées et jamais un état supposé.
+6. **Drive et Calendar** : le socle est déjà commun (mêmes tables, mêmes RPC,
+   `provider` déjà contraint). Il ne reste que les appels métier et les tests
+   réels de chaque API.
+7. **Cinq fournisseurs non Google** : toujours bloqués par leurs autorisations
+   propres (révision Meta, éligibilité TikTok, audit YouTube, compte WhatsApp
+   Business vérifié).
