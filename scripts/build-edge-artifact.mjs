@@ -188,7 +188,14 @@ if (name && !process.argv.includes('--import-only')) {
     }
     console.log(`chargeur à jour (${name}, ${built.chars} caractères de bundle)`);
   } else {
+    // Le chargeur télécharge l'artefact depuis le commit épinglé : si le fichier
+    // n'est pas écrit ET committé, la production charge un ancien bundle, ou
+    // échoue sur une empreinte qui ne correspond plus. Écrire le chargeur sans
+    // l'artefact produisait exactement cette dérive silencieuse.
+    const artifactPath = join(process.cwd(), FUNCTIONS[name].artifact);
+    writeFileSync(artifactPath, built.source, 'utf8');
     writeFileSync(loaderPath, code, 'utf8');
-    console.log(`écrit ${FUNCTIONS[name].loader} — sha256 ${built.sha256}, ${built.chars} caractères`);
+    console.log(`écrit ${FUNCTIONS[name].artifact} — sha256 ${built.sha256}, ${built.chars} caractères`);
+    console.log(`écrit ${FUNCTIONS[name].loader} — épinglé sur le commit ${commit}`);
   }
 }
