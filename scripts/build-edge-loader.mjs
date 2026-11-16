@@ -44,6 +44,11 @@ export const LOADER_TARGETS = {
   'vyora-ai': { migration: '20261115220000' },
   'vyora-ai-providers': { migration: '20261115220100' },
   'vyora-provider-health': { migration: '20261115220200' },
+  // Connecteurs OAuth Google (Gmail, Drive, Calendar). La fonction porte du
+  // chiffrement AES-256-GCM et une machine d'état OAuth ; la publier par
+  // tranches vérifiées par SHA-256 évite qu'une altération en transit modifie
+  // silencieusement un contrôle de sécurité.
+  'vyora-oauth': { migration: '20261116040000' },
 };
 
 /**
