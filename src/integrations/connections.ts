@@ -19,6 +19,7 @@
  * jamais « connecté ».
  */
 import { supabase } from '../lib/supabase';
+import type { BusinessIntegrationConnection } from '../business/api';
 import type { CatalogCategory, IntegrationEntry } from './catalog';
 
 /** Statut affiché sur une fiche, dérivé — jamais saisi. */
@@ -30,7 +31,15 @@ export type IntegrationStatus =
   | 'not_connected'
   | 'needs_config'
   | 'needs_approval'
-  | 'unavailable';
+  | 'unavailable'
+  /** Demande d'activation enregistrée, en attente de traitement. */
+  | 'requested'
+  /**
+   * Une ligne `connected` existe dans `integration_connections`, mais aucun
+   * compte OAuth vérifié ne la soutient : l'autorisation chez le fournisseur
+   * n'a jamais été obtenue. C'est le cas le plus important à ne pas maquiller.
+   */
+  | 'authorization_missing';
 
 export const STATUS_LABELS: Record<IntegrationStatus, string> = {
   connected: 'Connecté',
@@ -41,6 +50,8 @@ export const STATUS_LABELS: Record<IntegrationStatus, string> = {
   needs_config: 'Configuration requise',
   needs_approval: 'Validation externe requise',
   unavailable: 'Indisponible',
+  requested: 'Activation demandée',
+  authorization_missing: 'Autorisation manquante',
 };
 
 export const STATUS_TONE: Record<IntegrationStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
@@ -52,6 +63,8 @@ export const STATUS_TONE: Record<IntegrationStatus, 'success' | 'warning' | 'dan
   needs_config: 'warning',
   needs_approval: 'warning',
   unavailable: 'neutral',
+  requested: 'warning',
+  authorization_missing: 'danger',
 };
 
 /** Compte connecté, tel que le rend `oauth_list_accounts()`. */
@@ -68,7 +81,69 @@ export interface ConnectedAccount {
   createdAt: string | null;
 }
 
-/** Entrée d'audit, telle que le rend `oauth_audit_list()`. */
+/**
+ * Demande d'activation, telle que la rend `integrations.list` du socle
+ * Business Grow (`saas_business.bg_list_scoped_integration_connections`).
+ *
+ * `external_account_ref` vaut `null` pour une simple demande : aucune
+ * autorisation fournisseur n'a été obtenue. C'est ce champ qui distingue une
+ * demande d'une connexion réellement établie.
+ */
+export interface ActivationRequest {
+  connectorKey: string;
+  status: 'unconfigured' | 'pending' | 'connected' | 'disconnected' | 'error';
+  externalAccountRef: string | null;
+  updatedAt: string;
+}
+
+/**
+ * Lit les demandes d'activation de l'entreprise active.
+ *
+ * Passe par `businessGrowApi` : la RLS et les fonctions `security definer`
+ * filtrant sur `p_user_id` restent seules juges. Sans entreprise active, on
+ * renvoie une liste vide — les demandes sont toujours scopées.
+ */
+export async function listActivationRequests(
+  workspaceId: string | null,
+  api: { listIntegrations: (workspaceId?: string | null) => Promise<{ connections: BusinessIntegrationConnection[] }> },
+): Promise<BusinessIntegrationConnection[]> {
+  if (!workspaceId) return [];
+  const { connections } = await api.listIntegrations(workspaceId);
+  return connections ?? [];
+}
+
+/**
+ * Normalise des lignes brutes vers la forme lue par `deriveStatus`.
+ *
+ * La distinction essentielle est `externalAccountRef` : `null` signifie
+ * qu'aucun compte externe n'est rattaché, donc qu'il n'existe aucune preuve
+ * d'autorisation, même si `status` vaut `connected`.
+ */
+export function toActivationRequests(rows: BusinessIntegrationConnection[]): ActivationRequest[] {
+  return rows.map((row) => ({
+    connectorKey: String(row.connector_key ?? ''),
+    status: row.status ?? 'unconfigured',
+    externalAccountRef: row.external_account_ref ?? null,
+    updatedAt: String(row.updated_at ?? ''),
+  }));
+}
+
+/**
+ * Fournisseurs pour lesquels le socle accepte une demande d'activation.
+ *
+ * Source de vérité : `saas_business.bg_validate_connector_key`, qui lève
+ * `invalid connector key` pour toute autre valeur. Afficher un bouton de
+ * demande sur un fournisseur absent de cette liste produirait une erreur
+ * serveur garantie : on ne le propose donc pas.
+ *
+ * Cette liste s'élargira en même temps que les connecteurs réels
+ * (Livraison 3), pas avant.
+ */
+export const CONNECTORS_ACCEPTING_REQUESTS: ReadonlySet<string> = new Set([
+  'facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce',
+]);
+
+/** Entrée d'audit, telle que rend `oauth_audit_list()`. */
 export interface AuditEntry {
   id: string;
   action: string;
@@ -166,12 +241,35 @@ export async function revokeConnection(accountId: string): Promise<{ remoteRevok
  * « vous pouvez cliquer » : elle est « Configuration requise » ou
  * « Validation externe requise ».
  */
+/**
+ * Dérive le statut affiché d'une fiche.
+ *
+ * ## L'ordre des sources est la garantie
+ *
+ * 1. **Compte OAuth réel** — la seule preuve d'une connexion. Prioritaire sur
+ *    tout le reste : une demande d'activation ne peut pas masquer un compte
+ *    expiré, ni l'inverse.
+ * 2. **Demande d'activation** — tracée en base, mais ce n'est pas une
+ *    connexion.
+ * 3. **Capacité du catalogue** — décrit ce qui manque pour pouvoir connecter.
+ *
+ * Le cas `authorization_missing` mérite d'être explicité : le socle écrit
+ * `status = 'connected'` dans `integration_connections` sur simple demande
+ * (`bg_request_scoped_integration_connection`), sans qu'aucun échange OAuth
+ * n'ait eu lieu. Croire ce champ sur parole afficherait « Connecté » sans
+ * preuve côté fournisseur — exactement ce qui est interdit. On ne le croit donc
+ * que s'il est corroboré par un compte OAuth vérifié.
+ */
 export function deriveStatus(
   entry: IntegrationEntry,
   accounts: ConnectedAccount[],
   engineImplemented: boolean,
+  requests: ActivationRequest[] = [],
 ): IntegrationStatus {
-  const comptes = accounts.filter((a) => normalizeProvider(a.provider) === normalizeProvider(entry.id));
+  const cle = normalizeProvider(entry.id);
+
+  // 1. Compte OAuth réel : la seule preuve acceptable.
+  const comptes = accounts.filter((a) => normalizeProvider(a.provider) === cle);
   if (comptes.length > 0) {
     const prioritaire = comptes.find((a) => a.status === 'connected')
       ?? comptes.find((a) => a.status === 'error')
@@ -182,18 +280,51 @@ export function deriveStatus(
     return 'error';
   }
 
+  // 2. Demande d'activation persistée.
+  const demandes = requests.filter((r) => normalizeProvider(r.connectorKey) === cle);
+  if (demandes.length > 0) {
+    // Une demande n'est « en attente » que tant qu'aucun compte externe n'est
+    // rattaché. Sinon le socle prétend une connexion sans preuve OAuth.
+    const enAttente = demandes.find((r) => r.status === 'pending' && !r.externalAccountRef);
+    if (enAttente) return 'requested';
+
+    const pretendueConnectee = demandes.find((r) => r.status === 'connected');
+    if (pretendueConnectee) return 'authorization_missing';
+
+    if (demandes.some((r) => r.status === 'error')) return 'error';
+    // `disconnected` / `unconfigured` : rien à signaler de plus que l'absence
+    // de connexion, on retombe sur la capacité du catalogue ci-dessous.
+  }
+
+  // 3. Ce qui manque pour pouvoir connecter.
   if (!engineImplemented) {
-    // Aucun connecteur écrit : on distingue la cause plutôt que d'afficher un
-    // « non connecté » qui laisserait croire qu'un clic suffirait.
     const aUneApprobation = entry.auth.some((a) => a.externalApproval)
       || PROVIDERS_WITH_EXTERNAL_APPROVAL.has(entry.id);
     return aUneApprobation ? 'needs_approval' : 'needs_config';
   }
 
-  // Un connecteur existe : l'utilisateur peut lancer la connexion. Si les
-  // identifiants serveur manquent, c'est le moteur qui le dira à l'exécution
-  // (fail-closed) — on ne prétend pas ici savoir si le projet est configuré.
   return 'not_connected';
+}
+
+/**
+ * Une demande d'activation est-elle possible pour ce fournisseur ?
+ *
+ * Vrai uniquement si le socle l'accepte (`bg_validate_connector_key`) et
+ * qu'aucune demande active n'existe déjà. Proposer un bouton que le serveur
+ * refuserait serait un faux pas de plus.
+ */
+export function canRequestActivation(
+  entry: IntegrationEntry,
+  status: IntegrationStatus,
+): boolean {
+  if (!CONNECTORS_ACCEPTING_REQUESTS.has(entry.id)) return false;
+  return status === 'needs_config' || status === 'needs_approval'
+    || status === 'not_connected' || status === 'error';
+}
+
+/** Une demande en attente peut-elle être annulée ? */
+export function canCancelRequest(status: IntegrationStatus): boolean {
+  return status === 'requested';
 }
 
 /** Compte associé à une fiche, s'il existe. */
@@ -219,11 +350,18 @@ export function accountFor(entry: IntegrationEntry, accounts: ConnectedAccount[]
 export function summarize(
   entries: IntegrationEntry[],
   accounts: ConnectedAccount[],
+  /** Statuts déjà dérivés, quand l'appelant en dispose (état inconnu exclu). */
+  etatsConnus?: IntegrationStatus[],
 ): Record<IntegrationStatus, number> {
   const base: Record<IntegrationStatus, number> = {
     connected: 0, expired: 0, revoked: 0, error: 0,
     not_connected: 0, needs_config: 0, needs_approval: 0, unavailable: 0,
+    requested: 0, authorization_missing: 0,
   };
+  if (etatsConnus) {
+    for (const statut of etatsConnus) base[statut] += 1;
+    return base;
+  }
   for (const entry of entries) {
     base[deriveStatus(entry, accounts, entry.engine !== null)] += 1;
   }

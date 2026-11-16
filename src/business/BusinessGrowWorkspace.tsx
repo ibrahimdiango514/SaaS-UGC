@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useLocation } from 'react-router-dom';
 import {
   Activity, ArrowUpRight, Brain, Building2, ExternalLink, FileText, Gauge, Lightbulb,
-  MessageSquare, Package, Pencil, Plug, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, Zap,
+  MessageSquare, Package, Pencil, Plug, RefreshCw, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, Zap,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -14,7 +14,7 @@ import {
   type BusinessGrowEntryIntent,
   type BusinessGrowGrowthTab,
 } from '../contracts/business-grow';
-import { INTEGRATION_DEFINITIONS, type IntegrationDefinition } from '../integrations/contracts';
+import { IntegrationsCenter } from '../integrations/CatalogPage';
 import GrowthWorkspace from './growth/GrowthWorkspace';
 import AgentReports from './agent/AgentReports';
 import { BusinessAssistant } from '../ai/BusinessAssistant';
@@ -1267,107 +1267,6 @@ function ProvidersView({
   );
 }
 
-function IntegrationsView({
-  connections, loadError, busyKey, notice, onRetry, onRequest, onCancel, onDisconnect,
-}: {
-  connections: BusinessIntegrationConnection[] | null;
-  loadError: string | null;
-  busyKey: string | null;
-  notice: { tone: 'success' | 'error'; text: string } | null;
-  onRetry: () => void;
-  onRequest: (connectorKey: string) => void;
-  onCancel: (connectorKey: string) => void;
-  onDisconnect: (connectorKey: string) => void;
-}) {
-  const statusPriority: Record<string, number> = { connected: 4, pending: 3, error: 2, disconnected: 1, unconfigured: 0 };
-  const byConnector = new Map<string, BusinessIntegrationConnection>();
-  for (const conn of connections ?? []) {
-    const prev = byConnector.get(conn.connector_key);
-    if (!prev || (statusPriority[conn.status] ?? 0) > (statusPriority[prev.status] ?? 0)) {
-      byConnector.set(conn.connector_key, conn);
-    }
-  }
-  return (
-    <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">
-      <div className="mb-5 max-w-3xl">
-        <h2 className="text-lg font-semibold text-white">Intégrations et connexions sécurisées</h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          Une demande est enregistrée pour votre compte et cette entreprise. Elle ne lance pas de connexion OAuth
-          et n’importe aucune donnée externe automatiquement.
-        </p>
-        <p className="mt-2 text-xs leading-relaxed text-amber-100/75">
-          La déconnexion retire uniquement l’association locale. Si une autorisation existe chez un fournisseur,
-          révoquez-la également auprès de celui-ci : aucune révocation externe n’est effectuée ici.
-        </p>
-      </div>
-
-      {loadError && (
-        <div role="alert" className="mb-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3 text-xs text-amber-100">
-          État des intégrations indisponible : {loadError}{' '}
-          <button type="button" className="underline" onClick={onRetry}>Réessayer</button>
-        </div>
-      )}
-      {!connections && !loadError && <p role="status" className="mb-4 text-xs text-slate-400">Chargement des intégrations…</p>}
-      {notice && (
-        <div className={`mb-4 rounded-xl border px-3.5 py-2.5 text-xs ${notice.tone === 'success' ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100' : 'border-rose-400/20 bg-rose-400/[0.06] text-rose-100'}`} role="status">
-          {notice.text}
-        </div>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {INTEGRATION_DEFINITIONS.map((contract: IntegrationDefinition) => {
-          const persisted = byConnector.get(contract.id);
-          const status = connections ? persisted?.status ?? 'unconfigured' : null;
-          const busy = busyKey?.startsWith(`${contract.id}:`) ?? false;
-          const disabled = Boolean(busyKey) || !connections;
-          const tone = status === 'connected' ? 'success' : status === 'pending' ? 'warning' : status === 'error' ? 'danger' : 'neutral';
-          const label = status === null ? 'État inconnu' : status === 'connected' ? 'Connecté' : status === 'pending' ? 'Demande enregistrée' : status === 'error' ? 'Erreur de connexion' : status === 'disconnected' ? 'Déconnecté localement' : 'Non connecté';
-          return (
-            <article key={contract.id} className="flex flex-col rounded-xl border border-white/[0.07] bg-black/15 p-4" data-testid={`connector-${contract.id}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-white">{contract.name}</h3>
-                  <p className="mt-1 text-[11px] text-slate-500">Authentification : {contract.authorization}</p>
-                </div>
-                <Badge tone={tone}>{label}</Badge>
-              </div>
-              <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                Capacités proposées : {contract.proposedCapabilities.join(', ')}
-              </p>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">{contract.note}</p>
-              {persisted?.updated_at && (
-                <p className="mt-2 text-[10px] text-slate-600">Dernière activité : {new Date(persisted.updated_at).toLocaleString('fr-FR')}</p>
-              )}
-              <div className="mt-auto pt-3">
-                {status === 'connected' ? (
-                  <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onDisconnect(contract.id)}>
-                    {busy ? 'Déconnexion locale…' : 'Retirer l’association locale'}
-                  </Button>
-                ) : status === 'pending' ? (
-                  <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onCancel(contract.id)}>
-                    {busy ? 'Annulation…' : 'Annuler la demande'}
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onRequest(contract.id)}>
-                    {busy ? 'Enregistrement…' : status === 'error' || status === 'disconnected' ? 'Redemander l’activation' : 'Demander l’activation'}
-                  </Button>
-                )}
-              </div>
-            </article>
-          );
-        })}
-      </div>
-
-      <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-300/15 bg-amber-400/[0.04] px-3.5 py-3 text-[11px] leading-relaxed text-amber-100/80">
-        <ShieldAlert size={14} className="mt-0.5 shrink-0" />
-        <p>
-          Les connexions et synchronisations fournisseur ne sont pas configurées ici. Une demande enregistrée
-          ne signifie pas qu’un service externe est connecté.
-        </p>
-      </div>
-    </section>
-  );
-}
 
 /**
  * A6 — Contrôle IA : le centre de contrôle de l'AI CORE, côté utilisateur.
@@ -1830,7 +1729,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         if (typeof result.disconnected !== 'boolean') throw new Error('Réponse de déconnexion invalide.');
         tone = result.disconnected ? 'success' : 'error';
         text = result.disconnected
-          ? 'Association locale retirée. Révoquez aussi l’autorisation chez le fournisseur si nécessaire.'
+          ? 'Association locale retirée. Aucune révocation n’a été effectuée chez le fournisseur : révoquez-la également auprès de celui-ci si nécessaire.'
           : 'Aucune association locale à retirer dans cette entreprise.';
       }
       if (accountScopeRef.current !== scope) return;
@@ -2729,16 +2628,27 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
             />
           )}
           {workspaceId && section === 'integrations' && (
-            <IntegrationsView
-              connections={integrations}
-              loadError={integrationLoadError}
-              onRetry={() => { void loadIntegrations().catch(() => {}); }}
-              busyKey={integrationBusyKey}
-              notice={integrationNotice}
-              onRequest={(connectorKey) => { void handleIntegrationAction('request', connectorKey); }}
-              onCancel={(connectorKey) => { void handleIntegrationAction('cancel', connectorKey); }}
-              onDisconnect={(connectorKey) => { void handleIntegrationAction('disconnect', connectorKey); }}
-            />
+            /*
+             * Même composant que `/app/connect`, même source de vérité : un
+             * seul catalogue. Business Grow fournit ici l'entreprise active et
+             * son contrôleur d'état (compteurs de séquence, verrou de mutation).
+             */
+            <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">
+              <IntegrationsCenter
+                workspaceId={workspaceId}
+                embedded
+                controller={{
+                  connections: integrations,
+                  loadError: integrationLoadError,
+                  busyKey: integrationBusyKey,
+                  notice: integrationNotice,
+                  onRetry: () => { void loadIntegrations().catch(() => {}); },
+                  onRequest: (connectorKey) => { void handleIntegrationAction('request', connectorKey); },
+                  onCancel: (connectorKey) => { void handleIntegrationAction('cancel', connectorKey); },
+                  onDisconnect: (connectorKey) => { void handleIntegrationAction('disconnect', connectorKey); },
+                }}
+              />
+            </section>
           )}
         </div>
       </div>
