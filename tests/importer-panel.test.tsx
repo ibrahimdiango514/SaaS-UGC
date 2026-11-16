@@ -8,18 +8,19 @@
  *   - l'aperçu montre les prix, images, catégories et doublons ;
  *   - un import partiel est rapporté fidèlement (créés / échoués) ;
  *   - les doublons internes au fichier ne créent pas de produit en double ;
- *   - l'étape URL explique son indisponibilité au lieu d'offrir un bouton mort.
+ *   - l'import par URL passe par le serveur et n'écrit qu'après confirmation.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const api = vi.hoisted(() => ({
   createProduct: vi.fn(),
+  invokeEdge: vi.fn(),
 }));
 
 vi.mock('../src/lib/api', async () => {
   const reel = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api');
-  return { ...reel, createProduct: api.createProduct };
+  return { ...reel, createProduct: api.createProduct, invokeEdge: api.invokeEdge };
 });
 
 import { StoreImportPanel } from '../src/business/importer/StoreImportPanel';
@@ -55,12 +56,19 @@ describe('étape 1 — choix de la source', () => {
     expect(screen.getByText(/Déposez un fichier CSV, XLSX ou XML/i)).toBeTruthy();
   });
 
-  it('explique que l’import par URL n’est pas disponible, sans bouton mort', () => {
+  it('propose l’import par URL, exécuté par le serveur', () => {
     render(<StoreImportPanel workspaceId="w" existing={[]} onImported={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText(/Importer depuis une URL de boutique/i)).toBeTruthy();
-    expect(screen.getByText(/exige une vérification DNS et une protection/i)).toBeTruthy();
-    // Aucun bouton d'import par URL : on ne propose pas ce qui échouerait.
-    expect(screen.queryByRole('button', { name: /importer depuis une url/i })).toBeNull();
+    // L'explication dit QUI fait la lecture : le serveur, pas le navigateur.
+    expect(screen.getByText(/Votre navigateur ne contacte jamais la boutique/i)).toBeTruthy();
+    expect(screen.getByTestId('store-url-input')).toBeTruthy();
+    expect(screen.getByTestId('store-url-preview')).toBeTruthy();
+  });
+
+  it('désactive l’import par URL sans entreprise sélectionnée', () => {
+    render(<StoreImportPanel workspaceId={null} existing={[]} onImported={vi.fn()} onClose={vi.fn()} />);
+    expect((screen.getByTestId('store-url-input') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText(/Sélectionnez une entreprise pour importer/i)).toBeTruthy();
   });
 });
 
