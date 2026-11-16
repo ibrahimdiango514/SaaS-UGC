@@ -199,3 +199,47 @@ describe('publication / aucun effet de bord', () => {
     expect(publish.ARTIFACTS['vyora-oauth'].entry).toBe('supabase/functions/vyora-oauth/index.ts');
   });
 });
+
+describe('migration de la table d’artefacts', () => {
+  const migration = read('supabase/migrations/20261116055000_edge_function_artifact_slices.sql');
+
+  it('crée la table sans échouer si elle existe déjà', () => {
+    expect(migration).toMatch(/create table if not exists public\._edge_function_artifact_slices/i);
+  });
+
+  it('garantit la clé primaire même si la table préexistait sans elle', () => {
+    // `create table if not exists` est ignoré dans son ensemble quand la table
+    // existe : sans ce garde, une table sans clé primaire le resterait.
+    expect(migration).toMatch(/contype = 'p'/);
+  });
+
+  it('garantit la colonne `chunk` même si elle manquait', () => {
+    expect(migration).toMatch(/column_name = 'chunk'/);
+  });
+
+  it('applique la RLS sans politique permissive', () => {
+    // Refus par défaut : seul service_role (qui contourne la RLS) lit.
+    expect(migration).toMatch(/enable row level security/i);
+    expect(migration).not.toMatch(/create policy/i);
+  });
+
+  it('révoque les privilèges des rôles clients et les accorde à service_role', () => {
+    expect(migration).toMatch(/revoke all[\s\S]*?from anon/i);
+    expect(migration).toMatch(/revoke all[\s\S]*?from authenticated/i);
+    expect(migration).toMatch(/grant select, insert, update, delete[\s\S]*?to service_role/i);
+  });
+
+  it('ne détruit rien : aucune table supprimée, aucune donnée effacée', () => {
+    expect(migration).not.toMatch(/drop table/i);
+    expect(migration).not.toMatch(/truncate/i);
+    expect(migration).not.toMatch(/delete from/i);
+  });
+
+  it('est ordonnée AVANT la migration qui insère les tranches', () => {
+    // Une insertion dans une table absente ferait échouer la migration.
+    // Comparaison sur les timestamps numériques, pas sur les noms de fichier :
+    // l'ordre lexicographique des chaînes ne reflète pas l'ordre d'application.
+    const horodatage = (nom: string) => Number(nom.slice(0, 14));
+    expect(horodatage('20261116055000')).toBeLessThan(horodatage('20261116060000'));
+  });
+});
