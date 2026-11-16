@@ -164,3 +164,33 @@ unique), pas seulement la présence de l'outil dans la liste.
 | Jeton en clair dans un log | Le secret n'est jamais journalisé ; seule l'empreinte de préfixe l'est |
 | Écriture accidentelle | Écriture désactivée par défaut, confirmation obligatoire, portée `write` |
 | Énumération de jetons | Réponse uniforme `401` quel que soit le motif d'échec |
+
+---
+
+## État d'avancement (2026-11-16)
+
+| Élément | État |
+| --- | --- |
+| Document d'architecture | **fait** |
+| Migration `20261116000118_vyora_mcp_core` | **appliquée en base** |
+| Migration `20261116000130_vyora_mcp_functions` | **appliquée en base** |
+| Migration `20261116001121_vyora_mcp_user_api` (interface) | **appliquée en base** |
+| Edge Function `vyora-mcp` | **déployée, v1, ACTIVE** |
+| Outils de lecture (5) | **opérationnels, preuves enregistrées** |
+| Outil d'écriture | **préparé, non exposé** |
+| Interface dashboard `/app/mcp` | **fait** |
+| Connecteurs OAuth (8 fournisseurs) | **architecture seulement, aucun connecté** |
+
+Preuves d'exécution : `docs/mcp/preuves-execution-reelle.md`.
+Connecteurs : `docs/mcp/connecteurs-oauth.md`.
+Écart source de référence / source déployée : `supabase/functions/vyora-mcp/DEPLOYED.md`.
+
+### Limites connues
+
+1. **Aucun client MCP tiers n'a été connecté.** Les preuves portent sur le
+   protocole (JSON-RPC sur HTTP), pas sur Claude Desktop, Cursor ou VS Code.
+2. **La source déployée est un monofichier** issu de la source de référence :
+   toute correction doit être appliquée aux deux tant que le mécanisme
+   d'artefact n'est pas branché sur `vyora-mcp`.
+3. **Les jetons de vérification** créés pendant la campagne de preuves
+   (`verif-A`, `verif-B`) doivent être révoqués avant toute mise en service.
