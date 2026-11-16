@@ -9,6 +9,7 @@ import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { createProduct, deleteProduct, listProducts, updateProduct } from '../../lib/api';
 import { buildStudioLocationStateFromBrief } from '../../contracts/business-grow';
+import { StoreImportPanel } from '../importer/StoreImportPanel';
 import type { Product, Workspace } from '../../lib/types';
 import {
   EMPTY_COMPANY_PROFILE, GROWTH_CATEGORY, PROSPECT_STAGES, formatGrowthAmount, goalProgress,
@@ -314,6 +315,14 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [importing, setImporting] = useState(false);
+  /**
+   * Import universel (fichier CSV/XLSX/XML, URL de boutique à terme).
+   *
+   * Distinct de l'import texte rapide ci-dessus, qui reste disponible : il
+   * sert à coller deux lignes de JSON en vitesse, là où le panneau universel
+   * sert à reprendre un catalogue réel avec prévisualisation.
+   */
+  const [universalOpen, setUniversalOpen] = useState(false);
 
   const load = async () => {
     if (!workspaceId) { setProducts([]); setLoading(false); return; }
@@ -429,10 +438,29 @@ export function CatalogPanel({ workspaceId }: { workspaceId: string | null }) {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" icon={<RefreshCw size={13} />} onClick={() => void load()} disabled={loading}>Actualiser</Button>
-            <Button size="sm" variant="outline" icon={<Upload size={13} />} onClick={() => setImportOpen((value) => !value)}>Importer</Button>
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<Upload size={13} />}
+              onClick={() => { setUniversalOpen((value) => !value); setImportOpen(false); }}
+              data-testid="open-store-importer"
+            >
+              Importer un catalogue
+            </Button>
+            <Button size="sm" variant="ghost" icon={<FileText size={13} />} onClick={() => { setImportOpen((value) => !value); setUniversalOpen(false); }}>Coller du JSON / CSV</Button>
             <Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => openForm()} disabled={!workspaceId}>Ajouter</Button>
           </div>
         </div>
+        {universalOpen && (
+          <div className="mt-4">
+            <StoreImportPanel
+              workspaceId={workspaceId}
+              existing={products.map((produit) => ({ id: produit.id, name: produit.name }))}
+              onImported={load}
+              onClose={() => setUniversalOpen(false)}
+            />
+          </div>
+        )}
         {importOpen && (
           <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.04] p-3">
             <p className="text-[11px] font-semibold text-cyan-100">Import catalogue (JSON ou CSV)</p>
