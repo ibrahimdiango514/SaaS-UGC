@@ -23,7 +23,7 @@
  * appeler `/products.json`, obtenir 404, et afficher un échec incompréhensible.
  * « Je ne sais pas » est un résultat acceptable ; « je me trompe » ne l'est pas.
  */
-import { storeRoot } from './url-guard';
+import { storeRoot } from './url-guard.ts';
 
 /** Plateformes connues de l'importateur. */
 export type StorePlatform =

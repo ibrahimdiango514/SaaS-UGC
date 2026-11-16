@@ -23,7 +23,7 @@
  *   - **empreinte** : un identifiant de déduplication calculé sur le nom et la
  *     marque, insensible à la casse, aux accents et à la ponctuation.
  */
-import type { StorePlatform } from './platform';
+import type { StorePlatform } from './platform.ts';
 
 /** Un produit normalisé, prêt pour la prévisualisation et l'écriture. */
 export interface NormalizedProduct {

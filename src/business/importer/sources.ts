@@ -206,6 +206,20 @@ async function boundedGet(
     };
   } catch (cause) {
     const abandonne = cause instanceof Error && cause.name === 'AbortError';
+    // Un `fetch` de substitution (sortie réseau épinglée de l'Edge Function) peut
+    // refuser AVANT la connexion : plafond de taille, blocage SSRF, certificat.
+    // Sans cette lecture, ces refus étaient rapportés « injoignable » — un
+    // diagnostic faux qui masque la vraie cause.
+    const code = (cause as { code?: string } | null)?.code;
+    if (!abandonne && code === 'too_large') {
+      return { ok: false, error: sourceError('too_large', 'La réponse dépasse la taille autorisée.') };
+    }
+    if (!abandonne && code === 'blocked_url') {
+      return { ok: false, error: sourceError('blocked_url', 'Cette adresse est refusée : elle ne peut pas être contactée.') };
+    }
+    if (!abandonne && (code === 'tls_failed' || code === 'connect_failed')) {
+      return { ok: false, error: sourceError('unreachable', 'La connexion sécurisée avec la boutique a échoué.') };
+    }
     return {
       ok: false,
       error: abandonne

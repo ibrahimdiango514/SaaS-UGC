@@ -24,9 +24,9 @@
  *     `+`, `-` ou `@` est préfixée d'une apostrophe à l'export — voir
  *     `sanitizeFormula` — car le fichier peut être réouvert dans un tableur.
  */
-import type { NormalizedProduct } from './normalize';
-import { buildProduct, parsePriceMinor, DEFAULT_CURRENCY } from './normalize';
-import type { StorePlatform } from './platform';
+import type { NormalizedProduct } from './normalize.ts';
+import { buildProduct, parsePriceMinor, DEFAULT_CURRENCY } from './normalize.ts';
+import type { StorePlatform } from './platform.ts';
 
 /** Taille maximale acceptée pour un fichier, en octets (8 Mio). */
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;

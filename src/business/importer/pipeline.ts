@@ -21,12 +21,12 @@
  * - **Inventer un produit** pour combler une ligne vide.
  * - **Masquer une erreur** : chaque produit écarté est listé avec sa raison.
  */
-import type { NormalizedProduct } from './normalize';
-import { buildProduct, findDuplicates, parsePriceMinor, DEFAULT_CURRENCY, type DuplicateHit } from './normalize';
-import type { FileParseResult } from './files';
-import type { RawCatalogProduct, PublicCatalog } from './sources';
-import { fetchPublicCatalog, probeStore, type SourceDeps } from './sources';
-import { detectPlatform, type PlatformVerdict, type StorePlatform } from './platform';
+import type { NormalizedProduct } from './normalize.ts';
+import { buildProduct, findDuplicates, parsePriceMinor, DEFAULT_CURRENCY, type DuplicateHit } from './normalize.ts';
+import type { FileParseResult } from './files.ts';
+import type { RawCatalogProduct, PublicCatalog } from './sources.ts';
+import { fetchPublicCatalog, probeStore, type SourceDeps } from './sources.ts';
+import { detectPlatform, type PlatformVerdict, type StorePlatform } from './platform.ts';
 
 /** Ce qui a été demandé à l'importateur. */
 export type ImportIntent =
