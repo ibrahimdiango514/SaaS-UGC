@@ -325,6 +325,16 @@ function edgeResponse(url, body) {
     // Appelé par SasPay uniquement (signature HMAC) : jamais par le navigateur.
     return { error: { code: 'WEBHOOK_SIGNATURE_INVALID', message: 'Signature de webhook invalide.' } };
   }
+  if (fn === 'vyora-mcp') {
+    // Serveur MCP : l'authentification passe par un jeton personnel, jamais par
+    // un JWT Supabase. La preview reproduit donc le refus réel d'un appel sans
+    // jeton, et non un corps inventé.
+    return {
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32001, message: 'Jeton MCP absent ou mal formé.' },
+    };
+  }
   // Ne jamais retomber sur un corps générique : cela fait passer une fonction
   // réellement absente pour une fonction saine.
   return { error: { code: 'UNKNOWN_FUNCTION', message: 'Fonction non simulée dans la preview : ' + fn } };

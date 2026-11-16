@@ -464,6 +464,20 @@ export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
     ],
   },
   {
+    id: 'mcp',
+    label: 'VYORA MCP',
+    icon: Plug,
+    items: [
+      {
+        to: '/app/mcp',
+        label: 'Serveur MCP',
+        description: 'Jetons, outils et historique des appels',
+        icon: Plug,
+        keywords: ['mcp', 'claude', 'cursor', 'vscode', 'jeton', 'api'],
+      },
+    ],
+  },
+  {
     id: 'settings',
     label: 'Paramètres',
     icon: Settings,
