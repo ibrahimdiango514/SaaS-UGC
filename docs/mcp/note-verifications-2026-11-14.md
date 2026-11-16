@@ -240,7 +240,62 @@ Ces deux points ne bloquent pas la fusion, mais doivent précéder la publicatio
 
 ---
 
-## 4. Recommandation
+## 4. Correctifs appliqués le 14 novembre (soirée)
+
+Les deux risques identifiés ci-dessus ont été traités.
+
+### 4.1 PR #10 — publication obsolète retirée
+
+La migration `20261116040000_vyora_oauth_artifact.sql` de #10 ne publie plus
+rien. Elle devient un no-op documenté, avec une garde `to_regclass` pour
+tolérer le cas où #10 s'applique avant #12 (le manifeste n'existe pas encore).
+
+Vérifié en production, transactions annulées :
+
+| État du manifeste | Comportement |
+|---|---|
+| absent (production aujourd'hui) | no-op |
+| présent, sans épingle | no-op |
+| épingle du bundle corrigé | no-op |
+| épingle inattendue | **exception** |
+
+Commits sur `arena/vyora-mcp-connecteurs` : `2139ffd` puis `6bdf12d`.
+
+### 4.2 PR #12 — verrou de publication
+
+- `20261116056000_edge_function_artifact_guard.sql` : table
+  `_edge_function_artifact_manifest` + déclencheur différé
+  `_edge_function_artifact_guard`.
+- `renderSeedSql` émet désormais la pose d'épingle pour tout artefact publié.
+- `docs/mcp/verrou-publication.md` : le dispositif et ses limites.
+
+Vérifié en production, transactions annulées :
+
+| Test | Résultat |
+|---|---|
+| republication à l'identique | **passe** (9 tranches préservées) |
+| écrasement par contenu différent | **refusé** |
+| écrasement par le `delete`+`insert` réel de #10 | **refusé** |
+| parcours complet publication → épingle | OK |
+
+**Correction d'un diagnostic antérieur.** J'avais écrit que « la dernière
+migration appliquée gagne, donc #10 réinstalle le bundle vulnérable ». C'est
+vrai du point de vue des **données**, mais faux du point de vue du **code
+exécuté** : le chargeur `loader.ts` épingle `SHA256` et `CHARS`, et refuse
+d'exécuter un bundle différent (`artifact_size_mismatch` → 503). La faille
+n'était donc jamais réintroduite dans le service ; le risque réel était de
+faire passer le service de « sécurisé » à « indisponible », et de laisser en
+base une charge prête à redevenir active au prochain déploiement.
+
+### 4.3 Risque résiduel, inchangé
+
+Un **déploiement** du chargeur de #10 reste possible : celui-ci épingle lui
+aussi `4a3f6206…`, donc il exécuterait l'ancien bundle. Le verrou protège les
+données, pas les déploiements. Repasser d'une version déployée à une autre
+est un acte opérationnel, journalisé et réversible — hors du périmètre d'une
+migration.
+
+## 5. Recommandation
 
 **#12 est prête à fusionner sur le fond.** Les trois corrections demandées sont
 vérifiées :
@@ -265,7 +320,7 @@ devenue obsolète et dangereuse.
 
 ---
 
-## 5. Note de méthode
+## 6. Note de méthode
 
 Un test de cette session s'est d'abord révélé **faux positif** : il signalait une
 collision sur `20261112190000`, qui est en réalité un fichier hérité de

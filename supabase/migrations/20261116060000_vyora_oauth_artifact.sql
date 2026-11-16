@@ -46,3 +46,25 @@ begin
     'vyora-oauth', 34126, 7, 'b2101d1416d60022c8e26f0861449e145822a5bcf446d8f15f3529b082689ad0';
 end
 $artifact$;
+
+-- Verrouille l'empreinte de cet artefact : toute republication d'un contenu
+-- différent échouera désormais (déclencheur _edge_function_artifact_guard).
+insert into public._edge_function_artifact_manifest
+  (name, slices_sha256, base64_chars, parts, bundle_chars, bundle_sha256, note)
+values (
+  'vyora-oauth',
+  '6eebdd18470425a8bd9c1fb3fee5470b52f98abda1ed3acf997536aa180c5a02',
+  13684,
+  7,
+  34126,
+  'b2101d1416d60022c8e26f0861449e145822a5bcf446d8f15f3529b082689ad0',
+  'publication verrouillée'
+)
+on conflict (name) do update set
+  slices_sha256 = excluded.slices_sha256,
+  base64_chars  = excluded.base64_chars,
+  parts         = excluded.parts,
+  bundle_chars  = excluded.bundle_chars,
+  bundle_sha256 = excluded.bundle_sha256,
+  note          = excluded.note,
+  sealed_at     = now();

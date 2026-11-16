@@ -88,13 +88,13 @@ describe('ordre des migrations / état des lieux', () => {
     expect(publication.corrige).toBe(true);
   });
 
-  it('#10 publie un bundle PLUS COURT, donc vulnérable (lu depuis sa branche)', () => {
-    // Lecture directe dans la branche de #10 : le test échouerait si #10 était
-    // corrigée entre-temps, ce qui serait une bonne nouvelle mais doit être vu.
+  it('#10 ne publie PLUS l’ancien bundle (corrigé le 14 novembre)', () => {
+    // Avant correction, cette migration publiait 18 868 caractères de bundle
+    // sans vérification d'identité. Elle est désormais un no-op documenté :
+    // plus d'en-tête de publication, donc `lirePublication` doit échouer.
     const sql = executerGit(['show', 'arena/vyora-mcp-connecteurs:supabase/migrations/20261116040000_vyora_oauth_artifact.sql']);
-    const publication = lirePublication(sql, '20261116040000', 'vyora-oauth');
-    expect(publication.chars).toBe(TAILLE_BUNDLE_VULNERABLE);
-    expect(publication.corrige).toBe(false);
+    expect(() => lirePublication(sql, '20261116040000', 'vyora-oauth')).toThrow();
+    expect(sql).toContain('publication RETIRÉE');
   });
 
   it('#9 ne publie AUCUN artefact oauth', () => {
@@ -108,7 +108,12 @@ describe('ordre des migrations / simulation des ordres possibles', () => {
   const vuln = { migration: '20261116040000', name: 'vyora-oauth', chars: TAILLE_BUNDLE_VULNERABLE, corrige: false } as const;
   const corr = { migration: '20261116060000', name: 'vyora-oauth', chars: TAILLE_BUNDLE_CORRIGE, corrige: true } as const;
 
-  it('#12 puis #10 → le bundle VULNÉRABLE revient (scénario à empêcher)', () => {
+  it('#12 puis #10 → le bundle VULNÉRABLE reviendrait SI #10 publiait encore', () => {
+    // Ce test décrit le mécanisme, pas l'état actuel du dépôt : il montre ce
+    // qui se passerait si une migration publiait un bundle plus ancien après
+    // une publication récente. C'est le risque que le verrou neutralise.
+    // L'état réel de #10 est vérifié dans `artifact-guard.test.ts`, qui
+    // constate que la publication a été retirée.
     const { etat } = rejouer([corr, vuln]);
     expect(etat?.corrige).toBe(false);
     expect(etat?.chars).toBe(TAILLE_BUNDLE_VULNERABLE);
@@ -132,11 +137,31 @@ describe('ordre des migrations / simulation des ordres possibles', () => {
     expect(etat?.chars).toBe(TAILLE_BUNDLE_CORRIGE);
   });
 
-  it('production actuelle (v1) puis #12 puis #10 → VULNÉRABLE de nouveau', () => {
-    // Le scénario catastrophe complet : la correction est appliquée puis
-    // annulée par une publication plus ancienne, sans aucune erreur visible.
+  it('production actuelle (v1) puis #12 puis #10 → le mécanisme réintroduirait l’ancien bundle', () => {
+    // Le scénario que le verrou de publication interdit désormais : la
+    // correction appliquée, puis annulée par une publication plus ancienne,
+    // sans erreur visible. La barrière est le déclencheur
+    // `_edge_function_artifact_guard` (voir `artifact-guard.test.ts`).
     const { etat } = rejouer([corr, vuln], vuln);
     expect(etat?.corrige).toBe(false);
+  });
+
+  it('#10 ne publie plus : le scénario ci-dessus ne peut plus se produire', () => {
+    // Constat sur l'état réel du dépôt : la migration de #10 a été neutralisée,
+    // elle ne contient plus ni delete ni insert sur la table des tranches.
+    const sql = executerGit([
+      'show', 'arena/vyora-mcp-connecteurs:supabase/migrations/20261116040000_vyora_oauth_artifact.sql',
+    ]);
+    expect(sql).not.toMatch(/^\s*insert into public\._edge_function_artifact_slices/m);
+    expect(sql).not.toMatch(/^\s*delete from public\._edge_function_artifact_slices/m);
+    expect(sql).toContain('publication RETIRÉE');
+  });
+
+  it('#10 tolère l’application avant #12 (manifeste absent)', () => {
+    const sql = executerGit([
+      'show', 'arena/vyora-mcp-connecteurs:supabase/migrations/20261116040000_vyora_oauth_artifact.sql',
+    ]);
+    expect(sql).toContain("to_regclass('public._edge_function_artifact_manifest')");
   });
 
   it('le dernier appliqué gagne, quel que soit l’horodatage', () => {

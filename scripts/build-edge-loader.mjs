@@ -190,6 +190,62 @@ if (CODE) {
 `;
 }
 
+/**
+ * Constantes de publication partagées par la migration, le chargeur et le verrou.
+ *
+ * Elles sont calculées ici, une seule fois, à partir du bundle réellement
+ * construit : aucun de ces nombres n'est recopié à la main.
+ */
+export function publicationConstants(slug, built) {
+  // Empreinte des tranches base64 telles qu'elles seront stockées. C'est la
+  // valeur que le déclencheur de la table comparera : le SHA-256 du *bundle*
+  // ne peut pas être calculé par Postgres (les tranches sont un gzip base64).
+  const slicesSha256 = createHash('sha256').update(built.base64, 'utf8').digest('hex');
+  return { slicesSha256, base64Chars: built.base64.length, chars: built.chars, parts: built.slices.length, sha256: built.sha256 };
+}
+
+/** Nom de la table du manifeste d'empreintes (verrou de publication). */
+export const MANIFEST_TABLE = '_edge_function_artifact_manifest';
+
+/**
+ * SQL de pose de l'épingle de publication.
+ *
+ * Écrit APRÈS la publication des tranches, dans la même migration : la
+ * transaction est atomique, donc soit les deux passent, soit aucune ne passe.
+ * À partir de là, toute migration qui tenterait de réécrire ces tranches avec
+ * un autre contenu échouera sur le déclencheur `_edge_function_artifact_guard`.
+ *
+ * Le générateur émet cette instruction pour *chaque* artefact qu'il publie.
+ * C'est ce qui rend la protection systématique : elle ne dépend pas de la
+ * mémoire de celui qui prépare la migration.
+ */
+export function renderSealSql(slug, built, note = 'publication verrouillée') {
+  const c = publicationConstants(slug, built);
+  return `
+-- Verrouille l'empreinte de cet artefact : toute republication d'un contenu
+-- différent échouera désormais (déclencheur _edge_function_artifact_guard).
+insert into public.${MANIFEST_TABLE}
+  (name, slices_sha256, base64_chars, parts, bundle_chars, bundle_sha256, note)
+values (
+  ${sqlLiteral(slug)},
+  ${sqlLiteral(c.slicesSha256)},
+  ${c.base64Chars},
+  ${c.parts},
+  ${c.chars},
+  ${sqlLiteral(c.sha256)},
+  ${sqlLiteral(note)}
+)
+on conflict (name) do update set
+  slices_sha256 = excluded.slices_sha256,
+  base64_chars  = excluded.base64_chars,
+  parts         = excluded.parts,
+  bundle_chars  = excluded.bundle_chars,
+  bundle_sha256 = excluded.bundle_sha256,
+  note          = excluded.note,
+  sealed_at     = now();
+`;
+}
+
 /** Échappement d'un texte en littéral SQL (quotes simples doublées). */
 export function sqlLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
@@ -266,7 +322,7 @@ begin
     ${sqlLiteral(slug)}, ${built.chars}, ${built.slices.length}, ${sqlLiteral(built.sha256)};
 end
 $artifact$;
-`;
+${renderSealSql(slug, built)}`;
 }
 
 function targetsFromArgs(argv) {
