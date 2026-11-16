@@ -875,17 +875,38 @@ describe('Business Grow', () => {
     expect(await screen.findByText(/Connexion vérifiée avec succès/)).toBeTruthy();
   });
 
+  /**
+   * Depuis l'unification, cette section rend le catalogue partagé (26
+   * fournisseurs), plus le sous-ensemble de 6 contrats. Conséquence directe, et
+   * c'est le point de ce test : sans connecteur écrit, le statut n'est plus
+   * « Non connecté » — qui laisserait croire qu'un clic suffirait — mais la
+   * cause réelle du blocage.
+   */
   it('affiche les intégrations sans fausse connexion et propose une demande d’activation', async () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
     expect(await screen.findByTestId('business-integrations')).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId('connector-facebook').textContent).toContain('Non connecté'));
-    const facebook = screen.getByTestId('connector-facebook').textContent ?? '';
-    expect(facebook).toContain('Non connecté');
-    expect(facebook).toContain('Demander l’activation');
+    // Facebook exige une approbation du fournisseur.
+    await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'));
+    const facebook = screen.getByTestId('integration-facebook').textContent ?? '';
+    expect(facebook).not.toContain('Non connecté');
     expect(facebook).not.toContain('Connecté');
-    expect(screen.getByTestId('connector-shopify').textContent).toContain('Non connecté');
-    expect(screen.getByTestId('connector-woocommerce')).toBeTruthy();
+    // Shopify n'a pas d'approbation externe : il lui manque nos identifiants.
+    expect(screen.getByTestId('integration-shopify').textContent).toContain('Configuration requise');
+    expect(screen.getByTestId('integration-woocommerce')).toBeTruthy();
+  });
+
+  it('le catalogue de 26 fournisseurs est le catalogue principal de Business Grow', async () => {
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    await screen.findByTestId('business-integrations');
+    // Fournisseurs hors des 6 contrats historiques : preuve que le catalogue
+    // principal est bien celui de 26, pas un sous-ensemble.
+    for (const id of ['gmail', 'google_drive', 'google_calendar', 'notion', 'hubspot', 'prestashop']) {
+      await waitFor(() => expect(screen.getByTestId(`integration-${id}`)).toBeTruthy());
+    }
+    // Et les services Google restent trois fiches distinctes.
+    expect(screen.getByTestId('integration-gmail')).not.toBe(screen.getByTestId('integration-google_drive'));
   });
 
   it('garde les demandes d’intégration dans l’entreprise active et ne prétend pas connecter le service externe', async () => {
@@ -897,14 +918,22 @@ describe('Business Grow', () => {
     });
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('connector-facebook');
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
-    fireEvent.click(within(facebook).getByRole('button', { name: 'Demander l’activation' }));
+    const facebook = await screen.findByTestId('integration-facebook');
+    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
+    // La demande se fait dans la fiche : la carte est un bouton, sans action
+    // imbriquée (un bouton dans un bouton serait invalide en HTML).
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
     expect(await screen.findByText(/Aucun service externe n’a été connecté/)).toBeTruthy();
     expect(businessMocks.requestIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
     expect(businessMocks.listIntegrations).toHaveBeenCalledWith('workspace-1');
-    expect(facebook.textContent).toContain('Demande enregistrée');
-    fireEvent.click(within(facebook).getByRole('button', { name: 'Annuler la demande' }));
+    // La demande est un état réel, distinct d'une connexion.
+    await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Activation demandée'));
+    expect(screen.getByTestId('integration-facebook').textContent).not.toContain('Connecté)');
+    fireEvent.click(screen.getByTestId('integration-facebook'));
+    const fiche2 = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche2).getByRole('button', { name: 'Annuler la demande' }));
     await waitFor(() => expect(businessMocks.cancelIntegration).toHaveBeenCalledWith('facebook', 'workspace-1'));
   });
 
@@ -913,31 +942,49 @@ describe('Business Grow', () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
     expect(await screen.findByText(/État des intégrations indisponible/)).toBeTruthy();
-    const facebook = screen.getByTestId('connector-facebook');
+    const facebook = screen.getByTestId('integration-facebook');
     expect(facebook.textContent).toContain('État inconnu');
     expect(facebook.textContent).not.toContain('Non connecté');
-    expect((within(facebook).getByRole('button', { name: 'Demander l’activation' }) as HTMLButtonElement).disabled).toBe(true);
+    // Aucune action n'est proposée tant que l'état n'est pas lu : la fiche
+    // explique le blocage au lieu d'offrir un bouton qui parierait sur la base.
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    expect(within(fiche).getByText(/État inconnu : la lecture des intégrations a échoué/i)).toBeTruthy();
+    expect(within(fiche).queryByRole('button', { name: 'Demander l’activation' })).toBeNull();
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Retour' }));
     businessMocks.listIntegrations.mockResolvedValueOnce({ connections: [{ id: 'other', workspace_id: 'workspace-2', connector_key: 'facebook', external_account_ref: null, status: 'pending', updated_at: '2026-11-13' }] });
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
     expect(await screen.findByText(/Réponse invalide pour cette entreprise/)).toBeTruthy();
     expect(facebook.textContent).toContain('État inconnu');
     businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+    // Relecture de la carte par requête fraîche : le nœud précédent a pu être
+    // remplacé par le changement d'état.
+    await waitFor(() =>
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+    );
   });
 
   it('ne réessaie pas une mutation d’intégration non confirmée et impose une nouvelle lecture', async () => {
     businessMocks.requestIntegration.mockRejectedValueOnce(new Error('Réponse perdue'));
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('connector-facebook');
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
-    fireEvent.click(within(facebook).getByRole('button', { name: 'Demander l’activation' }));
+    const facebook = await screen.findByTestId('integration-facebook');
+    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
     expect(await screen.findByText(/Opération non confirmée/)).toBeTruthy();
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
-    expect((within(facebook).getByRole('button', { name: 'Demander l’activation' }) as HTMLButtonElement).disabled).toBe(true);
+    // L'état est devenu inconnu : aucune action n'est réessayable avant relecture.
+    expect(screen.getByTestId('integration-facebook').textContent).toContain('État inconnu');
+    expect(within(fiche).queryByRole('button', { name: 'Demander l’activation' })).toBeNull();
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Retour' }));
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
-    await waitFor(() => expect(facebook.textContent).toContain('Non connecté'));
+    await waitFor(() =>
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+    );
+    // La mutation n'a jamais été rejouée.
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
   });
 
@@ -950,13 +997,19 @@ describe('Business Grow', () => {
     });
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('connector-facebook');
-    const disconnect = await within(facebook).findByRole('button', { name: 'Retirer l’association locale' });
-    fireEvent.click(disconnect);
+    const facebook = await screen.findByTestId('integration-facebook');
+    // Une ligne `connected` sans compte OAuth vérifié : jamais « Connecté ».
+    await waitFor(() => expect(facebook.textContent).toContain('Autorisation manquante'));
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Retirer l’association locale' }));
     expect(await screen.findByText(/Association locale retirée/)).toBeTruthy();
+    // Le message précise que la révocation distante n'a pas eu lieu.
     expect(screen.getByText(/révoquez-la également auprès de celui-ci/i)).toBeTruthy();
     expect(businessMocks.disconnectIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
-    expect(facebook.textContent).toContain('Déconnecté localement');
+    await waitFor(() =>
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+    );
   });
 
   it('applique le contrat BusinessGrowEntryIntent et permet d’activer le secours auto en routage manuel', async () => {

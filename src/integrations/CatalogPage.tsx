@@ -11,9 +11,12 @@ import {
 } from './catalog';
 import {
   STATUS_LABELS, STATUS_TONE, type ConnectedAccount, type IntegrationStatus,
-  accountFor, canConnect, deriveStatus, listAudit, listConnectedAccounts, missingCapabilities,
-  revokeConnection, summarize, type AuditEntry,
+  accountFor, canCancelRequest, canConnect, canRequestActivation, deriveStatus, listActivationRequests,
+  listAudit, listConnectedAccounts, missingCapabilities, normalizeProvider, revokeConnection,
+  summarize, toActivationRequests, type AuditEntry,
 } from './connections';
+import { businessGrowApi, type BusinessIntegrationConnection } from '../business/api';
+import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
 import '../ai/assistant.css';
 
@@ -38,85 +41,291 @@ import '../ai/assistant.css';
  * Connecter un nouveau fournisseur : aucun connecteur n'est écrit (Livraison 3).
  * Les fiches concernées affichent « Configuration requise » ou « Validation
  * externe requise », et le bouton est désactivé avec l'explication.
+ *//**
+ * Contrôleur d'état fourni par l'espace hôte (Business Grow).
+ *
+ * Business Grow possède déjà des compteurs de séquence et un verrou de mutation
+ * éprouvés par ses tests : les réimplémenter ici les affaiblirait. Quand ce
+ * contrôleur est fourni, il pilote entièrement l'état ; sinon le composant gère
+ * le sien (page `/app/connect`).
  */
-export default function CatalogPage() {
+export interface IntegrationsController {
+  connections: BusinessIntegrationConnection[] | null;
+  loadError: string | null;
+  busyKey: string | null;
+  notice: { tone: 'success' | 'error'; text: string } | null;
+  onRetry: () => void;
+  onRequest: (connectorKey: string) => void;
+  onCancel: (connectorKey: string) => void;
+  onDisconnect: (connectorKey: string) => void;
+}
+
+export function IntegrationsCenter({
+  workspaceId = null,
+  embedded = false,
+  controller,
+}: {
+  /** Entreprise active : les demandes d'activation y sont rattachées. */
+  workspaceId?: string | null;
+  /**
+   * Intégré à Business Grow : on ne rend pas l'en-tête de page (titre, retour),
+   * déjà fournis par l'espace hôte. Le contenu est identique.
+   */
+  embedded?: boolean;
+  controller?: IntegrationsController;
+}) {
+  const [interneConnections, setInterneConnections] = useState<BusinessIntegrationConnection[] | null>(null);
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [erreur, setErreur] = useState<string | null>(null);
+  const [interneLoadError, setInterneLoadError] = useState<string | null>(null);
+  /**
+   * Panne de la source OAuth, distincte de celle des demandes d'activation.
+   * Les deux sont signalées séparément : une source muette ne doit pas faire
+   * passer l'autre pour complète.
+   */
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [interneBusyKey, setInterneBusyKey] = useState<string | null>(null);
+  const [interneNotice, setInterneNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  /*
+   * Le contrôleur, s'il existe, fait autorité. Sinon, l'état local.
+   * Un seul chemin de lecture pour le rendu : impossible d'afficher un statut
+   * provenant d'une source que l'appelant n'a pas validée.
+   */
+  const connections = controller ? controller.connections : interneConnections;
+  const setConnections = controller ? () => {} : setInterneConnections;
+  const loadError = controller ? controller.loadError : interneLoadError;
+  const setLoadError = controller ? () => {} : setInterneLoadError;
+  const busyKey = controller ? controller.busyKey : interneBusyKey;
+  const setBusyKey = controller ? () => {} : setInterneBusyKey;
+  const notice = controller ? controller.notice : interneNotice;
+  const setNotice = controller ? () => {} : setInterneNotice;
+
   const [query, setQuery] = useState('');
   const [categorie, setCategorie] = useState<CatalogCategory | 'all'>('all');
   const [selection, setSelection] = useState<IntegrationEntry | null>(null);
   const [confirmation, setConfirmation] = useState<ConnectedAccount | null>(null);
   const [enCours, setEnCours] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
+  /**
+   * Lecture des trois sources, entreprise par entreprise.
+   *
+   * `connections` reste `null` tant que la lecture n'a pas réussi : c'est ce
+   * `null` qui affiche « État inconnu » et désactive toutes les actions. Une
+   * lecture échouée ne doit jamais ressembler à une absence de connexion.
+   *
+   * Les comptes OAuth et le journal sont lus à part : leur panne ne doit pas
+   * invalider les demandes d'activation, qui sont une autre source. Mais si la
+   * lecture des demandes échoue, aucune fiche n'affirme un statut de connexion.
+   */
   const charger = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [comptes, journal] = await Promise.all([listConnectedAccounts(), listAudit(30)]);
-      setAccounts(comptes);
-      setAudit(journal);
-      setErreur(null);
-    } catch (e) {
-      setAccounts([]);
-      setAudit([]);
-      setErreur(e instanceof Error ? e.message : 'Lecture des connexions impossible.');
-    } finally {
-      setLoading(false);
+    if (!workspaceId) {
+      setConnections(null);
+      setLoadError(null);
     }
-  }, []);
+    const [demandesRes, comptesRes, journalRes] = await Promise.allSettled([
+      listActivationRequests(workspaceId, businessGrowApi),
+      listConnectedAccounts(),
+      listAudit(30),
+    ]);
+
+    if (demandesRes.status === 'fulfilled') {
+      const recues = demandesRes.value;
+      /*
+       * Isolation par entreprise : le serveur filtre déjà sur `p_user_id` et
+       * `p_workspace_id`, mais une ligne portant un autre `workspace_id` en
+       * réponse signalerait un mélange. On refuse alors tout l'état au lieu de
+       * l'afficher partiellement — fail-closed.
+       */
+      const melange = recues.some((r) => r.workspace_id && workspaceId && r.workspace_id !== workspaceId);
+      if (melange) {
+        setConnections(null);
+        setLoadError('Réponse invalide pour cette entreprise : lecture refusée.');
+      } else {
+        setConnections(recues);
+        setLoadError(null);
+      }
+    } else {
+      setConnections(null);
+      setLoadError(
+        demandesRes.reason instanceof Error ? demandesRes.reason.message : 'Lecture impossible.',
+      );
+    }
+
+    if (comptesRes.status === 'fulfilled') {
+      setAccounts(comptesRes.value);
+      setOauthError(null);
+    } else {
+      setAccounts([]);
+      setOauthError(
+        comptesRes.reason instanceof Error ? comptesRes.reason.message : 'Lecture des connexions impossible.',
+      );
+    }
+    setAudit(journalRes.status === 'fulfilled' ? journalRes.value : []);
+  }, [workspaceId]);
 
   useEffect(() => {
+    // Avec un contrôleur, c'est lui qui lit : deux lectures concurrentes
+    // pourraient afficher un état plus ancien que celui qu'il vient de valider.
+    if (controller) return;
     void charger();
-  }, [charger]);
+  }, [charger, controller]);
 
   const resultats = useMemo(
     () => searchIntegrations(INTEGRATIONS, query, categorie),
     [query, categorie],
   );
 
-  const compte = useMemo(() => summarize(INTEGRATIONS, accounts), [accounts]);
   const parCategorie = useMemo(() => countByCategory(), []);
 
+  /** Statut d'un fournisseur, ou `null` si l'état n'est pas connu. */
+  const statutDe = useCallback(
+    (entry: IntegrationEntry): IntegrationStatus | null =>
+      connections === null
+        ? null
+        : deriveStatus(entry, accounts, entry.engine !== null, toActivationRequests(connections)),
+    [connections, accounts],
+  );
+
+  const compte = useMemo(() => {
+    const etats = INTEGRATIONS.map(statutDe).filter((s): s is IntegrationStatus => s !== null);
+    return summarize(INTEGRATIONS, accounts, etats);
+  }, [statutDe, accounts]);
+
+  const connectionFor = useCallback(
+    (entry: IntegrationEntry) =>
+      (connections ?? [])
+        .filter((c) => normalizeProvider(c.connector_key) === normalizeProvider(entry.id))
+        .sort((a, b) => a.updated_at.localeCompare(b.updated_at))
+        .at(-1) ?? null,
+    [connections],
+  );
+
+  /* ----------------------------- mutations ------------------------------ */
+
+  /**
+   * Une mutation non confirmée n'est jamais rejouée.
+   *
+   * Si la réponse se perd, l'état local devient inconnu : on vide `connections`
+   * pour forcer une relecture explicite. Réessayer aveuglément pourrait créer
+   * un doublon de demande côté serveur.
+   */
+  const apresMutationIncertaine = (erreur: unknown) => {
+    setConnections(null);
+    setLoadError(erreur instanceof Error ? erreur.message : 'Réponse perdue.');
+    setNotice({ tone: 'error', text: 'Opération non confirmée. Relisez l’état avant de réessayer.' });
+  };
+
+  const demander = async (entry: IntegrationEntry) => {
+    if (controller) { controller.onRequest(entry.id); return; }
+    if (!workspaceId) {
+      setNotice({ tone: 'error', text: 'Aucune entreprise active : la demande ne peut pas être enregistrée.' });
+      return;
+    }
+    const cle = `${entry.id}:request`;
+    setBusyKey(cle);
+    setNotice(null);
+    try {
+      await businessGrowApi.requestIntegration(entry.id, workspaceId);
+      setNotice({
+        tone: 'success',
+        text: `Demande enregistrée pour ${entry.name}. Aucun service externe n’a été connecté.`,
+      });
+      await charger();
+    } catch (e) {
+      apresMutationIncertaine(e);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const annuler = async (entry: IntegrationEntry) => {
+    if (controller) { controller.onCancel(entry.id); return; }
+    if (!workspaceId) return;
+    setBusyKey(`${entry.id}:cancel`);
+    setNotice(null);
+    try {
+      await businessGrowApi.cancelIntegration(entry.id, workspaceId);
+      setNotice({ tone: 'success', text: `Demande annulée pour ${entry.name}.` });
+      await charger();
+    } catch (e) {
+      apresMutationIncertaine(e);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  /**
+   * Retrait de l'association locale.
+   *
+   * Ce n'est **pas** une révocation : le serveur ne révoque rien chez le
+   * fournisseur (aucun jeton n'est même détenu aujourd'hui). Le libellé et le
+   * message le disent, pour que personne ne croie son accès Google fermé.
+   */
+  const retirerAssociation = async (entry: IntegrationEntry) => {
+    if (controller) { controller.onDisconnect(entry.id); return; }
+    if (!workspaceId) return;
+    setBusyKey(`${entry.id}:disconnect`);
+    setNotice(null);
+    try {
+      await businessGrowApi.disconnectIntegration(entry.id, workspaceId);
+      setNotice({
+        tone: 'success',
+        text: `Association locale retirée pour ${entry.name}. Si une autorisation existe chez le fournisseur, révoquez-la également auprès de celui-ci.`,
+      });
+      await charger();
+    } catch (e) {
+      apresMutationIncertaine(e);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  /** Révocation d'un compte OAuth réel — la seule qui touche le fournisseur. */
   const revoquer = async (compteCible: ConnectedAccount) => {
     setEnCours(true);
     try {
       const { remoteRevoked } = await revokeConnection(compteCible.id);
-      setMessage(
-        remoteRevoked
+      setNotice({
+        tone: 'success',
+        text: remoteRevoked
           ? 'Connexion révoquée chez le fournisseur et dans VYORA.'
           : 'Connexion désactivée dans VYORA. Le fournisseur n’a pas confirmé la révocation distante : révoquez aussi depuis votre compte si nécessaire.',
-      );
+      });
       setConfirmation(null);
       await charger();
     } catch (e) {
-      setMessage(`Révocation impossible : ${e instanceof Error ? e.message : 'erreur inconnue'}`);
+      setNotice({ tone: 'error', text: `Révocation impossible : ${e instanceof Error ? e.message : 'erreur inconnue'}` });
     } finally {
       setEnCours(false);
     }
   };
 
+  const enCoursGlobal = busyKey !== null || enCours;
+
   return (
-    <div className="vy-ambient min-h-[100dvh] bg-ink">
-      <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
-        {/* En-tête */}
-        <header className="mb-6">
-          <Link
-            to="/app/ai"
-            className="mb-3 inline-flex items-center gap-1.5 text-xs text-slate-400 transition hover:text-white"
-          >
-            <ArrowLeft size={13} />
-            Retour à l’assistant
-          </Link>
+    <div className={embedded ? 'bg-transparent' : 'vy-ambient min-h-[100dvh] bg-ink'}>
+      <div className={embedded ? 'w-full' : 'mx-auto w-full max-w-6xl px-4 py-8 sm:px-6'}>
+        {/* En-tête — fourni par l'espace hôte quand le centre y est intégré */}
+        <header className={embedded ? 'mb-5' : 'mb-6'}>
+          {!embedded && (
+            <>
+              <Link
+                to="/app/ai"
+                className="mb-3 inline-flex items-center gap-1.5 text-xs text-slate-400 transition hover:text-white"
+              >
+                <ArrowLeft size={13} />
+                Retour à l’assistant
+              </Link>
+            </>
+          )}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-brand-400/25 bg-brand-500/10 px-3 py-1 text-[0.7rem] text-brand-200">
               <Plug size={13} />
               VYORA Integrations
             </span>
-            {!loading && !erreur && (
+            {connections !== null && (
               <span className="text-[0.7rem] text-slate-500">
-                {compte.connected} connectée{compte.connected > 1 ? 's' : ''} · {INTEGRATIONS.length} disponibles au catalogue
+                {compte.connected} connectée{compte.connected > 1 ? 's' : ''} · {INTEGRATIONS.length} fournisseurs au catalogue
               </span>
             )}
           </div>
@@ -129,35 +338,65 @@ export default function CatalogPage() {
             permissions demandées et l’état actuel. Aucun accès n’est simulé :
             un fournisseur sans connecteur affiche son prérequis.
           </p>
+          {!workspaceId && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-200/80">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              Aucune entreprise active : le catalogue reste consultable, les demandes d’activation sont désactivées.
+            </p>
+          )}
         </header>
 
-        {erreur && (
+        {oauthError && (
           <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3 text-sm text-amber-100">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
             <div className="flex-1">
               <p className="font-medium">Impossible de lire vos connexions</p>
-              <p className="mt-0.5 text-xs text-amber-200/80">{erreur}</p>
+              <p className="mt-0.5 text-xs text-amber-200/80">{oauthError}</p>
               <p className="mt-1 text-xs text-amber-200/60">
-                Les fiches ci-dessous reflètent uniquement le catalogue. Aucun état de connexion n’est affiché.
+                Aucun compte connecté n’est affiché. Aucun « Connecté » n’est supposé à partir de cette source.
               </p>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => void charger()} icon={<RefreshCw size={14} />}>
+            <Button variant="ghost" size="sm" onClick={() => (controller ? controller.onRetry() : void charger())} icon={<RefreshCw size={14} />}>
               Réessayer
             </Button>
           </div>
         )}
 
-        {message && (
-          <div className="mb-5 flex items-start gap-2 rounded-xl border border-brand-400/25 bg-brand-500/10 px-3.5 py-2.5 text-xs text-brand-100">
-            <Check size={14} className="mt-0.5 shrink-0" />
-            <span className="flex-1">{message}</span>
-            <button type="button" onClick={() => setMessage(null)} aria-label="Masquer">
+        {loadError && (
+          <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] px-3.5 py-3 text-xs text-amber-100">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium">État des intégrations indisponible</p>
+              <p className="mt-0.5 text-amber-200/80">{loadError}</p>
+              <p className="mt-1 text-amber-200/60">
+                Aucun état de connexion n’est affiché ni supposé.
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => (controller ? controller.onRetry() : void charger())} icon={<RefreshCw size={14} />}>
+              Réessayer
+            </Button>
+          </div>
+        )}
+
+        {notice && (
+          <div
+            role="status"
+            className={cn(
+              'mb-5 flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs',
+              notice.tone === 'success'
+                ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100'
+                : 'border-rose-400/20 bg-rose-400/[0.06] text-rose-100',
+            )}
+          >
+            {notice.tone === 'success' ? <Check size={14} className="mt-0.5 shrink-0" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}
+            <span className="flex-1">{notice.text}</span>
+            <button type="button" onClick={() => setNotice(null)} aria-label="Masquer le message">
               <X size={13} />
             </button>
           </div>
         )}
 
-        {/* Comptes connectés */}
+        {/* Comptes réellement connectés */}
         {accounts.length > 0 && (
           <section className="mb-7">
             <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -226,12 +465,8 @@ export default function CatalogPage() {
         </div>
 
         {/* Grille */}
-        {loading ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-32 animate-pulse rounded-2xl border border-line bg-white/[0.03]" />
-            ))}
-          </div>
+        {connections === null && !loadError ? (
+          <p role="status" className="mb-4 text-xs text-slate-400">Chargement des intégrations…</p>
         ) : resultats.length === 0 ? (
           <div className="rounded-2xl border border-line bg-white/[0.02] px-6 py-10 text-center">
             <p className="text-sm text-slate-400">Aucune intégration ne correspond à cette recherche.</p>
@@ -245,7 +480,7 @@ export default function CatalogPage() {
               <Carte
                 key={entry.id}
                 entry={entry}
-                accounts={accounts}
+                statut={statutDe(entry)}
                 onOpen={() => setSelection(entry)}
               />
             ))}
@@ -274,15 +509,31 @@ export default function CatalogPage() {
             </Card>
           </section>
         )}
+
+        <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-amber-300/15 bg-amber-400/[0.04] px-3.5 py-3 text-[11px] leading-relaxed text-amber-100/80">
+          <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+          <p>
+            Les connexions et synchronisations fournisseur ne sont pas configurées ici. Une demande
+            enregistrée ne signifie pas qu’un service externe est connecté. Aucun secret n’est manipulé
+            par le navigateur.
+          </p>
+        </div>
       </div>
 
       {/* Fiche détaillée */}
       {selection && (
         <FicheDetail
           entry={selection}
-          accounts={accounts}
+          statut={statutDe(selection)}
+          compte={accountFor(selection, accounts)}
+          busy={enCoursGlobal}
+          connection={connectionFor(selection)}
           onClose={() => setSelection(null)}
           onRevoke={(compteCible) => setConfirmation(compteCible)}
+          entrepriseActive={Boolean(workspaceId)}
+          onRequest={() => void demander(selection)}
+          onCancelRequest={() => void annuler(selection)}
+          onDisconnect={() => void retirerAssociation(selection)}
         />
       )}
 
@@ -310,6 +561,24 @@ export default function CatalogPage() {
   );
 }
 
+/**
+ * `/app/connect` — même composant, même source de vérité.
+ *
+ * Ce n'est plus un catalogue parallèle : la page ne fait que fournir
+ * l'entreprise active, lue dans le contexte de session, au composant partagé.
+ */
+export default function CatalogPage() {
+  // Sans contexte (page montée hors session), l'entreprise est simplement
+  // inconnue : les demandes d'activation sont désactivées avec explication.
+  let workspaceId: string | null = null;
+  try {
+    workspaceId = useAuth().workspaceId ?? null;
+  } catch {
+    workspaceId = null;
+  }
+  return <IntegrationsCenter workspaceId={workspaceId} />;
+}
+
 /* ------------------------------- sous-vues -------------------------------- */
 
 function Filtre({
@@ -333,10 +602,21 @@ function Filtre({
   );
 }
 
+/**
+ * Carte du catalogue.
+ *
+ * `statut === null` signifie « état inconnu » : la lecture a échoué ou
+ * l'entreprise n'est pas résolue. On affiche alors « État inconnu » plutôt que
+ * de retomber sur « Non connecté », qui laisserait croire à une lecture
+ * réussie.
+ */
 function Carte({
-  entry, accounts, onOpen,
-}: { entry: IntegrationEntry; accounts: ConnectedAccount[]; onOpen: () => void }) {
-  const statut = deriveStatus(entry, accounts, entry.engine !== null);
+  entry, statut, onOpen,
+}: {
+  entry: IntegrationEntry;
+  statut: IntegrationStatus | null;
+  onOpen: () => void;
+}) {
   return (
     <button
       type="button"
@@ -350,7 +630,9 @@ function Carte({
           <p className="truncate text-sm font-semibold text-white">{entry.name}</p>
           <p className="text-[0.68rem] text-slate-500">{CATEGORY_LABELS[entry.category]}</p>
         </div>
-        <Badge tone={STATUS_TONE[statut]}>{STATUS_LABELS[statut]}</Badge>
+        <Badge tone={statut === null ? 'neutral' : STATUS_TONE[statut]}>
+          {statut === null ? 'État inconnu' : STATUS_LABELS[statut]}
+        </Badge>
       </div>
       <p className="mt-2.5 line-clamp-2 text-xs leading-relaxed text-slate-400">{entry.description}</p>
       <div className="mt-2.5 flex flex-wrap gap-1">
@@ -393,16 +675,33 @@ function Logo({ entry }: { entry: IntegrationEntry }) {
 }
 
 function FicheDetail({
-  entry, accounts, onClose, onRevoke,
+  entry, statut, compte, connection, busy, entrepriseActive,
+  onClose, onRevoke, onRequest, onCancelRequest, onDisconnect,
 }: {
   entry: IntegrationEntry;
-  accounts: ConnectedAccount[];
+  statut: IntegrationStatus | null;
+  compte: ConnectedAccount | null;
+  connection: BusinessIntegrationConnection | null;
+  busy: boolean;
+  /** Sans entreprise active, une demande ne peut pas être rattachée. */
+  entrepriseActive: boolean;
   onClose: () => void;
   onRevoke: (compte: ConnectedAccount) => void;
+  onRequest: () => void;
+  onCancelRequest: () => void;
+  onDisconnect: () => void;
 }) {
-  const statut = deriveStatus(entry, accounts, entry.engine !== null);
-  const compte = accountFor(entry, accounts);
-  const connectable = canConnect(entry, statut);
+  // Tant que l'état est inconnu, aucune action n'est proposée : on ne parie pas
+  // sur ce que contient la base.
+  const etatConnu = statut !== null;
+  // Une demande est toujours scopée à une entreprise : sans elle, le serveur
+  // refuserait ou la rattacherait à un contexte indéterminé.
+  const demandePossible = etatConnu && entrepriseActive && canRequestActivation(entry, statut);
+  const annulationPossible = etatConnu && canCancelRequest(statut);
+  // « Connecté » au sens du socle Business Grow (ligne `connected`) : on peut
+  // retirer l'association locale, même si aucun compte OAuth ne la corrobore.
+  const associationLocale = etatConnu && connection?.status === 'connected';
+  const connectable = etatConnu && canConnect(entry, statut);
   const manquantes = missingCapabilities(entry, compte);
 
   return (
@@ -418,7 +717,9 @@ function FicheDetail({
             <h2 className="truncate font-display text-lg font-semibold text-white">{entry.name}</h2>
             <p className="text-[0.7rem] text-slate-500">{CATEGORY_LABELS[entry.category]}</p>
           </div>
-          <Badge tone={STATUS_TONE[statut]}>{STATUS_LABELS[statut]}</Badge>
+          <Badge tone={statut === null ? 'neutral' : STATUS_TONE[statut]}>
+            {statut === null ? 'État inconnu' : STATUS_LABELS[statut]}
+          </Badge>
         </div>
 
         <p className="text-sm leading-relaxed text-slate-300">{entry.description}</p>
@@ -500,13 +801,90 @@ function FicheDetail({
         </section>
 
         {/* Action */}
-        <section className="mt-5">
-          {connectable ? (
-            <ConnectButton entry={entry} />
-          ) : (
-            <div className="rounded-lg border border-line bg-white/[0.03] px-3.5 py-3 text-xs leading-relaxed text-slate-400">
-              {expliquerIndisponibilite(statut, entry)}
+        <section className="mt-5 space-y-2">
+          {!etatConnu ? (
+            <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-3.5 py-3 text-xs leading-relaxed text-amber-100">
+              État inconnu : la lecture des intégrations a échoué. Aucune action n’est
+              proposée avant une relecture réussie.
             </div>
+          ) : (
+            <>
+              {connectable ? (
+                <ConnectButton entry={entry} />
+              ) : (
+                /*
+                 * L'explication du blocage reste toujours affichée : elle dit
+                 * pourquoi le bouton de connexion n'existe pas. La demande
+                 * d'activation, quand le serveur l'accepte, s'ajoute en dessous —
+                 * c'est une trace réelle, pas une connexion simulée.
+                 */
+                <div className="rounded-lg border border-line bg-white/[0.03] px-3.5 py-3 text-xs leading-relaxed text-slate-400">
+                  {expliquerIndisponibilite(statut, entry)}
+                </div>
+              )}
+
+              {demandePossible && (
+                <div className="rounded-lg border border-brand-400/25 bg-brand-500/[0.08] px-3.5 py-3">
+                  <p className="text-xs leading-relaxed text-slate-300">
+                    Vous pouvez enregistrer une demande d’activation pour {entry.name}.
+                    Elle sera traitée lorsque le connecteur officiel sera implémenté.
+                    Aucun service externe n’est connecté par cette action.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-2.5"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={onRequest}
+                    icon={<Plug size={13} />}
+                  >
+                    Demander l’activation
+                  </Button>
+                </div>
+              )}
+
+              {annulationPossible && (
+                <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.08] px-3.5 py-3">
+                  <p className="text-xs leading-relaxed text-amber-100">
+                    Demande enregistrée. Aucune connexion n’est établie tant que le
+                    connecteur officiel n’existe pas.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2.5"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={onCancelRequest}
+                    icon={<X size={13} />}
+                  >
+                    Annuler la demande
+                  </Button>
+                </div>
+              )}
+
+              {associationLocale && (
+                <div className="rounded-lg border border-line bg-white/[0.03] px-3.5 py-3">
+                  <p className="text-xs leading-relaxed text-slate-400">
+                    Retirer l’association locale détache VYORA de ce fournisseur pour
+                    cette entreprise. Aucune révocation n’est effectuée chez le
+                    fournisseur.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2.5"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={onDisconnect}
+                    icon={<Unplug size={13} />}
+                  >
+                    Retirer l’association locale
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </section>
 
@@ -544,6 +922,12 @@ function ConnectButton({ entry }: { entry: IntegrationEntry }) {
 
 /** Message honnête expliquant pourquoi le bouton n'est pas actif. */
 export function expliquerIndisponibilite(statut: IntegrationStatus, entry: IntegrationEntry): string {
+  if (statut === 'authorization_missing') {
+    return `Une association est enregistrée pour ${entry.name}, mais aucune autorisation n’a été obtenue auprès du fournisseur. Aucune donnée n’est accessible : il manque le consentement officiel, pas un réglage.`;
+  }
+  if (statut === 'requested') {
+    return `Votre demande d’activation pour ${entry.name} est enregistrée. Aucune connexion n’existe encore : le connecteur officiel n’est pas implémenté.`;
+  }
   switch (statut) {
     case 'needs_approval':
       return `Ce fournisseur exige une validation de son côté (${entry.auth.find((a) => a.externalApproval)?.externalApproval ?? 'approbation du fournisseur'}). VYORA ne peut pas contourner cette étape : la connexion sera proposée une fois l’approbation obtenue.`;
