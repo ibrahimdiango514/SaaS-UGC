@@ -12,8 +12,13 @@ fournisseur opérationnel sans preuve d'un appel réussi.
 | Tables `oauth_accounts` / `oauth_states` / `oauth_audit_log` | **en production** |
 | Edge Function `vyora-oauth` | **v1 ACTIVE** |
 | Clé `VYORA_OAUTH_ENCRYPTION_KEY` | **créée et vérifiée** |
+| Interface VYORA Connect (`/app/connect`) | **implémentée et testée** |
+| Outils MCP Google (`tools_list` / `tools_call`) | **implémentés et testés** |
 | **Identifiants Google** | **absents** |
 | Comptes Google réellement connectés | **aucun** |
+
+> Les deux lignes « absents » / « aucun » vont ensemble et ne changeront qu'à la
+> configuration des identifiants Google : voir `docs/mcp/configuration-google.md`.
 
 Le socle commun aux trois fournisseurs Google est donc en place et prouvé en
 production (401 sur requête non authentifiée, 400 `state_invalid` sur état
@@ -110,23 +115,39 @@ flux OAuth inexistant.
 - ~~Garde de capacités à l'usage (`read|draft|send|modify`).~~ Réalisé et testé.
 - ~~Révocation qui efface réellement les cryptogrammes.~~ Réalisé.
 
+- ~~Outils MCP de lecture et d'écriture~~ Réalisé : six outils exposés par
+  `tools/list` et exécutés par `tools/call` (voir section suivante).
+- ~~Interface VYORA Connect~~ Réalisée : `/app/connect`, avec états réels,
+  capacités séparées, révocation et journal.
+
+### Les six outils MCP Google
+
+| Outil | Capacité requise | Effet |
+|---|---|---|
+| `vyora_gmail_search` | `read` | recherche, métadonnées seules |
+| `vyora_gmail_read` | `read` | lit un message en `format=metadata` |
+| `vyora_gmail_draft` | `draft` | crée un brouillon — **n'envoie jamais** |
+| `vyora_gmail_send` | `send` | envoie — seul outil `destructiveHint: true` |
+| `vyora_drive_list` | `read` | liste les fichiers non supprimés |
+| `vyora_calendar_list` | `read` | liste les événements à venir |
+
+La capacité est vérifiée **avant tout appel réseau** : un compte sans `send` ne
+peut pas envoyer, même si l'outil est invoqué directement. Le jeton est
+déchiffré en mémoire, transmis en en-tête `Authorization`, et n'apparaît ni dans
+l'URL ni dans la réponse. Tout refus est journalisé (`action: 'denied'`).
+
 ### Reste à faire, dans l'ordre
 
 1. **Identifiants Google** (blocage externe) : créer le client OAuth, renseigner
    `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, déclarer l'URI de redirection.
+   Procédure complète dans **`docs/mcp/configuration-google.md`**.
 2. **Premier essai réel** : connecter un compte Gmail en capacité `read` seule,
    vérifier que `callback` enregistre le compte et que les jetons sont bien
    chiffrés en base.
 3. **Rafraîchissement planifié** : le code existe (`refresh`), mais aucune tâche
    périodique ne l'appelle encore. À brancher sur `pg_cron`.
-4. **Outils MCP de lecture** (`vyora_gmail_search`, `vyora_drive_list`,
-   `vyora_calendar_list`) : ils doivent appeler `check` avant toute requête,
-   rester en lecture seule au départ, et ne jamais republier un jeton.
-5. **Interface VYORA Connect** : connecter / gérer / révoquer, en affichant les
-   capacités réellement accordées et jamais un état supposé.
-6. **Drive et Calendar** : le socle est déjà commun (mêmes tables, mêmes RPC,
-   `provider` déjà contraint). Il ne reste que les appels métier et les tests
-   réels de chaque API.
-7. **Cinq fournisseurs non Google** : toujours bloqués par leurs autorisations
+4. **Vérification Google** : les scopes Gmail sont *restreints* ; l'application
+   reste plafonnée au mode Test tant que la procédure n'est pas passée.
+5. **Cinq fournisseurs non Google** : toujours bloqués par leurs autorisations
    propres (révision Meta, éligibilité TikTok, audit YouTube, compte WhatsApp
    Business vérifié).
