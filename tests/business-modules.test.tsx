@@ -69,9 +69,15 @@ describe('Registre des modules Business Growth', () => {
   });
 
   it('calcule les fuites de revenus à partir des enregistrements réels', () => {
+    // Les dates sont relatives à l'horloge du test : une date fixe « récente »
+    // finit par devenir « froide » au fil des jours et le test échouait sans
+    // qu'aucun code ne change. On garde l'intention (un lead froid, un lead
+    // récent) sans dépendre du jour où la suite est exécutée.
+    const daysAgo = (days: number) =>
+      new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
     const leads = [
-      record('lead-1', { name: 'A', estimatedValue: 75000, lastContactAt: '2026-10-01', status: 'nouveau' }),
-      record('lead-2', { name: 'B', estimatedValue: 25000, lastContactAt: '2026-11-12', status: 'qualifie' }),
+      record('lead-1', { name: 'A', estimatedValue: 75000, lastContactAt: daysAgo(45), status: 'nouveau' }),
+      record('lead-2', { name: 'B', estimatedValue: 25000, lastContactAt: daysAgo(1), status: 'qualifie' }),
     ];
     const invoices = [record('invoice-1', { amount: 120000, status: 'en_retard' })];
     const stock = [record('stock-1', { stock: 2, threshold: 10, price: 15000 })];
