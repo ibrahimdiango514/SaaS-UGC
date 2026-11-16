@@ -54,8 +54,13 @@ describe('parcours public', () => {
     fireEvent.click(screen.getAllByRole('link', { name: /Créer mon compte/ })[0]);
     await waitFor(() => expect(window.location.pathname).toBe('/inscription'));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte'), { timeout: 5000 });
+    // Parcours en trois étapes : identité → accès sécurisé → confirmation.
     expect(screen.getByLabelText('Nom complet')).toBeTruthy();
     expect(screen.getByLabelText('Adresse e-mail')).toBeTruthy();
+    // « Continuer » valide l'étape courante avant de révéler le mot de passe.
+    fireEvent.change(screen.getByLabelText('Nom complet'), { target: { value: 'Awa Traoré' } });
+    fireEvent.change(screen.getByLabelText('Adresse e-mail'), { target: { value: 'awa@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continuer/i }));
     expect(screen.getByLabelText(/Mot de passe/)).toBeTruthy();
     expect(screen.getByText('Confirmer le mot de passe')).toBeTruthy();
   });

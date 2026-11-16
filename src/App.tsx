@@ -26,6 +26,7 @@ const Presets = lazy(() => import('./pages/Presets'));
 const Subscription = lazy(() => import('./pages/Subscription'));
 const StudioPricing = lazy(() => import('./pages/StudioPricing'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Mcp = lazy(() => import('./pages/Mcp'));
 const Admin = lazy(() => import('./pages/Admin'));
 const VideoStudio = lazy(() => import('./studio/VideoStudio'));
 const GenerationStudio = lazy(() => import('./studio/GenerationStudio'));
@@ -88,6 +89,7 @@ export default function App() {
                       <Route path="abonnement" element={<Subscription />} />
                       <Route path="credits" element={<StudioPricing />} />
                       <Route path="paiement/retour" element={<PaymentReturn />} />
+                      <Route path="mcp" element={<Mcp />} />
                       <Route path="parametres" element={<Settings />} />
                     </Route>
                     <Route element={<AdminRoute />}>

@@ -460,12 +460,24 @@ export interface AdminProviderSpendSummary {
   history: AdminProviderSpendEntry[];
 }
 
-/** VYORA AI CORE — registre multi-fournisseurs (lecture admin, snapshot v2). */
+/**
+ * VYORA AI CORE — fournisseur du registre (lecture admin).
+ *
+ * Le registre décrit LUI-MÊME le protocole : `adapter_kind`, `base_url` et le
+ * NOM de la variable portant la clé (`api_key_env`). Aucune liste fermée n'est
+ * maintenue côté application : un fournisseur ajouté ici est servi sans
+ * modification de code. Aucun secret ne transite par ces champs.
+ */
 export interface AiCoreRegistryProvider {
   key: string;
   name: string;
   status: string;
   aggregator: boolean;
+  adapter_kind?: string | null;
+  base_url?: string | null;
+  models_url?: string | null;
+  api_key_env?: string | null;
+  account_id_env?: string | null;
 }
 
 export interface AiCoreRegistryModel {

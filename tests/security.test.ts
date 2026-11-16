@@ -66,13 +66,27 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(6);
+    // 7 endpoints sans JWT vérifié par la plateforme : chacun applique son
+    // propre contrôle (jeton Vault, signature HMAC, jeton d'administration, ou
+    // jeton personnel `vyora_mcp_…` haché pour vyora-mcp).
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(7);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
     // Surveillance fournisseur : jeton Vault comparé à temps constant + en-tête
     // dédié, jamais un JWT utilisateur (le job pg_cron n'en a pas).
     expect(config).toMatch(/\[functions\.vyora-provider-health\][\s\S]*?verify_jwt\s*=\s*false/);
+    // Serveur MCP : aucun client MCP ne présente de JWT Supabase. La fonction
+    // résout elle-même un jeton `vyora_mcp_…` (SHA-256 côté base) et refuse en
+    // 401 sans distinguer jeton inconnu, révoqué ou expiré.
+    expect(config).toMatch(/\[functions\.vyora-mcp\][\s\S]*?verify_jwt\s*=\s*false/);
+    const mcpProtocol = read('supabase/functions/vyora-mcp/protocol.ts');
+    const mcpStore = read('supabase/functions/vyora-mcp/supabase-store.ts');
+    expect(mcpStore).toContain('mcp_resolve_token');
+    expect(mcpProtocol).toContain('UNAUTHORIZED');
+    expect(mcpProtocol).toContain('WWW-Authenticate');
+    // Le nom de RPC ne vient jamais du corps de la requête : liste blanche.
+    expect(mcpStore).toContain('ALLOWED_RPCS');
     const providerHealth = read('supabase/functions/vyora-provider-health/index.ts');
     expect(providerHealth).toContain("x-vyora-cron");
     expect(providerHealth).toContain('constantTimeEqual');
