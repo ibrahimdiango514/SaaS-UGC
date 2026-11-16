@@ -65,7 +65,6 @@ export default function App() {
                   <Route element={<Layout />}>
                     <Route path="/app">
                       <Route index element={<Home />} />
-                      <Route path="ai" element={<Assistant />} />
                       <Route path="studio/accueil" element={<Dashboard />} />
                       <Route path="projets" element={<StudioProjects />} />
                       <Route path="projets/:id" element={<ProjectDetail />} />
@@ -92,6 +91,10 @@ export default function App() {
                       <Route path="paiement/retour" element={<PaymentReturn />} />
                       <Route path="parametres" element={<Settings />} />
                     </Route>
+                    {/* L'espace assistant a sa propre coquille : sidebar VYORA AI,
+                        pas la navigation Studio. Imbrique dans <Layout>, il heritait
+                        de l'ancienne sidebar et paraissait inchange. */}
+                    <Route path="/app/ai" element={<Assistant />} />
                     <Route element={<AdminRoute />}>
                       <Route path="/admin" element={<Admin />} />
                       <Route path="/app/admin" element={<Navigate to="/admin" replace />} />

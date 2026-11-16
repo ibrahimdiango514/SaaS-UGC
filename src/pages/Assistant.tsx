@@ -72,7 +72,10 @@ export default function Assistant() {
     : null;
 
   return (
-    <div className="flex h-[calc(100dvh-4.5rem)] overflow-hidden lg:h-[calc(100dvh-5rem)]">
+    // Cette page vit HORS du <Layout> Studio : sa coquille est la sidebar
+    // VYORA AI, pas la navigation Studio. La hauteur est donc celle de la
+    // fenêtre, et non celle d'un contenu inséré dans le Layout.
+    <div className="flex h-[100dvh] overflow-hidden bg-ink">
       {/* Rail desktop / tiroir mobile */}
       <div className={cn('hidden lg:flex', tiroirMobile && '!flex')}>
         <Sidebar
