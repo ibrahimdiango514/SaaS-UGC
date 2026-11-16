@@ -36,6 +36,8 @@ jobs:
           SITE: ${{ inputs.site_url || 'https://vyora-ugc.netlify.app' }}
           FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
           VIDEO_FN: https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/reelora-video
+          # Clé publique, identique à celle livrée au navigateur : aucun secret.
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz
         run: |
           set -u
           summary="$GITHUB_STEP_SUMMARY"
@@ -114,37 +116,46 @@ jobs:
           # --- Chargeur d'artefact `reelora-video` -----------------------------
           # Cette fonction ne contient qu'un chargeur : son code métier est
           # reconstruit à froid depuis `_edge_deploy_artifact`, puis vérifié par
-          # SHA-256. Un 401 prouve seulement que la fonction répond ; il ne
-          # prouve PAS que l'artefact se charge. `verify_jwt = true` interdit
-          # d'aller plus loin sans jeton, et aucun secret ne doit être utilisé
-          # ici. On mesure donc ce qui est mesurable : la fonction répond-elle,
-          # et son chargeur est-il capable de se déclarer (503 = artefact
-          # irrécupérable, ce qui est un vrai défaut, pas un refus d'accès).
+          # SHA-256 avant le moindre appel.
+          #
+          # Un appel SANS jeton ne prouve rien sur l'artefact : la passerelle
+          # Supabase refuse en 401 AVANT d'exécuter la fonction. On envoie donc
+          # la clé `publishable`, qui est publique par construction (elle est
+          # livrée dans le bundle navigateur, cf. `src/lib/supabase.ts`) et
+          # n'ouvre aucun droit d'administration. Sans session utilisateur, nos
+          # propres handlers répondent alors 401 avec un code qui leur est
+          # propre ; la passerelle, elle, répond `UNAUTHORIZED_NO_AUTH_HEADER`.
+          # Distinguer les deux formes est ce qui prouve que le chargeur a bien
+          # tourné : un échec de chargement donnerait 503 `ARTIFACT_LOAD_FAILED`
+          # avec le motif exact du décalage d'empreinte.
           video_url="${VIDEO_FN}"
+          publishable="${SUPABASE_PUBLISHABLE_KEY}"
           v_rc=0
           v_code=$(curl -sS -o /tmp/vfn.json -w '%{http_code}' --max-time 30 \
-            -X POST "$video_url" -H 'content-type: application/json' \
+            -X POST "$video_url" \
+            -H "apikey: $publishable" -H "Authorization: Bearer $publishable" \
+            -H 'content-type: application/json' \
             --data '{"action":"catalog"}' 2>/tmp/vfn.err) || v_rc=$?
           v_body=$(head -c 300 /tmp/vfn.json 2>/dev/null | tr '\n' ' ')
           {
             echo "| Chargeur reelora-video | \`$video_url\` |"
-            echo "| HTTP chargeur | $v_code (curl rc=$v_rc) |"
+            echo "| HTTP chargeur (clé publishable) | $v_code (curl rc=$v_rc) |"
             echo "| Réponse | \`${v_body:-vide}\` |"
             echo
           } >> "$summary"
           if [ "$v_rc" -ne 0 ]; then
             echo "::warning::Chargeur reelora-video : aucune réponse (curl rc=$v_rc)."
+          elif [ "$v_code" = "503" ] || printf '%s' "$v_body" | grep -q 'ARTIFACT_LOAD_FAILED'; then
+            echo "::error::Le chargeur tourne mais l'artefact ne se charge pas : le code publié n'est pas servi."
+            exit 1
+          elif printf '%s' "$v_body" | grep -q 'UNAUTHORIZED_NO_AUTH_HEADER'; then
+            echo "::warning::La passerelle a refusé l'appel (401 passerelle) : le chargeur n'a pas été exécuté, il n'est donc pas prouvé."
+          elif [ "$v_code" = "401" ] || [ "$v_code" = "200" ]; then
+            echo "OK: chargeur exécuté (réponse venant de la fonction, pas de la passerelle)."
           else
-            case "$v_code" in
-              401) echo "OK: chargeur vivant, jeton exigé." ;;
-              503)
-                echo "::error::Chargeur vivant mais artefact non chargeable (503) : le code déployé ne sert pas."
-                exit 1
-                ;;
-              *) echo "::warning::Chargeur reelora-video : code inattendu $v_code." ;;
-            esac
-            echo "::notice::reelora-video HTTP $v_code · réponse ${v_body:-vide}"
+            echo "::warning::Chargeur reelora-video : code inattendu $v_code."
           fi
+          echo "::notice::reelora-video HTTP $v_code · réponse ${v_body:-vide}"
 
       - name: Détails réseau (DNS et TLS), pour trancher une absence de réponse
         env:
