@@ -147,10 +147,15 @@ function postgresPreviewStore(): PreviewStore {
     async set(id, record, expiresAt) {
       const db = requiredSql();
       const expire = new Date(expiresAt).toISOString();
+      // `JSON.stringify` enveloppé de `json()` explicite : sans cela, le pilote
+      // sérialise l'objet en LIGNE composée postgres `(...)` et `::jsonb`
+      // échoue — la colonne finissait par contenir une chaîne, l'aperçu était
+      // écrit mais jamais relu, et la confirmation répondait `PREVIEW_EXPIRED`.
+      const payload = JSON.stringify(record);
       await db`
         insert into saas_ugc.ugc_import_previews (id, user_id, workspace_id, payload, expires_at)
         values (${id}, ${record.userId}::uuid, ${record.workspaceId}::uuid,
-                ${JSON.stringify(record)}::jsonb, ${expire}::timestamptz)
+                (${payload}::text)::jsonb, ${expire}::timestamptz)
         on conflict (id) do update
           set payload = excluded.payload, expires_at = excluded.expires_at
       `;

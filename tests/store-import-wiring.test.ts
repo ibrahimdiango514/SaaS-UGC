@@ -61,12 +61,28 @@ function fausseBase(enregistrements: Array<Record<string, unknown>>): Fabrique {
     const params = valeurs as unknown[];
     if (texte.includes('insert into saas_ugc.ugc_import_previews')) {
       // (id, user_id, workspace_id, payload, expires_at)
-      apercus.set(String(params[0]), { payload: JSON.parse(String(params[3])), expires: String(params[4]) });
+      //
+      // Défaut observé en production : le payload était passé comme objet JS,
+      // le pilote `postgres` le sérialisait en LIGNE composée `(...)`, et
+      // `::jsonb` produisait une CHAÎNE. L'aperçu s'écrivait alors sans jamais
+      // pouvoir être relu — la confirmation répondait `PREVIEW_EXPIRED`. On
+      // vérifie donc ici que la valeur transmise est bien du JSON.
+      // On reproduit la sérialisation de `postgres` : un objet JS devient une
+      // LIGNE COMPOSÉE `(...)`, pas du JSON. C'est ce qui a produit la panne —
+      // une doublure qui accepterait l'objet masquerait le défaut.
+      const valeur = params[3];
+      const brut = typeof valeur === 'object' && valeur !== null
+        ? `(${Object.values(valeur as Record<string, unknown>).map((v) => String(v)).join(',')})`
+        : String(valeur);
+      const estJson = brut.trimStart().startsWith('{');
+      apercus.set(String(params[0]), { payload: estJson ? JSON.parse(brut) : brut, expires: String(params[4]) });
       return Promise.resolve([]);
     }
     if (texte.includes('from saas_ugc.ugc_import_previews')) {
       const trouve = apercus.get(String(params[0]));
-      return Promise.resolve(trouve ? [{ payload: trouve.payload }] : []);
+      // `payload` est typé jsonb : une valeur non-objet n'y est pas relisible.
+      const exploitable = trouve && typeof trouve.payload === 'object';
+      return Promise.resolve(exploitable ? [{ payload: trouve.payload }] : []);
     }
     if (texte.includes('delete from saas_ugc.ugc_import_previews')) {
       if (params.length === 0) apercus.clear();
@@ -181,6 +197,34 @@ describe('bundle store-import exécuté', () => {
     expect(Number(enregistrements[0].price_amount)).toBe(12000);
     expect(enregistrements[0].price_currency).toBe('XOF');
     expect(enregistrements[0].name).toBe('Sable fin');
+  });
+
+  it('relit l’aperçu qu’il vient d’écrire (stockage partagé)', async () => {
+    // Sans persistance exploitable, l'aperçu est écrit puis introuvable : la
+    // confirmation échoue en 409 malgré un aperçu valide. C'est ce que
+    // produisait la sérialisation en ligne composée.
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const gestionnaire = chargerBundle(enregistrements);
+    const apercu = await (await gestionnaire(requeteApercu(
+      'name,price,currency\nSable fin,3000,XOF',
+    ))).json() as { data: { previewId: string } };
+
+    const confirmation = new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+        selection: [0],
+      }),
+    });
+    const reponse = await gestionnaire(confirmation);
+    const corps = await reponse.json() as { data?: { created: number }; error?: { code: string } };
+
+    expect(corps.error, `refus inattendu : ${JSON.stringify(corps.error)}`).toBeUndefined();
+    expect(corps.data?.created).toBe(1);
   });
 
   it('refuse un fichier illisible sans écrire quoi que ce soit', async () => {
