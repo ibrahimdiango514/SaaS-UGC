@@ -149,7 +149,24 @@ l'empreinte, et `mcp_tokens.token_prefix` les 8 premiers caractères publics.
 
 ---
 
-## 13. Nettoyage de la campagne
+## 13. Boucle complète interface → serveur MCP (test de bout en bout)
+
+Ce test ne réutilise aucun jeton fabriqué à la main : il part de la RPC que
+l'interface appelle réellement.
+
+| Étape | Résultat |
+| --- | --- |
+| `mcp_create_token('e2e-commit', 'Claude Desktop', 'claude', `{read}`, 1)` en tant qu'utilisateur connecté | secret de 53 caractères, préfixe `vyora_mcp_82jqLS5V`, `token_id` et `connection_id` renvoyés |
+| `tools/call` sur `vyora_account_info` avec ce jeton, contre la fonction déployée | **HTTP 200**, `isError: false`, `user_id` = `373436db-0f06-4888-a489-e9c60d7fbd8b` (propriétaire du jeton) |
+| `mcp_revoke_token(<token_id>)` par le même utilisateur | `revoked: true` |
+| Même `tools/call` après révocation | **HTTP 401**, `-32001`, « Jeton MCP invalide. » |
+
+La révocation est donc effective **immédiatement**, sans cache ni délai.
+
+La garde anti-doublon a également été éprouvée par accident : deux créations
+avec le même libellé dans la même transaction ont renvoyé `duplicate_label`.
+
+## 14. Nettoyage de la campagne
 
 Les jetons de vérification (`verif-A`, `verif-B`, `test-A`) ont été **révoqués**,
 puis supprimés avec les connexions, le journal et les données de test :
