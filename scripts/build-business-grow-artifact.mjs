@@ -5,52 +5,56 @@
  * ## Pourquoi
  * La fonction Edge est déployée par un canal qui ne transmet pas fidèlement une
  * source multi-fichiers : un import relatif vers `./handler.ts` produirait un
- * `BOOT_ERROR`. Le code est donc bundlé (esbuild), compressé (gzip
- * déterministe) puis encodé en base64 dans un chargeur court. Le code exécuté
- * en production est exactement celui de ce dépôt.
+ * `BOOT_ERROR`, et un corps long arrive tronqué. Le code est donc bundlé
+ * (esbuild), puis **lu par un chargeur court depuis un commit épinglé** du
+ * dépôt public. Le code exécuté en production est exactement celui de ce dépôt.
  *
  * ## Déterminisme
- * `gzipSync` écrit un horodatage (MTIME) : deux exécutions du même code
- * produiraient deux empreintes. MTIME est forcé à 0, l'artefact est donc
- * reproductible octet pour octet — vérifié par `tests/business-grow-artifact.test.ts`.
+ * Le bundle est reproductible caractère pour caractère : `artifact()` recompile
+ * la source et les tests comparent le résultat au fichier committé. C'est ce qui
+ * garantit que l'empreinte épinglée désigne bien un contenu connu.
  *
- * ## Trois fichiers générés
- *  - `business-grow.edge.js` : le bundle exact (39 Ko). C'est lui qui est
- *    publié dans `public._edge_function_artifact` (nom + SHA-256).
- *  - `business-grow/loader.ts` : **la source déployée en production**. Courte
- *    (~2 Ko), elle lit le bundle en base et vérifie taille + SHA-256 avant de
- *    l'exécuter. Le canal de déploiement altère les corps longs (incident v18 :
- *    payload inline de 16 Ko arrivé corrompu ⇒ `WORKER_ERROR`) ; un fichier
- *    court ne peut pas l'être sans que le SHA-256 le révèle.
- *  - `business-grow/bootstrap.ts` : variante autonome (bundle inline
- *    gzip+base64), sans dépendance à la base. À réserver à un canal fiable
- *    (`supabase functions deploy`).
+ * ## Deux fichiers, pas plus
+ *  - `business-grow.edge.js` : le bundle exact (88 231 caractères). C'est lui
+ *    qui est publié, donc épinglé par empreinte.
+ *  - `business-grow/loader.ts` : **la seule source déployée**. Courte (~3,4 Ko),
+ *    elle télécharge ce bundle au commit épinglé, vérifie taille puis SHA-256,
+ *    et n'exécute rien si l'un des deux diffère.
+ *
+ * Le chargeur « artefact en base » et la variante gzip inline ont été retirés :
+ * aucun des deux n'était déployé, et laisser croire l'inverse a déjà fait
+ * valider un chargeur que la production n'exécutait pas.
  *
  * ## Usage
- *   node scripts/build-business-grow-artifact.mjs           # écrit les trois fichiers
- *   node scripts/build-business-grow-artifact.mjs --check   # échoue si désynchronisé
- *   node scripts/build-business-grow-artifact.mjs --print   # empreinte seulement
+ *   BG_PIN_COMMIT=<sha40> node scripts/build-business-grow-artifact.mjs          # écrit les deux fichiers
+ *   BG_PIN_COMMIT=<sha40> node scripts/build-business-grow-artifact.mjs --check  # échoue si désynchronisé
+ *   node scripts/build-business-grow-artifact.mjs --print                        # empreinte seulement
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
-import { gzipSync } from 'node:zlib';
 import esbuild from 'esbuild';
+import { renderGithubLoader as rendreChargeurGithub, verifierChargeur } from './edge-github-loader.mjs';
 
 export const ENTRY = 'supabase/functions/business-grow/index.ts';
-export const LOADER = 'supabase/functions/business-grow/bootstrap.ts';
+/**
+ * Le chargeur RÉELLEMENT déployé porte le mécanisme « GitHub épinglé » depuis
+ * la Phase A. `bootstrap.ts` a été retiré : il n'était pas déployé, contenait
+ * des placeholders de gabarit, et prétendre le contraire a déjà coûté une phase
+ * entière de vérification. L'historique Git en garde la trace.
+ */
+export const LOADER = 'supabase/functions/business-grow/loader.ts';
 export const HOSTED_LOADER = 'supabase/functions/business-grow/loader.ts';
 export const BUNDLE = 'supabase/functions/business-grow.edge.js';
 /**
  * Chargeur épinglé sur un commit du dépôt public.
  *
- * Ajouté parce que le canal de déploiement n'accepte que des corps courts : ni
- * le bundle (88 k) ni son SQL d'insertion ne passent. `store-import` résout ce
- * problème depuis des mois via une URL contenant un SHA de commit — une telle
- * URL ne peut pas changer de contenu.
+ * Le canal de déploiement n'accepte que des corps courts : ni le bundle (88 k)
+ * ni son SQL d'insertion ne passent. Une URL contenant un SHA de commit ne peut
+ * pas changer de contenu — c'est ce qui rend l'empreinte vérifiable.
  */
-export const GITHUB_LOADER = 'supabase/functions/business-grow/loader-github.ts';
+export const GITHUB_LOADER = 'supabase/functions/business-grow/loader.ts';
 export const GITHUB_REPO = 'ibrahimdiango514/SaaS-UGC';
 export const ARTIFACT_TABLE = '_edge_function_artifact';
 export const ARTIFACT_NAME = 'business-grow';
@@ -103,287 +107,46 @@ export function bundleBusinessGrow(root = process.cwd()) {
   return source;
 }
 
-/** gzip reproductible : ni horodatage, ni champ OS variable. */
-export function deterministicGzip(input) {
-  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
-  return gzipSync(buf, { level: 9, mtime: 0, portable: true });
-}
-
 export function artifact(root = process.cwd()) {
   const source = bundleBusinessGrow(root);
-  const gz = deterministicGzip(source);
-  const payload = gz.toString('base64');
   const sha256 = createHash('sha256').update(source, 'utf8').digest('hex');
-  if (payload.includes('"') || payload.includes('\\')) {
-    throw new Error('base64 inattendu : échappement requis');
-  }
-  return { source, payload, sha256, chars: source.length, gzBytes: gz.length };
+  return { source, sha256, chars: source.length };
 }
 
-export function renderLoader({ payload, sha256, chars }) {
-  // Le canal de déploiement tronque toute CONSTANTE de plus de 20 000
-  // caractères (le fichier lui-même reste toléré au-delà : le chargeur de
-  // production fait ~23 Ko). Le payload voyage donc en plusieurs morceaux,
-  // chacun largement sous la limite, reconcaténés avant décompression.
-  const CHUNKS = 4;
-  const size = Math.ceil(payload.length / CHUNKS);
-  const parts = [];
-  for (let i = 0; i < payload.length; i += size) {
-    parts.push(payload.slice(i, i + size));
-  }
-  const consts = parts
-    .map((p, i) => `const PAYLOAD_${i + 1} = "${p}";`)
-    .join('\n');
-  const join = parts.map((_, i) => `PAYLOAD_${i + 1}`).join(' + ');
-  return `// business-grow — artefact de déploiement autonome.
-// Généré par scripts/build-business-grow-artifact.mjs (esbuild --minify).
-// Bundle gzip+base64 (morceaux < 20 Ko, tronquables par le canal de déploiement),
-// intégrité vérifiée par SHA-256 à froid. Code exécuté = code du dépôt.
-import postgres from "npm:postgres@3.4.5";
-${consts}
-const PAYLOAD = ${join};
-const ARTIFACT_SHA256 = "${sha256}";
-const ARTIFACT_CHARS = ${chars};
-const bytes = Uint8Array.from(atob(PAYLOAD), (c) => c.charCodeAt(0));
-const CODE = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
-if (CODE.length !== ARTIFACT_CHARS) throw new Error("artifact_size_mismatch");
-const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(CODE));
-const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-if (hex !== ARTIFACT_SHA256) throw new Error("artifact_digest_mismatch");
-// Le bundle est exécuté par new Function : il ne peut contenir aucun import.
-// Le module postgres lui est donc fourni ici, avant exécution.
-(globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;
-new Function(CODE)();
-`;
-}
-
-/**
- * Chargeur déployé : lit le bundle dans `public._edge_function_artifact`.
- *
- * Écrit sans gabarit imbriqué (concaténations) pour rester lisible ici, et
- * volontairement court : c'est le seul texte qui transite par le canal de
- * déploiement.
- */
-export function renderHostedLoader({ sha256, chars }) {
-  return [
-    '// business-grow — chargeur de production (seule source déployée).',
-    '// Généré par scripts/build-business-grow-artifact.mjs : ne pas éditer.',
-    '//',
-    '// Le canal de déploiement altère les sources longues : ce fichier reste court.',
-    '// Le code métier (bundle esbuild de ce dossier) est lu dans',
-    '// public.' + ARTIFACT_TABLE + ' par nom + SHA-256, puis vérifié avant exécution :',
-    '// un artefact absent ou modifié n\'est jamais exécuté.',
-    'import postgres from "npm:postgres@3.4.5";',
-    '',
-    'const ARTIFACT_NAME = "' + ARTIFACT_NAME + '";',
-    'const ARTIFACT_SHA256 = "' + sha256 + '";',
-    'const ARTIFACT_CHARS = ' + chars + ';',
-    '',
-    'async function readArtifact(): Promise<string> {',
-    '  const base = Deno.env.get("SUPABASE_URL") ?? "";',
-    '  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";',
-    '  if (!base || !key) throw new Error("runtime_env_missing");',
-    '  const url = base + "/rest/v1/' + ARTIFACT_TABLE + '?select=source&name=eq." + ARTIFACT_NAME +',
-    '    "&sha256=eq." + ARTIFACT_SHA256;',
-    '  const res = await fetch(url, {',
-    '    headers: { apikey: key, Authorization: "Bearer " + key },',
-    '    signal: AbortSignal.timeout(15000),',
-    '  });',
-    '  if (!res.ok) throw new Error("artifact_read_failed:" + res.status);',
-    '  const rows = (await res.json()) as Array<{ source?: unknown }>;',
-    '  const source = rows[0]?.source;',
-    '  if (typeof source !== "string") throw new Error("artifact_missing");',
-    '  if (source.length !== ARTIFACT_CHARS) throw new Error("artifact_size_mismatch:" + source.length);',
-    '  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));',
-    '  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");',
-    '  if (hex !== ARTIFACT_SHA256) throw new Error("artifact_digest_mismatch");',
-    '  return source;',
-    '}',
-    '',
-    'let CODE = "";',
-    'let failure = "";',
-    '// Trois essais : une lecture ratée à froid ne doit pas figer l\'instance en panne.',
-    'for (let attempt = 1; attempt <= 3 && !CODE; attempt++) {',
-    '  try {',
-    '    CODE = await readArtifact();',
-    '    failure = "";',
-    '  } catch (error) {',
-    '    failure = error instanceof Error ? error.message : String(error);',
-    '    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));',
-    '  }',
-    '}',
-    '',
-    'if (CODE) {',
-    '  // Le bundle s\'exécute hors module : il ne contient aucun import et reçoit',
-    '  // postgres ici, AVANT son exécution. Il enregistre lui-même Deno.serve.',
-    '  (globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;',
-    '  new Function(CODE)();',
-    '} else {',
-    '  // Panne explicite et lisible par le navigateur (CORS ouvert : la réponse ne',
-    '  // contient qu\'un code d\'erreur), au lieu d\'un 500 opaque pris pour une',
-    '  // absence de backend.',
-    '  console.error("business-grow artifact load failed: " + failure);',
-    '  const headers = {',
-    '    "Content-Type": "application/json",',
-    '    "Access-Control-Allow-Origin": "*",',
-    '    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
-    '    "Access-Control-Allow-Methods": "POST, OPTIONS",',
-    '  };',
-    '  const body = JSON.stringify({',
-    '    error: {',
-    '      code: "BUSINESS_GROW_ARTIFACT_UNAVAILABLE",',
-    '      message: "Le service Business Grow n\'a pas pu charger son code (" + failure + ").",',
-    '    },',
-    '  });',
-    '  Deno.serve((request: Request) =>',
-    '    request.method === "OPTIONS"',
-    '      ? new Response("ok", { headers })',
-    '      : new Response(body, { status: 503, headers })',
-    '  );',
-    '}',
-    '',
-  ].join('\n');
-}
-
-/**
- * Chargeur GitHub épinglé — seul texte qui transite par le canal de déploiement.
- *
- * ## Pourquoi le fichier est comparé TEL QUEL
- * `store-import` retire le saut de ligne final avant de calculer l'empreinte.
- * Ce détail est invisible tant qu'on ne l'a pas rencontré : appliqué ici, il
- * donnait `9429baaf…` au lieu de `5578a53b…`, donc un refus de chargement en
- * production. L'empreinte porte ici sur le fichier exactement tel qu'il est
- * committé, saut de ligne compris.
- *
- * ## Pourquoi le commit et jamais `main`
- * `main` avance : la même URL servirait demain un autre contenu, et une
- * vérification par empreinte transforme alors le service en panne. Un SHA de
- * commit est immuable, donc l'empreinte reste valable.
- */
+/** Chargeur déployé : bundle lu à un commit épinglé, vérifié avant exécution. */
 export function renderGithubLoader({ sha256, chars }, commit) {
-  return [
-    '// business-grow — chargeur épinglé sur un commit du dépôt public.',
-    '//',
-    '// Le code métier est le bundle du dépôt, lu à un commit PRÉCIS (jamais `main`',
-    '// ni une branche mouvante) : une URL contenant un SHA de commit ne peut pas',
-    '// changer de contenu, et la taille + l\'empreinte SHA-256 sont vérifiées avant',
-    '// toute exécution. Un bundle absent, tronqué, reformaté ou modifié n\'est',
-    '// JAMAIS exécuté.',
-    '//',
-    '// Régénérer avec : node scripts/build-business-grow-artifact.mjs',
-    'import postgres from "' + POSTGRES + '";',
-    '',
-    'const REPO = "' + GITHUB_REPO + '";',
-    'const COMMIT = "' + commit + '";',
-    'const PATH = "supabase/functions/business-grow.edge.js";',
-    'const ARTIFACT_SHA256 = "' + sha256 + '";',
-    'const ARTIFACT_CHARS = ' + chars + ';',
-    '',
-    '// Le fichier est comparé caractère pour caractère, saut de ligne final COMPRIS :',
-    '// l\'empreinte porte sur le fichier tel qu\'il est committé.',
-    'async function charger(): Promise<string> {',
-    '  const urls = [',
-    '    "https://raw.githubusercontent.com/" + REPO + "/" + COMMIT + "/" + PATH,',
-    '    "https://api.github.com/repos/" + REPO + "/contents/" + PATH + "?ref=" + COMMIT,',
-    '  ];',
-    '  const echecs: string[] = [];',
-    '  for (const url of urls) {',
-    '    try {',
-    '      const res = await fetch(url, {',
-    '        headers: url.startsWith("https://api.github.com/")',
-    '          ? { accept: "application/vnd.github.raw+json" }',
-    '          : {},',
-    '        signal: AbortSignal.timeout(15000),',
-    '      });',
-    '      if (!res.ok) { echecs.push("http_" + res.status); continue; }',
-    '      const source = await res.text();',
-    '      if (source.length !== ARTIFACT_CHARS) { echecs.push("taille_" + source.length); continue; }',
-    '      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));',
-    '      const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");',
-    '      if (hex !== ARTIFACT_SHA256) { echecs.push("empreinte_" + hex.slice(0, 8)); continue; }',
-    '      return source;',
-    '    } catch (error) {',
-    '      echecs.push(error instanceof Error ? error.name : "reseau");',
-    '    }',
-    '  }',
-    '  throw new Error(echecs.join(","));',
-    '}',
-    '',
-    'let CODE = "";',
-    'let failure = "";',
-    'for (let essai = 1; essai <= 3 && !CODE; essai++) {',
-    '  try {',
-    '    CODE = await charger();',
-    '    failure = "";',
-    '  } catch (error) {',
-    '    failure = error instanceof Error ? error.message : String(error);',
-    '    if (essai < 3) await new Promise((r) => setTimeout(r, 400 * essai));',
-    '  }',
-    '}',
-    '',
-    'if (CODE) {',
-    '  (globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;',
-    '  new Function(CODE)();',
-    '} else {',
-    '  // Panne explicite et lisible, jamais un accès ouvert ni un 500 opaque.',
-    '  console.error("business-grow artifact load failed: " + failure);',
-    '  const headers = {',
-    '    "Content-Type": "application/json",',
-    '    "Access-Control-Allow-Origin": "*",',
-    '    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
-    '    "Access-Control-Allow-Methods": "POST, OPTIONS",',
-    '  };',
-    '  const body = JSON.stringify({',
-    '    error: {',
-    '      code: "BUSINESS_GROW_ARTIFACT_UNAVAILABLE",',
-    '      message: "Le service Business Grow n\'a pas pu charger son code (" + failure + ").",',
-    '    },',
-    '  });',
-    '  Deno.serve((request: Request) =>',
-    '    request.method === "OPTIONS"',
-    '      ? new Response("ok", { headers })',
-    '      : new Response(body, { status: 503, headers })',
-    '  );',
-    '}',
-    '',
-  ].join('\n');
+  const code = rendreChargeurGithub({
+    fonction: 'business-grow',
+    path: BUNDLE,
+    sha256,
+    chars,
+    commit,
+    chargeur: '__bgPostgres',
+    codeIndisponible: 'BUSINESS_GROW_ARTIFACT_UNAVAILABLE',
+  });
+  const problemes = verifierChargeur(code);
+  if (problemes.length) {
+    throw new Error(`chargeur business-grow non conforme : ${problemes.join(', ')}`);
+  }
+  return code;
 }
 
 const isMain = process.argv[1] && process.argv[1].endsWith('build-business-grow-artifact.mjs');
 if (isMain) {
   const built = artifact();
   console.log(`bundle     : ${built.chars} caractères`);
-  console.log(`gzip       : ${built.gzBytes} octets`);
-  console.log(`payload    : ${built.payload.length} caractères base64`);
   console.log(`sha256     : ${built.sha256}`);
-  if (process.argv.includes('--github')) {
-    // Le commit d'épinglage est celui que l'opérateur désigne explicitement :
-    // on ne devine ni ne fige automatiquement HEAD, qui pourrait ne pas être
-    // encore poussé (le chargeur téléchargerait alors un 404).
-    const commit = (process.env.BG_PIN_COMMIT || '').trim().toLowerCase();
-    if (!/^[0-9a-f]{40}$/.test(commit)) {
-      console.error('BG_PIN_COMMIT doit être un SHA de commit complet (40 hexadécimaux).');
-      process.exit(1);
-    }
-    const code = renderGithubLoader(built, commit);
-    if (process.argv.includes('--check')) {
-      const current = readFileSync(join(process.cwd(), GITHUB_LOADER), 'utf8');
-      if (current !== code) {
-        console.error(`chargeur GitHub désynchronisé : ${GITHUB_LOADER} (commit épinglé ${commit})`);
-        process.exit(1);
-      }
-      console.log(`chargeur GitHub à jour (commit ${commit.slice(0, 12)}, ${code.length} caractères)`);
-      process.exit(0);
-    }
-    writeFileSync(join(process.cwd(), GITHUB_LOADER), code);
-    console.log(`écrit      : ${GITHUB_LOADER} (${code.length} caractères, commit ${commit.slice(0, 12)})`);
-    process.exit(0);
-  }
   if (process.argv.includes('--print')) process.exit(0);
 
+  // Un seul chargeur est produit : celui réellement déployé (GitHub épinglé).
+  // Le bundle est écrit à part, car c'est lui qui est committé puis épinglé.
+  const commit = (process.env.BG_PIN_COMMIT || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    console.error('BG_PIN_COMMIT doit être un SHA de commit complet (40 hexadécimaux).');
+    process.exit(1);
+  }
   const outputs = [
-    [LOADER, renderLoader(built)],
-    [HOSTED_LOADER, renderHostedLoader(built)],
+    [LOADER, renderGithubLoader(built, commit)],
     [BUNDLE, built.source],
   ];
   if (process.argv.includes('--check')) {
