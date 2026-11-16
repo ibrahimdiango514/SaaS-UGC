@@ -35,6 +35,7 @@ jobs:
         env:
           SITE: ${{ inputs.site_url || 'https://vyora-ugc.netlify.app' }}
           FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
+          VIDEO_FN: https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/reelora-video
         run: |
           set -u
           summary="$GITHUB_STEP_SUMMARY"
@@ -108,6 +109,41 @@ jobs:
               *)   echo "::warning::Code inattendu ($fn_code) pour un appel anonyme." ;;
             esac
             echo "::notice::store-import HTTP $fn_code · réponse ${fn_body:-vide}"
+          fi
+
+          # --- Chargeur d'artefact `reelora-video` -----------------------------
+          # Cette fonction ne contient qu'un chargeur : son code métier est
+          # reconstruit à froid depuis `_edge_deploy_artifact`, puis vérifié par
+          # SHA-256. Un 401 prouve seulement que la fonction répond ; il ne
+          # prouve PAS que l'artefact se charge. `verify_jwt = true` interdit
+          # d'aller plus loin sans jeton, et aucun secret ne doit être utilisé
+          # ici. On mesure donc ce qui est mesurable : la fonction répond-elle,
+          # et son chargeur est-il capable de se déclarer (503 = artefact
+          # irrécupérable, ce qui est un vrai défaut, pas un refus d'accès).
+          video_url="${VIDEO_FN}"
+          v_rc=0
+          v_code=$(curl -sS -o /tmp/vfn.json -w '%{http_code}' --max-time 30 \
+            -X POST "$video_url" -H 'content-type: application/json' \
+            --data '{"action":"catalog"}' 2>/tmp/vfn.err) || v_rc=$?
+          v_body=$(head -c 300 /tmp/vfn.json 2>/dev/null | tr '\n' ' ')
+          {
+            echo "| Chargeur reelora-video | \`$video_url\` |"
+            echo "| HTTP chargeur | $v_code (curl rc=$v_rc) |"
+            echo "| Réponse | \`${v_body:-vide}\` |"
+            echo
+          } >> "$summary"
+          if [ "$v_rc" -ne 0 ]; then
+            echo "::warning::Chargeur reelora-video : aucune réponse (curl rc=$v_rc)."
+          else
+            case "$v_code" in
+              401) echo "OK: chargeur vivant, jeton exigé." ;;
+              503)
+                echo "::error::Chargeur vivant mais artefact non chargeable (503) : le code déployé ne sert pas."
+                exit 1
+                ;;
+              *) echo "::warning::Chargeur reelora-video : code inattendu $v_code." ;;
+            esac
+            echo "::notice::reelora-video HTTP $v_code · réponse ${v_body:-vide}"
           fi
 
       - name: Détails réseau (DNS et TLS), pour trancher une absence de réponse
