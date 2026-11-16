@@ -39,6 +39,15 @@ export interface NormalizedProduct {
   imageUrl: string | null;
   categories: string[];
   variants: ProductVariant[];
+  /**
+   * Quantité disponible, quand la source la fournit.
+   *
+   * `null` signifie « inconnu », et non « zéro » : confondre les deux ferait
+   * afficher « en rupture » sur tout un catalogue dont la colonne stock est
+   * simplement absente. Un stock négatif est une anomalie : il est écarté avec
+   * un avertissement, pas ramené à zéro.
+   */
+  stock: number | null;
   /** Empreinte de déduplication — voir `productFingerprint`. */
   fingerprint: string;
   /** Provenance, pour l'audit et le message d'erreur. */
@@ -77,6 +86,33 @@ const ZERO_DECIMAL_CURRENCIES = new Set([
   'XOF', 'XAF', 'XPF', 'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'RWF', 'GNF', 'KMF', 'DJF', 'PYG', 'VUV',
 ]);
 
+/**
+ * Devises connues : celles que l'application sait formater et écrire.
+ *
+ * Une devise absente de cette liste n'est pas « exotique mais valable » : elle
+ * n'a pas d'exposant connu, donc un prix dans cette devise serait converti avec
+ * un facteur arbitraire. On retombe sur la devise par défaut **en le disant**,
+ * plutôt que d'inventer une conversion.
+ */
+export const KNOWN_CURRENCIES = new Set([
+  ...['XOF', 'XAF', 'XPF', 'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'RWF', 'GNF', 'KMF', 'DJF', 'PYG', 'VUV'],
+  'EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'NZD', 'SEK', 'NOK', 'DKK',
+  'CNY', 'HKD', 'SGD', 'INR', 'BRL', 'MXN', 'ZAR', 'NGN', 'GHS', 'MAD', 'TND', 'DZD', 'EGP',
+  'AED', 'SAR', 'TRY', 'PLN', 'CZK', 'HUF', 'RON', 'BGN', 'ILS', 'THB', 'IDR', 'MYR', 'PHP', 'TWD',
+]);
+
+/** Ramène une devise reçue à une devise connue, sinon la devise par défaut. */
+export function normalizeCurrency(raw: unknown): { currency: string; warning?: string } {
+  const valeur = String(raw ?? '').trim().toUpperCase();
+  if (!valeur) return { currency: DEFAULT_CURRENCY };
+  // Certains fichiers mettent le symbole plutôt que le code.
+  const symboles: Record<string, string> = { '€': 'EUR', '$': 'USD', '£': 'GBP', '¥': 'JPY' };
+  const code = symboles[valeur] ?? valeur;
+  if (!/^[A-Z]{3}$/.test(code)) return { currency: DEFAULT_CURRENCY, warning: `devise « ${valeur} » inconnue, remplacée par ${DEFAULT_CURRENCY}` };
+  if (!KNOWN_CURRENCIES.has(code)) return { currency: DEFAULT_CURRENCY, warning: `devise « ${valeur} » non prise en charge, remplacée par ${DEFAULT_CURRENCY}` };
+  return { currency: code };
+}
+
 /** Nombre de décimales d'une devise. */
 export function currencyExponent(currency: string): number {
   return ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 0 : 2;
@@ -97,7 +133,13 @@ export function parsePriceMinor(raw: unknown, currency: string): { minor: number
     if (!Number.isFinite(raw) || raw < 0) return { minor: null, warning: 'prix numérique invalide' };
     // Les API Shopify fournissent déjà des chaînes décimales ; un nombre reçu
     // ici est une valeur en unité principale.
-    return { minor: Math.round(raw * 10 ** exponent) };
+    //
+    // `Math.round` ne suffit pas : un tableur stocke 24.9 en binaire, et
+    // `24.9 * 100` vaut 2490.0000000000005. Sur une ligne isolée l'écart est
+    // négligeable, mais une multiplication répétée sur un catalogue entier
+    // finit par produire des centimes fantômes. On arrondit donc au centième
+    // d'unité mineure avant l'arrondi final.
+    return { minor: Math.round(Number((raw * 10 ** exponent).toFixed(6))) };
   }
 
   const texte = String(raw).trim();
@@ -264,6 +306,7 @@ export function buildProduct(input: {
   imageUrl?: unknown;
   categories?: unknown;
   variants?: ProductVariant[];
+  stock?: unknown;
   source: NormalizedProduct['source'];
   warnings?: string[];
 }): NormalizedProduct | { error: string } {
@@ -272,6 +315,9 @@ export function buildProduct(input: {
 
   const currency = (input.currency ?? DEFAULT_CURRENCY).toUpperCase().slice(0, 3);
   const categories = normalizeCategories(input.categories);
+  const avertissements = [...(input.warnings ?? [])];
+  const stock = parseStock(input.stock);
+  if (stock.warning) avertissements.push(stock.warning);
 
   return {
     name,
@@ -282,10 +328,31 @@ export function buildProduct(input: {
     imageUrl: safeRemoteUrl(input.imageUrl),
     categories,
     variants: (input.variants ?? []).slice(0, LIMITS.variants),
+    stock: stock.value,
     fingerprint: productFingerprint(name, categories),
     source: input.source,
-    warnings: input.warnings ?? [],
+    warnings: avertissements,
   };
+}
+
+/**
+ * Lit une quantité en stock.
+ *
+ * Trois issues, volontairement distinctes :
+ *   - valeur absente → `null` (inconnu), sans avertissement : une colonne stock
+ *     facultative n'est pas une anomalie ;
+ *   - valeur illisible ou négative → `null` **avec** un avertissement : la
+ *     donnée est fausse, et le taire ferait croire à un stock nul ;
+ *   - valeur valide → l'entier.
+ */
+export function parseStock(raw: unknown): { value: number | null; warning?: string } {
+  if (raw === null || raw === undefined || raw === '') return { value: null };
+  const texte = String(raw).trim().replace(/\s/g, '').replace(',', '.');
+  if (!/^-?\d+(\.\d+)?$/.test(texte)) return { value: null, warning: 'stock illisible, écarté' };
+  const valeur = Number(texte);
+  if (!Number.isFinite(valeur)) return { value: null, warning: 'stock illisible, écarté' };
+  if (valeur < 0) return { value: null, warning: 'stock négatif, écarté' };
+  return { value: Math.floor(valeur) };
 }
 
 /**
