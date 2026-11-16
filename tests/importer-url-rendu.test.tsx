@@ -34,8 +34,8 @@ const APERCU = {
   },
   summary: { total: 4, importable: 3, duplicateInBatch: 1, duplicateExisting: 1, withWarnings: 1, priced: 4, unpriced: 0 },
   products: [
-    { index: 0, name: 'Sérum Éclat 30 ml', price: '12 000 F CFA', currency: 'XOF', productUrl: 'https://serum-eclat.example/p/serum', warnings: [], duplicate: null as const, importable: true },
-    { index: 1, name: 'Crème Nuit réparatrice', price: '8 500 F CFA', currency: 'XOF', productUrl: 'https://serum-eclat.example/p/creme', warnings: [], duplicate: null as const, importable: true },
+    { index: 0, name: 'Sérum Éclat 30 ml', price: '12 000 F CFA', currency: 'XOF', productUrl: 'https://serum-eclat.example/p/serum', warnings: [], duplicate: null, importable: true },
+    { index: 1, name: 'Crème Nuit réparatrice', price: '8 500 F CFA', currency: 'XOF', productUrl: 'https://serum-eclat.example/p/creme', warnings: [], duplicate: null, importable: true },
     { index: 2, name: 'Coffret rituel', price: '19 900 F CFA', currency: 'XOF', productUrl: 'https://serum-eclat.example/p/coffret', warnings: ['description vide'], duplicate: 'existing' as const, importable: true },
     { index: 3, name: 'SERUM ECLAT 30 ML', price: '12 000 F CFA', currency: 'XOF', productUrl: null, warnings: [], duplicate: 'in-batch' as const, importable: false },
   ],
