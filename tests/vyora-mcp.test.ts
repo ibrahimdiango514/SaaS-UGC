@@ -556,3 +556,159 @@ describe('vyora-mcp / cas réel : deux jetons, deux comptes', () => {
     expect((result.body as { error?: { code: number } }).error?.code).toBe(INVALID_PARAMS);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Adaptateur PostgREST : vérifie le contrat réel avec la base (URLs, en-têtes,
+// absence de connexion Postgres directe, aucune fuite de secret).
+// ---------------------------------------------------------------------------
+import { createDependencies } from '../supabase/functions/vyora-mcp/supabase-store.ts';
+
+interface Call {
+  url: string;
+  init: RequestInit;
+  body: string | null;
+}
+
+function fakeFetch(responses: Record<string, { status?: number; json?: unknown; text?: string }>) {
+  const calls: Call[] = [];
+  const impl = (async (url: string, init: RequestInit = {}) => {
+    const body = typeof init.body === 'string' ? init.body : null;
+    calls.push({ url: String(url), init, body });
+    const key = Object.keys(responses).find((needle) => String(url).includes(needle));
+    const spec = key ? responses[key] : { status: 404, json: null };
+    const text = spec.text !== undefined ? spec.text : JSON.stringify(spec.json ?? null);
+    return {
+      ok: (spec.status ?? 200) < 400,
+      status: spec.status ?? 200,
+      json: async () => JSON.parse(text),
+      text: async () => text,
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+  return { impl, calls };
+}
+
+function store(fetchImpl: typeof fetch, writeEnabledFlag = false) {
+  return createDependencies({
+    baseUrl: 'https://exemple.supabase.co/',
+    serviceKey: 'cle-service-de-test',
+    writeEnabled: writeEnabledFlag,
+    serverInfo: { name: 'vyora-mcp', version: 'test' },
+    fetchImpl,
+  });
+}
+
+describe('vyora-mcp / adaptateur PostgREST', () => {
+  it('résout un jeton via /rest/v1/rpc/mcp_resolve_token et construit l\'identité', async () => {
+    const { impl, calls } = fakeFetch({
+      'rpc/mcp_resolve_token': {
+        json: [{ token_id: TOKEN_A, user_id: USER_A, connection_id: 'conn-a', scopes: ['read'], token_prefix: 'vyora_mcp_abcd1234' }],
+      },
+    });
+    const deps = store(impl);
+    const identity = await deps.resolveToken(SECRET_A);
+    expect(identity).toEqual({
+      userId: USER_A,
+      tokenId: TOKEN_A,
+      connectionId: 'conn-a',
+      scopes: ['read'],
+      tokenPrefix: 'vyora_mcp_abcd1234',
+    });
+    expect(calls[0].url).toBe('https://exemple.supabase.co/rest/v1/rpc/mcp_resolve_token');
+    expect(calls[0].body).toBe(JSON.stringify({ p_secret: SECRET_A }));
+    const headers = calls[0].init.headers as Record<string, string>;
+    expect(headers.apikey).toBe('cle-service-de-test');
+  });
+
+  it('renvoie null pour un tableau vide (jeton inconnu, révoqué ou expiré)', async () => {
+    const { impl } = fakeFetch({ 'rpc/mcp_resolve_token': { json: [] } });
+    expect(await store(impl).resolveToken(SECRET_A)).toBeNull();
+  });
+
+  it('renvoie null si la base répond une erreur, sans propager le corps', async () => {
+    const { impl } = fakeFetch({ 'rpc/mcp_resolve_token': { status: 400, text: 'details de schema internes' } });
+    await expect(store(impl).resolveToken(SECRET_A)).rejects.toThrow('rpc_failed:mcp_resolve_token:400');
+    try {
+      await store(impl).resolveToken(SECRET_A);
+    } catch (error) {
+      expect(String(error)).not.toContain('details de schema internes');
+    }
+  });
+
+  it('refuse un nom de RPC hors liste blanche', async () => {
+    const { impl } = fakeFetch({});
+    const deps = store(impl);
+    await expect(deps.callRpc('pg_read_file', { p_user_id: USER_A })).rejects.toThrow('rpc_not_allowed');
+  });
+
+  it('autorise par défaut, refuse seulement sur allowed=false explicite', async () => {
+    const identite = { userId: USER_A, tokenId: TOKEN_A, connectionId: null, scopes: ['read'], tokenPrefix: 'p' };
+    const defaut = fakeFetch({ 'mcp_tool_permissions': { json: [] } });
+    expect(await store(defaut.impl).isToolPermitted(identite, 'vyora_projects_list', 'read')).toBe(true);
+
+    const refuse = fakeFetch({ 'mcp_tool_permissions': { json: [{ allowed: false }] } });
+    expect(await store(refuse.impl).isToolPermitted(identite, 'vyora_projects_list', 'read')).toBe(false);
+  });
+
+  it('n\'active l\'écriture que sur true exact', () => {
+    const { impl } = fakeFetch({});
+    expect(store(impl, false).writeEnabled).toBe(false);
+    expect(store(impl, true).writeEnabled).toBe(true);
+  });
+
+  it('journalise via mcp_log_activity avec un objet p_payload, sans jeton en clair', async () => {
+    const { impl, calls } = fakeFetch({ 'rpc/mcp_log_activity': { json: 7 } });
+    const deps = store(impl);
+    await deps.logActivity({
+      userId: USER_A,
+      tokenId: TOKEN_A,
+      connectionId: null,
+      tokenPrefix: 'vyora_mcp_abcd1234',
+      method: 'tools/call',
+      toolName: 'vyora_projects_list',
+      outcome: 'ok',
+      durationMs: 5,
+      resultSize: 120,
+    });
+    const payload = JSON.parse(calls[0].body ?? '{}');
+    expect(payload).toHaveProperty('p_payload');
+    expect(payload.p_payload).toMatchObject({ user_id: USER_A, method: 'tools/call', outcome: 'ok' });
+    expect(calls[0].body).not.toContain(SECRET_A);
+  });
+
+  it('une panne de journalisation ou de trace ne remonte jamais d\'exception', async () => {
+    const broken = (async () => {
+      throw new Error('reseau indisponible');
+    }) as unknown as typeof fetch;
+    const deps = store(broken);
+    await expect(deps.logActivity({
+      userId: USER_A,
+      tokenId: TOKEN_A,
+      connectionId: null,
+      tokenPrefix: 'p',
+      method: 'ping',
+      outcome: 'ok',
+    })).resolves.toBeUndefined();
+    await expect(deps.touchToken(TOKEN_A)).resolves.toBeUndefined();
+  });
+
+  it('bout en bout : une requête HTTP authentifiée ne lit que le compte du jeton', async () => {
+    const { impl, calls } = fakeFetch({
+      'rpc/mcp_resolve_token': {
+        json: [{ token_id: TOKEN_A, user_id: USER_A, connection_id: null, scopes: ['read'], token_prefix: 'vyora_mcp_abcd1234' }],
+      },
+      'mcp_tool_permissions': { json: [] },
+      'rpc/mcp_projects_list': { json: { total: 1, items: [{ title: 'PROJET SECRET A' }], limit: 20, offset: 0 } },
+    });
+    const deps = store(impl);
+    const result = await handleMcpHttp(deps, {
+      method: 'POST',
+      authorization: `Bearer ${SECRET_A}`,
+      body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'vyora_projects_list', arguments: {} } },
+    });
+    const call = calls.find((entry) => entry.url.includes('rpc/mcp_projects_list'));
+    expect(call).toBeDefined();
+    expect(JSON.parse(call?.body ?? '{}')).toEqual({ p_user_id: USER_A, p_limit: 20, p_offset: 0 });
+    const payload = result.body as { result: { isError: boolean } };
+    expect(payload.result.isError).toBe(false);
+  });
+});

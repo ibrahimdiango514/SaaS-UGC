@@ -72,3 +72,10 @@ verify_jwt = false
 # SasPay ; ne livre que par le règlement idempotent, après vérification.
 [functions.vyora-payments-reconcile]
 verify_jwt = false
+
+# Serveur MCP VYORA. L'authentification ne repose PAS sur un JWT Supabase mais
+# sur un jeton personnel `vyora_mcp_…` vérifié par la fonction elle-même
+# (`mcp_resolve_token`, SHA-256 côté base). `verify_jwt` doit donc rester false :
+# aucun client MCP (Claude, Cursor, VS Code…) ne présente de JWT Supabase.
+[functions.vyora-mcp]
+verify_jwt = false
