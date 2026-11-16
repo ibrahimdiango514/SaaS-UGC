@@ -43,3 +43,12 @@
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# Relais zero-secret vers l'Edge Function `reelora-video` (Studio, références
+# multiples). Le navigateur n'appelle jamais *.supabase.co directement : il
+# passe par cette origine, et le relais ajoute le jeton et les en-têtes.
+# Même motif que le relais business-grow ci-dessus : aucun secret dans le
+# bundle, aucune clé côté client.
+[[edge_functions]]
+  path = "/api/reelora-video"
+  function = "reelora-video"
