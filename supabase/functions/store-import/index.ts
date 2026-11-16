@@ -276,12 +276,13 @@ const store: StoreImportDependencies = {
              p.name,
              nullif(p.product_facts->>'sku', '') as sku,
              nullif(p.product_facts->>'platform_id', '') as platform_id,
-             coalesce(
-               (select array_agg(v.sku) from saas_ugc.ugc_product_variants v
-                 where v.product_id = p.id and v.sku is not null),
-               '{}'::text[]
-             ) as variant_skus
+             coalesce(v.skus, '{}'::text[]) as variant_skus
         from saas_ugc.ugc_products p
+        left join lateral (
+          select array_agg(vv.sku) as skus
+            from saas_ugc.ugc_product_variants vv
+           where vv.product_id = p.id and vv.sku is not null
+        ) v on true
        where p.workspace_id = ${workspaceId}::uuid
        order by p.name
        limit 5000
