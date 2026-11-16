@@ -33,17 +33,47 @@ export function Composer({
   sending,
   mode,
   onModeChange,
+  suggestion,
+  onSuggestionUsed,
+  label = 'Votre message',
+  placeholder = 'Demandez, analysez, créez… (Entrée pour envoyer, Maj+Entrée pour un retour à la ligne)',
+  sendLabel = 'Envoyer le message',
 }: {
   onSend: (content: string, mode: AiMode, attachments: AiAttachment[]) => Promise<boolean>;
   sending: boolean;
   mode: AiMode;
   onModeChange: (mode: AiMode) => void;
+  /**
+   * Texte pré-rempli depuis l'extérieur (suggestions de l'accueil). Le
+   * composant reste contrôlé : on ne manipule jamais son DOM de l'extérieur,
+   * ce qui désynchroniserait l'état React du champ affiché.
+   */
+  suggestion?: string | null;
+  onSuggestionUsed?: () => void;
+  /** Libellé accessible du champ, selon l'espace qui héberge le composeur. */
+  label?: string;
+  placeholder?: string;
+  /**
+   * Libellé du bouton d'envoi. L'espace autonome utilise une icône seule
+   * (`Envoyer le message`) ; Business Grow expose un bouton texte « Envoyer »,
+   * comme dans l'interface qu'il remplace.
+   */
+  sendLabel?: string;
 }) {
   const [texte, setTexte] = useState('');
   const [attachments, setAttachments] = useState<AiAttachment[]>([]);
   const [erreur, setErreur] = useState<string | null>(null);
   const zone = useRef<HTMLTextAreaElement>(null);
   const fichiers = useRef<HTMLInputElement>(null);
+
+  // Une suggestion externe remplit le champ sans écraser un brouillon en cours
+  // de frappe : si l'utilisateur a déjà écrit, c'est son texte qui compte.
+  useEffect(() => {
+    if (!suggestion) return;
+    setTexte((courant) => (courant.trim() ? courant : suggestion));
+    onSuggestionUsed?.();
+    zone.current?.focus();
+  }, [suggestion, onSuggestionUsed]);
 
   // Hauteur automatique, plafonnée par le CSS (max-height: 220px).
   useEffect(() => {
@@ -152,7 +182,7 @@ export function Composer({
       )}
 
       <div className="vy-composer px-3 py-2.5">
-        <label className="sr-only" htmlFor="vy-prompt">Votre message</label>
+        <label className="sr-only" htmlFor="vy-prompt">{label}</label>
         <textarea
           id="vy-prompt"
           ref={zone}
@@ -160,7 +190,7 @@ export function Composer({
           value={texte}
           onChange={(event) => setTexte(event.target.value)}
           onKeyDown={surEntree}
-          placeholder="Demandez, analysez, créez… (Entrée pour envoyer, Maj+Entrée pour un retour à la ligne)"
+          placeholder={placeholder}
           disabled={sending}
         />
 
@@ -203,15 +233,27 @@ export function Composer({
 
           <span className="flex-1" />
 
-          <button
-            type="button"
-            onClick={() => void envoyer()}
-            disabled={!peutEnvoyer}
-            className="btn btn-primary btn-sm h-9 w-9 p-0"
-            aria-label="Envoyer le message"
-          >
-            <ArrowUp size={17} />
-          </button>
+          {sendLabel === 'Envoyer' ? (
+            <button
+              type="button"
+              onClick={() => void envoyer()}
+              disabled={!peutEnvoyer}
+              className="btn btn-primary btn-sm h-9 gap-1.5 px-3"
+            >
+              <ArrowUp size={15} />
+              Envoyer
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void envoyer()}
+              disabled={!peutEnvoyer}
+              className="btn btn-primary btn-sm h-9 w-9 p-0"
+              aria-label={sendLabel}
+            >
+              <ArrowUp size={17} />
+            </button>
+          )}
         </div>
       </div>
 
