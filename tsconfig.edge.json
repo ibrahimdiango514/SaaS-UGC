@@ -32,6 +32,8 @@
   "include": [
     "supabase/functions/store-import/index.ts",
     "supabase/functions/store-import/handler.ts",
+    "supabase/functions/store-connect/index.ts",
+    "supabase/functions/store-connect/handler.ts",
     "supabase/functions/types/*.d.ts"
   ]
 }

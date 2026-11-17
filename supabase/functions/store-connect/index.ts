@@ -19,12 +19,26 @@ import { handleStoreConnect, type ConnectDependencies } from './handler.ts';
 import type { EgressDeps } from '../store-import/safe-egress.ts';
 import { pinnedFetchLike } from '../store-import/safe-egress.ts';
 
-const DEFAULT_SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
-const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const DATABASE_URL = Deno.env.get('SUPABASE_DB_URL') ?? '';
+/**
+ * Lecture d'environnement sans supposer la présence de `Deno`.
+ *
+ * `tsconfig.edge.json` vérifie ce fichier sans charger les types Deno (le
+ * dépôt n'en dépend pas) : un `Deno.env.get(...)` en portée de module y serait
+ * une erreur de compilation, donc la fonction ne serait plus vérifiée du tout.
+ * On accède au runtime par `globalThis`, comme `store-import` le fait déjà.
+ */
+const env = (name: string): string =>
+  (globalThis as unknown as { Deno?: { env?: { get(k: string): string | undefined } } })
+    .Deno?.env?.get(name) ?? '';
+
+const DEFAULT_SUPABASE_URL = env('SUPABASE_URL');
+const ANON_KEY = env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY');
+// `STORE_CONNECT_DATABASE_URL` d'abord : une chaîne dédiée évite de partager
+// par accident les réglages d'une autre fonction.
+const DATABASE_URL = env('STORE_CONNECT_DATABASE_URL') || env('SUPABASE_DB_URL');
 
 /** Origines autorisées, séparées par des virgules. */
-const ALLOWED_ORIGINS = (Deno.env.get('VYORA_ALLOWED_ORIGINS') ?? '')
+const ALLOWED_ORIGINS = env('VYORA_ALLOWED_ORIGINS')
   .split(',').map((o) => o.trim()).filter(Boolean);
 
 function requiredSql() {
@@ -155,9 +169,17 @@ async function deleteCredential(name: string): Promise<void> {
 
 /** Résolution DNS réelle, utilisée par la sortie épinglée. */
 async function resolveHost(hostname: string): Promise<string[]> {
+  // Fail-closed : sans résolveur, la connexion épinglée ne peut pas vérifier
+  // l'adresse, donc on refuse plutôt que de laisser `fetch` résoudre seul.
+  const deno = (globalThis as unknown as {
+    Deno?: { resolveDns?: (nom: string, type: 'A' | 'AAAA') => Promise<string[]> };
+  }).Deno;
+  if (typeof deno?.resolveDns !== 'function') {
+    throw new Error('Deno.resolveDns indisponible');
+  }
   const resultats = await Promise.allSettled([
-    Deno.resolveDns(hostname, 'A'),
-    Deno.resolveDns(hostname, 'AAAA'),
+    deno.resolveDns(hostname, 'A'),
+    deno.resolveDns(hostname, 'AAAA'),
   ]);
   const adresses: string[] = [];
   for (const resultat of resultats) {
@@ -284,9 +306,10 @@ const deps: ConnectDependencies = {
   },
 
   async readConnection(userId: string, workspaceId: string, connectorKey: string) {
-    // L'identité de l'appelant est passée à la RPC sous forme de claims : la
-    // fonction `vyora_ugc_store_connection` lit `auth.uid()`, elle ne peut donc
-    // pas être détournée pour lire une autre entreprise.
+    // `userId` n'est pas passé à la RPC, volontairement : la RPC lit
+    // `auth.uid()` elle-même, donc un identifiant fourni par l'appelant ne
+    // peut pas la détourner vers une autre entreprise.
+    void userId;
     const db = requiredSql();
     try {
       const [ligne] = await db<{ etat: unknown }[]>`
@@ -314,6 +337,12 @@ const deps: ConnectDependencies = {
   },
 };
 
-Deno.serve((request: Request) =>
+// `Deno.serve` lu sur `globalThis` pour la même raison que `env` : le fichier
+// doit rester vérifiable par `tsc` sans les types Deno.
+const runtime = (globalThis as unknown as {
+  Deno: { serve(handler: (request: Request) => Promise<Response>): unknown };
+}).Deno;
+
+runtime.serve((request: Request) =>
   handleStoreConnect(request, deps, { allowedOrigins: ALLOWED_ORIGINS }),
 );
