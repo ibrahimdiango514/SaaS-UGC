@@ -38,6 +38,7 @@ const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioP
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
 const Assistant = lazy(() => import('./pages/Assistant'));
 const Integrations = lazy(() => import('./integrations/CatalogPage'));
+const McpConnections = lazy(() => import('./integrations/McpConnectionsPage').then(({ McpConnectionsPage }) => ({ default: McpConnectionsPage })));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
 const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
@@ -100,6 +101,7 @@ export default function App() {
                         d'integrations suit la meme regle. */}
                     <Route path="/app/ai" element={<Assistant />} />
                     <Route path="/app/connect" element={<Integrations />} />
+                    <Route path="/app/connexions-ia" element={<McpConnections />} />
                     <Route element={<AdminRoute />}>
                       <Route path="/admin" element={<Admin />} />
                       <Route path="/app/admin" element={<Navigate to="/admin" replace />} />

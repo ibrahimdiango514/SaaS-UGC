@@ -34,6 +34,9 @@
     "supabase/functions/store-import/handler.ts",
     "supabase/functions/store-connect/index.ts",
     "supabase/functions/store-connect/handler.ts",
-    "supabase/functions/types/*.d.ts"
+    "supabase/functions/types/*.d.ts",
+    "supabase/functions/vyora-mcp/index.ts",
+    "supabase/functions/vyora-mcp/handler.ts",
+    "supabase/functions/vyora-mcp/core.ts"
   ]
 }

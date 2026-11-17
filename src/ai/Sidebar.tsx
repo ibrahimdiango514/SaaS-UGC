@@ -194,6 +194,7 @@ export function Sidebar({
           <RailLink to="/app/ai/images" icon={<ImageIcon size={16} />} label="Images" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/bibliotheque" icon={<BookOpen size={16} />} label="Bibliothèque" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/connect" icon={<Plug size={16} />} label="Intégrations" collapsed={collapsed} onClick={onCloseMobile} />
+          <RailLink to="/app/connexions-ia" icon={<Sparkles size={16} />} label="MCP et connexions IA" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/ai/explorer" icon={<Compass size={16} />} label="Explorer" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/business" icon={<TrendingUp size={16} />} label="Espace Business" collapsed={collapsed} onClick={onCloseMobile} />
         </nav>
