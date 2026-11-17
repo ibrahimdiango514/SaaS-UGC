@@ -140,6 +140,54 @@ export async function safeGet(
   options: { accept: string; maxBytes: number; headers?: Record<string, string> },
   deps: EgressDeps,
 ): Promise<EgressResult<PageResult>> {
+  return saufRequete(input, { ...options, method: 'get' }, deps);
+}
+
+/**
+ * `POST` HTTPS sûr, pour les serveurs MCP (`Streamable HTTP`).
+ *
+ * Le corps est celui d'un appel JSON-RPC : petit, borné, et jamais construit à
+ * partir d'une entrée non validée sans passer par `JSON.stringify`.
+ *
+ * ## Ce qui NE change pas par rapport à `safeGet`
+ *
+ * Tout. Même validation d'URL, même résolution, même contrôle de TOUTES les
+ * adresses à CHAQUE saut, même épinglage de l'IP, même refus de suivre une
+ * redirection en emportant les en-têtes. Un serveur MCP hostile est un hôte
+ * hostile comme un autre : rien n'est assoupli parce qu'on parle MCP.
+ *
+ * ## Ce qui change
+ *
+ * Le corps est RENVOYÉ tel quel en cas de redirection ? Non : une redirection
+ * sur un `POST` est traitée comme un échec (`protocol_error`). Suivre un 307 en
+ * rejouant le corps enverrait l'appel — donc parfois une écriture — à une
+ * destination choisie par le serveur distant. Un serveur MCP digne de ce nom
+ * ne redirige pas ses endpoints.
+ */
+export async function safePost(
+  input: string | URL,
+  options: {
+    accept: string;
+    maxBytes: number;
+    headers?: Record<string, string>;
+    body: string;
+  },
+  deps: EgressDeps,
+): Promise<EgressResult<PageResult>> {
+  return saufRequete(input, { ...options, method: 'post' }, deps);
+}
+
+async function saufRequete(
+  input: string | URL,
+  options: {
+    accept: string;
+    maxBytes: number;
+    headers?: Record<string, string>;
+    method: 'get' | 'post';
+    body?: string;
+  },
+  deps: EgressDeps,
+): Promise<EgressResult<PageResult>> {
   let courant = typeof input === 'string' ? input : input.toString();
 
   /*
@@ -182,6 +230,8 @@ export async function safeGet(
             maxBytes: options.maxBytes,
             timeoutMs: deps.timeoutMs,
             connect: deps.connect,
+            method: options.method,
+            body: options.body,
             // Transmis à `buildRequest`, qui n'accepte qu'une liste blanche.
             headers: hoteAutorisation !== null && url.hostname === hoteAutorisation
               ? options.headers
@@ -191,6 +241,19 @@ export async function safeGet(
 
         // 4) Redirection éventuelle : revalidée au tour suivant, jamais suivie ici.
         if (reponse.status >= 300 && reponse.status < 400) {
+          /*
+           * Un `POST` n'est jamais redirigé, quelle que soit la forme du 3xx.
+           * Rejouer le corps vers une destination décidée par le serveur
+           * distant enverrait un appel d'outil là où il ne doit pas aller ; un
+           * serveur MCP légitime n'a aucune raison de rediriger son endpoint.
+           */
+          if (options.method === 'post') {
+            return {
+              ok: false,
+              error: erreur('protocol_error', 'Le serveur MCP a redirigé la requête : refusé.'),
+              httpStatus: reponse.status,
+            };
+          }
           const location = reponse.headers['location'];
           if (!location) {
             return { ok: false, error: erreur('protocol_error', 'Redirection sans destination.') };

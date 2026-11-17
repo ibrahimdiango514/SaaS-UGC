@@ -40,6 +40,7 @@
     "supabase/functions/vyora-mcp/core.ts",
     "supabase/functions/vyora-mcp/oauth.ts",
     "supabase/functions/vyora-mcp/oauth-routes.ts",
-    "supabase/functions/vyora-mcp/consentement.ts"
+    "supabase/functions/vyora-mcp/consentement.ts",
+    "supabase/functions/mcp-client/client.ts"
   ]
 }
