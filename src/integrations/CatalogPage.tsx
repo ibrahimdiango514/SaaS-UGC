@@ -18,8 +18,8 @@ import {
 import { businessGrowApi, type BusinessIntegrationConnection } from '../business/api';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
-import { PrestashopConnectForm } from './PrestashopConnectForm';
-import { ChariowConnectForm } from './ChariowConnectForm';
+import { ConnectorConnectForm } from './ConnectorConnectForm';
+import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
 
 /**
@@ -817,30 +817,25 @@ function FicheDetail({
             </div>
           ) : (
             <>
-              {connectable && entry.engine === 'api-key' && entry.id === 'chariow' ? (
+              {hasConnectFlow(entry.id) ? (
                 /*
-                 * Chariow : un SEUL champ (la clé). Son API est hébergée chez
-                 * l'éditeur, il n'y a donc aucune adresse de boutique à
-                 * saisir — l'exiger serait un champ inutile qui laisserait
-                 * croire que VYORA contacte la vitrine.
+                 * Un seul composant pour tous les connecteurs à clé : ses
+                 * champs, son aide et ses limites viennent de
+                 * `connector-requirements.ts`, pas de ce fichier. Ajouter une
+                 * plateforme ne demande donc plus d'écrire un écran — ni de
+                 * modifier celui-ci.
+                 *
+                 * `hasConnectFlow` est le garde-fou : une fiche dont le
+                 * parcours n'est pas livré tombe dans la branche suivante et
+                 * n'affiche aucun champ de saisie.
                  */
-                <ChariowConnectForm
+                <ConnectorConnectForm
+                  connectorKey={entry.id}
                   workspaceId={workspaceId}
                   connected={statut === 'connected'}
                   onChanged={onChanged}
                 />
               ) : connectable && entry.engine === 'api-key' ? (
-                /*
-                 * Connecteur à clé d'API : le formulaire fait le travail réel.
-                 * La fiche garde la main sur l'état (connecté / non connecté),
-                 * le formulaire sur la clé, qu'il ne conserve jamais.
-                 */
-                <PrestashopConnectForm
-                  workspaceId={workspaceId}
-                  connected={statut === 'connected'}
-                  onChanged={onChanged}
-                />
-              ) : connectable ? (
                 <ConnectButton entry={entry} />
               ) : (
                 /*

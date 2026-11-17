@@ -401,7 +401,9 @@ function environnementImport(options: {
   existants?: Array<{ id: string; name: string; platformId?: string | null }>;
 }): { handler: ReturnType<typeof createStoreImportHandler>; ecrits: unknown[]; appels: ReturnType<typeof apiChariow>['appels'] } {
   const ecrits: unknown[] = [];
-  const { fetchImpl, appels } = apiChariow(options.api ?? (() => ({ body: boutiquePayload })));
+  // `fetchImpl` n'existe pas dans `StoreImportDependencies` : l'Edge Function
+  // sort par le socket épinglé (`connect`). Seuls les appels sont observés ici.
+  const { appels } = apiChariow(options.api ?? (() => ({ body: boutiquePayload })));
 
   const deps: StoreImportDependencies = {
     async getUserId() { return UTILISATEUR; },
@@ -424,7 +426,6 @@ function environnementImport(options: {
     // La sortie réelle de `store-import` est le socket épinglé, pas `fetch` :
     // les deux sont fournis pour que le test exerce le vrai chemin.
     connect: async () => socketApi(options.api ?? (() => ({ body: boutiquePayload }))),
-    fetchImpl,
     allowedOrigins: ['https://app.vyora.test'],
   };
 
