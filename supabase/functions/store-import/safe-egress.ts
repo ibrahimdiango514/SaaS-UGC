@@ -89,6 +89,32 @@ function erreur(code: EgressErrorCode, message: string): EgressError {
   return { code, message };
 }
 
+/**
+ * En-têtes que `buildRequest` pose lui-même à partir de valeurs calculées.
+ *
+ * `buildRequest` écrit toujours `Accept: <options.accept>` puis recopie les
+ * en-têtes supplémentaires de la liste blanche. Depuis que `accept` et
+ * `content-type` figurent dans cette liste (nécessaire au transport MCP), un
+ * appelant qui les passe produirait une **seconde** ligne : `Accept` envoyé
+ * deux fois. C'était le cas de la sonde de `store-connect`, qui pose
+ * `accept: application/json`.
+ *
+ * `content-type` N'est PAS retiré : il n'est pas écrit en double (`buildRequest`
+ * ne l'ajoute que s'il est absent), et sa valeur doit rester contrôlée par
+ * `buildRequest`. Le retirer ici ferait perdre le POST JSON-RPC.
+ */
+function sansEntetesRecalcules(
+  entetes: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!entetes) return entetes;
+  const propre: Record<string, string> = {};
+  for (const [nom, valeur] of Object.entries(entetes)) {
+    if (nom.toLowerCase() === 'accept') continue;
+    propre[nom] = valeur;
+  }
+  return Object.keys(propre).length > 0 ? propre : undefined;
+}
+
 function fromRejection(reason: UrlRejection): EgressError {
   return erreur('blocked_url', explainRejection(reason));
 }
@@ -234,7 +260,7 @@ async function saufRequete(
             body: options.body,
             // Transmis à `buildRequest`, qui n'accepte qu'une liste blanche.
             headers: hoteAutorisation !== null && url.hostname === hoteAutorisation
-              ? options.headers
+              ? sansEntetesRecalcules(options.headers)
               : undefined,
           },
         );
