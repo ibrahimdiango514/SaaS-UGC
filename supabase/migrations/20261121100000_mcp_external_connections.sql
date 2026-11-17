@@ -11,9 +11,10 @@
 --    (espace de travail UGC). Les deux sont obligatoires : une connexion
 --    n'existe jamais « hors sol ».
 -- 3. Les secrets vivent dans Supabase Vault (`vault.secrets`), jamais dans une
---    colonne de la table. La table ne porte qu'un UUID de référence, et les
---    politiques RLS interdisent de l'exposer au frontend : seule la fonction
---    `mcp_servers_secret_ref` (service_role) le lit.
+--    colonne de la table. La table ne porte qu'un UUID de référence. Les
+--    politiques RLS et les GRANT interdisent de l'exposer au frontend : le
+--    secret n'est lisible QUE par `public.mcp_servers_secret(uuid)`, en
+--    SECURITY DEFINER, dont l'EXECUTE est réservé à `service_role`.
 -- 4. Aucune suppression automatique : pas de `on delete cascade` depuis une
 --    table métier, pas de purge programmée. Un `revoked_at` trace la
 --    révocation ; l'historique reste.
@@ -24,9 +25,21 @@
 -- ## Rôles réellement définis dans ce projet
 --
 -- `anon`, `authenticated`, `service_role` : rôles API Supabase.
--- `authenticator` : rôle de connexion PostgREST (déjà en NOINHERIT).
--- Ce projet n'a pas de `supabase_auth_admin` ni de `supabase_storage_admin`.
--- Les privilèges sont donc nominatifs : jamais `PUBLIC`.
+-- `authenticator` : rôle de connexion PostgREST (`pgrst.db_schemas` inclut
+-- `public`, donc toute table de `public` est joignable via PostgREST).
+--
+-- ⚠️ `service_role` possède DÉJÀ, par défaut dans ce projet, un GRANT SELECT
+-- sur `vault.secrets` ET `vault.decrypted_secrets`. Ce n'est pas créé ici et
+-- ce n'est pas révoqué ici : `vyora-provider-health`, `store-connect` et
+-- d'autres fonctions lisent Vault par ce chemin, et révoquer casserait la
+-- production. La conséquence est assumée : `service_role` ne doit JAMAIS être
+-- exposé à un navigateur. Toute lecture de secret passe par une Edge Function
+-- qui l'utilise côté serveur et ne le renvoie jamais.
+--
+-- `public` n'est pas créable par `anon`/`authenticated`
+-- (`has_schema_privilege(...,'create') = false`, vérifié), donc le
+-- `search_path` des fonctions SECURITY DEFINER ci-dessous ne peut pas être
+-- détourné par un objet homonyme.
 --
 -- Retour arrière : `drop table public.mcp_servers_secrets` puis
 -- `drop table public.mcp_servers` ; les secrets Vault restent et peuvent être
@@ -191,11 +204,24 @@ drop policy if exists mcp_servers_secrets_none on public.mcp_servers_secrets;
 -- Volontairement aucune politique : même le propriétaire ne lit pas cette
 -- table. Elle ne sert qu'aux fonctions SECURITY DEFINER.
 
-revoke all on public.mcp_servers from public, anon;
+/*
+ * Ce projet accorde par défaut (`pg_default_acl`) `arwdDxtm` à `anon`,
+ * `authenticated` et `service_role` sur CHAQUE nouvelle table de `public`
+ * (vérifié le 2026-11-21). Un simple `revoke all ... from public, anon` ne
+ * retire donc PAS les privilèges d'`authenticated` : il faut le nommer.
+ *
+ * On retire en particulier TRUNCATE et TRIGGER, qu'aucun usage applicatif ne
+ * justifie ici : TRUNCATE contourne la RLS et détruirait l'historique des
+ * connexions, ce qui contredirait la règle « aucune suppression automatique ».
+ */
+revoke all on public.mcp_servers from public, anon, authenticated;
 revoke all on public.mcp_servers_secrets from public, anon, authenticated;
 grant select on public.mcp_servers to authenticated;
-grant all on public.mcp_servers to service_role;
-grant all on public.mcp_servers_secrets to service_role;
+-- `service_role` contourne la RLS, mais n'a pas besoin de TRUNCATE/TRIGGER :
+-- les fonctions SECURITY DEFINER suffisent, et un droit en moins vaut mieux
+-- qu'un droit en trop sur une table qui porte l'historique des connexions.
+grant select, insert, update, delete on public.mcp_servers to service_role;
+grant select, insert, update, delete on public.mcp_servers_secrets to service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. Appartenance à un espace de travail — une seule définition, réutilisée
@@ -537,7 +563,7 @@ select
 from public.mcp_servers
 where user_id = (select auth.uid());
 
-revoke all on public.mcp_servers_public from public, anon;
+revoke all on public.mcp_servers_public from public, anon, authenticated;
 grant select on public.mcp_servers_public to authenticated, service_role;
 
 comment on table public.mcp_servers is
@@ -546,3 +572,31 @@ comment on table public.mcp_servers_secrets is
   'Références Vault des jetons MCP sortants. Aucune valeur lisible, aucune politique RLS : service_role seulement.';
 comment on column public.mcp_servers.tool_permissions is
   'Permissions outil par outil : allowed | denied | pending. Un outil absent est refusé (fail-closed).';
+
+-- ---------------------------------------------------------------------------
+-- 9. Auto-vérification (facultative)
+-- ---------------------------------------------------------------------------
+--
+-- Bloc commenté volontairement : la migration reste purement DDL. Pour
+-- contrôler l'état juste après l'exécution, décommentez-le, exécutez, puis
+-- re-commentez. Chaque ligne doit renvoyer `true`.
+--
+-- select
+--   to_regclass('public.mcp_servers') is not null          as table_servers,
+--   to_regclass('public.mcp_servers_secrets') is not null  as table_secrets,
+--   to_regclass('public.mcp_servers_public') is not null   as vue_publique,
+--   (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--     where n.nspname = 'public' and p.proname in (
+--       'mcp_servers_touch','mcp_is_workspace_member','mcp_servers_create',
+--       'mcp_servers_rotate_secret','mcp_servers_record_probe',
+--       'mcp_servers_revoke','mcp_servers_set_permissions','mcp_servers_secret'
+--     )) = 8                                             as huit_fonctions,
+--   (select relrowsecurity from pg_class where oid = 'public.mcp_servers'::regclass) as rls_servers,
+--   (select relrowsecurity from pg_class where oid = 'public.mcp_servers_secrets'::regclass) as rls_secrets,
+--   -- Aucun droit d'écriture pour le frontend :
+--   not has_table_privilege('authenticated', 'public.mcp_servers', 'insert')
+--     and not has_table_privilege('authenticated', 'public.mcp_servers', 'update')
+--     and not has_table_privilege('authenticated', 'public.mcp_servers', 'delete') as frontend_lecture_seule,
+--   not has_table_privilege('authenticated', 'public.mcp_servers_secrets', 'select') as secrets_invisibles,
+--   -- La fonction de lecture du secret n'est pas appelable par un utilisateur :
+--   not has_function_privilege('authenticated', 'public.mcp_servers_secret(uuid)', 'execute') as secret_non_appelable;
