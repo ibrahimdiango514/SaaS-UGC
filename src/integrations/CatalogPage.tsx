@@ -18,6 +18,7 @@ import {
 import { businessGrowApi, type BusinessIntegrationConnection } from '../business/api';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
+import { PrestashopConnectForm } from './PrestashopConnectForm';
 import '../ai/assistant.css';
 
 /**
@@ -531,6 +532,8 @@ export function IntegrationsCenter({
           onClose={() => setSelection(null)}
           onRevoke={(compteCible) => setConfirmation(compteCible)}
           entrepriseActive={Boolean(workspaceId)}
+          workspaceId={workspaceId}
+          onChanged={setNotice}
           onRequest={() => void demander(selection)}
           onCancelRequest={() => void annuler(selection)}
           onDisconnect={() => void retirerAssociation(selection)}
@@ -675,7 +678,7 @@ function Logo({ entry }: { entry: IntegrationEntry }) {
 }
 
 function FicheDetail({
-  entry, statut, compte, connection, busy, entrepriseActive,
+  entry, statut, compte, connection, busy, entrepriseActive, workspaceId, onChanged,
   onClose, onRevoke, onRequest, onCancelRequest, onDisconnect,
 }: {
   entry: IntegrationEntry;
@@ -685,6 +688,10 @@ function FicheDetail({
   busy: boolean;
   /** Sans entreprise active, une demande ne peut pas être rattachée. */
   entrepriseActive: boolean;
+  /** Entreprise active : la connexion à clé d'API y est rattachée. */
+  workspaceId: string | null;
+  /** Retour d'une connexion/déconnexion, affiché par l'écran hôte. */
+  onChanged: (message: { tone: 'success' | 'error'; text: string }) => void;
   onClose: () => void;
   onRevoke: (compte: ConnectedAccount) => void;
   onRequest: () => void;
@@ -809,7 +816,18 @@ function FicheDetail({
             </div>
           ) : (
             <>
-              {connectable ? (
+              {connectable && entry.engine === 'api-key' ? (
+                /*
+                 * Connecteur à clé d'API : le formulaire fait le travail réel.
+                 * La fiche garde la main sur l'état (connecté / non connecté),
+                 * le formulaire sur la clé, qu'il ne conserve jamais.
+                 */
+                <PrestashopConnectForm
+                  workspaceId={workspaceId}
+                  connected={statut === 'connected'}
+                  onChanged={onChanged}
+                />
+              ) : connectable ? (
                 <ConnectButton entry={entry} />
               ) : (
                 /*

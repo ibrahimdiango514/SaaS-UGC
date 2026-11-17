@@ -141,6 +141,10 @@ export function toActivationRequests(rows: BusinessIntegrationConnection[]): Act
  */
 export const CONNECTORS_ACCEPTING_REQUESTS: ReadonlySet<string> = new Set([
   'facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce',
+  // PrestaShop a un moteur réel : la demande d'activation reste possible pour
+  // les comptes qui n'ont pas encore d'abonnement, et `bg_connect_integration`
+  // accepte la clé. L'ajouter ici ne crée donc aucun bouton mort.
+  'prestashop',
 ]);
 
 /** Entrée d'audit, telle que rend `oauth_audit_list()`. */
@@ -368,10 +372,23 @@ export function summarize(
   return base;
 }
 
-/** Une fiche peut-elle proposer un bouton « Connecter » actif ? */
+/**
+ * Une fiche peut-elle proposer un bouton « Connecter » actif ?
+ *
+ * `needs_config` est accepté pour un `entry.engine` déclaré : c'est l'état
+ * normal d'un connecteur écrit mais jamais encore utilisé (aucune ligne
+ * `integration_connections`). Le refuser rendait le bouton inatteignable pour
+ * tout nouvel utilisateur — le connecteur existait, l'interface ne le
+ * proposait jamais.
+ *
+ * Les états qui supposent une connexion déjà établie (`connected`,
+ * `authorization_missing`, `requested`) restent exclus : on ne repropose pas de
+ * connecter ce qui l'est déjà.
+ */
 export function canConnect(entry: IntegrationEntry, status: IntegrationStatus): boolean {
   if (entry.engine === null) return false;
-  return status === 'not_connected' || status === 'expired' || status === 'revoked' || status === 'error';
+  return status === 'not_connected' || status === 'expired' || status === 'revoked'
+    || status === 'error' || status === 'needs_config';
 }
 
 /** Catégories effectivement présentes, pour ne pas afficher d'onglet vide. */

@@ -306,14 +306,29 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     id: 'prestashop',
     name: 'PrestaShop',
     category: 'commerce',
-    description: 'Catalogue et commandes de votre boutique PrestaShop.',
-    capabilities: ['catalog-read', 'orders-read', 'inventory-read'],
+    description: 'Catalogue et stocks de votre boutique PrestaShop, lus par l’API Webservice.',
+    /*
+     * Capacités DÉCLARÉES par la fiche, donc vérifiables.
+     *
+     * `catalog-read` et `inventory-read` sont réellement fournis : l'import lit
+     * `products`, `combinations`, `stock_availables`, `product_options` et
+     * `product_option_values`, et la connexion n'est enregistrée qu'après une
+     * lecture réussie de `shops` et `languages`.
+     *
+     * `orders-read` est retiré : le connecteur ne lit aucune commande. Une
+     * capacité affichée mais non implémentée est une promesse fausse, et c'est
+     * exactement ce que cette fiche ne doit pas faire.
+     */
+    capabilities: ['catalog-read', 'inventory-read'],
     auth: [
-      { mode: 'api-key', label: 'Clé Webservice PrestaShop', serverConfigKey: 'PRESTASHOP_ALLOW_KEYS' },
-      { mode: 'file-import', label: 'Import CSV PrestaShop' },
+      { mode: 'api-key', label: 'Clé Webservice PrestaShop (droits de lecture sur le catalogue)' },
+      { mode: 'file-import', label: 'Import d’un export CSV PrestaShop' },
     ],
-    engine: null,
+    // Seul fournisseur dont le moteur est écrit : la clé est vérifiée par le
+    // serveur, rangée dans Vault, et le catalogue est lu par l'API officielle.
+    engine: 'api-key',
     docsUrl: 'https://devdocs.prestashop-project.org/',
+    caveat: 'La clé Webservice se crée dans PrestaShop : Paramètres avancés → Webservice. Elle ne doit jamais transiter par le navigateur : VYORA la vérifie et la range côté serveur.',
   },
   {
     id: 'magento',

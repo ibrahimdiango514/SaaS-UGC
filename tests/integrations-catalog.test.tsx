@@ -24,6 +24,8 @@ vi.mock('../src/lib/supabase', () => ({
   isSupabaseConfigured: true,
 }));
 
+import { existsSync } from 'node:fs';
+
 import CatalogPage from '../src/integrations/CatalogPage';
 import {
   INTEGRATIONS, INTEGRATION_BY_ID, CAPABILITY_LABELS, countByCategory,
@@ -104,11 +106,42 @@ describe('catalogue — structure', () => {
   });
 
   it('aucune intégration ne déclare un connecteur inexistant', () => {
-    // Livraison 2 = catalogue seul. Un `engine` non nul alors qu'aucun
-    // connecteur n'est écrit serait un mensonge dans le modèle.
+    // Un `engine` non nul est une PROMESSE : il doit exister un connecteur
+    // réel derrière. On vérifie donc la présence du code, pas seulement la
+    // forme du modèle. PrestaShop est aujourd'hui le seul dont le moteur est
+    // écrit (clé vérifiée côté serveur, catalogue lu par l'API Webservice) ;
+    // les autres fiches restent à `null` et l'affichent.
+    const MOTEURS_ECRITS = new Set(['prestashop']);
     for (const entry of INTEGRATIONS) {
-      expect(entry.engine).toBeNull();
+      if (MOTEURS_ECRITS.has(entry.id)) {
+        expect(entry.engine, `${entry.id} : moteur annoncé`).not.toBeNull();
+        // Le point qui rend la promesse vérifiable : le code du connecteur et
+        // son point d'entrée déployé existent dans le dépôt.
+        expect(existsSync(`supabase/functions/store-connect/handler.ts`)).toBe(true);
+        expect(existsSync(`supabase/functions/store-connect/index.ts`)).toBe(true);
+      } else {
+        expect(entry.engine, `${entry.id} : aucun moteur écrit`).toBeNull();
+      }
     }
+  });
+
+  it('PrestaShop ne déclare que des capacités réellement fournies', () => {
+    const prestashop = INTEGRATION_BY_ID.prestashop as IntegrationEntry;
+    // `orders-read` était annoncé sans qu'aucune commande ne soit lue.
+    expect(prestashop.capabilities).toContain('catalog-read');
+    expect(prestashop.capabilities).toContain('inventory-read');
+    expect(prestashop.capabilities).not.toContain('orders-read');
+  });
+
+  it('un connecteur au moteur écrit est proposé dès le premier usage', () => {
+    const prestashop = INTEGRATION_BY_ID.prestashop as IntegrationEntry;
+    // Premier usage : aucune ligne de connexion ⇒ `needs_config`. Le bouton
+    // doit être proposé, sinon le connecteur existe sans être atteignable.
+    expect(canConnect(prestashop, 'needs_config')).toBe(true);
+    expect(canConnect(prestashop, 'not_connected')).toBe(true);
+    // On ne repropose pas de connecter ce qui l'est déjà.
+    expect(canConnect(prestashop, 'connected')).toBe(false);
+    expect(canConnect(prestashop, 'requested')).toBe(false);
   });
 
   it('chaque intégration a au moins un mode d’authentification décrit', () => {
