@@ -15,17 +15,41 @@
  */
 import { invokeEdge } from '../../lib/api';
 
+/**
+ * Connecteurs dont la connexion est réellement implémentée.
+ *
+ * Le type est fermé volontairement : ajouter un fournisseur au catalogue sans
+ * avoir écrit son parcours de connexion ne doit pas compiler ici. Une fiche
+ * cliquable qui échouerait à la première requête serait un bouton mort.
+ */
+export type StoreConnectorKey = 'prestashop' | 'chariow';
+
 /** État d'une connexion boutique, tel que le serveur le décrit. */
 export interface StoreConnectionState {
   connectorKey: string;
   /** `connected` une fois la vérification réussie. */
   status: string;
+  /**
+   * Vrai seulement si le statut vaut `connected` **et** qu'une clé est
+   * réellement enregistrée.
+   *
+   * La RPC distingue les deux : une ligne laissée par une ancienne demande
+   * d'activation, sans secret, ne doit pas s'afficher comme connectée.
+   */
+  connected?: boolean;
   connectedTo: string | null;
   endpoint: string | null;
   shopName: string | null;
   version: string | null;
   totalProducts: number | null;
   resourcesRead: string[];
+  /**
+   * URL publique de la boutique, quand l'éditeur la publie (Chariow).
+   * Absente pour PrestaShop, dont l'API appartient au marchand.
+   */
+  storeUrl?: string | null;
+  /** Statut de la boutique chez l'éditeur (`active`, `suspended`…). */
+  storeStatus?: string | null;
   /** Dernière vérification, si le serveur en conserve une. */
   checkedAt: string | null;
   /** Message d'échec lisible, quand la dernière tentative a échoué. */
@@ -41,29 +65,45 @@ export interface StoreConnectionResult {
   version: string | null;
   totalProducts: number | null;
   resourcesRead: string[];
+  /** Hôte réellement contacté — preuve du contrôle de sortie. */
   connectedTo: string;
   endpoint: string;
   durationMs: number;
+  /** Boutique annoncée par l'éditeur (Chariow : `GET /v1/store`). */
+  storeUrl?: string | null;
+  storeStatus?: string | null;
+  storeId?: string | null;
 }
 
 /**
- * Connecte une boutique PrestaShop.
+ * Connecte une boutique.
  *
- * La clé n'est jamais conservée côté navigateur : elle n'est pas stockée dans
- * un état React au-delà de la saisie, et n'est pas relue ensuite. C'est le
- * serveur qui la retrouve dans Vault pour les aperçus.
+ * ## Ce que le navigateur envoie
+ * Une adresse (PrestaShop) et/ou une clé. **Rien d'autre.**
+ *
+ * ## Ce qu'il ne reçoit jamais
+ * La clé, son nom de secret, un jeton. Le serveur la dépose dans Vault et
+ * répond uniquement des faits observés (nom de boutique, ressources lues,
+ * hôte contacté).
+ *
+ * ## Pourquoi `url` est facultative
+ * PrestaShop expose son API **chez le marchand** : sans adresse, il n'y a rien
+ * à interroger, elle est donc obligatoire côté serveur. Chariow expose son API
+ * **chez l'éditeur** (`api.chariow.com`) : l'adresse de la vitrine ne sert
+ * qu'à confirmer que la clé appartient bien à cette boutique. Le type le dit,
+ * et le serveur refuse une adresse absente là où elle est indispensable.
  */
 export async function connectStore(input: {
   workspaceId: string;
-  connectorKey: 'prestashop';
-  url: string;
+  connectorKey: StoreConnectorKey;
+  url?: string;
   apiKey: string;
 }): Promise<StoreConnectionResult> {
   const { data } = await invokeEdge<{ data: StoreConnectionResult }>('store-connect', {
     action: 'connect',
     workspaceId: input.workspaceId,
     connectorKey: input.connectorKey,
-    url: input.url,
+    ...(input.url ? { url: input.url } : {}),
     apiKey: input.apiKey,
   });
   return data;
@@ -78,7 +118,7 @@ export async function connectStore(input: {
  */
 export async function readConnection(input: {
   workspaceId: string;
-  connectorKey: 'prestashop';
+  connectorKey: StoreConnectorKey;
 }): Promise<StoreConnectionState | null> {
   const { data } = await invokeEdge<{ data: StoreConnectionState | null }>('store-connect', {
     action: 'status',
@@ -96,7 +136,7 @@ export async function readConnection(input: {
  */
 export async function disconnectStore(input: {
   workspaceId: string;
-  connectorKey: 'prestashop';
+  connectorKey: StoreConnectorKey;
 }): Promise<void> {
   await invokeEdge<{ data: unknown }>('store-connect', {
     action: 'disconnect',

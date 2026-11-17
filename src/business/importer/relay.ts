@@ -45,6 +45,14 @@ export interface StorePreviewProduct {
 
 export interface StorePreview {
   previewId: string;
+  /**
+   * Nombre de produits écartés parce que NON PUBLIÉS chez la source (Chariow).
+   *
+   * Absent pour les sources qui n'ont pas de notion de brouillon. Sa présence
+   * permet à l'écran de distinguer « 3 produits » de « 3 produits, 5 brouillons
+   * ignorés » — sinon un marchand croirait son catalogue incomplet.
+   */
+  draftsSkipped?: number;
   expiresAt: string;
   summary: ImportBatch['summary'];
   products: StorePreviewProduct[];
@@ -118,6 +126,35 @@ export async function previewStore(input: {
     action: 'preview',
     workspaceId: input.workspaceId,
     url: input.url,
+  });
+  return data;
+}
+
+/**
+ * Demande un aperçu pour un connecteur à clé d'API **hébergée** (Chariow).
+ *
+ * Pourquoi une fonction distincte plutôt qu'un `url` facultatif :
+ *
+ * - Pour PrestaShop, l'URL **est** l'API : elle est obligatoire, et l'oublier
+ *   donne un aperçu qui échoue à l'exécution.
+ * - Pour Chariow, l'API est chez l'éditeur (`api.chariow.com`) : la clé vient
+ *   de Vault, et l'adresse de vitrine ne sert qu'à nommer la source. Un appel
+ *   « aperçu d'une boutique par URL » laisserait croire que le serveur va
+ *   contacter cette adresse, ce qui est faux.
+ *
+ * Le type sépare donc deux intentions réelles, au lieu de rendre un paramètre
+ * optionnel qui serait obligatoire dans un cas et ignoré dans l'autre.
+ */
+export async function previewConnectedStore(input: {
+  workspaceId: string;
+  connectorKey: 'chariow';
+}): Promise<StorePreview> {
+  const { data } = await invokeEdge<Enveloppe<StorePreview>>('store-import', {
+    action: 'preview',
+    workspaceId: input.workspaceId,
+    // Le serveur lit la clé dans Vault sous ce connecteur. L'absence d'URL est
+    // volontaire : pour Chariow, il n'y a pas de boutique à joindre.
+    connectorKey: input.connectorKey,
   });
   return data;
 }

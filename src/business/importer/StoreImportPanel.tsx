@@ -48,7 +48,8 @@ import { Button, cn } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
 import { PLATFORM_LABELS } from './platform';
 import {
-  importStore, previewFile, previewStore, previewValidity, type PreviewValidity, type StorePreview,
+  importStore, previewConnectedStore, previewFile, previewStore, previewValidity,
+  type PreviewValidity, type StorePreview,
 } from './relay';
 import {
   connectStore, disconnectStore, readConnection,
@@ -107,7 +108,10 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
    * un aperçu expire.
    */
   const [dernièreSource, setDernièreSource] = useState<
-    { kind: 'file'; fichier: File } | { kind: 'url'; url: string } | null
+    | { kind: 'file'; fichier: File }
+    | { kind: 'url'; url: string }
+    | { kind: 'chariow' }
+    | null
   >(null);
 
   /*
@@ -120,6 +124,17 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
    * jamais le secret.
    */
   const [cléApi, setCléApi] = useState('');
+  /**
+   * Clé Chariow et état de SA connexion, séparés de ceux de PrestaShop.
+   *
+   * Un état partagé ferait qu'une clé PrestaShop saisie resterait affichée
+   * après avoir basculé sur Chariow, et que « connecté » d'un connecteur
+   * s'afficherait pour l'autre. Deux connecteurs, deux secrets, deux états.
+   */
+  const [cléChariow, setCléChariow] = useState('');
+  const [connexionChariow, setConnexionChariow] = useState<StoreConnectionState | null>(null);
+  const [connexionChariowEnCours, setConnexionChariowEnCours] = useState(false);
+  const [connexionChariowErreur, setConnexionChariowErreur] = useState<string | null>(null);
   const [connexion, setConnexion] = useState<StoreConnectionState | null>(null);
   const [connexionEnCours, setConnexionEnCours] = useState(false);
   const [connexionErreur, setConnexionErreur] = useState<string | null>(null);
@@ -153,6 +168,15 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
         if (!annulé) setConnexion(état);
       } catch {
         if (!annulé) setConnexion(null);
+      }
+      // Chariow a sa PROPRE connexion : la lire ici aussi, sinon l'écran
+      // afficherait « non connecté » sur une boutique déjà liée, et l'utilisateur
+      // ressaisirait une clé qu'il n'a plus (elle n'est affichée qu'une fois).
+      try {
+        const état = await readConnection({ workspaceId, connectorKey: 'chariow' });
+        if (!annulé) setConnexionChariow(état);
+      } catch {
+        if (!annulé) setConnexionChariow(null);
       }
     })();
     return () => { annulé = true; };
@@ -218,6 +242,94 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
       setConnexionErreur(asAppError(erreur).message);
     } finally {
       setConnexionEnCours(false);
+    }
+  };
+
+  /**
+   * Connecte la boutique Chariow : le serveur vérifie la clé en lisant
+   * réellement `GET /v1/store` puis `GET /v1/products`, puis la range dans
+   * Vault. Aucune URL n'est demandée : l'API est hébergée chez Chariow.
+   */
+  const connecterChariow = async () => {
+    if (!workspaceId) {
+      setConnexionChariowErreur('Sélectionnez une entreprise avant de connecter une boutique.');
+      return;
+    }
+    const clé = cléChariow.trim();
+    if (!clé.startsWith('sk_') || clé.length < 20) {
+      setConnexionChariowErreur('Collez la clé Chariow complète (elle commence par « sk_ »).');
+      return;
+    }
+    setConnexionChariowEnCours(true);
+    setConnexionChariowErreur(null);
+    try {
+      const résultat = await connectStore({ workspaceId, connectorKey: 'chariow', apiKey: clé });
+      // Effacée avant tout rendu : elle ne doit pas rester dans l'état.
+      setCléChariow('');
+      setConnexionChariow({
+        connectorKey: 'chariow',
+        status: résultat.status,
+        connected: true,
+        connectedTo: résultat.connectedTo,
+        endpoint: résultat.endpoint,
+        shopName: résultat.shopName,
+        version: null,
+        totalProducts: résultat.totalProducts,
+        resourcesRead: résultat.resourcesRead,
+        storeUrl: résultat.storeUrl ?? null,
+        storeStatus: résultat.storeStatus ?? null,
+        checkedAt: new Date().toISOString(),
+        lastError: null,
+      });
+    } catch (erreur) {
+      setConnexionChariowErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionChariowEnCours(false);
+    }
+  };
+
+  /** Déconnecte Chariow : le secret quitte Vault, l'aperçu le dira ensuite. */
+  const déconnecterChariow = async () => {
+    if (!workspaceId) return;
+    setConnexionChariowEnCours(true);
+    setConnexionChariowErreur(null);
+    try {
+      await disconnectStore({ workspaceId, connectorKey: 'chariow' });
+      setConnexionChariow(null);
+      setCléChariow('');
+    } catch (erreur) {
+      setConnexionChariowErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionChariowEnCours(false);
+    }
+  };
+
+  /**
+   * Aperçu du catalogue Chariow — **aucune écriture**.
+   *
+   * Aucune URL n'est envoyée : la clé vient de Vault côté serveur, et l'hôte
+   * de l'API est fixe. Le navigateur ne contacte donc ni Chariow ni la vitrine.
+   */
+  const prévisualiserChariow = async () => {
+    if (!workspaceId) {
+      setErreurs(['Sélectionnez une entreprise avant d’importer.']);
+      return;
+    }
+    setChargement(true);
+    setErreurs([]);
+    setAvertissements([]);
+    setRésultat(null);
+    setApercuServeur(null);
+    try {
+      const apercu = await previewConnectedStore({ workspaceId, connectorKey: 'chariow' });
+      setApercuServeur(apercu);
+      setAvertissements(apercu.warnings);
+      setDernièreSource({ kind: 'chariow' });
+      setÉtape('apercu');
+    } catch (erreur) {
+      setErreurs([asAppError(erreur).message]);
+    } finally {
+      setChargement(false);
     }
   };
 
@@ -360,6 +472,7 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
   const relancer = async () => {
     if (!dernièreSource) return;
     if (dernièreSource.kind === 'file') await traiterFichier(dernièreSource.fichier);
+    else if (dernièreSource.kind === 'chariow') await prévisualiserChariow();
     else {
       setUrl(dernièreSource.url);
       await prévisualiserUrl();
@@ -521,6 +634,92 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
             )}
           </div>
 
+          {/* --- Chariow : clé API, sans URL (API hébergée chez l'éditeur) --- */}
+          <div
+            className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5"
+            data-testid="store-chariow-block"
+          >
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+              <KeyRound size={13} className="text-slate-500" /> Boutique Chariow (clé API)
+            </p>
+
+            {connexionChariow?.connected ? (
+              <>
+                <p className="mt-1 text-[10px] leading-relaxed text-emerald-200" data-testid="store-chariow-connected">
+                  Connectée : {connexionChariow.shopName ?? 'boutique Chariow'}
+                  {connexionChariow.storeUrl ? ` · ${connexionChariow.storeUrl}` : ''}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={chargement}
+                    disabled={!workspaceId}
+                    onClick={() => void prévisualiserChariow()}
+                    icon={<Link2 size={13} />}
+                    data-testid="store-chariow-preview"
+                  >
+                    Prévisualiser le catalogue
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={connexionChariowEnCours}
+                    onClick={() => void déconnecterChariow()}
+                    data-testid="store-chariow-disconnect"
+                  >
+                    Déconnecter
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  Clé créée dans app.chariow.com → Settings → API Keys, avec les scopes
+                  « products.read » et « store.read ». Le serveur la vérifie en lisant réellement
+                  votre boutique, puis la range dans le coffre. Elle n’est jamais renvoyée au navigateur.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    type="password"
+                    value={cléChariow}
+                    onChange={(événement) => setCléChariow(événement.target.value)}
+                    onKeyDown={(événement) => {
+                      if (événement.key === 'Enter') {
+                        événement.preventDefault();
+                        void connecterChariow();
+                      }
+                    }}
+                    placeholder="sk_live_…"
+                    aria-label="Clé API Chariow"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={connexionChariowEnCours || !workspaceId}
+                    className="min-w-0 flex-1 rounded-lg border border-white/[0.09] bg-black/30 px-2.5 py-1.5 font-mono text-[11px] text-slate-200 placeholder:text-slate-600 focus:border-cyan-300/40 focus:outline-none disabled:opacity-50"
+                    data-testid="store-chariow-key"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={connexionChariowEnCours}
+                    disabled={!workspaceId || cléChariow.trim().length < 20}
+                    onClick={() => void connecterChariow()}
+                    icon={<KeyRound size={13} />}
+                    data-testid="store-chariow-connect"
+                  >
+                    Vérifier et connecter
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {connexionChariowErreur && (
+              <p className="mt-1.5 text-[10px] text-rose-200" data-testid="store-chariow-error">
+                {connexionChariowErreur}
+              </p>
+            )}
+          </div>
+
           <div className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
               <Globe size={13} className="text-slate-500" /> Importer depuis une URL de boutique
@@ -644,6 +843,25 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
             Aucun produit n’a été créé à cette étape. L’import n’a lieu qu’après votre
             confirmation, et l’aperçu expire au bout de dix minutes.
           </p>
+
+          {/*
+            * Brouillons écartés chez la source (Chariow).
+            *
+            * Affiché à part, et pas seulement noyé dans les avertissements :
+            * « 3 produits » sur une boutique qui en compte 8 ferait conclure à
+            * une panne d'import. Ce décompte dit exactement ce qui a été laissé
+            * de côté, et pourquoi.
+            */}
+          {(apercuServeur.draftsSkipped ?? 0) > 0 && (
+            <div
+              className="mt-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.05] px-3 py-2 text-[10px] text-amber-100"
+              data-testid="preview-drafts-skipped"
+            >
+              {apercuServeur.draftsSkipped} produit(s) non publié(s) chez Chariow (brouillon ou suspendu)
+              {apercuServeur.draftsSkipped === 1 ? ' a' : ' ont'} été écarté(s) : seuls les produits
+              publiés sont importés.
+            </div>
+          )}
 
           {apercuServeur.rejected.length > 0 && (
             <div className="mt-2 rounded-lg border border-rose-400/20 bg-rose-400/[0.05] px-3 py-2 text-[10px] text-rose-100">

@@ -32,7 +32,7 @@ import { isConnectorAvailable } from './contract';
  */
 export const CATALOG_CONNECTOR_KEYS: readonly string[] = [
   'instagram', 'facebook', 'tiktok', 'youtube', 'linkedin', 'pinterest',
-  'shopify', 'woocommerce', 'prestashop', 'magento', 'opencart', 'wix',
+  'shopify', 'woocommerce', 'prestashop', 'chariow', 'magento', 'opencart', 'wix',
   'bigcommerce', 'squarespace', 'ecwid',
   'gmail', 'google_drive', 'google_calendar', 'microsoft365', 'outlook', 'slack', 'notion',
   'hubspot', 'stripe', 'saspay', 'odoo',

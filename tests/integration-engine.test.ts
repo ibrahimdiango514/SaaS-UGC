@@ -148,7 +148,7 @@ describe('registre — un fournisseur inventé est refusé', () => {
 });
 
 describe('registre — la liste des clés reste alignée sur le catalogue', () => {
-  it('les 26 clés du registre sont exactement celles du catalogue', () => {
+  it('les 27 clés du registre sont exactement celles du catalogue', () => {
     const catalogue = INTEGRATIONS.map((e) => e.id).sort();
     expect([...CATALOG_CONNECTOR_KEYS].sort()).toEqual(catalogue);
   });
@@ -156,8 +156,8 @@ describe('registre — la liste des clés reste alignée sur le catalogue', () =
   it('le registre global est vide au départ : aucune implémentation inventée', () => {
     expect(connectorRegistry.size()).toBe(0);
     expect(implementedKeys()).toEqual([]);
-    // Les 26 fournisseurs sont donc non implémentés, sans exception.
-    expect(unimplementedKeys()).toHaveLength(26);
+    // Les 27 fournisseurs sont donc non implémentés, sans exception.
+    expect(unimplementedKeys()).toHaveLength(27);
   });
 });
 

@@ -24,7 +24,7 @@ vi.mock('../src/lib/supabase', () => ({
   isSupabaseConfigured: true,
 }));
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import CatalogPage from '../src/integrations/CatalogPage';
 import {
@@ -109,9 +109,9 @@ describe('catalogue — structure', () => {
     // Un `engine` non nul est une PROMESSE : il doit exister un connecteur
     // réel derrière. On vérifie donc la présence du code, pas seulement la
     // forme du modèle. PrestaShop est aujourd'hui le seul dont le moteur est
-    // écrit (clé vérifiée côté serveur, catalogue lu par l'API Webservice) ;
-    // les autres fiches restent à `null` et l'affichent.
-    const MOTEURS_ECRITS = new Set(['prestashop']);
+    // écrit (clé vérifiée côté serveur, catalogue lu par l'API Webservice ou
+    // par l'API Chariow) ; les autres fiches restent à `null` et l'affichent.
+    const MOTEURS_ECRITS = new Set(['prestashop', 'chariow']);
     for (const entry of INTEGRATIONS) {
       if (MOTEURS_ECRITS.has(entry.id)) {
         expect(entry.engine, `${entry.id} : moteur annoncé`).not.toBeNull();
@@ -119,6 +119,13 @@ describe('catalogue — structure', () => {
         // son point d'entrée déployé existent dans le dépôt.
         expect(existsSync(`supabase/functions/store-connect/handler.ts`)).toBe(true);
         expect(existsSync(`supabase/functions/store-connect/index.ts`)).toBe(true);
+        // Le connecteur doit être RÉELLEMENT branché dans les deux fonctions :
+        // une fiche à `engine: 'api-key'` sans branchement serait un bouton
+        // qui échoue à la première requête.
+        const handler = readFileSync('supabase/functions/store-connect/handler.ts', 'utf8');
+        expect(handler).toContain(`'${entry.id}'`);
+        const importHandler = readFileSync('supabase/functions/store-import/handler.ts', 'utf8');
+        expect(importHandler).toContain(`'${entry.id}'`);
       } else {
         expect(entry.engine, `${entry.id} : aucun moteur écrit`).toBeNull();
       }

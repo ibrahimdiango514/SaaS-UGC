@@ -331,6 +331,45 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     caveat: 'La clé Webservice se crée dans PrestaShop : Paramètres avancés → Webservice. Elle ne doit jamais transiter par le navigateur : VYORA la vérifie et la range côté serveur.',
   },
   {
+    id: 'chariow',
+    name: 'Chariow',
+    category: 'commerce',
+    description: 'Catalogue de votre boutique Chariow, lu par l’API officielle (clé de boutique).',
+    /*
+     * Capacités DÉCLARÉES, donc vérifiables.
+     *
+     * `catalog-read` et `inventory-read` sont réellement fournis : l'import lit
+     * `GET /v1/products` et `GET /v1/store`, et la connexion n'est enregistrée
+     * qu'après une lecture réussie des deux.
+     *
+     * `orders-read` est volontairement ABSENT : le connecteur ne lit aucune
+     * commande, et les scopes demandés au marchand (`store.read`,
+     * `products.read`) ne le permettraient pas. Une capacité affichée mais non
+     * implémentée est une promesse fausse.
+     *
+     * `catalog-write` est absent pour la même raison, en plus fort : Chariow
+     * n'est utilisé qu'en lecture, et le code n'a aucun chemin d'écriture.
+     */
+    capabilities: ['catalog-read', 'inventory-read'],
+    auth: [
+      {
+        mode: 'api-key',
+        label: 'Clé de boutique Chariow — scopes `store.read` et `products.read` uniquement',
+      },
+      { mode: 'file-import', label: 'Import d’un export CSV de vos produits' },
+    ],
+    // Moteur réellement écrit : la clé est vérifiée par le serveur en lisant
+    // `GET /v1/store` puis `GET /v1/products`, rangée dans Vault, et le
+    // catalogue est lu par l'API officielle.
+    engine: 'api-key',
+    docsUrl: 'https://chariow.dev',
+    caveat:
+      'La clé se crée dans app.chariow.com → Settings → API Keys, et n’est affichée qu’une seule fois. '
+      + 'Cochez uniquement « store.read » et « products.read » : VYORA n’a besoin d’aucun autre droit. '
+      + 'Chariow n’expose pas les variantes détaillées ni de SKU : les produits à tarifs par variante sont importés '
+      + 'comme des fiches simples, avec un avertissement dans l’aperçu.',
+  },
+  {
     id: 'magento',
     name: 'Magento / Adobe Commerce',
     category: 'commerce',

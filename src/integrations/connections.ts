@@ -145,6 +145,10 @@ export const CONNECTORS_ACCEPTING_REQUESTS: ReadonlySet<string> = new Set([
   // les comptes qui n'ont pas encore d'abonnement, et `bg_connect_integration`
   // accepte la clé. L'ajouter ici ne crée donc aucun bouton mort.
   'prestashop',
+  // Chariow a un moteur réel (clé vérifiée par lecture de `GET /v1/store` et
+  // `GET /v1/products`). Comme pour PrestaShop, l'ajouter ici ne crée aucun
+  // bouton mort : `bg_connect_integration` accepte la clé.
+  'chariow',
 ]);
 
 /** Entrée d'audit, telle que rend `oauth_audit_list()`. */

@@ -116,7 +116,9 @@ export function normalizeCatalogProduct(
   defaultCurrency = DEFAULT_CURRENCY,
 ): NormalizedProduct | { error: string } {
   const currency = (raw.currency ?? defaultCurrency).toUpperCase();
-  const warnings: string[] = [];
+  // Les avertissements du LECTEUR passent en premier : ils décrivent une limite
+  // de la source (« variantes non exposées ») que le prix ne doit pas masquer.
+  const warnings: string[] = [...(raw.warnings ?? [])];
 
   let priceMinor: number | null;
   if (typeof raw.priceMinor === 'number' && Number.isFinite(raw.priceMinor) && raw.priceMinor >= 0) {

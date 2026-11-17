@@ -49,6 +49,7 @@ import { fetchPublicCatalog } from '../../../src/business/importer/sources.ts';
 import { DEFAULT_CURRENCY, type NormalizedProduct } from '../../../src/business/importer/normalize.ts';
 import { matchBatch, type MatchResult } from '../../../src/business/importer/matching.ts';
 import { readPrestashopCatalog } from '../../../src/business/importer/prestashop-catalog.ts';
+import { explainChariowError, readChariowCatalog, toChariowRawProduct } from '../../../src/business/importer/chariow-catalog.ts';
 import type { FileParseResult } from '../../../src/business/importer/files.ts';
 import { pinnedFetchLike, type EgressDeps } from './safe-egress.ts';
 import { MAX_CATALOG_BYTES, MAX_HTML_BYTES } from '../../../src/business/importer/sources.ts';
@@ -297,6 +298,13 @@ export interface PreviewPayload {
   previewId: string;
   expiresAt: string;
   origin: ImportBatch['origin'];
+  /**
+   * Produits écartés parce que non publiés chez la source (Chariow).
+   *
+   * Absent quand la notion n'existe pas pour la source. Sa présence évite de
+   * faire passer « 3 produits publiés » pour « 3 produits au total ».
+   */
+  draftsSkipped?: number;
   summary: ImportBatch['summary'];
   products: Array<{
     index: number;
@@ -324,6 +332,13 @@ export interface PreviewPayload {
     /** Produit visé quand la décision est `update`. */
     targetId?: string | null;
     importable: boolean;
+    /**
+     * Plateforme d'origine de la fiche (`chariow`, `prestashop`, `unknown`…).
+     *
+     * Sert à expliquer une limite propre à la source dans l'écran d'aperçu —
+     * par exemple l'absence de variantes détaillées chez Chariow.
+     */
+    platform?: string;
     /**
      * Déclinaisons détectées, telles qu'elles seront écrites.
      *
@@ -594,6 +609,17 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
         // Deux sources, une seule garde : l'abonnement a déjà été vérifié
         // ci-dessus, avant même de savoir de quel type d'import il s'agit.
         const fichier = typeof body.fileBase64 === 'string' && body.fileBase64.length > 0;
+        /*
+         * `connectorKey` : aperçu d'une boutique dont l'API est HÉBERGÉE chez
+         * l'éditeur (Chariow). Il n'y a pas d'URL de boutique à joindre — la
+         * clé est dans Vault, l'hôte de l'API est fixe.
+         *
+         * Sans cette distinction, l'appelant devrait envoyer une adresse
+         * factice pour satisfaire la validation d'URL, ce qui ferait croire au
+         * serveur qu'il va contacter cette adresse. Le type de la requête dit
+         * donc deux intentions réelles, au lieu d'un paramètre détourné.
+         */
+        const connecteur = text(body.connectorKey, 40);
         const payload = fichier
           ? await faireApercuFichier(dependencies, {
             userId,
@@ -606,7 +632,9 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
             now,
             ttl,
           })
-          : await faireApercu(dependencies, { userId, workspaceId, url: text(body.url, 2048), now, ttl });
+          : connecteur
+            ? await faireApercuConnecteur(dependencies, { userId, workspaceId, connectorKey: connecteur, now, ttl })
+            : await faireApercu(dependencies, { userId, workspaceId, url: text(body.url, 2048), now, ttl });
         await apercus.set(payload.data.previewId, {
           ...payload.record,
           kind: fichier ? 'file' : 'url',
@@ -1072,6 +1100,10 @@ async function faireApercu(
   const produits: NormalizedProduct[] = [];
   let rejets: Array<{ line: number; reason: string }> = [];
   let endpoint: string | null = null;
+  /** Produits Chariow écartés parce que non publiés (compté, jamais importé). */
+  let brouillonsChariow = 0;
+  /** La source de cet aperçu est-elle Chariow (pour les champs qui lui sont propres) ? */
+  const plateformeChariow = verdict.platform === 'chariow';
 
   // `public-json` n'est vrai que pour Shopify et WooCommerce ; on le dit au
   // type plutôt que de caster, pour qu'un futur ajout de plateforme casse ici
@@ -1169,6 +1201,88 @@ async function faireApercu(
     );
     produits.push(...normalise.produits);
     rejets = [...lecture.value.rejected, ...normalise.rejets];
+  } else if (verdict.platform === 'chariow') {
+    /*
+     * Chariow : aucun catalogue public. Le catalogue n'est lisible que par
+     * `GET https://api.chariow.com/v1/products`, avec la clé déposée dans Vault
+     * au moment de la connexion. Le navigateur ne la voit jamais.
+     *
+     * L'hôte interrogé est FIXE (`api.chariow.com`), il ne dépend pas de l'URL
+     * reçue : la boutique saisie sert uniquement à identifier la plateforme et
+     * à construire les liens produits. Il n'y a donc pas d'adresse arbitraire à
+     * épingler ici — la sortie réseau reste celle de l'import commun, qui
+     * revalide la résolution de l'hôte API à chaque appel.
+     */
+    if (typeof dependencies.readStoreCredential !== 'function') {
+      throw new StoreImportError(
+        'CONNECTOR_UNAVAILABLE',
+        'Le connecteur Chariow n’est pas disponible sur cette installation.',
+        503,
+      );
+    }
+    const cle = await dependencies.readStoreCredential(contexte.userId, 'chariow');
+    if (!cle) {
+      throw new StoreImportError(
+        'CONNECTION_REQUIRED',
+        'Connectez votre boutique Chariow (clé API dans Settings → API Keys) avant de lancer l’aperçu.',
+        409,
+      );
+    }
+    const lecture = await readChariowCatalog(
+      { apiKey: cle },
+      { fetchImpl: pinnedFetchLike(deps, { accept: 'application/json', maxBytes: MAX_CATALOG_BYTES }) },
+      { defaultCurrency: DEFAULT_CURRENCY },
+    );
+    if (!lecture.ok) {
+      // 401 (clé révoquée) et 403 (scope manquant) sont des problèmes de
+      // CONNEXION que le marchand peut corriger : les traiter comme une panne
+      // d'import l'enverrait chercher au mauvais endroit.
+      const refusConnexion = lecture.error.code === 'auth_invalid'
+        || lecture.error.code === 'insufficient_scope'
+        || lecture.error.code === 'forbidden';
+      throw new StoreImportError(
+        refusConnexion ? 'STORE_CONNECTION_REFUSED' : 'CATALOG_UNAVAILABLE',
+        explainChariowError(lecture.error),
+        refusConnexion ? 401 : 502,
+      );
+    }
+    const catalogue = lecture.value;
+    if (catalogue.products.length === 0) {
+      /*
+       * Message précis : « aucun produit publié » n'est PAS « aucun produit ».
+       * Une boutique dont tous les articles sont en brouillon produirait sinon
+       * un « catalogue vide » incompréhensible pour le marchand, qui voit bien
+       * ses produits dans son tableau de bord Chariow.
+       */
+      const brouillons = catalogue.draftsSkipped;
+      throw new StoreImportError(
+        'CATALOG_EMPTY',
+        brouillons > 0
+          ? `Aucun produit publié chez Chariow : ${brouillons} produit(s) sont en brouillon ou suspendus. Publiez-les dans Chariow, puis relancez l’aperçu.`
+          : 'L’API Chariow ne renvoie aucun produit pour cette boutique.',
+        422,
+      );
+    }
+    endpoint = catalogue.endpoint;
+    // Même normalisation que Shopify, Woo et PrestaShop : le connecteur ne fait
+    // que PRODUIRE la forme brute commune.
+    const bruts = catalogue.products.map((produit) =>
+      toChariowRawProduct(produit, catalogue.store.url, catalogue.currency ?? DEFAULT_CURRENCY)
+    );
+    const normalise = normalizeCatalog(
+      {
+        platform: 'chariow',
+        endpoint: catalogue.endpoint,
+        products: bruts,
+        currency: catalogue.currency,
+      },
+      'chariow',
+      DEFAULT_CURRENCY,
+    );
+    produits.push(...normalise.produits);
+    rejets = [...catalogue.rejected, ...normalise.rejets];
+    // Les brouillons écartés sont DITS à l'écran, pas seulement dans un journal.
+    brouillonsChariow = catalogue.draftsSkipped;
   } else {
     throw new StoreImportError(
       'NO_PUBLIC_CATALOG',
@@ -1217,8 +1331,21 @@ async function faireApercu(
         stock: variante.stock ?? null,
         attributeName: variante.attributeName ?? null,
       })),
+      // Provenance de la fiche : `platformId` est l'identifiant STABLE chez la
+      // source (`prd_…` Chariow). Il est renvoyé pour que l'écran puisse
+      // expliquer pourquoi un produit sera mis à jour plutôt que dupliqué.
+      platform: produit.source.platform,
     };
   });
+
+  /*
+   * Brouillons Chariow : remontés à l'écran, pas seulement dans un journal.
+   *
+   * Un marchand qui voit « 3 produits » alors que sa boutique en contient 8
+   * conclurait à une panne d'import. Le décompte explicite fait la différence
+   * entre une limite de l'API et une perte de données.
+   */
+  const brouillonsEcartes = plateformeChariow ? brouillonsChariow : 0;
 
   const importables = lignes.filter((l) => l.importable).length;
   const origin: ImportBatch['origin'] = {
@@ -1235,6 +1362,216 @@ async function faireApercu(
       : []),
     ...(lignes.some((l) => l.duplicate === 'in-batch')
       ? ['Des doublons internes au catalogue source sont ignorés : aucun produit n’est écrit deux fois.']
+      : []),
+    ...(rejets.length ? [`${rejets.length} produit(s) du catalogue source n’ont pas pu être normalisés.`] : []),
+    ...(brouillonsChariow > 0
+      ? [`${brouillonsChariow} produit(s) Chariow non publié(s) (brouillon ou suspendu) ont été écartés : seuls les produits publiés sont importés.`]
+      : []),
+  ];
+
+  const previewId = crypto.randomUUID();
+  const expire = new Date(contexte.now() + contexte.ttl).toISOString();
+
+  const data: PreviewPayload = {
+    previewId,
+    expiresAt: expire,
+    origin,
+    summary: {
+      total: lignes.length,
+      importable: importables,
+      duplicateInBatch: lignes.filter((l) => l.duplicate === 'in-batch').length,
+      duplicateExisting: lignes.filter((l) => l.duplicate === 'existing').length,
+      withWarnings: lignes.filter((l) => l.warnings.length > 0).length,
+      priced: produits.filter((p) => p.priceMinor !== null).length,
+      unpriced: produits.filter((p) => p.priceMinor === null).length,
+    },
+    products: lignes,
+    rejected: rejets,
+    warnings,
+    connectedTo,
+    ...(brouillonsEcartes > 0 ? { draftsSkipped: brouillonsEcartes } : {}),
+  };
+
+  return {
+    data,
+    record: {
+      userId: contexte.userId,
+      workspaceId: contexte.workspaceId,
+      createdAt: contexte.now(),
+      kind: 'url',
+      products: produits,
+      // Décisions figées avec l'aperçu : la confirmation applique exactement ce
+      // qui a été montré.
+      matches: lignes.map((ligne) => ({ match: ligne.match, targetId: ligne.targetId })),
+      origin,
+    },
+  };
+}
+
+/**
+ * Aperçu pour un connecteur dont l'API est **hébergée chez l'éditeur**.
+ *
+ * ## Pourquoi une fonction séparée de `faireApercu`
+ * `faireApercu` commence par sonder une page HTML de boutique : il lui faut une
+ * URL, un résolveur et un épinglage. Chariow n'a rien de tout cela — l'hôte de
+ * l'API est constant (`api.chariow.com`) et le catalogue vient d'une clé. Passer
+ * par le chemin « URL » obligerait à inventer une adresse, et ferait croire au
+ * serveur qu'il contacte la boutique.
+ *
+ * Ce qui est **partagé** et non dupliqué : la sortie réseau épinglée, le
+ * normaliseur (`normalizeCatalog`), le rapprochement (`matchBatch`), la
+ * construction de l'aperçu, la sélection, la confirmation, la reprise et
+ * l'historique. Cette fonction ne fait que produire `produits` et `endpoint` ;
+ * tout le reste est le code commun.
+ */
+async function faireApercuConnecteur(
+  dependencies: StoreImportDependencies,
+  contexte: {
+    userId: string;
+    workspaceId: string;
+    connectorKey: string;
+    now: () => number;
+    ttl: number;
+  },
+): Promise<{ data: PreviewPayload; record: PreviewRecord }> {
+  if (contexte.connectorKey !== 'chariow') {
+    // Un identifiant inconnu ne doit pas retomber silencieusement sur un autre
+    // connecteur : on refuse explicitement.
+    throw new StoreImportError('UNKNOWN_CONNECTOR', 'Connecteur inconnu pour l’aperçu.', 400);
+  }
+  if (typeof dependencies.readStoreCredential !== 'function') {
+    throw new StoreImportError(
+      'CONNECTOR_UNAVAILABLE',
+      'Le connecteur Chariow n’est pas disponible sur cette installation.',
+      503,
+    );
+  }
+  if (!dependencies.resolveHost) {
+    // La sortie épinglée exige un résolveur : sans lui, l'import est refusé
+    // plutôt que de laisser `fetch` résoudre seul (ce serait rouvrir le SSRF).
+    throw new StoreImportError(
+      'RESOLVER_UNAVAILABLE',
+      'La vérification DNS serveur n’est pas disponible : import refusé par sécurité.',
+      503,
+    );
+  }
+
+  const cle = await dependencies.readStoreCredential(contexte.userId, 'chariow');
+  if (!cle) {
+    throw new StoreImportError(
+      'CONNECTION_REQUIRED',
+      'Connectez votre boutique Chariow (clé API dans Settings → API Keys) avant de lancer l’aperçu.',
+      409,
+    );
+  }
+
+  let connectedTo = '';
+  const deps: EgressDeps = {
+    resolveHost: dependencies.resolveHost,
+    connect: dependencies.connect,
+    onConnected: (ip) => {
+      connectedTo = ip;
+    },
+  };
+
+  const lecture = await readChariowCatalog(
+    { apiKey: cle },
+    { fetchImpl: pinnedFetchLike(deps, { accept: 'application/json', maxBytes: MAX_CATALOG_BYTES }) },
+    { defaultCurrency: DEFAULT_CURRENCY },
+  );
+  if (!lecture.ok) {
+    const refusConnexion = lecture.error.code === 'auth_invalid'
+      || lecture.error.code === 'insufficient_scope'
+      || lecture.error.code === 'forbidden';
+    throw new StoreImportError(
+      refusConnexion ? 'STORE_CONNECTION_REFUSED' : 'CATALOG_UNAVAILABLE',
+      explainChariowError(lecture.error),
+      refusConnexion ? 401 : 502,
+    );
+  }
+
+  const catalogue = lecture.value;
+  if (catalogue.products.length === 0) {
+    const brouillons = catalogue.draftsSkipped;
+    throw new StoreImportError(
+      'CATALOG_EMPTY',
+      brouillons > 0
+        ? `Aucun produit publié chez Chariow : ${brouillons} produit(s) sont en brouillon ou suspendus. Publiez-les dans Chariow, puis relancez l’aperçu.`
+        : 'L’API Chariow ne renvoie aucun produit pour cette boutique.',
+      422,
+    );
+  }
+
+  // Projection vers la forme brute commune, puis normalisation COMMUNE.
+  const bruts = catalogue.products.map((produit) =>
+    toChariowRawProduct(produit, catalogue.store.url, catalogue.currency ?? DEFAULT_CURRENCY)
+  );
+  const normalise = normalizeCatalog(
+    {
+      platform: 'chariow',
+      endpoint: catalogue.endpoint,
+      products: bruts,
+      currency: catalogue.currency,
+    },
+    'chariow',
+    DEFAULT_CURRENCY,
+  );
+  const produits = normalise.produits;
+  const rejets = [...catalogue.rejected, ...normalise.rejets];
+  if (produits.length === 0) {
+    throw new StoreImportError(
+      'CATALOG_EMPTY',
+      'Les produits Chariow lus n’ont pas pu être normalisés.',
+      422,
+    );
+  }
+
+  // Rapprochement : lecture seule du catalogue existant, aucune écriture.
+  const existants = await dependencies.listExistingProducts(contexte.workspaceId);
+  const rapprochements = rapprocher(produits, existants);
+
+  const lignes = produits.map((produit, index) => {
+    const decision = decisionApercu(rapprochements[index], existants);
+    return {
+      index,
+      name: produit.name,
+      price: formatPreviewPrice(produit),
+      currency: produit.currency,
+      productUrl: produit.productUrl,
+      sku: produit.sku ?? null,
+      platformId: produit.platformId ?? null,
+      warnings: produit.warnings,
+      duplicate: decision.duplicate,
+      match: decision.match,
+      matchReason: decision.matchReason,
+      candidates: decision.candidates,
+      targetId: decision.targetId,
+      importable: isImportable(produit)
+        && decision.match !== 'ambiguous'
+        && decision.match !== 'duplicate-in-batch',
+      variants: [],
+      platform: 'chariow',
+    };
+  });
+
+  const importables = lignes.filter((l) => l.importable).length;
+  const origin: ImportBatch['origin'] = {
+    kind: 'url',
+    reference: catalogue.store.url ?? 'https://api.chariow.com',
+    platform: 'chariow',
+    endpoint: catalogue.endpoint,
+  };
+
+  const warnings = [
+    'Aucun produit n’a été créé : cette étape est une prévisualisation.',
+    ...(catalogue.draftsSkipped > 0
+      ? [`${catalogue.draftsSkipped} produit(s) Chariow non publié(s) (brouillon ou suspendu) ont été écartés : seuls les produits publiés sont importés.`]
+      : []),
+    ...(catalogue.truncated
+      ? ['Le catalogue dépasse la limite de lecture : une partie des produits n’a pas été récupérée.']
+      : []),
+    ...(lignes.some((l) => l.warnings.length > 0)
+      ? ['Certains produits portent un avertissement (variantes non exposées par l’API, prix absent) : lisez-le avant de confirmer.']
       : []),
     ...(rejets.length ? [`${rejets.length} produit(s) du catalogue source n’ont pas pu être normalisés.`] : []),
   ];
@@ -1259,6 +1596,7 @@ async function faireApercu(
     rejected: rejets,
     warnings,
     connectedTo,
+    ...(catalogue.draftsSkipped > 0 ? { draftsSkipped: catalogue.draftsSkipped } : {}),
   };
 
   return {
@@ -1270,7 +1608,7 @@ async function faireApercu(
       kind: 'url',
       products: produits,
       // Décisions figées avec l'aperçu : la confirmation applique exactement ce
-      // qui a été montré.
+      // qui a été montré, même si le catalogue change entre-temps.
       matches: lignes.map((ligne) => ({ match: ligne.match, targetId: ligne.targetId })),
       origin,
     },

@@ -334,6 +334,15 @@ export interface RawCatalogProduct {
   /** Quantité totale du produit. `null` = inconnue, jamais zéro. */
   stock?: number | null;
   /**
+   * Avertissements produits par le LECTEUR, rattachés à la fiche.
+   *
+   * Cas concret : Chariow publie `has_variant_pricing` sans exposer les
+   * variantes. Le lecteur le signale ici, et le normaliseur les fait remonter
+   * dans l'aperçu — sans quoi l'utilisateur importerait un produit à options
+   * en croyant avoir récupéré ses tarifs par variante.
+   */
+  warnings?: string[];
+  /**
    * Prix déjà en unité mineure, quand le lecteur sait le convertir.
    *
    * Prioritaire sur `price` : PrestaShop publie un montant décimal dont
@@ -365,7 +374,7 @@ export interface RawCatalogProduct {
  * passent par leur API authentifiée, et fournissent le même contrat — c'est ce
  * qui permet à `normalizeCatalog` et au reste du moteur de ne pas changer.
  */
-export type CatalogPlatform = 'shopify' | 'woocommerce' | 'prestashop' | 'opencart';
+export type CatalogPlatform = 'shopify' | 'woocommerce' | 'prestashop' | 'opencart' | 'chariow';
 
 export interface PublicCatalog {
   platform: CatalogPlatform;

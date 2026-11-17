@@ -47,6 +47,18 @@ import {
 // vérifie en lisant réellement des ressources, la seconde construit le
 // catalogue. `prestashop-api.ts` ne fait que parler à l'API.
 import { probePrestashop, readPrestashopCatalog } from '../../../src/business/importer/prestashop-catalog.ts';
+import {
+  CHARIOW_API_HOST,
+  validateChariowKey,
+  type ChariowError,
+} from '../../../src/business/importer/chariow-api.ts';
+import {
+  explainChariowError,
+  probeChariow,
+  readChariowCatalog,
+  toChariowRawProduct,
+} from '../../../src/business/importer/chariow-catalog.ts';
+import { sameShopOrigin } from '../../../src/business/importer/chariow-pricing.ts';
 import { resolveCorsOrigin } from '../../../src/lib/origin-allowlist.ts';
 import {
   assertPublicAddresses,
@@ -228,9 +240,23 @@ export function credentialName(userId: string, connectorKey: string): string {
   return `vyora_${connectorKey}_${userId}`;
 }
 
-/** Le connecteur dont on vérifie la connexion. Un seul pour l'instant. */
-const CONNECTEURS: Record<string, { platform: CatalogPlatform; label: string }> = {
-  prestashop: { platform: 'prestashop', label: 'PrestaShop' },
+/**
+ * Connecteurs dont la connexion est vérifiée par une lecture réelle de l'API.
+ *
+ * `mode` décide du parcours :
+ *  - `shop-api` : l'API est **chez le marchand** (PrestaShop). L'URL de la
+ *    boutique est obligatoire, résolue, contrôlée contre le SSRF, puis épinglée.
+ *  - `hosted-api` : l'API est **chez l'éditeur** (Chariow, `api.chariow.com`).
+ *    L'hôte est fixe et non fourni par l'utilisateur : la surface SSRF liée à
+ *    une adresse d'API arbitraire disparaît. L'URL de la vitrine ne sert qu'à
+ *    confirmer que la clé correspond bien à la boutique annoncée.
+ */
+const CONNECTEURS: Record<
+  string,
+  { platform: CatalogPlatform; label: string; mode: 'shop-api' | 'hosted-api' }
+> = {
+  prestashop: { platform: 'prestashop', label: 'PrestaShop', mode: 'shop-api' },
+  chariow: { platform: 'chariow', label: 'Chariow', mode: 'hosted-api' },
 };
 
 /* ---------------------------------- actions -------------------------------- */
@@ -245,6 +271,14 @@ async function connecter(
   const connecteur = CONNECTEURS[connectorKey];
   if (!connecteur) {
     return jsonResponse(failure('UNKNOWN_CONNECTOR', 'Connecteur inconnu.'), 400, corsOrigin);
+  }
+
+  // Chariow a son propre parcours : l'API n'est pas chez le marchand, donc il
+  // n'y a ni résolution de boutique ni épinglage d'adresse client à faire. On
+  // délègue AVANT la validation d'URL PrestaShop, qui exigerait une adresse
+  // de boutique obligatoire — Chariow, lui, la déduit de l'API.
+  if (connecteur.mode === 'hosted-api') {
+    return connecterHerberge(body, { userId, workspaceId, corsOrigin, deps, connectorKey });
   }
 
   const apiKey = normalizeApiKey(body.apiKey);
@@ -360,6 +394,243 @@ async function connecter(
   }, 200, corsOrigin);
 }
 
+/* --------------------- connecteurs à API hébergée (Chariow) ----------------- */
+
+/**
+ * Connexion d'une boutique dont l'API appartient à l'ÉDITEUR (Chariow).
+ *
+ * ## Différences assumées avec PrestaShop
+ *
+ * | | PrestaShop | Chariow |
+ * |---|---|---|
+ * | Hôte de l'API | la boutique du marchand | `api.chariow.com`, fixe |
+ * | Contrôle SSRF | résolution + épinglage de l'IP | hôte constant, non fourni |
+ * | URL de boutique | obligatoire, c'est l'API | facultative, sert de contrôle |
+ *
+ * L'hôte de l'API n'étant **pas** dicté par la requête, il n'y a pas d'adresse
+ * arbitraire à épingler : la sortie reste la sortie épinglée commune
+ * (`pinnedFetchLike`), qui revalide la résolution de `api.chariow.com` à chaque
+ * appel. Le SSRF ne disparaît donc pas, il est simplement réduit à un seul nom,
+ * connu à l'avance.
+ *
+ * ## Le contrôle qui compte : la clé appartient-elle à CETTE boutique ?
+ *
+ * Une clé Chariow donne accès à **une** boutique. Si le marchand saisit
+ * l'adresse de sa vitrine, on compare avec `data.url` renvoyé par
+ * `GET /v1/store`. Sans cette comparaison, une clé appartenant à une autre
+ * boutique serait acceptée et l'import écraserait le catalogue de la mauvaise
+ * entreprise. En cas de désaccord, on **refuse** au lieu d'importer.
+ */
+async function connecterHerberge(
+  body: Record<string, unknown>,
+  contexte: {
+    userId: string;
+    workspaceId: string;
+    corsOrigin: string;
+    deps: ConnectDependencies;
+    connectorKey: string;
+  },
+): Promise<Response> {
+  const { userId, workspaceId, corsOrigin, deps, connectorKey } = contexte;
+
+  const cle = validateChariowKey(body.apiKey);
+  if (!cle.ok) {
+    return jsonResponse(failure('API_KEY_REQUIRED', cle.error.message), 400, corsOrigin);
+  }
+
+  // Adresse de vitrine : facultative. Elle ne sert qu'à la confirmation
+  // d'appartenance, jamais à joindre l'API.
+  const vitrine = text(body.url, 500);
+
+  const debut = (deps.now ?? Date.now)();
+  const sonde = await probeChariow({ apiKey: cle.value }, { fetchImpl: deps.fetchImpl });
+
+  if (!sonde.ok) {
+    const duree = (deps.now ?? Date.now)() - debut;
+    await journaliserEchec(deps, {
+      userId, workspaceId, connectorKey, duree,
+      erreur: { code: sonde.error.code, message: sonde.error.message },
+      phase: 'probe',
+    });
+    return jsonResponse(
+      failure(sonde.error.code.toUpperCase(), explainChariowError(sonde.error)),
+      statutPourErreurChariow(sonde.error),
+      corsOrigin,
+    );
+  }
+
+  const rapport = sonde.value;
+
+  // Confirmation d'appartenance : seulement si le marchand a saisi une adresse
+  // ET si Chariow en publie une. On ne refuse pas sur une donnée manquante —
+  // on refuse seulement sur un DÉSACCORD explicite.
+  if (vitrine && rapport.store.url && !sameShopOrigin(rapport.store.url, vitrine)) {
+    return jsonResponse(
+      failure(
+        'SHOP_MISMATCH',
+        `Cette clé appartient à la boutique ${rapport.store.url}, pas à ${vitrine}. Vérifiez la clé (Settings → API Keys de la bonne boutique).`,
+      ),
+      409,
+      corsOrigin,
+    );
+  }
+
+  let credentialRef: string;
+  try {
+    credentialRef = await deps.storeCredential({ userId, connectorKey, secret: cle.value });
+  } catch (erreur) {
+    deps.log?.('store-connect: dépôt du secret impossible', {
+      erreur: erreur instanceof Error ? erreur.message : 'inconnue',
+    });
+    return jsonResponse(
+      failure('SECRET_STORE_UNAVAILABLE', 'La clé n’a pas pu être enregistrée de façon sécurisée. Réessayez.'),
+      503, corsOrigin,
+    );
+  }
+
+  const duree = (deps.now ?? Date.now)() - debut;
+  let enregistrement: { connectionId: string; status: string };
+  try {
+    enregistrement = await deps.recordConnection({
+      userId,
+      workspaceId,
+      connectorKey,
+      credentialRef,
+      // Référence externe : l'URL publique de la boutique lue chez Chariow.
+      // Jamais la clé, jamais son nom de secret.
+      externalAccountRef: rapport.store.url,
+      resourcesRead: rapport.resourcesRead,
+      // Chariow ne publie pas de total : `null` est plus honnête qu'un 0.
+      totalProducts: null,
+      durationMs: duree,
+    });
+  } catch (erreur) {
+    await deps.deleteCredential(credentialRef).catch(() => {});
+    const message = erreur instanceof Error ? erreur.message : '';
+    if (/SUBSCRIPTION_REQUIRED/i.test(message)) {
+      return jsonResponse(
+        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Ground actif et payé est requis pour connecter une boutique.'),
+        403, corsOrigin,
+      );
+    }
+    if (/WORKSPACE_ACCESS_DENIED|forbidden/i.test(message)) {
+      return jsonResponse(failure('WORKSPACE_ACCESS_DENIED', 'Droits insuffisants sur cette entreprise.'), 403, corsOrigin);
+    }
+    deps.log?.('store-connect: enregistrement impossible', { erreur: message || 'inconnue' });
+    return jsonResponse(failure('CONNECTION_NOT_SAVED', 'La connexion vérifiée n’a pas pu être enregistrée.'), 500, corsOrigin);
+  }
+
+  return jsonResponse({
+    data: {
+      connectorKey,
+      status: enregistrement.status,
+      connected: true,
+      // Ce que la vérification a RÉELLEMENT lu chez Chariow.
+      shopName: rapport.store.name,
+      version: null,
+      totalProducts: null,
+      languages: [],
+      resourcesRead: rapport.resourcesRead,
+      connectedTo: CHARIOW_API_HOST,
+      endpoint: 'https://api.chariow.com/v1',
+      storeUrl: rapport.store.url,
+      storeStatus: rapport.store.status,
+      storeId: rapport.store.id,
+      durationMs: duree,
+    },
+  }, 200, corsOrigin);
+}
+
+/** Traduit une erreur Chariow en statut HTTP. */
+function statutPourErreurChariow(erreur: ChariowError): number {
+  switch (erreur.code) {
+    case 'auth_required':
+      return 400;
+    case 'auth_invalid':
+      return 401;
+    case 'insufficient_scope':
+    case 'forbidden':
+      return 403;
+    case 'rate_limited':
+      return 429;
+    case 'timeout':
+      return 504;
+    case 'too_large':
+      return 413;
+    case 'blocked_url':
+    case 'not_found':
+    case 'bad_response':
+      return 400;
+    default:
+      return 502;
+  }
+}
+
+/**
+ * Aperçu Chariow : lit le catalogue, le projette dans la forme brute commune,
+ * et le renvoie SANS RIEN ÉCRIRE.
+ *
+ * La clé vient de Vault : le navigateur ne la renvoie jamais. C'est ce qui
+ * permet à l'aperçu de fonctionner après un rechargement de page sans que
+ * l'utilisateur ait à ressaisir son secret.
+ */
+async function previsualiserChariow(
+  contexte: { userId: string; corsOrigin: string; deps: ConnectDependencies },
+  currency?: string,
+): Promise<Response> {
+  const { userId, corsOrigin, deps } = contexte;
+
+  const apiKey = await deps.readCredential(userId, 'chariow');
+  if (!apiKey) {
+    return jsonResponse(
+      failure('CONNECTION_REQUIRED', 'Connectez d’abord votre boutique Chariow : aucune clé n’est enregistrée pour ce connecteur.'),
+      409, corsOrigin,
+    );
+  }
+
+  const lecture = await readChariowCatalog(
+    { apiKey },
+    { fetchImpl: deps.fetchImpl },
+    { defaultCurrency: currency },
+  );
+  if (!lecture.ok) {
+    return jsonResponse(
+      failure(lecture.error.code.toUpperCase(), explainChariowError(lecture.error)),
+      statutPourErreurChariow(lecture.error),
+      corsOrigin,
+    );
+  }
+
+  const catalogue = lecture.value;
+  // Les produits sont renvoyés sous la forme brute normalisable : c'est
+  // `store-import` qui applique ensuite `normalizeCatalog` et `matchBatch`.
+  // Le rapprochement reste donc à UN seul endroit, quel que soit le connecteur.
+  const produits = catalogue.products.map((produit) =>
+    toChariowRawProduct(produit, catalogue.store.url, catalogue.currency ?? 'XOF')
+  );
+
+  return jsonResponse({
+    data: {
+      platform: 'chariow',
+      endpoint: catalogue.endpoint,
+      connectedTo: CHARIOW_API_HOST,
+      currency: catalogue.currency,
+      resourcesRead: catalogue.resourcesRead,
+      // Un catalogue tronqué doit être DIT : l'utilisateur verrait sinon une
+      // partie de ses produits sans savoir qu'il en manque.
+      truncated: catalogue.truncated,
+      // Compté et remonté : distinguer « 0 produit » de « 0 produit publié,
+      // 4 brouillons » est la différence entre une boutique vide et un import
+      // qui aurait dû ramener des fiches.
+      draftsSkipped: catalogue.draftsSkipped,
+      rejected: catalogue.rejected,
+      store: catalogue.store,
+      products: produits,
+      count: produits.length,
+    },
+  }, 200, corsOrigin);
+}
+
 /** Traduit une erreur du connecteur en statut HTTP. */
 function statutPourErreur(erreur: PrestashopError): number {
   switch (erreur.code) {
@@ -390,7 +661,10 @@ async function journaliserEchec(
   deps: ConnectDependencies,
   entree: {
     userId: string; workspaceId: string; connectorKey: string;
-    duree: number; erreur: PrestashopError; phase: string;
+    // Structure minimale commune à tous les connecteurs : un code machine et un
+    // message déjà expurgé. Le journal ne connaît donc pas les types propres à
+    // chaque API, et n'a aucune raison de manipuler un secret.
+    duree: number; erreur: { code: string; message: string }; phase: string;
   },
 ): Promise<void> {
   try {
@@ -619,6 +893,14 @@ async function previsualiser(
       return jsonResponse(failure(erreur.code, erreur.message), erreur.status, corsOrigin);
     }
     throw erreur;
+  }
+
+  const connecteur = CONNECTEURS[connectorKey];
+  if (connecteur.mode === 'hosted-api') {
+    return await previsualiserChariow(
+      { userId, corsOrigin, deps },
+      typeof body.currency === 'string' ? body.currency : undefined,
+    );
   }
 
   const apiKey = await deps.readCredential(userId, connectorKey);

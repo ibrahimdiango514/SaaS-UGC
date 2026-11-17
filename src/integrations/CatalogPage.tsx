@@ -19,6 +19,7 @@ import { businessGrowApi, type BusinessIntegrationConnection } from '../business
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
 import { PrestashopConnectForm } from './PrestashopConnectForm';
+import { ChariowConnectForm } from './ChariowConnectForm';
 import '../ai/assistant.css';
 
 /**
@@ -816,7 +817,19 @@ function FicheDetail({
             </div>
           ) : (
             <>
-              {connectable && entry.engine === 'api-key' ? (
+              {connectable && entry.engine === 'api-key' && entry.id === 'chariow' ? (
+                /*
+                 * Chariow : un SEUL champ (la clé). Son API est hébergée chez
+                 * l'éditeur, il n'y a donc aucune adresse de boutique à
+                 * saisir — l'exiger serait un champ inutile qui laisserait
+                 * croire que VYORA contacte la vitrine.
+                 */
+                <ChariowConnectForm
+                  workspaceId={workspaceId}
+                  connected={statut === 'connected'}
+                  onChanged={onChanged}
+                />
+              ) : connectable && entry.engine === 'api-key' ? (
                 /*
                  * Connecteur à clé d'API : le formulaire fait le travail réel.
                  * La fiche garde la main sur l'état (connecté / non connecté),
