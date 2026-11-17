@@ -56,6 +56,12 @@ export interface DependancesServeur {
   journaliser(entree: JournalEntree): Promise<void>;
   ecritureActive: boolean;
   maintenant?: () => number;
+  /**
+   * URL publique de ce serveur MCP, utilisée pour publier l'adresse des
+   * métadonnées OAuth dans les défis 401. Optionnelle : sans elle, le serveur
+   * se comporte exactement comme en v5.
+   */
+  ressourcePublicitaire?: string;
 }
 
 export interface ReponseHttp {
@@ -90,16 +96,53 @@ export function lireJeton(enteteAuthorization: string | null | undefined): strin
   return secret;
 }
 
-/** Traduit une erreur d'accès en réponse 401 avec l'en-tête attendu. */
-function nonAutorise(message: string, codeErreur = 'invalid_token'): ReponseHttp {
+/**
+ * Traduit une erreur d'accès en réponse 401 avec l'en-tête attendu.
+ *
+ * ## `resource_metadata` : la moitié du travail d'un client inconnu
+ *
+ * Un client MCP qui reçoit un simple 401 ne sait pas où demander un jeton : il
+ * n'a que l'URL du serveur MCP, rien d'autre. La spécification d'autorisation
+ * MCP impose donc d'ajouter `resource_metadata`, l'URL du document RFC 9728
+ * qui décrit la ressource, son serveur d'autorisation et les portées valides.
+ *
+ * C'est ce qui rend le branchement possible SANS configuration manuelle : le
+ * client découvre `authorization_servers`, puis le document RFC 8414, puis
+ * s'enregistre dynamiquement. Sans cet en-tête, le client devrait deviner, et
+ * un client qui devine est un client qui n'essaie pas.
+ *
+ * `deps.ressourcePublicitaire` est fourni par `index.ts` ; absent (tests, ou
+ * configuration incomplète), l'en-tête reste ce qu'il était en v5 : un défi
+ * minimal, jamais une URL inventée.
+ */
+function nonAutorise(
+  message: string,
+  codeErreur = 'invalid_token',
+  ressourcePublicitaire?: string,
+): ReponseHttp {
+  const defi = [`Bearer realm="vyora-mcp"`, `error="${codeErreur}"`];
+  if (ressourcePublicitaire) {
+    defi.push(`resource_metadata="${adresseMetadonnees(ressourcePublicitaire)}"`);
+  }
   return {
     status: 401,
     body: erreur(null, CODES.unauthorized, message),
     headers: {
       ...ENTETES_CORS,
-      'WWW-Authenticate': `Bearer realm="vyora-mcp", error="${codeErreur}"`,
+      'WWW-Authenticate': defi.join(', '),
     },
   };
+}
+
+/**
+ * Adresse du document de ressource, dérivée de l'URL du serveur MCP.
+ *
+ * L'URL relative (`.well-known` sous le chemin de la fonction) est la forme que
+ * `index.ts` sert réellement : la fonction Edge ne peut pas répondre à la
+ * racine du domaine. On n'invente donc rien, on pointe sur une route qui existe.
+ */
+function adresseMetadonnees(ressource: string): string {
+  return `${ressource.replace(/\/+$/, '')}/.well-known/oauth-protected-resource`;
 }
 
 /**
@@ -168,6 +211,7 @@ export async function traiterRequete(
     return nonAutorise(
       'Jeton MCP absent ou mal formé. En-tête attendu : « Authorization: Bearer vyora_mcp_… ».',
       'invalid_request',
+      deps.ressourcePublicitaire,
     );
   }
 
@@ -183,7 +227,9 @@ export async function traiterRequete(
       headers: { ...ENTETES_CORS, 'Retry-After': '5' },
     };
   }
-  if (!contexte) return nonAutorise('Jeton MCP invalide, révoqué ou expiré.');
+  if (!contexte) {
+    return nonAutorise('Jeton MCP invalide, révoqué ou expiré.', 'invalid_token', deps.ressourcePublicitaire);
+  }
 
   if (corpsIllisible) {
     return {

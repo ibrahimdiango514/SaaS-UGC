@@ -37,6 +37,9 @@
     "supabase/functions/types/*.d.ts",
     "supabase/functions/vyora-mcp/index.ts",
     "supabase/functions/vyora-mcp/handler.ts",
-    "supabase/functions/vyora-mcp/core.ts"
+    "supabase/functions/vyora-mcp/core.ts",
+    "supabase/functions/vyora-mcp/oauth.ts",
+    "supabase/functions/vyora-mcp/oauth-routes.ts",
+    "supabase/functions/vyora-mcp/consentement.ts"
   ]
 }

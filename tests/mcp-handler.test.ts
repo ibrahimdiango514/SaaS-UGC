@@ -59,6 +59,7 @@ function serveur(options: {
   panneResolution?: boolean;
   autorise?: boolean;
   ecritureActive?: boolean;
+  ressourcePublicitaire?: string;
 } = {}) {
   const jetons = options.jetons ?? tableJetons();
   const journal = vi.fn(async () => {});
@@ -66,6 +67,7 @@ function serveur(options: {
 
   const deps: DependancesServeur = {
     ecritureActive: options.ecritureActive ?? false,
+    ressourcePublicitaire: options.ressourcePublicitaire,
     async resoudreJeton(secret) {
       if (options.panneResolution) throw new Error('postgres injoignable');
       const hash = createHash('sha256').update(secret, 'utf8').digest('hex');
@@ -303,5 +305,43 @@ describe('permissions par jeton (phase 7.9)', () => {
     const r = await traiterRequete(deps, post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
     const noms = (r.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
     expect(noms).not.toContain('vyora_product_create');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Découverte OAuth dans les défis 401                                         */
+/* -------------------------------------------------------------------------- */
+
+describe('défi d’autorisation (RFC 9728)', () => {
+  const RESSOURCE = 'https://exemple.supabase.co/functions/v1/vyora-mcp';
+
+  it('publie resource_metadata quand la ressource est configurée', async () => {
+    const { deps } = serveur({ jetons: [], ressourcePublicitaire: RESSOURCE });
+    const r = await traiterRequete(deps, post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+    expect(r.status).toBe(401);
+    expect(r.headers['WWW-Authenticate']).toContain(`resource_metadata="${RESSOURCE}/.well-known/oauth-protected-resource"`);
+  });
+
+  it('le publie aussi sur une requête sans jeton', async () => {
+    const { deps } = serveur({ ressourcePublicitaire: RESSOURCE });
+    const r = await traiterRequete(deps, post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, null));
+    expect(r.status).toBe(401);
+    expect(r.headers['WWW-Authenticate']).toContain('resource_metadata=');
+    expect(r.headers['WWW-Authenticate']).toContain('error="invalid_request"');
+  });
+
+  it('reste un défi minimal sans ressource configurée', async () => {
+    const { deps } = serveur({ jetons: [] });
+    const r = await traiterRequete(deps, post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+    // Aucune URL inventée : le comportement v5 est préservé tel quel.
+    expect(r.headers['WWW-Authenticate']).toBe('Bearer realm="vyora-mcp", error="invalid_token"');
+  });
+
+  it('ne fuit ni la clé de service ni le secret présenté', async () => {
+    const { deps } = serveur({ jetons: [], ressourcePublicitaire: RESSOURCE });
+    const r = await traiterRequete(deps, post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }));
+    const tout = JSON.stringify(r.body) + JSON.stringify(r.headers);
+    expect(tout).not.toContain(SECRET);
+    expect(tout).not.toContain(jwtServiceRole());
   });
 });
