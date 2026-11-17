@@ -34,6 +34,10 @@ export const CATALOG_CONNECTOR_KEYS: readonly string[] = [
   'instagram', 'facebook', 'tiktok', 'youtube', 'linkedin', 'pinterest',
   'shopify', 'woocommerce', 'prestashop', 'chariow', 'magento', 'opencart', 'wix',
   'bigcommerce', 'squarespace', 'ecwid',
+  // « Autre plateforme » : le connecteur que l'utilisateur décrit lui-même.
+  // Il appartient au catalogue, mais n'a pas d'adaptateur au sens des autres —
+  // sa configuration est une donnée, pas du code par fournisseur.
+  'custom-api',
   'gmail', 'google_drive', 'google_calendar', 'microsoft365', 'outlook', 'slack', 'notion',
   'hubspot', 'stripe', 'saspay', 'odoo',
 ];

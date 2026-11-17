@@ -59,6 +59,18 @@ import {
   toChariowRawProduct,
 } from '../../../src/business/importer/chariow-catalog.ts';
 import { sameShopOrigin } from '../../../src/business/importer/chariow-pricing.ts';
+import {
+  buildAuthHeaders,
+  parseCustomApiBaseUrl,
+  parseCustomApiEndpoint,
+  explainCustomApiRejection,
+  type AuthScheme,
+} from '../../../src/business/importer/custom-api-guard.ts';
+import {
+  paginationCoherente,
+  probeResponse,
+  type PaginationKind,
+} from '../../../src/business/importer/custom-api-probe.ts';
 import { resolveCorsOrigin } from '../../../src/lib/origin-allowlist.ts';
 import {
   assertPublicAddresses,
@@ -124,6 +136,31 @@ export interface ConnectDependencies {
   resolveHost(hostname: string): Promise<string[]>;
   /** `fetch` épinglé sur l'IP validée (`pinnedFetchLike`). */
   fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * Écrit la configuration d'une API personnalisée (table dédiée).
+   *
+   * Séparé de `recordConnection` : l'une décrit l'état de connexion commun à
+   * tous les connecteurs, l'autre les paramètres propres à une API décrite par
+   * l'utilisateur. Les mélanger aurait imposé un schéma fourre-tout.
+   */
+  saveCustomApiConfig?(input: {
+    userId: string; workspaceId: string; credentialRef: string;
+    baseUrl: string; authScheme: string; authHeaderName: string | null;
+    productsPath: string; paginationKind: string; pageSize: number; maxPages: number;
+    mapping: Record<string, unknown>; priceUnit: 'major' | 'minor'; currency: string;
+    probeSummary: string; probeStatus: number; productsFound: number; durationMs: number;
+  }): Promise<{
+    ok?: boolean; code?: string; message?: string;
+    connectionId?: string; configurationId?: string;
+  } | void>;
+  /**
+   * Nom du secret Vault existant, sans en lire la valeur.
+   *
+   * Utile à `save-custom` : le secret a déjà été déposé par la sonde, et il ne
+   * faut pas le redemander. `readCredential` rendrait la valeur — dont on n'a
+   * justement pas besoin ici.
+   */
+  readCredentialRef?(userId: string, connectorKey: string): Promise<string | null>;
   /** Marque de temps, injectable. */
   now?: () => number;
   /** Journal technique, silencieux en test. */
@@ -739,7 +776,7 @@ export async function handleStoreConnect(
   }
 
   const action = text(body.action, 20);
-  if (!['connect', 'status', 'preview', 'disconnect'].includes(action)) {
+  if (!['connect', 'status', 'preview', 'disconnect', 'probe-custom', 'save-custom'].includes(action)) {
     return new Response(JSON.stringify(failure('UNKNOWN_ACTION', 'Opération inconnue.')), {
       status: 400, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
     });
@@ -779,7 +816,7 @@ export async function handleStoreConnect(
 
     // 3) Entreprise : lue en base, pas reçue du client.
     const grant = await deps.grantWorkspace(userId, workspaceId);
-    const ecriture = action === 'connect' || action === 'disconnect';
+    const ecriture = action === 'connect' || action === 'disconnect' || action === 'save-custom';
     if (ecriture ? !grant.canWrite : !grant.canRead) {
       return new Response(JSON.stringify(failure('WORKSPACE_ACCESS_DENIED', 'Droits insuffisants sur cette entreprise.')), {
         status: 403, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
@@ -842,6 +879,14 @@ export async function handleStoreConnect(
 
     if (action === 'preview') {
       return await previsualiser(body, { userId, workspaceId, corsOrigin, deps });
+    }
+
+    if (action === 'probe-custom') {
+      return await sonderApiPersonnalisee(body, { userId, workspaceId, corsOrigin, deps });
+    }
+
+    if (action === 'save-custom') {
+      return await enregistrerApiPersonnalisee(body, { userId, workspaceId, corsOrigin, deps });
     }
 
     return await connecter(body, { userId, workspaceId, corsOrigin, deps });
@@ -939,6 +984,377 @@ async function previsualiser(
       count: catalogue.products.length,
     },
   }, 200, corsOrigin);
+}
+
+/** Lit un corps de réponse en le plafonnant, sans jamais lever. */
+async function capterCorps(reponse: Response): Promise<string> {
+  try {
+    const texte = await reponse.text();
+    // 2 Mio suffisent pour la première page d'un catalogue ; au-delà, ce n'est
+    // pas un catalogue mais une erreur de configuration.
+    return texte.length > 2 * 1024 * 1024 ? texte.slice(0, 2 * 1024 * 1024) : texte;
+  } catch {
+    return '';
+  }
+}
+
+/** Réponse JSON avec les en-têtes CORS déjà calculés par l'appelant. */
+function reponseJson(statut: number, corsOrigin: string) {
+  return {
+    status: statut,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'access-control-allow-origin': corsOrigin,
+      vary: 'origin',
+    },
+  };
+}
+
+/* ------------------------- API personnalisée (phase D) ---------------------- */
+/*
+ * Deux actions, dans cet ordre imposé : `probe-custom` vérifie sans rien
+ * écrire, `save-custom` enregistre **en s'appuyant sur un test récent**. Le
+ * client ne peut pas sauter l'étape 1 : il ne dispose d'aucun moyen de
+ * fabriquer la preuve, et la base refuse de toute façon une configuration sans
+ * sonde (`PROBE_REQUIRED`).
+ *
+ * La clé arrive par le corps, part dans Vault, et n'est jamais renvoyée. Aucun
+ * journal ne contient ni la clé, ni l'URL complète avec ses paramètres.
+ */
+
+interface CiblePersonnalisee {
+  baseUrl: string;
+  scheme: AuthScheme;
+  headerName: string | null;
+  productsPath: string;
+  pagination: PaginationKind;
+  pageSize: number;
+  /** Secret fourni à l'instant, ou relu du coffre s'il est absent. */
+  secret: string | null;
+  /** URL qui a réellement été testée (affichée à l'utilisateur). */
+  testedUrl: string;
+}
+
+/**
+ * Lit et valide la cible décrite par le client.
+ *
+ * La clé est facultative **ici** : `save-custom` peut enregistrer une
+ * configuration dont le secret a déjà été rangé par une sonde précédente.
+ * `probe-custom`, lui, exige une clé quand le schéma en réclame une.
+ */
+function lireCible(
+  body: Record<string, unknown>,
+  options: { secretRequis: boolean; secretCoffre: string | null },
+): CiblePersonnalisee {
+  const base = parseCustomApiBaseUrl(text(body.baseUrl, 400));
+  if (!base.ok) throw new ConnectError('INVALID_BASE_URL', explainCustomApiRejection(base.reason), 400);
+
+  const scheme = (text(body.authScheme, 10) || 'bearer') as AuthScheme;
+  if (!['bearer', 'header', 'basic', 'none'].includes(scheme)) {
+    throw new ConnectError('INVALID_AUTH_SCHEME', 'Mode d’authentification non pris en charge.', 400);
+  }
+
+  const headerName = scheme === 'header' ? text(body.authHeaderName, 60).toLowerCase() : null;
+  if (scheme === 'header' && !headerName) {
+    throw new ConnectError('INVALID_AUTH_SCHEME', 'Nom d’en-tête d’authentification requis.', 400);
+  }
+
+  const pagination = (text(body.paginationKind, 10) || 'page') as PaginationKind;
+  if (!['none', 'page', 'cursor'].includes(pagination)) {
+    throw new ConnectError('INVALID_PAGINATION', 'Mode de pagination inconnu.', 400);
+  }
+
+  /*
+   * Le chemin est stocké **sans** marqueur : les paramètres de pagination sont
+   * composés au moment de la requête (`composerChemin`). Exiger `{page}` dans
+   * le chemin enregistré aurait obligé l'utilisateur à taper une syntaxe
+   * interne — et rendu impossible la simple saisie « /api/products ».
+   */
+  const cheminBrut = text(body.productsPath, 300) || '/';
+  const coherence = paginationCoherente(pagination, composerModele(cheminBrut, pagination));
+  if (!coherence.ok) {
+    throw new ConnectError('PAGINATION_INCOHERENTE', coherence.message ?? 'Pagination incohérente.', 400);
+  }
+
+  const endpoint = parseCustomApiEndpoint(base.value, composerModele(cheminBrut, pagination));
+  if (!endpoint.ok) throw new ConnectError('INVALID_ENDPOINT', explainCustomApiRejection(endpoint.reason), 400);
+
+  // La clé du corps prime : elle vient d'être saisie et peut avoir changé.
+  const secreteSaisi = text(body.secret, 400);
+  const secret = secreteSaisi || options.secretCoffre;
+  if (options.secretRequis && scheme !== 'none' && !secret) {
+    throw new ConnectError('SECRET_REQUIRED', 'Clé ou jeton requis pour tester cette API.', 400);
+  }
+
+  // Un secret dans l'URL serait journalisé par tous les intermédiaires.
+  if (secreteSaisi && endpoint.value.url.href.includes(secreteSaisi)) {
+    throw new ConnectError('SECRET_IN_URL', 'Ne placez pas la clé dans l’adresse : utilisez l’en-tête d’authentification.', 400);
+  }
+
+  const taille = Number(body.pageSize);
+  // `new URL` ajoute « / » à une origine nue. On le retire : l'adresse stockée
+  // doit être celle que l'utilisateur a saisie, sans décoration.
+  const baseNormalisee = base.value.pathname === '/' && !base.value.search
+    ? base.value.origin
+    : base.value.href.replace(/\/$/, '');
+  return {
+    baseUrl: baseNormalisee,
+    scheme,
+    headerName,
+    productsPath: cheminBrut,
+    pagination,
+    pageSize: Number.isFinite(taille) && taille > 0 ? Math.min(Math.floor(taille), 100) : 50,
+    secret: scheme === 'none' ? null : secret,
+    testedUrl: endpoint.value.url.href,
+  };
+}
+
+/**
+ * Ajoute les marqueurs de pagination au chemin saisi.
+ *
+ * L'utilisateur indique « /api/products » ; le mode de pagination détermine ce
+ * qui est ajouté. Une adresse contenant déjà `{page}` est respectée telle
+ * quelle — les APIs qui attendent le numéro dans le chemin existent.
+ */
+function composerModele(chemin: string, pagination: PaginationKind): string {
+  const base = chemin.trim() || '/';
+  if (pagination === 'none') return base;
+  if (base.includes('{page}') || base.includes('{cursor}') || base.includes('{limit}')) return base;
+  const separateur = base.includes('?') ? '&' : '?';
+  if (pagination === 'page') return `${base}${separateur}page={page}&limit={limit}`;
+  return `${base}${separateur}cursor={cursor}`;
+}
+
+/** Remplace les marqueurs d'une première requête : la page 1 n'a pas de curseur. */
+function premiereRequete(modele: string, taille: number): string {
+  return modele
+    .replace('{page}', '1')
+    .replace('{limit}', String(taille))
+    .replace(/[?&]cursor=\{cursor\}/, '');
+}
+
+/** Premier chemin d'un tableau dans une réponse JSON, comme la sonde locale. */
+async function sonderApiPersonnalisee(
+  body: Record<string, unknown>,
+  contexte: { userId: string; workspaceId: string; corsOrigin: string; deps: ConnectDependencies },
+): Promise<Response> {
+  const { userId, workspaceId, corsOrigin, deps } = contexte;
+
+  let secretCoffre: string | null = null;
+  try {
+    secretCoffre = await deps.readCredential(userId, 'custom-api');
+  } catch {
+    secretCoffre = null;
+  }
+
+  const cible = lireCible(body, { secretRequis: true, secretCoffre });
+  const depart = deps.now ? deps.now() : Date.now();
+
+  const police = buildAuthHeaders({
+    scheme: cible.scheme,
+    // `AuthConfig` attend des champs facultatifs, pas `null` : un `null` ici
+    // serait sérialisé en en-tête absent, mais le type doit rester honnête.
+    headerName: cible.headerName ?? undefined,
+    secret: cible.secret ?? undefined,
+  });
+  if (police.rejected.length > 0) {
+    // Un en-tête refusé donne un 401 incompréhensible côté boutique : on
+    // s'arrête ici, avec un motif qui désigne le champ à corriger.
+    throw new ConnectError('HEADER_NOT_ALLOWED', 'En-tête ou valeur d’authentification refusé.', 400);
+  }
+  const entetes: Record<string, string> = { accept: 'application/json' };
+  for (const entete of police.headers) entetes[entete.name] = entete.value;
+
+  // La sonde lit la PREMIÈRE page : un curseur vide ferait démarrer l'API au
+  // milieu de rien sur certaines implémentations.
+  const url = new URL(premiereRequete(cible.testedUrl, cible.pageSize));
+  const adresses = await deps.resolveHost(url.hostname);
+  const publique = assertPublicAddresses(adresses);
+  if (!publique.ok) {
+    // Message volontairement générique : il ne doit pas servir de sonde réseau.
+    throw new ConnectError('SSRF_BLOCKED', 'Cette adresse n’est pas accessible depuis VYORA.', 400);
+  }
+
+  let reponse: Response;
+  try {
+    reponse = await deps.fetchImpl(url.href, {
+      method: 'GET',
+      headers: entetes,
+      redirect: 'error',
+    });
+  } catch {
+    throw new ConnectError('NETWORK_FAILED', 'La boutique n’a pas répondu. Vérifiez l’adresse.', 502);
+  }
+
+  const duree = (deps.now ? deps.now() : Date.now()) - depart;
+  // Le corps est lu ici, plafonné, avant analyse : `probeResponse` ne fait
+  // aucune entrée-sortie et reste testable sans réseau.
+  const texte = await capterCorps(reponse);
+  const sonde = probeResponse({
+    status: reponse.status,
+    contentType: reponse.headers.get('content-type') ?? undefined,
+    body: texte,
+  }, typeof body.declaredArrayPath === 'string' ? body.declaredArrayPath : undefined);
+
+  deps.log?.('store-connect: sonde api personnalisée', {
+    userId, workspaceId,
+    hote: url.hostname,
+    statut: reponse.status,
+    ok: sonde.ok,
+    code: sonde.code,
+    duree,
+  });
+
+  /*
+   * Une sonde réussie crée la connexion et range la clé.
+   *
+   * C'est l'ordre imposé par la base : `bg_save_custom_api_connection` exige
+   * qu'une connexion existe avant d'accepter une configuration, et la
+   * configuration n'est acceptée qu'après une sonde. Autrement dit, la sonde
+   * est le seul moment où la connexion peut naître.
+   *
+   * Le secret part dans Vault ici : l'utilisateur n'a pas à le ressaisir pour
+   * enregistrer, et il n'est plus jamais renvoyé au navigateur ensuite.
+   */
+  if (sonde.ok) {
+    let credentialRef: string | null = null;
+    if (cible.secret) {
+      credentialRef = await deps.storeCredential({
+        userId, connectorKey: 'custom-api', secret: cible.secret,
+      });
+    }
+    if (credentialRef) {
+      await deps.recordConnection({
+        userId,
+        workspaceId,
+        connectorKey: 'custom-api',
+        credentialRef,
+        externalAccountRef: url.hostname,
+        // `catalog` est la seule ressource lue : la sonde n'a demandé que des
+        // produits.
+        resourcesRead: ['catalog'],
+        totalProducts: sonde.count ?? null,
+        durationMs: duree,
+      }).catch((erreur) => {
+        deps.log?.('store-connect: connexion non enregistrée après sonde', {
+          erreur: erreur instanceof Error ? erreur.message : 'inconnue',
+        });
+      });
+    }
+  }
+
+  // Aucune trace d'échec n'est écrite à ce stade : une sonde ratée pendant la
+  // configuration n'est pas un incident de connexion, et l'import n'a pas
+  // encore eu lieu.
+  return new Response(JSON.stringify({
+    data: {
+      probe: sonde,
+      status: reponse.status,
+      productsFound: sonde.count ?? 0,
+      durationMs: duree,
+      // L'URL testée, pour que l'utilisateur voie exactement ce qui a été lu.
+      testedPath: `${url.pathname}${url.search}`,
+      host: url.hostname,
+    },
+  }), reponseJson(200, corsOrigin));
+}
+
+/**
+ * Enregistre une configuration d'API personnalisée.
+ *
+ * La configuration n'est acceptée que si le même client vient de réussir une
+ * sonde : `probeStatus` et `productsFound` sont comparés aux valeurs
+ * attendues, et la base applique `PROBE_REQUIRED`.
+ */
+async function enregistrerApiPersonnalisee(
+  body: Record<string, unknown>,
+  contexte: { userId: string; workspaceId: string; corsOrigin: string; deps: ConnectDependencies },
+): Promise<Response> {
+  const { userId, workspaceId, corsOrigin, deps } = contexte;
+
+  const sondeStatut = Number(body.probeStatus);
+  if (!Number.isFinite(sondeStatut) || sondeStatut !== 200) {
+    throw new ConnectError(
+      'PROBE_REQUIRED',
+      'Testez l’API avec succès avant d’enregistrer cette configuration.',
+      400,
+    );
+  }
+
+  let secretCoffre: string | null = null;
+  try {
+    secretCoffre = await deps.readCredential(userId, 'custom-api');
+  } catch {
+    secretCoffre = null;
+  }
+
+  const cible = lireCible(body, { secretRequis: false, secretCoffre });
+  const depart = deps.now ? deps.now() : Date.now();
+
+  // 1) La clé d'abord. Sans elle, enregistrer une configuration « connectée »
+  //    afficherait une connexion qui ne peut rien lire.
+  let credentialRef: string | null = null;
+  if (cible.secret) {
+    credentialRef = await deps.storeCredential({
+      userId, connectorKey: 'custom-api', secret: cible.secret,
+    });
+  } else if (deps.readCredentialRef) {
+    credentialRef = await deps.readCredentialRef(userId, 'custom-api');
+  }
+  if (!credentialRef) {
+    throw new ConnectError(
+      'SECRET_REQUIRED',
+      'Aucune clé n’est enregistrée pour cette API : saisissez-la avant d’enregistrer.',
+      400,
+    );
+  }
+
+  const mapping = body.mapping && typeof body.mapping === 'object' ? body.mapping : {};
+
+  /*
+   * 2) L'enregistrement passe par `bg_save_custom_api_connection`, qui délègue
+   *    elle-même à `bg_connect_integration` : contrôle d'appartenance à
+   *    l'entreprise, abonnement payant, validation du connecteur, journal de
+   *    vérification. Appeler `recordConnection` ici aurait doublé cette
+   *    écriture — et fait échouer la RPC, qui exige que la connexion existe
+   *    AVANT la configuration.
+   */
+  const ecriture = await deps.saveCustomApiConfig?.({
+    userId,
+    workspaceId,
+    credentialRef,
+    baseUrl: cible.baseUrl,
+    authScheme: cible.scheme,
+    authHeaderName: cible.headerName,
+    productsPath: cible.productsPath,
+    paginationKind: cible.pagination,
+    pageSize: cible.pageSize,
+    maxPages: Number.isFinite(Number(body.maxPages)) ? Math.min(Math.max(Number(body.maxPages), 1), 200) : 20,
+    mapping: mapping as Record<string, unknown>,
+    priceUnit: text(body.priceUnit, 10) === 'minor' ? 'minor' : 'major',
+    currency: (text(body.currency, 3) || 'XOF').toUpperCase(),
+    probeSummary: text(body.probeSummary, 400),
+    probeStatus: sondeStatut,
+    productsFound: Number(body.productsFound) || 0,
+    durationMs: (deps.now ? deps.now() : Date.now()) - depart,
+  });
+  if (!ecriture || ecriture.ok === false) {
+    throw new ConnectError(
+      ecriture?.code ?? 'CUSTOM_API_SAVE_FAILED',
+      ecriture?.message ?? 'La configuration n’a pas pu être enregistrée.',
+      400,
+    );
+  }
+
+  return new Response(JSON.stringify({
+    data: {
+      saved: true,
+      connectionId: ecriture.connectionId ?? null,
+      status: 'connected',
+      baseUrl: cible.baseUrl,
+      mappingFields: Object.keys(mapping).length,
+    },
+  }), reponseJson(200, corsOrigin));
 }
 
 export { classifyStatus };

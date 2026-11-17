@@ -111,6 +111,12 @@ describe('catalogue — structure', () => {
     // forme du modèle. PrestaShop est aujourd'hui le seul dont le moteur est
     // écrit (clé vérifiée côté serveur, catalogue lu par l'API Webservice ou
     // par l'API Chariow) ; les autres fiches restent à `null` et l'affichent.
+    /*
+     * `custom-api` est un moteur ÉCRIT (actions `probe-custom` et `save-custom`
+     * de `store-connect`), mais il ne se vérifie pas de la même façon : il n'a
+     * pas de branche par connecteur dans le handler — c'est justement ce qui le
+     * rend universel. Il est donc vérifié séparément, plus bas.
+     */
     const MOTEURS_ECRITS = new Set(['prestashop', 'chariow']);
     for (const entry of INTEGRATIONS) {
       if (MOTEURS_ECRITS.has(entry.id)) {
@@ -126,6 +132,8 @@ describe('catalogue — structure', () => {
         expect(handler).toContain(`'${entry.id}'`);
         const importHandler = readFileSync('supabase/functions/store-import/handler.ts', 'utf8');
         expect(importHandler).toContain(`'${entry.id}'`);
+      } else if (entry.id === 'custom-api') {
+        expect(entry.engine).toBe('custom-api');
       } else {
         expect(entry.engine, `${entry.id} : aucun moteur écrit`).toBeNull();
       }

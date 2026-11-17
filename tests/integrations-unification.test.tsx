@@ -3,7 +3,7 @@
  * Unification des intégrations — garanties qui ne doivent jamais régresser.
  *
  * Ce fichier verrouille les huit règles énoncées avant le chantier :
- *   1. les 27 fournisseurs sont conservés ;
+ *   1. les 27 fournisseurs d'origine sont conservés ;
  *   2. les demandes d'activation existantes sont conservées ;
  *   3. les connexions OAuth réellement enregistrées sont conservées ;
  *   4. les huit états restent distincts ;
@@ -112,14 +112,16 @@ beforeEach(() => {
   mocks.disconnectIntegration.mockResolvedValue({ connectorKey: 'facebook', disconnected: true });
 });
 
-describe('règle 1 — les 27 fournisseurs sont conservés', () => {
+describe('règle 1 — les 27 fournisseurs d’origine sont conservés', () => {
   it('affiche le catalogue complet, sans en retirer aucun', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('integration-facebook')).toBeTruthy());
     for (const entry of INTEGRATIONS) {
       expect(screen.getByTestId(`integration-${entry.id}`)).toBeTruthy();
     }
-    expect(INTEGRATIONS).toHaveLength(27);
+    // 28 depuis « Autre plateforme (API personnalisée) » : le catalogue ne
+    // perd aucune fiche, il en gagne une.
+    expect(INTEGRATIONS).toHaveLength(28);
   });
 
   it('un fournisseur absent du catalogue ne peut pas apparaître par accident', async () => {

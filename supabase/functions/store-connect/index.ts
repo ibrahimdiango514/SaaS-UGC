@@ -152,6 +152,30 @@ async function readCredential(userId: string, connectorKey: string): Promise<str
   }
 }
 
+/**
+ * Nom du secret Vault existant, sans en lire la valeur.
+ *
+ * `save-custom` en a besoin quand la clé a déjà été déposée par une sonde
+ * réussie : on ne veut ni la redemander à l'utilisateur, ni la relire pour la
+ * replacer à l'identique.
+ */
+async function readCredentialRef(userId: string, connectorKey: string): Promise<string | null> {
+  const db = requiredSql();
+  try {
+    const [ligne] = await db<{ name: string }[]>`
+      select name
+        from vault.secrets
+       where name = ${credentialName(userId, connectorKey)}
+       limit 1
+    `;
+    return typeof ligne?.name === 'string' && ligne.name ? ligne.name : null;
+  } catch {
+    return null;
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 /** Retire le secret Vault. Best-effort : ne fait jamais échouer la déconnexion. */
 async function deleteCredential(name: string): Promise<void> {
   const db = requiredSql();
@@ -239,7 +263,61 @@ const deps: ConnectDependencies = {
 
   storeCredential,
   readCredential,
+  readCredentialRef,
   deleteCredential,
+
+  /**
+   * Enregistre la configuration d'une API personnalisée.
+   *
+   * Une seule RPC : `bg_save_custom_api_connection` valide, délègue la partie
+   * commune à `bg_connect_integration` (appartenance, abonnement, journal) puis
+   * écrit la configuration. Les erreurs `connect_invalid:CODE` remontent telles
+   * quelles pour que l'interface nomme le champ fautif.
+   */
+  async saveCustomApiConfig(input) {
+    const db = requiredSql();
+    try {
+      const [ligne] = await db<{ resultat: Record<string, unknown> }[]>`
+        select saas_business.bg_save_custom_api_connection(
+          ${input.userId}::uuid,
+          ${input.workspaceId}::uuid,
+          ${input.credentialRef},
+          ${input.baseUrl},
+          ${input.authScheme},
+          ${input.authHeaderName},
+          ${input.productsPath},
+          ${input.paginationKind},
+          ${input.pageSize}::integer,
+          ${input.maxPages}::integer,
+          ${JSON.stringify(input.mapping)}::jsonb,
+          ${input.priceUnit},
+          ${input.currency},
+          ${input.probeStatus}::integer,
+          ${input.productsFound}::integer,
+          ${input.probeSummary},
+          ${input.durationMs}::integer
+        ) as resultat
+      `;
+      const resultat = ligne?.resultat ?? {};
+      return {
+        ok: true,
+        connectionId: String((resultat as { connection_id?: string }).connection_id ?? ''),
+        configurationId: String((resultat as { configuration_id?: string }).configuration_id ?? ''),
+      };
+    } catch (erreur) {
+      const brut = erreur instanceof Error ? erreur.message : String(erreur);
+      // `connect_invalid:MAPPING_NAME_REQUIRED` → code et message lisibles.
+      const trouve = /connect_(?:invalid|forbidden):([A-Z_]+)/.exec(brut);
+      const code = trouve?.[1] ?? 'CUSTOM_API_SAVE_FAILED';
+      return {
+        ok: false,
+        code,
+        message: messagePourCode(code),
+      };
+    } finally {
+      await db.end().catch(() => {});
+    }
+  },
 
   async recordConnection(input) {
     const db = requiredSql();
@@ -346,3 +424,38 @@ const runtime = (globalThis as unknown as {
 runtime.serve((request: Request) =>
   handleStoreConnect(request, deps, { allowedOrigins: ALLOWED_ORIGINS }),
 );
+
+/**
+ * Traduit un code d'erreur de la RPC en message affichable.
+ *
+ * Les codes viennent de `bg_save_custom_api_connection`, qui les émet en
+ * `connect_invalid:CODE`. On ne renvoie jamais le message brut de Postgres :
+ * il contient le nom de la fonction et parfois des valeurs.
+ */
+function messagePourCode(code: string): string {
+  switch (code) {
+    case 'PROBE_REQUIRED':
+      return 'Testez l’API avec succès avant d’enregistrer cette configuration.';
+    case 'NO_PRODUCTS_FOUND':
+      return 'L’API a répondu, mais aucun produit n’a été trouvé : vérifiez le chemin des produits.';
+    case 'CREDENTIAL_REF_REQUIRED':
+      return 'Aucune clé n’est enregistrée pour cette API.';
+    case 'BASE_URL_REQUIRED':
+      return 'L’adresse de base doit commencer par https://.';
+    case 'MAPPING_REQUIRED':
+      return 'La correspondance des champs est absente.';
+    case 'MAPPING_NAME_REQUIRED':
+      return 'Le champ « nom du produit » doit être associé : sans lui, aucun produit ne peut être importé.';
+    case 'PRICE_UNIT_REQUIRED':
+      return 'L’unité des prix doit être précisée.';
+    case 'CONNECTION_REQUIRED':
+      return 'La connexion doit être testée avant d’être configurée.';
+    case 'WORKSPACE_ACCESS_DENIED':
+      return 'Droits insuffisants sur cette entreprise.';
+    case 'SUBSCRIPTION_REQUIRED':
+    case 'SUBSCRIPTION_EXPIRED':
+      return 'Un abonnement Business Ground actif est requis.';
+    default:
+      return 'La configuration n’a pas pu être enregistrée.';
+  }
+}

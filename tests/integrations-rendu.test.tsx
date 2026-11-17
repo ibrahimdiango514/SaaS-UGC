@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { writeFileSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+// Le nombre de fournisseurs est lu du catalogue : la capture ne doit pas
+// annoncer un total que le composant ne rend pas.
+import { INTEGRATIONS } from '../src/integrations/catalog';
 
 /**
  * Preuve de rendu — catalogue d'intégrations unifié.
@@ -141,7 +144,7 @@ describe('preuve de rendu du catalogue unifié', () => {
 <body>
 <div class="wrap">
   <p class="capture-title">VYORA · Business Grow → Intégrations</p>
-  <p class="capture-sub">Catalogue unique de 26 fournisseurs, statuts dérivés du serveur. Capture produite depuis le composant réel.</p>
+  <p class="capture-sub">Catalogue unique de ${INTEGRATIONS.length} fournisseurs, statuts dérivés du serveur. Capture produite depuis le composant réel.</p>
   <span class="capture-banner">Même composant que /app/connect</span>
   ${container.innerHTML}
 </div>

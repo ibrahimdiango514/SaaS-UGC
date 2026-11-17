@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
 import { ConnectorConnectForm } from './ConnectorConnectForm';
 import { MesBoutiquesConnectees } from './MesBoutiquesConnectees';
+import { CustomApiConnectForm } from './CustomApiConnectForm';
 import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
 
@@ -557,6 +558,7 @@ export function IntegrationsCenter({
           onRequest={() => void demander(selection)}
           onCancelRequest={() => void annuler(selection)}
           onDisconnect={() => void retirerAssociation(selection)}
+          onReload={() => void charger()}
         />
       )}
 
@@ -699,7 +701,7 @@ function Logo({ entry }: { entry: IntegrationEntry }) {
 
 function FicheDetail({
   entry, statut, compte, connection, busy, entrepriseActive, workspaceId, onChanged,
-  onClose, onRevoke, onRequest, onCancelRequest, onDisconnect,
+  onClose, onRevoke, onRequest, onCancelRequest, onDisconnect, onReload,
 }: {
   entry: IntegrationEntry;
   statut: IntegrationStatus | null;
@@ -717,6 +719,8 @@ function FicheDetail({
   onRequest: () => void;
   onCancelRequest: () => void;
   onDisconnect: () => void;
+  /** Relit l'état des connexions après un enregistrement réussi. */
+  onReload: () => void;
 }) {
   // Tant que l'état est inconnu, aucune action n'est proposée : on ne parie pas
   // sur ce que contient la base.
@@ -836,7 +840,20 @@ function FicheDetail({
             </div>
           ) : (
             <>
-              {hasConnectFlow(entry.id) ? (
+              {entry.engine === 'custom-api' ? (
+                /*
+                 * Parcours propre à ce connecteur : il n'y a pas de clé à
+                 * demander mais une description à recueillir. Le composant
+                 * générique de clé ne conviendrait pas — et prétendre le
+                 * contraire aurait affiché un champ unique ne menant nulle
+                 * part.
+                 */
+                <CustomApiConnectForm
+                  workspaceId={workspaceId}
+                  onChanged={onChanged}
+                  onSaved={onReload}
+                />
+              ) : hasConnectFlow(entry.id) ? (
                 /*
                  * Un seul composant pour tous les connecteurs à clé : ses
                  * champs, son aide et ses limites viennent de

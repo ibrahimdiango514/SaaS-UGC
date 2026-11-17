@@ -54,7 +54,15 @@ export type AuthMode =
   | 'app-install'
   | 'public-catalog'
   | 'file-import'
-  | 'none';
+  | 'none'
+  /*
+   * `custom-api` n'est pas un mode d'authentification à proprement parler :
+   * c'est la marque d'une fiche dont l'utilisateur décrit lui-même la
+   * connexion (adresse, en-tête, chemin, mapping). Il vit dans cette union
+   * parce que `engine` et `auth[].mode` partagent le même vocabulaire, et parce
+   * qu'un mode à part évite de faire croire qu'une simple clé suffirait.
+   */
+  | 'custom-api';
 
 /** Ce qu'un fournisseur permet de faire une fois connecté. */
 export type Capability =
@@ -479,6 +487,35 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     ],
     engine: null,
     docsUrl: 'https://api-docs.ecwid.com/',
+  },
+  {
+    /*
+     * « Autre plateforme » n'est pas une plateforme : c'est le connecteur qui
+     * permet de décrire la sienne. Il a donc ses propres règles.
+     *
+     * - `capabilities: ['catalog-read']` — une seule, et elle est réelle : la
+     *   configuration n'ouvre que la lecture du catalogue. Rien d'autre n'est
+     *   codé, donc rien d'autre n'est annoncé.
+     * - `engine: 'custom-api'` — moteur distinct, pas `api-key` : il n'y a pas
+     *   UNE clé à demander mais une description complète à recueillir. Un
+     *   formulaire générique de clé n'aurait aucun sens ici.
+     * - Pas de `caveat` rassurant : celui-ci dit exactement ce qui est
+     *   attendu de l'utilisateur, y compris quand il n'a pas d'API.
+     */
+    id: 'custom-api',
+    name: 'Autre plateforme (API personnalisée)',
+    category: 'commerce',
+    description: 'Connectez une boutique dont l’API expose vos produits en JSON.',
+    capabilities: ['catalog-read'],
+    auth: [
+      { mode: 'custom-api', label: 'URL de l’API, mode d’authentification et correspondance des champs' },
+    ],
+    engine: 'custom-api',
+    caveat:
+      'Nécessite une API HTTPS qui renvoie vos produits en JSON. VYORA lit la première page, '
+      + 'propose une correspondance des champs, et n’enregistre rien avant un test réussi. '
+      + 'Si votre boutique n’expose pas d’API, utilisez l’import d’un export CSV : il n’existe '
+      + 'aucun moyen d’inventer les produits d’un site qui ne les publie pas.',
   },
 
   /* ------------------------------- Productivité -------------------------- */
