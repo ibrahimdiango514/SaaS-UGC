@@ -6,16 +6,16 @@
 // toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
 // JAMAIS exécuté.
 //
-// Épinglé sur store-connect.js (80742 caractères).
+// Épinglé sur store-connect.js (80895 caractères).
 //
 // Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "f42d03e239af93821d7d07ec61295ce9fef8ec46";
+const COMMIT = "209748b77c91fda348ca86c19fcc5fa68e3fc19e";
 const PATH = "supabase/functions/_artifacts/store-connect.js";
-const ARTIFACT_SHA256 = "82429f688f8c9c1bfb94123420d061e23fe8778c5353fe78098f3797dd05bbb5";
-const ARTIFACT_CHARS = 80742;
+const ARTIFACT_SHA256 = "06905ac3754fd830cb07aca1d06943f064db39c445cbabfb47542271ad57ee19";
+const ARTIFACT_CHARS = 80895;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
 // porte sur le fichier tel qu'il est committé.
