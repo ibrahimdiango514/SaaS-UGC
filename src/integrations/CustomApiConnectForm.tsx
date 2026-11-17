@@ -34,10 +34,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowRight,
   Check,
   ChevronDown,
-  Download,
   Eye,
   KeyRound,
   Loader2,
@@ -48,7 +46,6 @@ import {
 } from 'lucide-react';
 import { Button, Input, Select } from '../components/ui';
 import { asAppError } from '../lib/errors';
-import { validateField } from '../business/importer/connector-requirements';
 import {
   ALLOWED_AUTH_HEADERS,
   explainCustomApiRejection,
@@ -123,25 +120,30 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
   const [erreur, setErreur] = useState<string | null>(null);
   const [enregistre, setEnregistre] = useState(false);
 
+  /**
+   * Ce qui empêche de tester : adresse invalide, chemin refusé.
+   *
+   * Ne dépend PAS du secret saisi, délibérément. Une clé refusée doit être
+   * signalée par la sonde — c'est-à-dire par le serveur qui parle vraiment à
+   * l'API — et non par une heuristique locale qui interdirait d'essayer. Seule
+   * son ABSENCE bloque, et elle se constate sans lire sa valeur.
+   */
   const erreursCible = useMemo(() => {
     const liste: string[] = [];
+    const modele = modeleChemin(productsPath, pagination);
     const base = parseCustomApiBaseUrl(baseUrl);
     if (!base.ok) liste.push(explainCustomApiRejection(base.reason));
     else {
-      const endpoint = parseCustomApiEndpoint(base.value, productsPath + (pagination === 'page' ? '?page={page}&limit={limit}' : pagination === 'cursor' ? '?cursor={cursor}' : ''));
+      const endpoint = parseCustomApiEndpoint(base.value, modele);
       if (!endpoint.ok) liste.push(explainCustomApiRejection(endpoint.reason));
     }
-    if (schema !== 'none') {
-      const champ = schema === 'bearer' || schema === 'basic' ? { format: 'api-key' as const, label: 'Clé', required: true } : { format: 'api-key' as const, label: 'Clé', required: true };
-      const validation = validateField({ name: 'secret', label: champ.label, format: champ.format, secret: true, required: true }, secret);
-      if (!validation.ok && validation.error) liste.push(validation.error);
-    }
-    if (pagination !== 'none') {
-      const coherence = paginationCoherente(pagination, productsPath + (pagination === 'page' ? '?page={page}' : '?cursor={cursor}'));
-      if (!coherence.ok && coherence.message) liste.push(coherence.message);
-    }
+    const coherence = paginationCoherente(pagination, modele);
+    if (!coherence.ok && coherence.message) liste.push(coherence.message);
     return liste;
-  }, [baseUrl, productsPath, pagination, schema, secret]);
+  }, [baseUrl, productsPath, pagination]);
+
+  /** La clé est-elle absente alors que le schéma en réclame une ? */
+  const cleManquante = schema !== 'none' && secret.trim().length === 0;
 
   /* ------------------------------- sonde -------------------------------- */
 
@@ -154,13 +156,23 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
       setErreurSonde(erreursCible[0]);
       return;
     }
+    if (cleManquante) {
+      setErreurSonde('Saisissez la clé ou le jeton de votre API avant de tester.');
+      return;
+    }
 
     setSondage(true);
     setErreurSonde(null);
     setSonde(null);
     try {
+      /*
+       * `probe-custom` vit dans `store-connect`, pas dans `store-import` : la
+       * sonde établit une CONNEXION (elle range la clé et crée la ligne), elle
+       * n'importe rien. L'appeler sur l'autre fonction renvoyait
+       * `UNKNOWN_ACTION` — ce que les tests ont révélé.
+       */
       const { data } = await invokeEdge<{ data: { probe: ProbeOutcome; status: number; productsFound: number } }>(
-        'store-import',
+        'store-connect',
         {
           action: 'probe-custom',
           workspaceId,
@@ -169,12 +181,13 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
           authHeaderName: schema === 'header' ? headerName : null,
           // La clé part au serveur et n'est jamais réaffichée après la réponse.
           secret: schema === 'none' ? null : secret,
-          productsPath: modelChemin(productsPath, pagination),
+          productsPath: modeleChemin(productsPath, pagination),
           paginationKind: pagination,
           pageSize: Number(pageSize) || 50,
           maxPages: Number(maxPages) || 20,
         },
       );
+      // La réponse de l'Edge Function est enveloppée : `{ data: { probe } }`.
       setSonde(data.probe);
 
       if (data.probe.ok && data.probe.sampleFields) {
@@ -183,9 +196,12 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
         const propose = suggestMapping(data.probe.sampleFields);
         const valeurs: Record<string, string> = {};
         for (const [cle, champ] of Object.entries(propose)) {
-          if (champ && typeof champ === 'object' && 'path' in champ) {
-            valeurs[cle] = String((champ as { path: string }).path);
-          }
+          // `suggestMapping` rend `{ path: 'title' }`. Un chemin vide ne doit
+          // pas écraser une saisie existante.
+          const chemin = champ && typeof champ === 'object' && 'path' in champ
+            ? String((champ as { path: string }).path)
+            : '';
+          if (chemin.trim()) valeurs[cle] = chemin;
         }
         setMapping(valeurs);
         setMappingOuvert(true);
@@ -197,7 +213,7 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
     } finally {
       setSondage(false);
     }
-  }, [workspaceId, baseUrl, schema, headerName, secret, productsPath, pagination, pageSize, maxPages, erreursCible]);
+  }, [workspaceId, baseUrl, schema, headerName, secret, productsPath, pagination, pageSize, maxPages, erreursCible, cleManquante]);
 
   /* ----------------------------- enregistrement ------------------------- */
 
@@ -227,7 +243,7 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
         authScheme: schema,
         authHeaderName: schema === 'header' ? headerName : null,
         secret: schema === 'none' ? null : secret,
-        productsPath: modelChemin(productsPath, pagination),
+        productsPath: modeleChemin(productsPath, pagination),
         paginationKind: pagination,
         pageSize: Number(pageSize) || 50,
         maxPages: Number(maxPages) || 20,
@@ -251,10 +267,8 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
     }
   }
 
-  const testId = 'custom-api-form';
-
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.02]" data-testid={testId}>
+    <div className="rounded-lg border border-white/10 bg-white/[0.02]" data-testid="custom-api-form">
       <div className="border-b border-white/10 px-3.5 py-2.5">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-white">
           <Plug size={13} className="text-brand-300" /> API personnalisée
@@ -501,7 +515,7 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
           )}
           {sonde?.ok && erreursMapping.ok && (
             <span className="ml-auto flex items-center gap-1 text-[0.66rem] text-emerald-300">
-              <Download size={11} /> Prêt à importer <ArrowRight size={11} /> Aperçu avant écriture
+              <Check size={11} /> Correspondance valide · aperçu avant écriture
             </span>
           )}
         </div>
@@ -514,8 +528,13 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
   );
 }
 
-/** Compose le chemin avec les marqueurs de pagination. */
-function modelChemin(chemin: string, pagination: Pagination): string {
+/**
+ * Compose le chemin avec les marqueurs de pagination.
+ *
+ * Le serveur applique exactement la même règle (`composerModele`) : ici, c'est
+ * pour valider avant l'envoi et afficher un motif compréhensible.
+ */
+function modeleChemin(chemin: string, pagination: Pagination): string {
   const base = chemin.trim() || '/';
   if (pagination === 'page') {
     return base.includes('?') ? `${base}&page={page}&limit={limit}` : `${base}?page={page}&limit={limit}`;
@@ -525,6 +544,3 @@ function modelChemin(chemin: string, pagination: Pagination): string {
   }
   return base;
 }
-
-/** Ce que la sonde a réellement vérifié — utilisé par les tests. */
-export const SONDE_INTERDITE_DANS_URL = true;
