@@ -265,6 +265,24 @@ const deps: ConnectDependencies = {
     }
   },
 
+  async markDisconnected(userId: string, workspaceId: string, connectorKey: string) {
+    void userId;
+    // La RPC relit l'identité côté base (`auth.uid()`) et exige le droit
+    // d'écriture sur l'entreprise : `userId` n'est ici qu'un rappel de qui
+    // appelle, il n'est jamais utilisé comme preuve.
+    const db = requiredSql();
+    try {
+      const [ligne] = await db<{ resultat: unknown }[]>`
+        select saas_business.bg_disconnect_integration(
+          ${userId}::uuid, ${workspaceId}::uuid, ${connectorKey}
+        ) as resultat
+      `;
+      return ligne?.resultat ?? null;
+    } finally {
+      await db.end().catch(() => {});
+    }
+  },
+
   async readConnection(userId: string, workspaceId: string, connectorKey: string) {
     // L'identité de l'appelant est passée à la RPC sous forme de claims : la
     // fonction `vyora_ugc_store_connection` lit `auth.uid()`, elle ne peut donc

@@ -20,6 +20,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 const api = vi.hoisted(() => ({
   createProduct: vi.fn(),
   invokeEdge: vi.fn(),
+  /** Route `store-connect` : état de connexion, connexion, déconnexion. */
+  connectEdge: vi.fn(),
 }));
 
 /** Aperçu serveur minimal, tel que `store-import` le renvoie. */
@@ -42,9 +44,22 @@ function apercuServeur(surcharge: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Le panneau parle à DEUX Edge Functions : `store-import` (aperçu, import) et
+ * `store-connect` (état de connexion, connexion). Les router séparément évite
+ * qu'une réponse programmée pour l'un soit consommée par l'autre — un
+ * `mockResolvedValueOnce` destiné à l'aperçu partait sinon sur la lecture
+ * d'état faite au montage, et tous les tests d'aperçu échouaient.
+ */
 vi.mock('../src/lib/api', async () => {
   const reel = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api');
-  return { ...reel, createProduct: api.createProduct, invokeEdge: api.invokeEdge };
+  return {
+    ...reel,
+    createProduct: api.createProduct,
+    invokeEdge: (nom: string, corps: Record<string, unknown>) => (
+      nom === 'store-connect' ? api.connectEdge(nom, corps) : api.invokeEdge(nom, corps)
+    ),
+  };
 });
 
 import { StoreImportPanel } from '../src/business/importer/StoreImportPanel';
@@ -113,9 +128,12 @@ describe('étape 2 — aperçu avant écriture', () => {
     // Le point essentiel : aucune écriture avant confirmation, et c'est le
     // SERVEUR qui a produit l'aperçu (pas un parseur local).
     expect(api.createProduct).not.toHaveBeenCalled();
-    expect(api.invokeEdge).toHaveBeenCalledTimes(1);
-    expect(api.invokeEdge.mock.calls[0][1].action).toBe('preview');
-    expect(api.invokeEdge.mock.calls[0][1].fileBase64).toBeTruthy();
+    // Seuls les appels d'import comptent : le panneau lit aussi l'état de
+    // connexion au montage (`store-connect`, action `status`), qui n'écrit rien.
+    const appels = api.invokeEdge.mock.calls.filter(([nom]) => nom === 'store-import');
+    expect(appels).toHaveLength(1);
+    expect(appels[0][1].action).toBe('preview');
+    expect(appels[0][1].fileBase64).toBeTruthy();
     expect(screen.getByTestId('import-confirm').textContent).toContain('2');
   });
 

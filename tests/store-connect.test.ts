@@ -48,6 +48,10 @@ function environnement(options: {
   vaultEchoue?: boolean;
   enregistrementEchoue?: string | null;
   etat?: unknown;
+  /** Nb d'appels à la RPC de déconnexion. */
+  journalDeconnexion?: { appels: number };
+  /** Fait échouer la RPC de déconnexion. */
+  deconnexionEchoue?: boolean;
 }): { deps: ConnectDependencies; journal: Journal } {
   const journal: Journal = { secrets: [], supprimes: [], connexions: [], echecs: [], logs: [] };
 
@@ -90,6 +94,11 @@ function environnement(options: {
     },
     async readConnection() {
       return options.etat ?? null;
+    },
+    async markDisconnected() {
+      if (options.deconnexionEchoue) throw new Error('RPC indisponible');
+      if (options.journalDeconnexion) options.journalDeconnexion.appels += 1;
+      return { disconnected: true, status: 'disconnected' };
     },
     async resolveHost() {
       if (options.dnsLance) throw new Error('DNS mort');
@@ -433,6 +442,36 @@ describe('store-connect — état et déconnexion', () => {
     );
     expect(reponse.status).toBe(200);
     expect(journal.supprimes).toEqual([`vyora_prestashop_${UTILISATEUR}`]);
+  });
+
+  it('remet la connexion à disconnected avant de retirer le secret', async () => {
+    // Le défaut corrigé : supprimer le secret en laissant `connected` faisait
+    // annoncer une connexion inexistante à l'écran.
+    const journalDeconnexion = { appels: 0 };
+    const { deps, journal } = environnement({ journalDeconnexion });
+    const reponse = await handleStoreConnect(
+      requete({ action: 'disconnect', workspaceId: ENTREPRISE, connectorKey: 'prestashop' }),
+      deps,
+    );
+    expect(reponse.status).toBe(200);
+    expect(journalDeconnexion.appels).toBe(1);
+    expect(journal.supprimes).toEqual([`vyora_prestashop_${UTILISATEUR}`]);
+    const corps = await reponse.json() as { data: { disconnected: boolean } };
+    expect(corps.data.disconnected).toBe(true);
+  });
+
+  it('n’annonce pas une déconnexion réussie si la base n’a pas été mise à jour', async () => {
+    const { deps, journal } = environnement({ deconnexionEchoue: true });
+    const reponse = await handleStoreConnect(
+      requete({ action: 'disconnect', workspaceId: ENTREPRISE, connectorKey: 'prestashop' }),
+      deps,
+    );
+    expect(reponse.status).toBe(503);
+    const corps = await reponse.json() as { error: { code: string } };
+    expect(corps.error.code).toBe('DISCONNECT_FAILED');
+    // Le secret n'a PAS été retiré : la connexion reste utilisable, ce qui est
+    // préférable à une boutique « déconnectée » dont la clé existe encore.
+    expect(journal.supprimes).toHaveLength(0);
   });
 
   it('refuse la déconnexion en lecture seule', async () => {

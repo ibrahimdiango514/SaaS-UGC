@@ -100,6 +100,13 @@ export interface ConnectDependencies {
   }): Promise<{ connectionId: string; status: string }>;
   /** État courant d'un connecteur pour cette entreprise. */
   readConnection(userId: string, workspaceId: string, connectorKey: string): Promise<unknown>;
+  /**
+   * Remet la connexion à `disconnected` et vide `credential_ref`.
+   *
+   * Sans cette écriture, supprimer le secret laissait la ligne au statut
+   * `connected` : l'écran annonçait une connexion qui n'existait plus.
+   */
+  markDisconnected?(userId: string, workspaceId: string, connectorKey: string): Promise<unknown>;
   /** Résolution DNS réelle (Deno.resolveDns), injectable en test. */
   resolveHost(hostname: string): Promise<string[]>;
   /** `fetch` épinglé sur l'IP validée (`pinnedFetchLike`). */
@@ -521,11 +528,36 @@ export async function handleStoreConnect(
           status: 400, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
         });
       }
-      // Le secret est retiré de Vault AVANT la ligne : si la suppression du
-      // secret échoue, on ne prétend pas avoir déconnecté.
+      /*
+       * Ordre voulu : le statut en base d'abord, le secret ensuite.
+       *
+       * Si le secret disparaissait en premier et que l'écriture du statut
+       * échouait, la base affirmerait « connecté » sans qu'aucune clé existe —
+       * l'utilisateur ne pourrait plus rien importer sans comprendre pourquoi.
+       * Dans l'ordre inverse, une suppression de secret ratée laisse au pire un
+       * secret orphelin dans Vault : inutilisable, puisqu'aucune connexion ne
+       * le désigne plus.
+       */
+      let etat: Record<string, unknown> | null = null;
+      if (typeof deps.markDisconnected === 'function') {
+        try {
+          await deps.markDisconnected(userId, workspaceId, connecteur);
+        } catch (erreur) {
+          deps.log?.('store-connect: déconnexion impossible', {
+            erreur: erreur instanceof Error ? erreur.message : 'inconnue',
+          });
+          return new Response(JSON.stringify(failure(
+            'DISCONNECT_FAILED',
+            'La déconnexion n’a pas pu être enregistrée. Réessayez.',
+          )), {
+            status: 503, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
+          });
+        }
+      }
+      // Le secret est retiré de Vault une fois l'état enregistré.
       await deps.deleteCredential(credentialName(userId, connecteur)).catch(() => {});
-      const etat = await deps.readConnection(userId, workspaceId, connecteur) as Record<string, unknown> | null;
-      return new Response(JSON.stringify({ data: { disconnected: true, previous: etat } }), {
+      etat = await deps.readConnection(userId, workspaceId, connecteur) as Record<string, unknown> | null;
+      return new Response(JSON.stringify({ data: { disconnected: true, connection: etat } }), {
         status: 200, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
       });
     }

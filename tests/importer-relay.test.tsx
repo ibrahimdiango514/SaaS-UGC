@@ -15,11 +15,26 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 const api = vi.hoisted(() => ({
   createProduct: vi.fn(),
   invokeEdge: vi.fn(),
+  /** Route `store-connect` : état de connexion, connexion, déconnexion. */
+  connectEdge: vi.fn(),
 }));
 
+/**
+ * Le panneau parle à DEUX Edge Functions : `store-import` (aperçu, import) et
+ * `store-connect` (état de connexion, connexion). Les router séparément évite
+ * qu'une réponse programmée pour l'un soit consommée par l'autre — un
+ * `mockResolvedValueOnce` destiné à l'aperçu partait sinon sur la lecture
+ * d'état faite au montage, et tous les tests d'aperçu échouaient.
+ */
 vi.mock('../src/lib/api', async () => {
   const reel = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api');
-  return { ...reel, createProduct: api.createProduct, invokeEdge: api.invokeEdge };
+  return {
+    ...reel,
+    createProduct: api.createProduct,
+    invokeEdge: (nom: string, corps: Record<string, unknown>) => (
+      nom === 'store-connect' ? api.connectEdge(nom, corps) : api.invokeEdge(nom, corps)
+    ),
+  };
 });
 
 import { StoreImportPanel } from '../src/business/importer/StoreImportPanel';
@@ -41,12 +56,29 @@ const apercuServeur = {
 beforeEach(() => {
   api.createProduct.mockReset();
   api.invokeEdge.mockReset();
+  api.connectEdge.mockReset();
+  // Par défaut : aucune boutique connectée. Aucun secret, aucune écriture.
+  api.connectEdge.mockResolvedValue({ data: null });
 });
 
 afterEach(cleanup);
 
+/**
+ * Monte le panneau.
+ *
+ * Le panneau interroge `store-connect` (action `status`) au montage pour savoir
+ * s'il doit afficher « connecté » : cet appel est légitime et ne fait aucune
+ * écriture. On le distingue des appels d'import dans les assertions, plutôt que
+ * de compter *tous* les appels — compter tout obligerait à ignorer la lecture
+ * d'état, donc à ne plus vérifier l'essentiel : qu'un aperçu n'écrit rien.
+ */
 function panneau(workspaceId: string | null = 'w1') {
   return render(<StoreImportPanel workspaceId={workspaceId} existing={[]} onImported={vi.fn()} onClose={vi.fn()} />);
+}
+
+/** Appels réellement destinés à l'import (jamais la lecture d'état). */
+function appelsImport() {
+  return api.invokeEdge.mock.calls.filter(([nom]) => nom === 'store-import');
 }
 
 function saisirUrl(valeur = 'https://boutique.example') {
@@ -62,8 +94,9 @@ describe('import par URL — aperçu', () => {
 
     await waitFor(() => expect(screen.getByTestId('store-url-preview-panel')).toBeTruthy());
 
-    expect(api.invokeEdge).toHaveBeenCalledTimes(1);
-    const [nom, corps] = api.invokeEdge.mock.calls[0];
+    const appels = appelsImport();
+    expect(appels).toHaveLength(1);
+    const [nom, corps] = appels[0];
     expect(nom).toBe('store-import');
     expect(corps).toMatchObject({ action: 'preview', workspaceId: 'w1', url: 'https://boutique.example' });
 
@@ -128,7 +161,7 @@ describe('import par URL — confirmation', () => {
     fireEvent.click(screen.getByTestId('import-confirm'));
     await waitFor(() => expect(screen.getByTestId('import-result')).toBeTruthy());
 
-    const [, corps] = api.invokeEdge.mock.calls[1];
+    const [, corps] = appelsImport()[1];
     expect(corps).toMatchObject({
       action: 'import',
       workspaceId: 'w1',

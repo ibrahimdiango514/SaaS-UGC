@@ -41,8 +41,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, Link2, Loader2, Package, RotateCcw,
-  Upload, X,
+  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, KeyRound, Link2, Loader2, Package,
+  RotateCcw, Upload, X,
 } from 'lucide-react';
 import { Button, cn } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
@@ -50,6 +50,10 @@ import { PLATFORM_LABELS } from './platform';
 import {
   importStore, previewFile, previewStore, previewValidity, type PreviewValidity, type StorePreview,
 } from './relay';
+import {
+  connectStore, disconnectStore, readConnection,
+  type StoreConnectionResult, type StoreConnectionState,
+} from './connect-relay';
 
 export interface StoreImportPanelProps {
   workspaceId: string | null;
@@ -77,7 +81,15 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
   const [résultat, setRésultat] = useState<{ créés: number; échecs: Array<{ nom: string; raison: string }> } | null>(null);
   const [glisser, setGlisser] = useState(false);
   const fichierInput = useRef<HTMLInputElement>(null);
+  /**
+   * L'adresse de la boutique PrestaShop (`urlPrestashop`) et celle de l'aperçu
+   * public (`url`) sont deux champs distincts : partager un seul état ferait
+   * qu'une adresse de connexion écraserait silencieusement l'URL d'un aperçu en
+   * cours, et l'utilisateur verrait deux champs identiques se répercuter l'un
+   * l'autre.
+   */
   const [url, setUrl] = useState('');
+  const [urlPrestashop, setUrlPrestashop] = useState('');
   /** Aperçu renvoyé par le serveur : seule source d'une écriture par URL. */
   const [apercuServeur, setApercuServeur] = useState<StorePreview | null>(null);
   /**
@@ -98,12 +110,116 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
     { kind: 'file'; fichier: File } | { kind: 'url'; url: string } | null
   >(null);
 
+  /*
+   * Connexion par clé d'API (PrestaShop).
+   *
+   * La clé saisie ne quitte cet état qu'une fois envoyée au serveur : elle
+   * n'est ni recopiée dans l'URL, ni conservée après la réponse, ni renvoyée
+   * par l'API. Ce qui reste à l'écran après une connexion réussie est la
+   * PREUVE de ce qui a été lu (boutique, version, nombre de produits),
+   * jamais le secret.
+   */
+  const [cléApi, setCléApi] = useState('');
+  const [connexion, setConnexion] = useState<StoreConnectionState | null>(null);
+  const [connexionEnCours, setConnexionEnCours] = useState(false);
+  const [connexionErreur, setConnexionErreur] = useState<string | null>(null);
+  const [, setConnexionOk] = useState<StoreConnectionResult | null>(null);
+
   /**
    * L'aperçu par URL passe par l'Edge Function `store-import`, seule à disposer
    * d'un résolveur DNS et d'une connexion épinglée sur l'IP validée. Aucun appel
    * direct à la boutique n'est possible depuis le navigateur.
    */
   const relaisDisponible = typeof window !== 'undefined';
+
+  /**
+   * Relit l'état de connexion quand l'entreprise change.
+   *
+   * L'écran doit refléter la réalité au retour de l'utilisateur : afficher
+   * « non connecté » alors qu'une connexion existe l'obligerait à ressaisir sa
+   * clé, et afficher « connecté » après une déconnexion ferait échouer son
+   * aperçu sans explication. En cas d'échec de lecture, on n'invente rien — on
+   * laisse l'état inconnu et la saisie disponible.
+   */
+  useEffect(() => {
+    let annulé = false;
+    setConnexion(null);
+    setConnexionOk(null);
+    setConnexionErreur(null);
+    if (!workspaceId) return;
+    void (async () => {
+      try {
+        const état = await readConnection({ workspaceId, connectorKey: 'prestashop' });
+        if (!annulé) setConnexion(état);
+      } catch {
+        if (!annulé) setConnexion(null);
+      }
+    })();
+    return () => { annulé = true; };
+  }, [workspaceId]);
+
+  /**
+   * Connecte la boutique : le serveur vérifie la clé en lisant réellement
+   * l'API, puis dépose le secret dans Vault.
+   */
+  const connecter = async () => {
+    if (!workspaceId) {
+      setConnexionErreur('Sélectionnez une entreprise avant de connecter une boutique.');
+      return;
+    }
+    const adresse = urlPrestashop.trim();
+    if (!adresse) {
+      setConnexionErreur('Saisissez l’adresse de votre boutique PrestaShop.');
+      return;
+    }
+    if (cléApi.trim().length < 8) {
+      setConnexionErreur('La clé Webservice PrestaShop est requise (au moins 8 caractères).');
+      return;
+    }
+    setConnexionEnCours(true);
+    setConnexionErreur(null);
+    setConnexionOk(null);
+    try {
+      const résultat = await connectStore({
+        workspaceId, connectorKey: 'prestashop', url: adresse, apiKey: cléApi.trim(),
+      });
+      setConnexionOk(résultat);
+      // La clé n'est plus nécessaire : le serveur la retrouve dans Vault.
+      setCléApi('');
+      setConnexion({
+        connectorKey: 'prestashop',
+        status: résultat.status,
+        connectedTo: résultat.connectedTo,
+        endpoint: résultat.endpoint,
+        shopName: résultat.shopName,
+        version: résultat.version,
+        totalProducts: résultat.totalProducts,
+        resourcesRead: résultat.resourcesRead,
+        checkedAt: new Date().toISOString(),
+        lastError: null,
+      });
+    } catch (erreur) {
+      setConnexionErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionEnCours(false);
+    }
+  };
+
+  /** Déconnecte : la boutique n'est plus lisible, l'aperçu le dira clairement. */
+  const déconnecter = async () => {
+    if (!workspaceId) return;
+    setConnexionEnCours(true);
+    setConnexionErreur(null);
+    try {
+      await disconnectStore({ workspaceId, connectorKey: 'prestashop' });
+      setConnexionOk(null);
+      setConnexion(null);
+    } catch (erreur) {
+      setConnexionErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionEnCours(false);
+    }
+  };
 
   const réinitialiser = useCallback(() => {
     setErreurs([]);
@@ -318,6 +434,91 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
             >
               Choisir un fichier
             </Button>
+          </div>
+
+          {/* Connexion PrestaShop — la clé part au serveur, jamais l'inverse */}
+          <div className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5" data-testid="store-connect">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+              <KeyRound size={13} className="text-slate-500" /> Boutique PrestaShop (clé Webservice)
+            </p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+              La clé est vérifiée par le serveur, puis rangée dans un coffre chiffré.
+              Elle ne revient jamais dans le navigateur, et n’apparaît ni dans les
+              journaux ni dans les réponses.
+            </p>
+
+            {connexion?.status === 'connected' ? (
+              <div className="mt-2 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] px-2.5 py-2 text-[10px] text-emerald-100" data-testid="store-connect-connected">
+                <p className="flex items-center gap-1.5 font-semibold"><Check size={11} /> Boutique connectée</p>
+                {connexion.shopName && <p className="mt-0.5 text-slate-300">{connexion.shopName}{connexion.version ? ` · ${connexion.version}` : ''}</p>}
+                {connexion.totalProducts !== null && (
+                  <p className="text-slate-400">{connexion.totalProducts} produit(s) annoncé(s) par l’API</p>
+                )}
+                {connexion.connectedTo && (
+                  // Preuve du contrôle SSRF : l'adresse réellement contactée.
+                  <p className="text-slate-500">adresse contrôlée : {connexion.connectedTo}</p>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-1.5"
+                  loading={connexionEnCours}
+                  onClick={() => void déconnecter()}
+                  icon={<X size={12} />}
+                  data-testid="store-connect-disconnect"
+                >
+                  Déconnecter
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                  <input
+                    type="url"
+                    inputMode="url"
+                    value={urlPrestashop}
+                    onChange={(événement) => setUrlPrestashop(événement.target.value)}
+                    placeholder="https://ma-boutique.com"
+                    aria-label="Adresse de la boutique PrestaShop"
+                    disabled={connexionEnCours || !workspaceId}
+                    className="rounded-lg border border-white/[0.09] bg-black/30 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600 focus:border-cyan-300/40 focus:outline-none disabled:opacity-50"
+                    data-testid="store-connect-url"
+                  />
+                  {/* `type="password"` : la clé ne doit pas rester lisible à l'écran. */}
+                  <input
+                    type="password"
+                    value={cléApi}
+                    onChange={(événement) => setCléApi(événement.target.value)}
+                    placeholder="Clé Webservice"
+                    aria-label="Clé Webservice PrestaShop"
+                    autoComplete="off"
+                    disabled={connexionEnCours || !workspaceId}
+                    className="rounded-lg border border-white/[0.09] bg-black/30 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600 focus:border-cyan-300/40 focus:outline-none disabled:opacity-50"
+                    data-testid="store-connect-key"
+                  />
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={connexionEnCours}
+                    disabled={!workspaceId || !urlPrestashop.trim() || cléApi.trim().length < 8}
+                    onClick={() => void connecter()}
+                    icon={<KeyRound size={13} />}
+                    data-testid="store-connect-submit"
+                  >
+                    Vérifier et connecter
+                  </Button>
+                  {connexion?.status === 'error' && connexion.lastError && (
+                    <span className="text-[10px] text-amber-200">{connexion.lastError}</span>
+                  )}
+                </div>
+              </>
+            )}
+
+            {connexionErreur && (
+              <p className="mt-1.5 text-[10px] text-rose-200" data-testid="store-connect-error">{connexionErreur}</p>
+            )}
           </div>
 
           <div className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
