@@ -304,7 +304,43 @@ export interface RawCatalogProduct {
   productUrl: string | null;
   imageUrl: string | null;
   categories: string[];
-  variants: Array<{ name: string; price: string | number | null; sku: string | null; available: boolean | null }>;
+  /**
+   * Déclinaisons du produit.
+   *
+   * `stock`, `attributeName` et `priceMinor` sont optionnels : Shopify et
+   * WooCommerce n'exposent pas ces informations de la même façon, et un lecteur
+   * qui ne les connaît pas ne doit pas les inventer. PrestaShop, lui, les
+   * fournit — d'où leur présence ici plutôt qu'un type parallèle.
+   */
+  variants: Array<{
+    name: string;
+    price: string | number | null;
+    sku: string | null;
+    available: boolean | null;
+    /** Quantité de CETTE déclinaison. `null` = inconnue, jamais zéro. */
+    stock?: number | null;
+    /** Nom du critère (« Taille », « Couleur »), quand la source le dit. */
+    attributeName?: string | null;
+    /**
+     * Prix déjà converti en unité mineure par le lecteur, quand la source
+     * publie un montant décimal à exposant inconnu (PrestaShop).
+     *
+     * Prioritaire sur `price` : `price` est une chaîne « humain » dont
+     * l'exposant dépend de la devise, ce qui oblige à deviner. Quand le
+     * lecteur sait, il le dit.
+     */
+    priceMinor?: number | null;
+  }>;
+  /** Quantité totale du produit. `null` = inconnue, jamais zéro. */
+  stock?: number | null;
+  /**
+   * Prix déjà en unité mineure, quand le lecteur sait le convertir.
+   *
+   * Prioritaire sur `price` : PrestaShop publie un montant décimal dont
+   * l'exposant dépend de la devise de la boutique, et convertir deux fois
+   * ferait diverger le prix importé de celui affiché en boutique.
+   */
+  priceMinor?: number | null;
   /**
    * Référence produit fournie par la source (`sku` Shopify, `sku` Woo).
    *
@@ -321,10 +357,22 @@ export interface RawCatalogProduct {
   platformId?: string | null;
 }
 
+/**
+ * Catalogue lu chez une plateforme.
+ *
+ * `platform` s'élargit au fil des connecteurs. Shopify et WooCommerce restent
+ * lus par `fetchPublicCatalog` (catalogue public) ; PrestaShop et OpenCart
+ * passent par leur API authentifiée, et fournissent le même contrat — c'est ce
+ * qui permet à `normalizeCatalog` et au reste du moteur de ne pas changer.
+ */
+export type CatalogPlatform = 'shopify' | 'woocommerce' | 'prestashop' | 'opencart';
+
 export interface PublicCatalog {
-  platform: 'shopify' | 'woocommerce';
+  platform: CatalogPlatform;
   endpoint: string;
   products: RawCatalogProduct[];
+  /** Devise de la boutique, quand la plateforme la publie globalement. */
+  currency?: string | null;
 }
 
 /**

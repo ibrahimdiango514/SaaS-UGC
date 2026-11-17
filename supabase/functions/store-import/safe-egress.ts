@@ -55,7 +55,18 @@ export interface EgressError {
   message: string;
 }
 
-export type EgressResult<T> = { ok: true; value: T } | { ok: false; error: EgressError };
+export type EgressResult<T> =
+  | { ok: true; value: T }
+  | {
+    ok: false;
+    error: EgressError;
+    /**
+     * Statut HTTP reçu, quand l'échec vient d'une réponse et non du réseau.
+     * Permet à l'appelant de distinguer 401 (clé refusée) de 502 (boutique en
+     * panne), ce que le seul `code` ne dit pas.
+     */
+    httpStatus?: number;
+  };
 
 /** Résolveur DNS : renvoie toutes les adresses du nom (IPv4 et IPv6). */
 export type ResolveHost = (hostname: string) => Promise<string[]>;
@@ -126,10 +137,22 @@ interface PageResult {
  */
 export async function safeGet(
   input: string | URL,
-  options: { accept: string; maxBytes: number },
+  options: { accept: string; maxBytes: number; headers?: Record<string, string> },
   deps: EgressDeps,
 ): Promise<EgressResult<PageResult>> {
   let courant = typeof input === 'string' ? input : input.toString();
+
+  /*
+   * Portée de l'autorisation : l'hôte EXACT demandé par l'appelant.
+   *
+   * Une clé d'API ne doit jamais suivre une redirection : un 302 vers un autre
+   * domaine est le moyen le plus simple de la faire sortir. On note donc l'hôte
+   * de la première requête et on ne joint l'en-tête que si l'hôte courant lui
+   * est identique — un changement d'hôte (ou de casse, ou de sous-domaine)
+   * suffit à l'écarter.
+   */
+  const premier = parseStoreUrl(courant);
+  const hoteAutorisation = premier.ok ? premier.url.hostname : null;
 
   for (let saut = 0; saut <= MAX_REDIRECTS; saut++) {
     // 1) Validation syntaxique (schéma, port, hôte littéral interdit).
@@ -154,7 +177,16 @@ export async function safeGet(
       try {
         const reponse = await httpGetPinned(
           { ip, hostname: url.hostname, path: `${url.pathname}${url.search}` },
-          { accept: options.accept, maxBytes: options.maxBytes, timeoutMs: deps.timeoutMs, connect: deps.connect },
+          {
+            accept: options.accept,
+            maxBytes: options.maxBytes,
+            timeoutMs: deps.timeoutMs,
+            connect: deps.connect,
+            // Transmis à `buildRequest`, qui n'accepte qu'une liste blanche.
+            headers: hoteAutorisation !== null && url.hostname === hoteAutorisation
+              ? options.headers
+              : undefined,
+          },
         );
 
         // 4) Redirection éventuelle : revalidée au tour suivant, jamais suivie ici.
@@ -178,11 +210,21 @@ export async function safeGet(
           break;
         }
 
-        if (reponse.status === 404) {
-          return { ok: false, error: erreur('unreachable', 'Ressource introuvable sur cette boutique.') };
-        }
+        /*
+         * Un statut d'erreur est rendu à l'appelant, pas transformé ici.
+         *
+         * `safeGet` ne sait pas ce qui était demandé : une page d'accueil en
+         * 404 (probeStore essaie des racines candidates, dont `/fr/`, et
+         * enchaîne sur la suivante) n'a pas le même sens qu'un 401 sur l'API
+         * (clé refusée). Traduire ici en « injoignable » effaçait cette
+         * distinction : une clé révoquée devenait une panne réseau de 502.
+         */
         if (reponse.status < 200 || reponse.status >= 300) {
-          return { ok: false, error: erreur('unreachable', `La boutique a répondu ${reponse.status}.`) };
+          return {
+            ok: false,
+            error: erreur('unreachable', `La boutique a répondu ${reponse.status}.`),
+            httpStatus: reponse.status,
+          };
         }
 
         deps.onConnected?.(ip, url.hostname);
@@ -243,10 +285,16 @@ export function pinnedFetchLike(deps: EgressDeps, defaults: { accept: string; ma
     }
     const entetes = new Headers(init?.headers ?? {});
     const accept = entetes.get('accept') ?? defaults.accept;
+    // L'autorisation — et rien d'autre — est transmise à la connexion
+    // épinglée. Sans cela, une API qui exige un en-tête `Authorization`
+    // (PrestaShop Webservice) répondait 401 alors que la requête partait
+    // pourtant sur la bonne adresse.
+    const autorisation = entetes.get('authorization');
+    const entetesTransmis = autorisation ? { authorization: autorisation } : undefined;
     // Un délai propre à l'appel est respecté s'il est fourni (AbortSignal).
-    const resultat = await safeGet(input, { accept, maxBytes: defaults.maxBytes }, deps);
+    const resultat = await safeGet(input, { accept, maxBytes: defaults.maxBytes, headers: entetesTransmis }, deps);
     if (!resultat.ok) {
-      throw new PinnedNetworkError(resultat.error.code, resultat.error.message);
+      throw new PinnedNetworkError(resultat.error.code, resultat.error.message, resultat.httpStatus);
     }
     const { value } = resultat;
     const headers = new Headers();
@@ -259,11 +307,14 @@ export function pinnedFetchLike(deps: EgressDeps, defaults: { accept: string; ma
 /** Erreur réseau portant un code, pour que `sources.ts` la classe correctement. */
 export class PinnedNetworkError extends Error {
   readonly code: EgressErrorCode;
+  /** Statut HTTP observé, s'il y en a un. Absent = la requête n'est pas partie. */
+  readonly status?: number;
 
-  constructor(code: EgressErrorCode, message: string) {
+  constructor(code: EgressErrorCode, message: string, status?: number) {
     super(message);
     this.name = 'PinnedNetworkError';
     this.code = code;
+    if (status !== undefined) this.status = status;
   }
 }
 

@@ -47,6 +47,7 @@ import {
 import { fetchPublicCatalog } from '../../../src/business/importer/sources.ts';
 import { DEFAULT_CURRENCY, type NormalizedProduct } from '../../../src/business/importer/normalize.ts';
 import { matchBatch, type MatchResult } from '../../../src/business/importer/matching.ts';
+import { readPrestashopCatalog } from '../../../src/business/importer/prestashop-catalog.ts';
 import type { FileParseResult } from '../../../src/business/importer/files.ts';
 import { pinnedFetchLike, type EgressDeps } from './safe-egress.ts';
 import { MAX_CATALOG_BYTES, MAX_HTML_BYTES } from '../../../src/business/importer/sources.ts';
@@ -203,6 +204,15 @@ export interface StoreImportDependencies {
    * jour plutôt qu'en doublons. On perd la reprise fine, pas la sûreté.
    */
   readProgress?(workspaceId: string, userId: string, importKey: string): Promise<ProgressRecord[]>;
+  /**
+   * Relit côté serveur la clé d'API d'une connexion boutique vérifiée.
+   *
+   * Utilisée par l'aperçu `prestashop` : le navigateur n'envoie jamais la clé,
+   * et elle ne ressort pas de la fonction. Absente = le connecteur n'est pas
+   * disponible dans cette installation ; l'aperçu le dit explicitement au lieu
+   * d'échouer sur une clé vide.
+   */
+  readStoreCredential?(userId: string, connectorKey: string): Promise<string | null>;
   /** Écrit une ligne de progression après une écriture réussie. */
   recordProgress?(line: ProgressRecord): Promise<void>;
   /**
@@ -1021,6 +1031,12 @@ async function faireApercu(
   if (!url) throw new StoreImportError('INVALID_URL', 'URL de boutique requise.', 400);
 
   // 1) Sonde : `probeStore` du client, sortie réseau épinglée.
+  //
+  // La sonde lit une PAGE HTML : elle n'est pas authentifiée. C'est voulu — la
+  // page d'accueil d'une boutique est publique, et y envoyer une clé d'API
+  // ferait sortir le secret sur une URL arbitraire dictée par l'utilisateur.
+  // L'authentification ne commence qu'à l'appel de l'API, sur la racine
+  // déduite du site.
   const sonde = await probeStore(url, {
     resolveHost: deps.resolveHost,
     fetchImpl: pinnedFetchLike(deps, { accept: 'text/html,application/xhtml+xml', maxBytes: MAX_HTML_BYTES }),
@@ -1054,8 +1070,16 @@ async function faireApercu(
   let rejets: Array<{ line: number; reason: string }> = [];
   let endpoint: string | null = null;
 
-  if (verdict.access === 'public-json') {
-    const catalogue = await fetchPublicCatalog(verdict.platform, racine, {
+  // `public-json` n'est vrai que pour Shopify et WooCommerce ; on le dit au
+  // type plutôt que de caster, pour qu'un futur ajout de plateforme casse ici
+  // au lieu de produire un catalogue lu avec le mauvais exposant de prix.
+  const plateformePublique = verdict.access === 'public-json'
+    && (verdict.platform === 'shopify' || verdict.platform === 'woocommerce')
+    ? verdict.platform
+    : null;
+
+  if (plateformePublique) {
+    const catalogue = await fetchPublicCatalog(plateformePublique, racine, {
       resolveHost: deps.resolveHost,
       fetchImpl: pinnedFetchLike(deps, { accept: 'application/json', maxBytes: MAX_CATALOG_BYTES }),
     });
@@ -1063,7 +1087,7 @@ async function faireApercu(
       throw new StoreImportError('CATALOG_UNAVAILABLE', catalogue.error.message, 502);
     }
     endpoint = catalogue.value.endpoint;
-    const normalise = normalizeCatalog(catalogue.value, verdict.platform as 'shopify' | 'woocommerce', DEFAULT_CURRENCY);
+    const normalise = normalizeCatalog(catalogue.value, plateformePublique, DEFAULT_CURRENCY);
     if (normalise.produits.length === 0) {
       throw new StoreImportError(
         'CATALOG_EMPTY',
@@ -1073,6 +1097,75 @@ async function faireApercu(
     }
     produits.push(...normalise.produits);
     rejets = normalise.rejets;
+  } else if (verdict.platform === 'prestashop') {
+    /*
+     * PrestaShop n'a pas de catalogue public : on passe par l'API Webservice,
+     * avec la clé déposée dans Vault au moment de la connexion. Le navigateur
+     * ne voit jamais cette clé.
+     *
+     * Sans connexion vérifiée, on ne tente rien : on dit quoi faire. Sortir un
+     * « catalogue vide » ici ferait croire à une boutique sans produits.
+     */
+    if (typeof dependencies.readStoreCredential !== 'function') {
+      throw new StoreImportError(
+        'CONNECTOR_UNAVAILABLE',
+        'Le connecteur PrestaShop n’est pas disponible sur cette installation.',
+        503,
+      );
+    }
+    const cle = await dependencies.readStoreCredential(contexte.userId, 'prestashop');
+    if (!cle) {
+      throw new StoreImportError(
+        'CONNECTION_REQUIRED',
+        'Connectez votre boutique PrestaShop (URL et clé Webservice) avant de lancer l’aperçu.',
+        409,
+      );
+    }
+    const lecture = await readPrestashopCatalog(
+      { root: racine, basePath: '/api' },
+      { apiKey: cle },
+      { fetchImpl: pinnedFetchLike(deps, { accept: 'application/json', maxBytes: MAX_CATALOG_BYTES }) },
+      { defaultCurrency: DEFAULT_CURRENCY },
+    );
+    if (!lecture.ok) {
+      /*
+       * Le message vient du connecteur : il ne contient jamais la clé.
+       *
+       * `forbidden` compte comme un refus de connexion, pas comme une panne :
+       * une clé valide mais sans droits de lecture sur `products` est un
+       * problème de connexion que le marchand peut corriger (droits de la clé),
+       * et lui répondre 502 lui ferait chercher la panne du mauvais côté.
+       */
+      const refus = lecture.error.code === 'auth_invalid' || lecture.error.code === 'forbidden';
+      throw new StoreImportError(
+        refus ? 'STORE_CONNECTION_REFUSED' : 'CATALOG_UNAVAILABLE',
+        lecture.error.message,
+        refus ? 401 : 502,
+      );
+    }
+    if (lecture.value.products.length === 0) {
+      throw new StoreImportError(
+        'CATALOG_EMPTY',
+        'L’API PrestaShop ne renvoie aucun produit actif pour cette boutique.',
+        422,
+      );
+    }
+    endpoint = lecture.value.endpoint;
+    // Même normalisation que Shopify/Woo : le connecteur ne fait que PRODUIRE
+    // la forme brute commune. Prix, devise, stock et identifiants passent donc
+    // par exactement le même code, puis par le même rapprochement.
+    const normalise = normalizeCatalog(
+      {
+        platform: 'prestashop',
+        endpoint: lecture.value.endpoint,
+        products: lecture.value.products,
+        currency: lecture.value.currency,
+      },
+      'prestashop',
+      DEFAULT_CURRENCY,
+    );
+    produits.push(...normalise.produits);
+    rejets = [...lecture.value.rejected, ...normalise.rejets];
   } else {
     throw new StoreImportError(
       'NO_PUBLIC_CATALOG',

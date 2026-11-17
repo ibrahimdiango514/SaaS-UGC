@@ -56,6 +56,15 @@ export const FUNCTIONS = {
     artifact: 'supabase/functions/_artifacts/store-import.js',
     usesPostgres: true,
   },
+  // Connexion d'une boutique à clé d'API (PrestaShop). Même mécanisme
+  // d'artefact épinglé que `store-import` : le code livré est celui du dépôt, à
+  // un commit précis, vérifié par taille et empreinte avant exécution.
+  'store-connect': {
+    entry: 'supabase/functions/store-connect/index.ts',
+    loader: 'supabase/functions/store-connect/loader.ts',
+    artifact: 'supabase/functions/_artifacts/store-connect.js',
+    usesPostgres: true,
+  },
 };
 
 // esbuild peut placer l'import en fin de ligne, après d'autres instructions :

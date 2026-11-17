@@ -24,7 +24,7 @@
 import type { NormalizedProduct } from './normalize.ts';
 import { buildProduct, findDuplicates, parsePriceMinor, DEFAULT_CURRENCY, type DuplicateHit } from './normalize.ts';
 import type { FileParseResult } from './files.ts';
-import type { RawCatalogProduct, PublicCatalog } from './sources.ts';
+import type { CatalogPlatform, RawCatalogProduct, PublicCatalog } from './sources.ts';
 import { fetchPublicCatalog, probeStore, type SourceDeps } from './sources.ts';
 import { detectPlatform, type PlatformVerdict, type StorePlatform } from './platform.ts';
 
@@ -111,7 +111,7 @@ export function summarizeBatch(products: NormalizedProduct[], duplicates: Duplic
  */
 export function normalizeCatalogProduct(
   raw: RawCatalogProduct,
-  platform: 'shopify' | 'woocommerce',
+  platform: CatalogPlatform,
   origin: { reference: string; endpoint: string },
   defaultCurrency = DEFAULT_CURRENCY,
 ): NormalizedProduct | { error: string } {
@@ -119,7 +119,12 @@ export function normalizeCatalogProduct(
   const warnings: string[] = [];
 
   let priceMinor: number | null;
-  if (platform === 'woocommerce') {
+  if (typeof raw.priceMinor === 'number' && Number.isFinite(raw.priceMinor) && raw.priceMinor >= 0) {
+    // Le lecteur a déjà converti : PrestaShop publie un décimal dont l'exposant
+    // dépend de la devise de la boutique. Reconvertir ici reviendrait à
+    // deviner une deuxième fois, et à diverger du prix affiché par la boutique.
+    priceMinor = Math.round(raw.priceMinor);
+  } else if (platform === 'woocommerce' || platform === 'prestashop' && raw.priceMinor === undefined) {
     // Déjà en unité mineure : on refuse seulement ce qui n'est pas entier.
     const nombre = raw.price === null ? null : Number(String(raw.price).replace(/[^\d.-]/g, ''));
     if (nombre !== null && Number.isFinite(nombre) && nombre >= 0) {
@@ -155,21 +160,27 @@ export function normalizeCatalogProduct(
     categories: raw.categories,
     variants: raw.variants.map((v) => ({
       name: v.name,
-      priceMinor: platform === 'woocommerce'
-        ? (v.price === null ? null : Math.round(Number(String(v.price).replace(/[^\d.-]/g, '')) || 0))
-        : parsePriceMinor(v.price, currency).minor,
+      priceMinor: typeof v.priceMinor === 'number' && Number.isFinite(v.priceMinor)
+        ? Math.round(v.priceMinor)
+        : platform === 'woocommerce'
+          ? (v.price === null ? null : Math.round(Number(String(v.price).replace(/[^\d.-]/g, '')) || 0))
+          : parsePriceMinor(v.price, currency).minor,
       sku: v.sku,
-      // Une source distante ne fournit pas de stock par variante : `null`
-      // (inconnu) et non 0, qui afficherait « rupture » partout.
-      stock: null,
+      // Une source distante ne fournit pas toujours un stock par variante :
+      // `null` (inconnu) et non 0, qui afficherait « rupture » partout.
+      // PrestaShop, lui, le publie — on le transmet tel quel.
+      stock: typeof v.stock === 'number' && Number.isFinite(v.stock) ? v.stock : null,
       currency: null,
-      attributeName: null,
+      attributeName: v.attributeName ?? null,
       available: v.available,
     })),
     // Identifiants stables transmis tels quels : le rapprochement les utilise,
     // la normalisation ne les invente pas.
     sku: raw.sku,
     platformId: raw.platformId,
+    // Stock global quand le lecteur le connaît (PrestaShop). `undefined` laisse
+    // `buildProduct` décider : somme des déclinaisons, ou inconnu.
+    ...(typeof raw.stock === 'number' && Number.isFinite(raw.stock) ? { stock: raw.stock } : {}),
     source: { platform, reference: origin.reference },
     warnings,
   });
@@ -283,7 +294,7 @@ export async function runUrlImport(input: string, options: RunImportOptions = {}
 /** Normalise un catalogue public entier, en gardant la trace des rejets. */
 export function normalizeCatalog(
   catalogue: PublicCatalog,
-  platform: 'shopify' | 'woocommerce',
+  platform: CatalogPlatform,
   currency: string,
 ): { produits: NormalizedProduct[]; rejets: Array<{ line: number; reason: string }> } {
   const produits: NormalizedProduct[] = [];

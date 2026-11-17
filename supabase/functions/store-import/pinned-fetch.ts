@@ -134,10 +134,29 @@ export async function connectPinnedTls(ip: string, hostname: string, port = 443)
 }
 
 /** Construit la requête HTTP/1.1. Aucun secret n'y est jamais placé. */
-export function buildRequest(hostname: string, path: string, accept: string): string {
+/** En-têtes qu'un appelant peut faire passer par la sortie épinglée. */
+const EN_TETES_TRANSMIS = ['authorization'] as const;
+
+export function buildRequest(
+  hostname: string,
+  path: string,
+  accept: string,
+  extraHeaders: Record<string, string> = {},
+): string {
   // Le chemin ne peut pas contenir d'espace ni de retour à la ligne : une URL
   // parsée par `URL` encode déjà ces caractères, et on refuse le reste.
   if (/[\r\n]/.test(path)) throw new PinnedFetchFailure('protocol_error', 'Chemin de requête invalide.');
+  // Les en-têtes supplémentaires viennent de l'appelant (clé d'API d'une
+  // boutique). Deux règles : liste blanche stricte, et aucune valeur ne peut
+  // contenir un saut de ligne — c'est ce qui empêche une clé de sortir du
+  // message HTTP en injectant des en-têtes supplémentaires.
+  const lignes: string[] = [];
+  for (const nom of EN_TETES_TRANSMIS) {
+    const valeur = extraHeaders[nom];
+    if (typeof valeur !== 'string' || valeur.length === 0) continue;
+    if (/[\r\n]/.test(valeur)) throw new PinnedFetchFailure('protocol_error', 'En-tête de requête invalide.');
+    lignes.push(`${nom === 'authorization' ? 'Authorization' : nom}: ${valeur}`);
+  }
   return [
     `GET ${path || '/'} HTTP/1.1`,
     `Host: ${hostname}`,
@@ -145,6 +164,7 @@ export function buildRequest(hostname: string, path: string, accept: string): st
     `Accept: ${accept}`,
     'Accept-Language: fr,en;q=0.8',
     'Accept-Encoding: identity',
+    ...lignes,
     'Connection: close',
     '',
     '',
@@ -269,6 +289,8 @@ export async function httpGetPinned(
     timeoutMs?: number;
     /** Injectable pour les tests : remplace la connexion TLS réelle. */
     connect?: (ip: string, hostname: string) => Promise<PinnedSocket>;
+    /** En-têtes transmis à la boutique (liste blanche : `authorization`). */
+    headers?: Record<string, string>;
   },
 ): Promise<PinnedResponse> {
   const timeoutMs = options.timeoutMs ?? PINNED_TIMEOUT_MS;
@@ -288,7 +310,7 @@ export async function httpGetPinned(
     };
     controller.signal.addEventListener('abort', abandon, { once: true });
 
-    await socket.write(new TextEncoder().encode(buildRequest(target.hostname, target.path, options.accept)));
+    await socket.write(new TextEncoder().encode(buildRequest(target.hostname, target.path, options.accept, options.headers)));
     // Plafond de lecture majoré : en-têtes + corps chunked (qui ajoute des
     // métadonnées) restent sous maxBytes + MAX_HEADER_BYTES.
     const brut = await readBounded(socket, options.maxBytes + MAX_HEADER_BYTES);

@@ -513,6 +513,25 @@ const store: StoreImportDependencies = {
    * c'est ce qui rend la reprise idempotente côté base, et pas seulement côté
    * code.
    */
+  /**
+   * Clé d'API d'une connexion boutique, relue côté serveur.
+   *
+   * Utilisée par l'aperçu PrestaShop. Le secret vit dans Vault ; il n'est
+   * jamais transmis au navigateur ni journalisé. `null` quand la connexion
+   * n'existe pas ou n'a pas de secret — l'aperçu le dit explicitement.
+   */
+  async readStoreCredential(userId: string, connectorKey: string) {
+    const db = requiredSql();
+    const nom = `vyora_${connectorKey}_${userId}`;
+    const [ligne] = await db<{ secret: string }[]>`
+      select decrypted_secret as secret
+        from vault.decrypted_secrets
+       where name = ${nom}
+       limit 1
+    `;
+    return typeof ligne?.secret === 'string' && ligne.secret ? ligne.secret : null;
+  },
+
   async recordProgress(ligne: {
     workspaceId: string; userId: string; importKey: string; lineKey: string;
     productId: string; outcome: 'created' | 'updated'; variantsWritten: number;

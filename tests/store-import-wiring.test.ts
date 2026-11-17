@@ -71,6 +71,15 @@ interface Scenario {
   }>;
   /** Lignes de progression déjà présentes pour le lot. */
   progress?: Array<{ line_key: string; product_id: string; outcome: string; variants_written: number }>;
+  /**
+   * Clé d'API de la connexion PrestaShop (`null` = non connecté).
+   *
+   * Simule le contenu de Vault : le bundle la relit côté serveur pour
+   * l'aperçu, exactement comme en production.
+   */
+  storeApiKey?: string | null;
+  /** Réponses de l'API PrestaShop, par suffixe de chemin. */
+  prestashop?: (url: URL) => { status?: number; body: unknown; headers?: Record<string, string> } | null;
 }
 
 function fausseBase(
@@ -152,6 +161,11 @@ function fausseBase(
       const exploitable = trouve && typeof trouve.payload === 'object';
       return Promise.resolve(exploitable ? [{ payload: trouve.payload }] : []);
     }
+    // Lecture du secret Vault (clé d'API d'une connexion boutique).
+    if (texte.includes('vault.decrypted_secrets')) {
+      const cle = scenario.storeApiKey ?? null;
+      return Promise.resolve(cle ? [{ secret: cle }] : []);
+    }
     // Lecture de la progression d'un lot (reprise).
     if (texte.includes('from saas_ugc.ugc_import_progress')) {
       return Promise.resolve(scenario.progress ?? []);
@@ -217,6 +231,65 @@ function fausseBase(
 }
 
 /**
+ * Socket simulé servant la réponse HTTP correspondant au chemin demandé.
+ *
+ * Il ne se contente pas de renvoyer une page : il enregistre la requête
+ * sortante, ce qui permet de vérifier que la clé d'API part bien en en-tête
+ * `Authorization` et jamais dans l'URL.
+ */
+/**
+ * Requêtes sortantes du dernier bundle chargé.
+ *
+ * Sert de preuve : ce qui a réellement été écrit sur le socket, et non ce que
+ * le code prétend avoir envoyé.
+ */
+let dernieresRequetes: string[] = [];
+
+function socketPour(
+  hostname: string,
+  scenarioPrestashop?: Scenario['prestashop'],
+  requetes?: string[],
+): { write(p: Uint8Array): Promise<number>; read(p: Uint8Array): Promise<number | null>; close(): void } {
+  let octets = new TextEncoder().encode('');
+  let position = 0;
+  let pret = false;
+  return {
+    async write(p: Uint8Array) {
+      const texte = new TextDecoder().decode(p);
+      requetes?.push(texte);
+      const url = new URL(`https://${hostname}${/^GET (\S+) HTTP\//.exec(texte)?.[1] ?? '/'}`);
+      const reponse = scenarioPrestashop?.(url) ?? { body: { prestashop: {} } };
+        const corps = typeof reponse.body === 'string' ? reponse.body : JSON.stringify(reponse.body);
+      const typeContenu = typeof reponse.body === 'string' && reponse.body.trimStart().startsWith('<')
+        ? 'text/html; charset=utf-8'
+        : 'application/json';
+      if (hostname && requetes) void 0;
+      const entetes = [
+        `HTTP/1.1 ${reponse.status ?? 200} ${(reponse.status ?? 200) === 200 ? 'OK' : 'Erreur'}`,
+        `Content-Type: ${typeContenu}`,
+        `Content-Length: ${new TextEncoder().encode(corps).byteLength}`,
+        ...Object.entries(reponse.headers ?? {}).map(([n, v]) => `${n}: ${v}`),
+        'Connection: close',
+        '',
+        corps,
+      ].join('\r\n');
+      octets = new TextEncoder().encode(entetes);
+      position = 0;
+      pret = true;
+      return p.byteLength;
+    },
+    async read(p: Uint8Array) {
+      if (!pret || position >= octets.length) return null;
+      const taille = Math.min(p.length, octets.length - position);
+      p.set(octets.subarray(position, position + taille));
+      position += taille;
+      return taille;
+    },
+    close() {},
+  };
+}
+
+/**
  * Charge le bundle et renvoie le gestionnaire HTTP enregistré.
  *
  * Le contexte fournit ce que la production fournit : `Deno` (avec `serve`) et
@@ -233,6 +306,9 @@ function chargerBundle(
 ) {
   type Gestionnaire = (request: Request) => Promise<Response>;
   let gestionnaire: Gestionnaire | null = null;
+  /** Requêtes réellement écrites sur la sortie réseau (preuve, pas promesse). */
+  const requetesSortantes: string[] = [];
+  dernieresRequetes = requetesSortantes;
   const contexte = {
     __edgePostgres: fausseBase(
       enregistrements, variantes, scenario, misesAJour, suppressionsVariantes, progressions,
@@ -240,13 +316,32 @@ function chargerBundle(
     Deno: {
       serve: (h: Gestionnaire) => { gestionnaire = h; },
       env: { get: (nom: string) => (nom === 'SUPABASE_URL' ? 'https://exemple.invalid' : 'cle') },
+      // `Deno.resolveDns` : sans résolution, la sortie épinglée refuse de
+      // partir — comportement voulu en production. On fournit une adresse
+      // publique pour que le test exerce le vrai chemin du connecteur.
+      resolveDns: async () => ['203.0.113.10'],
+      /*
+       * Connexion épinglée simulée. Le bundle ouvre un TCP sur l'IP validée
+       * puis passe en TLS ; on rend le même socket pour les deux étapes, et ce
+       * socket répond selon le CHEMIN demandé. C'est le seul moyen de servir
+       * du HTML à la racine et du JSON sur `/api/...` sans réseau.
+       */
+      connect: async (options: { hostname: string }) => socketPour(options.hostname, scenario.prestashop, requetesSortantes),
+      startTls: async (socket: unknown) => socket,
     },
-    // GoTrue rend l'identité de l'appelant : `getUserId` exige un UUID réel,
-    // sinon le bundle refuse la requête comme non authentifiée.
-    fetch: () => Promise.resolve(new Response(
-      JSON.stringify({ id: '22222222-2222-4222-8222-222222222222' }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    )),
+    // `fetch` ne sert qu'à GoTrue (identité). La sortie réseau vers une
+    // boutique passe par la connexion épinglée ci-dessus : c'est le chemin
+    // réel, et le simuler autrement ne prouverait rien.
+    fetch: (input: string) => {
+      const url = new URL(String(input));
+      if (url.hostname !== 'exemple.invalid') {
+        return Promise.reject(new Error(`sortie réseau non épinglée vers ${url.hostname}`));
+      }
+      return Promise.resolve(new Response(
+        JSON.stringify({ id: '22222222-2222-4222-8222-222222222222' }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
+    },
     Response, Request, Headers, URL, AbortSignal, AbortController,
     TextEncoder, TextDecoder, crypto, atob, btoa, Blob, console,
     setTimeout, clearTimeout, structuredClone, Math, Date, JSON,
@@ -959,6 +1054,250 @@ describe('bundle store-import exécuté', () => {
     // produire AUCUNE ligne de produit.
     expect(reponse.status).toBeGreaterThanOrEqual(400);
     expect(enregistrements).toHaveLength(0);
+  });
+});
+
+
+/**
+ * Aperçu par URL d'une boutique PrestaShop, exécuté dans le bundle réel.
+ *
+ * Ce que ce parcours prouve, et ce qu'il ne prouve pas :
+ *   - prouvé : la sonde HTML identifie PrestaShop, la clé est lue côté serveur,
+ *     le catalogue vient de l'API Webservice, les déclinaisons restent des
+ *     variantes, la devise et le stock traversent le normaliseur, et la
+ *     confirmation met à jour le produit rapproché au lieu d'en créer un second ;
+ *   - non prouvé : une connexion à une vraie boutique. Aucune réponse réelle
+ *     n'est simulée comme réelle — tout vient de la doublure ci-dessous.
+ */
+describe('bundle store-import — catalogue PrestaShop par API', () => {
+  const HTML_PRESTASHOP = [
+    '<!doctype html><html><head>',
+    '<meta name="generator" content="PrestaShop">',
+    '<script src="/themes/classic/assets/theme.js"></script>',
+    '</head><body><h1>Boutique</h1></body></html>',
+  ].join('');
+
+  /** API simulée : deux ressources, pagination réelle, total via Content-Range. */
+  function apiPrestashop(url: URL, apiKey: { value: string | null }) {
+    apiKey.value = (url.searchParams.get('__cle') as string) ?? apiKey.value;
+    const chemin = url.pathname.replace(/\/+$/, '');
+    const offset = Number((url.searchParams.get('limit') ?? '0,100').split(',')[0] ?? '0');
+    const pageVide = offset > 0;
+    if (chemin.endsWith('/products')) {
+      return {
+        status: 200,
+        headers: { 'content-range': '0-1/2' },
+        body: {
+          prestashop: {
+            products: pageVide ? [] : [
+              {
+                id: '10', reference: 'CHE-1', price: '24.900000',
+                id_default_combination: '100', id_tax_rules_group: '1',
+                active: '1', state: '1', available_for_order: '1',
+                name: { language: [{ '@id': '1', value: 'Chemise lin' }] },
+                link_rewrite: { language: [{ '@id': '1', value: 'chemise-lin' }] },
+              },
+              {
+                id: '11', reference: 'PAN-2', price: '39.500000',
+                active: '1', state: '1', available_for_order: '1',
+                name: { language: [{ '@id': '1', value: 'Pantalon' }] },
+                link_rewrite: { language: [{ '@id': '1', value: 'pantalon' }] },
+              },
+            ],
+          },
+        },
+      };
+    }
+    if (chemin.endsWith('/combinations')) {
+      return {
+        status: 200,
+        headers: { 'content-range': '0-1/2' },
+        body: {
+          prestashop: {
+            combinations: pageVide ? [] : [
+              { id: '100', id_product: '10', reference: 'CHE-1-M', price: '0.000000', quantity: '4' },
+              { id: '101', id_product: '10', reference: 'CHE-1-L', price: '2.000000', quantity: '0' },
+            ],
+          },
+        },
+      };
+    }
+    if (chemin.endsWith('/stock_availables')) {
+      return {
+        status: 200,
+        headers: { 'content-range': '0-0/1' },
+        body: { prestashop: { stock_availables: pageVide ? [] : [{ id: '1', id_product: '10', id_product_attribute: '100', quantity: '4' }] } },
+      };
+    }
+    if (chemin.endsWith('/product_option_values') || chemin.endsWith('/product_options')) {
+      return { status: 200, headers: { 'content-range': '0-0/0' }, body: { prestashop: { [chemin.split('/').pop() ?? 'x']: [] } } };
+    }
+    if (chemin.endsWith('/languages')) {
+      return {
+        status: 200,
+        headers: { 'content-range': '0-0/1' },
+        body: { prestashop: { languages: pageVide ? [] : [{ id: '1', iso_code: 'fr', active: '1' }] } },
+      };
+    }
+    if (chemin.endsWith('/shops')) {
+      return {
+        status: 200,
+        headers: { 'content-range': '0-0/1' },
+        body: { prestashop: { shops: pageVide ? [] : [{ id: '1', name: 'Atelier Lin', active: '1', id_shop_group: '1' }] } },
+      };
+    }
+    return { status: 200, headers: { 'content-range': '0-0/0' }, body: { prestashop: {} } };
+  }
+
+  function requeteApercuUrl(urlBoutique: string): Request {
+    return new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'preview',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        url: urlBoutique,
+      }),
+    });
+  }
+
+  it('lit le catalogue par API et garde les déclinaisons comme variantes', async () => {
+    const cleVue: { value: string | null } = { value: null };
+    const gestionnaire = chargerBundle([], [], {
+      storeApiKey: 'CLE-WEBSERVICE',
+      prestashop: (url) => {
+        if (url.pathname.endsWith('/api') || url.pathname === '/' || !url.pathname.includes('/api/')) {
+          return { status: 200, body: HTML_PRESTASHOP };
+        }
+        return apiPrestashop(url, cleVue);
+      },
+    });
+
+    const reponse = await gestionnaire(requeteApercuUrl('https://atelier-lin.example/'));
+    const corps = await reponse.json() as {
+      data?: {
+        previewId: string;
+        origin: { platform: string };
+        summary: { total: number };
+        products: Array<{
+          name: string; price: string; currency: string; sku: string | null;
+          variants: Array<{ name: string; price: string; stock: number | null; sku: string | null }>;
+        }>;
+      };
+      error?: { code: string; message: string };
+    };
+
+    expect(corps.error, `échec serveur : ${JSON.stringify(corps.error)}`).toBeUndefined();
+    expect(reponse.status).toBe(200);
+    expect(corps.data?.origin.platform).toBe('prestashop');
+    // Deux produits, pas quatre : les déclinaisons ne sont PAS des produits.
+    expect(corps.data?.summary.total).toBe(2);
+
+    const chemise = corps.data?.products.find((p) => p.name === 'Chemise lin');
+    expect(chemise).toBeDefined();
+    expect(chemise?.sku).toBe('CHE-1');
+    // 24,900000 depuis l'API : 2 490 centimes, pas 25 (la devise XOF n'a pas
+    // de décimales, le formatage le reflète).
+    expect(chemise?.price).toMatch(/2\D?490/);
+    expect(chemise?.currency).toBe('XOF');
+    expect(chemise?.variants).toHaveLength(2);
+    expect(chemise?.variants.map((v) => v.sku)).toEqual(['CHE-1-M', 'CHE-1-L']);
+    expect(chemise?.variants[0].stock).toBe(4);
+    expect(chemise?.variants[1].stock).toBe(0);
+
+    // La clé n'apparaît nulle part dans la réponse.
+    expect(JSON.stringify(corps)).not.toContain('CLE-WEBSERVICE');
+    // ... mais elle a bien été transmise à l'API, en en-tête et jamais en URL :
+    // c'est la preuve lue sur la requête sortante réelle, pas une intention.
+    const versApi = dernieresRequetes.filter((r) => r.startsWith('GET /api/'));
+    expect(versApi.length).toBeGreaterThan(0);
+    expect(versApi.every((r) => r.includes('Authorization: Basic '))).toBe(true);
+    expect(versApi.some((r) => r.includes('CLE-WEBSERVICE'))).toBe(false);
+    const attendu = `Basic ${Buffer.from('CLE-WEBSERVICE:').toString('base64')}`;
+    expect(versApi[0]).toContain(`Authorization: ${attendu}`);
+    // La sonde, elle, reste NON authentifiée : la page d'accueil est publique,
+    // et y envoyer la clé la ferait sortir sur une URL choisie par l'appelant.
+    const versRacine = dernieresRequetes.filter((r) => r.startsWith('GET / '));
+    expect(versRacine.length).toBe(1);
+    expect(versRacine[0]).not.toContain('Authorization');
+  });
+
+  it('refuse l’aperçu sans connexion vérifiée, sans inventer un catalogue vide', async () => {
+    const gestionnaire = chargerBundle([], [], {
+      storeApiKey: null,
+      prestashop: () => ({ status: 200, body: HTML_PRESTASHOP }),
+    });
+
+    const reponse = await gestionnaire(requeteApercuUrl('https://atelier-lin.example/'));
+    const corps = await reponse.json() as { error?: { code: string } };
+    expect(reponse.status).toBe(409);
+    expect(corps.error?.code).toBe('CONNECTION_REQUIRED');
+  });
+
+  it('traduit une clé refusée par l’API en 401 explicite', async () => {
+    const gestionnaire = chargerBundle([], [], {
+      storeApiKey: 'CLE-PERIMEE',
+      prestashop: (url) => (
+        url.pathname.includes('/api/')
+          ? { status: 401, body: { errors: [{ code: 401, message: 'Unauthorized' }] } }
+          : { status: 200, body: HTML_PRESTASHOP }
+      ),
+    });
+
+    const reponse = await gestionnaire(requeteApercuUrl('https://atelier-lin.example/'));
+    const corps = await reponse.json() as { error?: { code: string; message: string } };
+    expect(reponse.status).toBe(401);
+    expect(corps.error?.code).toBe('STORE_CONNECTION_REFUSED');
+    expect(JSON.stringify(corps)).not.toContain('CLE-PERIMEE');
+  });
+
+  it('confirme l’import : le produit rapproché est mis à jour, pas dupliqué', async () => {
+    const enregistrements: Array<Record<string, unknown>> = [];
+    const misesAJour: Array<{ params: unknown[]; texte: string }> = [];
+    // Le catalogue contient déjà « Chemise lin » : le rapprochement doit le
+    // reconnaître par son nom, et la confirmation écrire dessus.
+    const existants = [{ id: '99999999-9999-4999-8999-999999999999', name: 'Chemise lin' }];
+    const gestionnaireAvecExistant = chargerBundle(enregistrements, [], {
+      existants,
+      storeApiKey: 'CLE-WEBSERVICE',
+      prestashop: (url) => (
+        url.pathname.includes('/api/')
+          ? apiPrestashop(url, { value: null })
+          : { status: 200, body: HTML_PRESTASHOP }
+      ),
+    }, misesAJour);
+
+    const apercu = await (await gestionnaireAvecExistant(requeteApercuUrl('https://atelier-lin.example/'))).json() as {
+      data: { previewId: string; products: Array<{ name: string; importable: boolean; match: string; targetId: string | null }> };
+      error?: { code: string };
+    };
+    expect(apercu.error, `échec serveur : ${JSON.stringify(apercu.error)}`).toBeUndefined();
+    const ligne = apercu.data.products.find((p) => p.name === 'Chemise lin');
+    expect(ligne?.match).toBe('update');
+    expect(ligne?.targetId).toBe('99999999-9999-4999-8999-999999999999');
+    expect(ligne?.importable).toBe(true);
+
+    const reponse = await gestionnaireAvecExistant(new Request('https://exemple.invalid/functions/v1/store-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer jeton' },
+      body: JSON.stringify({
+        action: 'import',
+        workspaceId: '11111111-1111-4111-8111-111111111111',
+        previewId: apercu.data.previewId,
+        confirmed: true,
+      }),
+    }));
+    const resultat = await reponse.json() as { error?: { code: string; message: string } };
+    expect(resultat.error, `échec serveur : ${JSON.stringify(resultat.error)}`).toBeUndefined();
+
+    // Le catalogue source contient DEUX produits : « Chemise lin » est
+    // rapprochée et mise à jour, « Pantalon » est créée. Une seule création,
+    // donc — et pas un second « Chemise lin ».
+    expect(misesAJour.length).toBe(1);
+    expect(misesAJour[0].params).toContain('99999999-9999-4999-8999-999999999999');
+    const crees = enregistrements.flatMap((lot) => (Array.isArray(lot) ? lot : [lot])) as Array<{ name?: string }>;
+    expect(crees).toHaveLength(1);
+    expect(crees[0]?.name).toBe('Pantalon');
   });
 });
 
