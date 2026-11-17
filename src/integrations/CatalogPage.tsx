@@ -19,6 +19,7 @@ import { businessGrowApi, type BusinessIntegrationConnection } from '../business
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
 import { ConnectorConnectForm } from './ConnectorConnectForm';
+import { MesBoutiquesConnectees } from './MesBoutiquesConnectees';
 import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
 
@@ -432,6 +433,24 @@ export function IntegrationsCenter({
             </div>
           </section>
         )}
+
+        {/*
+         * Vue d'ensemble des boutiques connectées, AVANT le catalogue.
+         *
+         * L'état d'une connexion vivait dans la fiche de son fournisseur :
+         * passé deux connecteurs, savoir laquelle demandait une action
+         * supposait d'ouvrir chaque fiche. Ce panneau ne remplace pas les
+         * fiches, il évite d'avoir à les parcourir.
+         */}
+        <div className="mb-5">
+          <MesBoutiquesConnectees
+            workspaceId={workspaceId}
+            onOpenConnector={(cle) => {
+              const entry = INTEGRATIONS.find((candidat) => candidat.id === cle);
+              if (entry) setSelection(entry);
+            }}
+          />
+        </div>
 
         {/* Recherche + filtres */}
         <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center">
