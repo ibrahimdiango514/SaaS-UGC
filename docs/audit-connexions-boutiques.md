@@ -200,3 +200,53 @@ Aucune clé API de votre part n'est nécessaire pour A, B, D et E. La Phase C
 est **bloquée par des API qui n'existent pas**, pas par des identifiants : si
 vous avez un accès documenté à une API catalogue Maketou ou à une extension
 OpenCart précise, c'est ce qu'il faut me transmettre.
+
+---
+
+## 8. Avancement (au 14 novembre 2026)
+
+### Phase A — livrée (`25cbb60`)
+`connector-requirements.ts` décrit les champs, capacités et limites de chaque
+connecteur ; `ConnectorConnectForm` les rend. Les deux formulaires
+spécifiques sont supprimés. `hasConnectFlow` est le garde-fou : une fiche
+dont le parcours n'est pas livré ne rend **rien**.
+
+### Phase B — livrée (`d5784ae`)
+Capacités du catalogue alignées sur le code : Shopify/WooCommerce en lecture
+seule du catalogue public, OpenCart sans capacité revendiquée. Migration
+appliquée en base avec une contrainte `CHECK` qui refuse `write`/`modify`
+sur un fournisseur `implemented`. Vérifiée par introspection de
+`pg_constraint`, pas par lecture du fichier.
+
+### Phase C — conclue par vérification, sans code natif
+- **OpenCart** : API à session, sans route produits. Non connectable
+  nativement. Sa fiche le dit et renvoie vers l'export ou la Phase D.
+- **Maketou** (le nom « Marketoo » n'existe pas) : API publique limitée aux
+  paniers et aux webhooks, sans catalogue. Aucun import possible. **Pas
+  encore déclarée dans le catalogue** — c'est la suite de la Phase C.
+
+Ces deux refus sont des résultats, pas des abandons : ils évitent de
+construire des connecteurs qui n'auraient rien pu lire.
+
+### Phase D — première moitié livrée (`2af6917`, `e94cd2e`)
+- `custom-api-guard.ts` : garde d'adresse (SSRF), confinement des endpoints à
+  l'hôte configuré, liste blanche d'en-têtes, refus de l'injection CRLF,
+  masquage pour les journaux.
+- `custom-api-probe.ts` : sonde de réponse (401 vs 403 vs 404), localisation
+  du tableau de produits, pagination par substitution bornée, aucune
+  exécution de code utilisateur.
+
+Reste pour compléter la Phase D : persistance de la configuration, sonde
+serveur branchée dans `store-import`, import via le moteur existant, et
+l'écran de configuration (mapping de champs).
+
+### Phase E — non commencée
+Centre « Mes boutiques connectées ».
+
+### Points bloqués, à signaler
+| Sujet | Blocage | Ce qu'il faudrait |
+| --- | --- | --- |
+| Import natif Maketou | aucun endpoint catalogue dans l'API publique | un accès documenté, ou passer par la Phase D |
+| Import natif OpenCart | API à session sans route produits | une extension tierce dont le format est connu, ou la Phase D |
+| Test authentifié Chariow | clé de boutique requise | la clé, saisie par vous dans l'interface |
+| Écriture (bidirectionnelle) | aucun code, aucun méthode HTTP autre que GET | un chantier dédié avec contrôle de conflits |
