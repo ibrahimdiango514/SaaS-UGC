@@ -168,8 +168,12 @@ describe('périmètre affiché', () => {
     render(<MesBoutiquesConnectees workspaceId="w1" />);
     await waitFor(() => expect(screen.getByTestId('boutique-prestashop')).toBeTruthy());
 
+    // Les quatre connecteurs dont la connexion est déployée.
+    for (const present of ['prestashop', 'chariow', 'shopify', 'woocommerce']) {
+      expect(screen.getByTestId(`boutique-${present}`), present).toBeTruthy();
+    }
     // Aucun connecteur non fonctionnel ne doit apparaître ici.
-    for (const absent of ['shopify', 'woocommerce', 'opencart', 'magento']) {
+    for (const absent of ['opencart', 'magento', 'wix', 'ecwid']) {
       expect(screen.queryByTestId(`boutique-${absent}`), absent).toBeNull();
     }
   });
@@ -177,7 +181,7 @@ describe('périmètre affiché', () => {
   it('dit combien de connecteurs sont configurables', async () => {
     repondre({});
     render(<MesBoutiquesConnectees workspaceId="w1" />);
-    await waitFor(() => expect(screen.getByTestId('mes-boutiques').textContent).toMatch(/2 connecteurs sont configurables/i));
+    await waitFor(() => expect(screen.getByTestId('mes-boutiques').textContent).toMatch(/4 connecteurs sont configurables/i));
   });
 
   it('n’expose aucun secret dans le DOM', async () => {

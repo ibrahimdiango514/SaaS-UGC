@@ -60,7 +60,14 @@ export interface MesBoutiquesProps {
 }
 
 /** Connecteurs réellement branchés : la vue ne liste rien d'autre. */
-const CONNECTEURS_CONNECTABLES = ['prestashop', 'chariow'];
+/**
+ * Connecteurs dont la connexion est RÉELLEMENT déployée.
+ *
+ * Cette liste suit `CONNECTOR_REQUIREMENTS` : un connecteur sans formulaire
+ * n'apparaît pas ici, sinon le panneau annoncerait une boutique « non
+ * configurée » qu'aucun écran ne permet de configurer.
+ */
+const CONNECTEURS_CONNECTABLES = ['prestashop', 'chariow', 'shopify', 'woocommerce'];
 
 const TONS: Record<ConnectionState, { tone: string; icon: typeof CheckCircle2; label: string }> = {
   connected: { tone: 'text-emerald-300', icon: CheckCircle2, label: 'Connectée' },

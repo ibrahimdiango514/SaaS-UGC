@@ -26,14 +26,42 @@ describe('registre des exigences de connexion', () => {
   it('ne déclare que des connecteurs réellement déployés', () => {
     // Cette liste est un garde-fou : elle ne doit croissance qu'avec un
     // parcours de connexion livré et testé côté Edge Function.
-    expect(Object.keys(CONNECTOR_REQUIREMENTS).sort()).toEqual(['chariow', 'prestashop']);
+    expect(Object.keys(CONNECTOR_REQUIREMENTS).sort()).toEqual(['chariow', 'prestashop', 'shopify', 'woocommerce']);
   });
 
   it('`hasConnectFlow` est faux pour tout le reste du catalogue', () => {
-    for (const cle of ['shopify', 'woocommerce', 'opencart', 'magento', 'wix', 'squarespace', 'ecwid']) {
+    // Shopify et WooCommerce ont désormais un parcours : ils SORTENT de cette
+    // liste. Ce qui reste n'a réellement aucun formulaire livré.
+    for (const cle of ['opencart', 'magento', 'wix', 'squarespace', 'ecwid', 'bigcommerce']) {
       expect(hasConnectFlow(cle), cle).toBe(false);
       expect(requirementsFor(cle), cle).toBeNull();
     }
+  });
+
+  it('Shopify et WooCommerce déclarent un parcours complet et cohérent', () => {
+    for (const cle of ['shopify', 'woocommerce']) {
+      const exigence = requirementsFor(cle);
+      expect(exigence, cle).not.toBeNull();
+      // Un champ d'adresse ET au moins un secret : sans les deux, aucune
+      // connexion n'est vérifiable.
+      expect(exigence!.fields.some((f) => f.name === 'url')).toBe(true);
+      expect(exigence!.fields.some((f) => f.secret)).toBe(true);
+      // Aucun champ secret ne doit être facultatif.
+      for (const champ of exigence!.fields.filter((f) => f.secret)) {
+        expect(champ.required, `${cle}/${champ.name}`).toBe(true);
+      }
+      expect(exigence!.capabilities.catalogRead).toBe(true);
+      // Lecture seule : aucune capacité d'écriture n'existe dans le type, et
+      // ces connecteurs ne doivent rien annoncer d'autre.
+      expect(exigence!.setupHint.length).toBeGreaterThan(20);
+    }
+  });
+
+  it('WooCommerce demande DEUX secrets, Shopify un seul', () => {
+    // Le formulaire générique envoie le dernier secret comme `apiKey` et le
+    // premier comme `apiSecret` : la distinction est structurante.
+    expect(requirementsFor('woocommerce')!.fields.filter((f) => f.secret)).toHaveLength(2);
+    expect(requirementsFor('shopify')!.fields.filter((f) => f.secret)).toHaveLength(1);
   });
 
   it('ne se laisse pas tromper par une clé du prototype', () => {

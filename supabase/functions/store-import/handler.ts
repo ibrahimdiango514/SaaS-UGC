@@ -49,6 +49,11 @@ import { fetchPublicCatalog } from '../../../src/business/importer/sources.ts';
 import { DEFAULT_CURRENCY, type NormalizedProduct } from '../../../src/business/importer/normalize.ts';
 import { matchBatch, type MatchResult } from '../../../src/business/importer/matching.ts';
 import { readPrestashopCatalog } from '../../../src/business/importer/prestashop-catalog.ts';
+import { readShopifyCatalog } from '../../../src/business/importer/shopify-api.ts';
+import { toShopifyRawProducts } from '../../../src/business/importer/shopify-catalog.ts';
+import { readWooCatalog } from '../../../src/business/importer/woocommerce-api.ts';
+import type { StorePlatform } from '../../../src/business/importer/platform.ts';
+import { toWooRawProducts } from '../../../src/business/importer/woocommerce-catalog.ts';
 import { explainChariowError, readChariowCatalog, toChariowRawProduct } from '../../../src/business/importer/chariow-catalog.ts';
 import type { FileParseResult } from '../../../src/business/importer/files.ts';
 import { pinnedFetchLike, type EgressDeps } from './safe-egress.ts';
@@ -1424,6 +1429,347 @@ async function faireApercu(
  * l'historique. Cette fonction ne fait que produire `produits` et `endpoint` ;
  * tout le reste est le code commun.
  */
+
+/* --------------------- Shopify et WooCommerce (phase E) -------------------- */
+/*
+ * Ces deux-là sont des connecteurs AUTHENTIFIÉS : contrairement au catalogue
+ * public, ils lisent l'API d'administration avec les identifiants du marchand.
+ * Tout le reste est commun — normalisation, rapprochement, dédoublonnage,
+ * aperçu, confirmation, reprise, historique — et c'est précisément l'intérêt :
+ * un produit Shopify et un produit PrestaShop produisent la même fiche.
+ *
+ * ## L'adresse vient du secret, pas de la requête
+ *
+ * Le domaine (Shopify) ou l'URL du site (WooCommerce) a été validé à la
+ * connexion, puis rangé dans Vault avec les clés. L'aperçu le relit de là : le
+ * navigateur ne peut donc pas faire contacter une adresse arbitraire par un
+ * simple champ de formulaire. La garde SSRF s'applique quand même à chaque
+ * import, puisque la sortie épinglée revalide la résolution.
+ */
+
+/** Découpe le secret Shopify : première ligne = domaine, seconde = jeton. */
+export function splitShopifySecret(brut: string): { domain: string; token: string } | null {
+  const lignes = brut.split('\n');
+  if (lignes.length < 2) return null;
+  const domain = lignes[0].trim();
+  const token = lignes[1].trim();
+  if (!domain || !token) return null;
+  return { domain, token };
+}
+
+/** Découpe le secret WooCommerce : clé, secret, site. */
+export function splitWooSecret(brut: string): { key: string; secret: string; siteUrl: string } | null {
+  const lignes = brut.split('\n');
+  if (lignes.length < 3) return null;
+  const [key, secret, siteUrl] = lignes.map((l) => l.trim());
+  if (!key || !secret || !siteUrl) return null;
+  return { key, secret, siteUrl };
+}
+
+async function faireApercuShopify(
+  dependencies: StoreImportDependencies,
+  contexte: { userId: string; workspaceId: string; connectorKey: string; now: () => number; ttl: number },
+): Promise<{ data: PreviewPayload; record: PreviewRecord }> {
+  if (typeof dependencies.readStoreCredential !== 'function') {
+    throw new StoreImportError(
+      'CONNECTOR_UNAVAILABLE',
+      'Le connecteur Shopify n’est pas disponible sur cette installation.',
+      503,
+    );
+  }
+  const brut = await dependencies.readStoreCredential(contexte.userId, 'shopify');
+  const secret = brut ? splitShopifySecret(brut) : null;
+  if (!secret) {
+    throw new StoreImportError(
+      'CONNECTION_REQUIRED',
+      'Connectez votre boutique Shopify (domaine et jeton d’API Admin) avant de lancer l’aperçu.',
+      409,
+    );
+  }
+
+  if (!dependencies.resolveHost) {
+    // Sans résolveur, la sortie épinglée ne peut pas vérifier l'IP : on refuse
+    // plutôt que de laisser `fetch` résoudre seul (ce serait rouvrir le SSRF).
+    throw new StoreImportError(
+      'RESOLVER_UNAVAILABLE',
+      'La vérification DNS serveur n’est pas disponible : import refusé par sécurité.',
+      503,
+    );
+  }
+
+  let connectedTo = '';
+  const lecture = await readShopifyCatalog(
+    { shopDomain: secret.domain, accessToken: secret.token },
+    {
+      fetchImpl: pinnedFetchLike(
+        { resolveHost: dependencies.resolveHost, connect: dependencies.connect, onConnected: (ip) => { connectedTo = ip; } },
+        { accept: 'application/json', maxBytes: MAX_CATALOG_BYTES },
+      ),
+    },
+  );
+
+  if (!lecture.ok) {
+    const refus = lecture.error.code === 'auth_invalid' || lecture.error.code === 'insufficient_scope';
+    throw new StoreImportError(
+      refus ? 'STORE_CONNECTION_REFUSED' : 'CATALOG_UNAVAILABLE',
+      lecture.error.message,
+      refus ? 401 : 502,
+    );
+  }
+
+  const catalogue = lecture.value;
+  if (catalogue.products.length === 0) {
+    throw new StoreImportError(
+      'CATALOG_EMPTY',
+      catalogue.unpublishedSkipped > 0
+        ? `Aucun produit publié chez Shopify : ${catalogue.unpublishedSkipped} produit(s) sont en brouillon ou archivés. `
+          + 'Publiez-les dans Shopify, puis relancez l’aperçu.'
+        : 'L’API Shopify ne renvoie aucun produit pour cette boutique.',
+      422,
+    );
+  }
+
+  const projection = toShopifyRawProducts(catalogue);
+  const normalise = normalizeCatalog(
+    {
+      platform: 'shopify',
+      endpoint: catalogue.endpoint,
+      products: projection.produits,
+      currency: catalogue.currency,
+    },
+    'shopify',
+    DEFAULT_CURRENCY,
+  );
+
+  if (normalise.produits.length === 0) {
+    throw new StoreImportError(
+      'CATALOG_EMPTY',
+      'Les produits Shopify lus n’ont pas pu être normalisés.',
+      422,
+    );
+  }
+
+  return await assemblerApercuConnecteur(dependencies, {
+    ...contexte,
+    produits: normalise.produits,
+    rejets: [...projection.rejets, ...normalise.rejets],
+    endpoint: catalogue.endpoint,
+    platform: 'shopify',
+    reference: catalogue.domain,
+    connectedTo,
+    warningsSupplementaires: [
+      ...(catalogue.unpublishedSkipped > 0
+        ? [`${catalogue.unpublishedSkipped} produit(s) Shopify non publié(s) (brouillon ou archivé) ont été écartés.`]
+        : []),
+      ...(catalogue.truncated
+        ? ['Le catalogue dépasse la limite de lecture : une partie des produits n’a pas été récupérée.']
+        : []),
+      ...(catalogue.variantsSeen > projection.variantes
+        ? [`${catalogue.variantsSeen - projection.variantes} variante(s) n’ont pas pu être rattachées à leur produit.`]
+        : []),
+    ],
+  });
+}
+
+async function faireApercuWooCommerce(
+  dependencies: StoreImportDependencies,
+  contexte: { userId: string; workspaceId: string; connectorKey: string; now: () => number; ttl: number },
+): Promise<{ data: PreviewPayload; record: PreviewRecord }> {
+  if (typeof dependencies.readStoreCredential !== 'function') {
+    throw new StoreImportError(
+      'CONNECTOR_UNAVAILABLE',
+      'Le connecteur WooCommerce n’est pas disponible sur cette installation.',
+      503,
+    );
+  }
+  const brut = await dependencies.readStoreCredential(contexte.userId, 'woocommerce');
+  const secret = brut ? splitWooSecret(brut) : null;
+  if (!secret) {
+    throw new StoreImportError(
+      'CONNECTION_REQUIRED',
+      'Connectez votre site WooCommerce (clés API REST) avant de lancer l’aperçu.',
+      409,
+    );
+  }
+
+  if (!dependencies.resolveHost) {
+    throw new StoreImportError(
+      'RESOLVER_UNAVAILABLE',
+      'La vérification DNS serveur n’est pas disponible : import refusé par sécurité.',
+      503,
+    );
+  }
+
+  let connectedTo = '';
+  const lecture = await readWooCatalog(
+    { siteUrl: secret.siteUrl, consumerKey: secret.key, consumerSecret: secret.secret },
+    {
+      fetchImpl: pinnedFetchLike(
+        { resolveHost: dependencies.resolveHost, connect: dependencies.connect, onConnected: (ip) => { connectedTo = ip; } },
+        { accept: 'application/json', maxBytes: MAX_CATALOG_BYTES },
+      ),
+    },
+  );
+
+  if (!lecture.ok) {
+    const refus = lecture.error.code === 'auth_invalid' || lecture.error.code === 'rest_disabled';
+    throw new StoreImportError(
+      refus ? 'STORE_CONNECTION_REFUSED' : 'CATALOG_UNAVAILABLE',
+      lecture.error.message,
+      refus ? 401 : 502,
+    );
+  }
+
+  const catalogue = lecture.value;
+  if (catalogue.products.length === 0) {
+    throw new StoreImportError('CATALOG_EMPTY', 'L’API WooCommerce ne renvoie aucun produit publié.', 422);
+  }
+
+  const projection = toWooRawProducts(catalogue);
+  const normalise = normalizeCatalog(
+    {
+      platform: 'woocommerce',
+      endpoint: catalogue.endpoint,
+      products: projection.produits,
+      currency: catalogue.currency,
+    },
+    'woocommerce',
+    DEFAULT_CURRENCY,
+  );
+
+  if (normalise.produits.length === 0) {
+    throw new StoreImportError('CATALOG_EMPTY', 'Les produits WooCommerce lus n’ont pas pu être normalisés.', 422);
+  }
+
+  return await assemblerApercuConnecteur(dependencies, {
+    ...contexte,
+    produits: normalise.produits,
+    rejets: [...projection.rejets, ...normalise.rejets],
+    endpoint: catalogue.endpoint,
+    platform: 'woocommerce',
+    reference: catalogue.siteUrl,
+    connectedTo,
+    warningsSupplementaires: [
+      ...(catalogue.truncated
+        ? ['Le catalogue dépasse la limite de lecture : une partie des produits n’a pas été récupérée.']
+        : []),
+      ...(projection.variablesSansVariations.length > 0
+        ? [
+          `${projection.variablesSansVariations.length} produit(s) à variations n’ont pas pu être lus avec leurs `
+          + `déclinaisons (${projection.variablesSansVariations.slice(0, 3).join(', ')}${projection.variablesSansVariations.length > 3 ? '…' : ''}) : `
+          + 'ils seront importés au prix affiché, sans déclinaison.',
+        ]
+        : []),
+    ],
+  });
+}
+
+/**
+ * Assemble un aperçu à partir de produits DÉJÀ normalisés.
+ *
+ * Mutualisé entre Shopify et WooCommerce pour qu'ils héritent exactement du
+ * même rapprochement, du même calcul d'importabilité et des mêmes décisions
+ * figées. Une copie aurait fini par diverger, et c'est le genre d'écart qui
+ * produit des doublons.
+ */
+async function assemblerApercuConnecteur(
+  dependencies: StoreImportDependencies,
+  contexte: {
+    userId: string;
+    workspaceId: string;
+    now: () => number;
+    ttl: number;
+    produits: NormalizedProduct[];
+    rejets: Array<{ line: number; reason: string }>;
+    endpoint: string;
+    /** Plateforme d'origine, au type du catalogue : aucune valeur libre. */
+    platform: StorePlatform;
+    reference: string;
+    connectedTo: string;
+    warningsSupplementaires: string[];
+  },
+): Promise<{ data: PreviewPayload; record: PreviewRecord }> {
+  const { produits, rejets } = contexte;
+
+  const existants = await dependencies.listExistingProducts(contexte.workspaceId);
+  const rapprochements = rapprocher(produits, existants);
+
+  const lignes = produits.map((produit, index) => {
+    const decision = decisionApercu(rapprochements[index], existants);
+    return {
+      index,
+      name: produit.name,
+      price: formatPreviewPrice(produit),
+      currency: produit.currency,
+      productUrl: produit.productUrl,
+      sku: produit.sku ?? null,
+      platformId: produit.platformId ?? null,
+      warnings: produit.warnings,
+      duplicate: decision.duplicate,
+      match: decision.match,
+      matchReason: decision.matchReason,
+      candidates: decision.candidates,
+      targetId: decision.targetId,
+      importable: isImportable(produit)
+        && decision.match !== 'ambiguous'
+        && decision.match !== 'duplicate-in-batch',
+      variants: [],
+      platform: contexte.platform,
+    };
+  });
+
+  const importables = lignes.filter((l) => l.importable).length;
+  const origin: ImportBatch['origin'] = {
+    kind: 'url',
+    reference: contexte.reference,
+    platform: contexte.platform,
+    endpoint: contexte.endpoint,
+  };
+
+  const warnings = [
+    'Aucun produit n’a été créé : cette étape est une prévisualisation.',
+    ...contexte.warningsSupplementaires,
+    ...(lignes.some((l) => l.warnings.length > 0)
+      ? ['Certains produits portent un avertissement (prix absent, variantes incomplètes) : lisez-le avant de confirmer.']
+      : []),
+    ...(rejets.length ? [`${rejets.length} produit(s) du catalogue source n’ont pas pu être normalisés.`] : []),
+  ];
+
+  const data: PreviewPayload = {
+    previewId: crypto.randomUUID(),
+    expiresAt: new Date(contexte.now() + contexte.ttl).toISOString(),
+    origin,
+    summary: {
+      total: lignes.length,
+      importable: importables,
+      duplicateInBatch: lignes.filter((l) => l.duplicate === 'in-batch').length,
+      duplicateExisting: lignes.filter((l) => l.duplicate === 'existing').length,
+      withWarnings: lignes.filter((l) => l.warnings.length > 0).length,
+      priced: produits.filter((p) => p.priceMinor !== null).length,
+      unpriced: produits.filter((p) => p.priceMinor === null).length,
+    },
+    products: lignes,
+    rejected: rejets,
+    warnings,
+    connectedTo: contexte.connectedTo,
+  };
+
+  return {
+    data,
+    record: {
+      userId: contexte.userId,
+      workspaceId: contexte.workspaceId,
+      createdAt: contexte.now(),
+      kind: 'url',
+      products: produits,
+      // Décisions figées avec l'aperçu : la confirmation applique exactement ce
+      // qui a été montré, même si le catalogue change entre-temps.
+      matches: lignes.map((ligne) => ({ match: ligne.match, targetId: ligne.targetId })),
+      origin,
+    },
+  };
+}
+
 async function faireApercuConnecteur(
   dependencies: StoreImportDependencies,
   contexte: {
@@ -1434,10 +1780,21 @@ async function faireApercuConnecteur(
     ttl: number;
   },
 ): Promise<{ data: PreviewPayload; record: PreviewRecord }> {
-  if (contexte.connectorKey !== 'chariow') {
+  const connecteursConnus = ['chariow', 'prestashop', 'shopify', 'woocommerce', 'custom-api'];
+  if (!connecteursConnus.includes(contexte.connectorKey)) {
     // Un identifiant inconnu ne doit pas retomber silencieusement sur un autre
     // connecteur : on refuse explicitement.
     throw new StoreImportError('UNKNOWN_CONNECTOR', 'Connecteur inconnu pour l’aperçu.', 400);
+  }
+
+  // Shopify et WooCommerce ont leur propre lecture (API authentifiée) et
+  // rejoignent l'assemblage commun : on délègue AVANT les contrôles Chariow,
+  // qui exigeraient un résolveur et une clé propres à ce connecteur.
+  if (contexte.connectorKey === 'shopify') {
+    return await faireApercuShopify(dependencies, contexte);
+  }
+  if (contexte.connectorKey === 'woocommerce') {
+    return await faireApercuWooCommerce(dependencies, contexte);
   }
   if (typeof dependencies.readStoreCredential !== 'function') {
     throw new StoreImportError(
@@ -1454,6 +1811,13 @@ async function faireApercuConnecteur(
       'La vérification DNS serveur n’est pas disponible : import refusé par sécurité.',
       503,
     );
+  }
+
+  if (contexte.connectorKey === 'shopify') {
+    return await faireApercuShopify(dependencies, contexte);
+  }
+  if (contexte.connectorKey === 'woocommerce') {
+    return await faireApercuWooCommerce(dependencies, contexte);
   }
 
   const cle = await dependencies.readStoreCredential(contexte.userId, 'chariow');

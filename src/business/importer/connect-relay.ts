@@ -22,7 +22,7 @@ import { invokeEdge } from '../../lib/api';
  * avoir écrit son parcours de connexion ne doit pas compiler ici. Une fiche
  * cliquable qui échouerait à la première requête serait un bouton mort.
  */
-export type StoreConnectorKey = 'prestashop' | 'chariow';
+export type StoreConnectorKey = 'prestashop' | 'chariow' | 'shopify' | 'woocommerce';
 
 /** État d'une connexion boutique, tel que le serveur le décrit. */
 export interface StoreConnectionState {
@@ -98,6 +98,14 @@ export async function connectStore(input: {
   connectorKey: StoreConnectorKey;
   url?: string;
   apiKey: string;
+  /**
+   * Second secret, quand le connecteur en exige deux.
+   *
+   * Seul WooCommerce est dans ce cas (Consumer key + Consumer secret). Le champ
+   * reste facultatif : l'absence est valide pour tous les autres connecteurs, et
+   * le serveur refuse explicitement si le connecteur choisi l'exige.
+   */
+  apiSecret?: string;
 }): Promise<StoreConnectionResult> {
   const { data } = await invokeEdge<{ data: StoreConnectionResult }>('store-connect', {
     action: 'connect',
@@ -105,6 +113,7 @@ export async function connectStore(input: {
     connectorKey: input.connectorKey,
     ...(input.url ? { url: input.url } : {}),
     apiKey: input.apiKey,
+    ...(input.apiSecret ? { apiSecret: input.apiSecret } : {}),
   });
   return data;
 }

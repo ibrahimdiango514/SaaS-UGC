@@ -99,12 +99,64 @@ describe('champs pilotés par les exigences du connecteur', () => {
   });
 
   it('un connecteur sans parcours livré ne rend rien', () => {
+    // Shopify a désormais un formulaire : le contre-exemple est OpenCart, qui
+    // n'a réellement ni exigences ni route produits.
     const { container } = render(
-      <ConnectorConnectForm connectorKey="shopify" workspaceId="w1" onChanged={onChanged} />,
+      <ConnectorConnectForm connectorKey="opencart" workspaceId="w1" onChanged={onChanged} />,
     );
     // Garantie structurelle contre les boutons morts.
     expect(container.innerHTML).toBe('');
     expect(api.connectEdge).not.toHaveBeenCalled();
+  });
+
+  it('Shopify demande le domaine et le jeton, sans second secret', () => {
+    monter('shopify');
+    expect(screen.getByTestId('shopify-field-url')).toBeTruthy();
+    expect((screen.getByTestId('shopify-field-apiKey') as HTMLInputElement).type).toBe('password');
+    // Un seul secret pour Shopify : aucun champ `apiSecret`.
+    expect(screen.queryByTestId('shopify-field-apiSecret')).toBeNull();
+  });
+
+  it('WooCommerce demande l’adresse ET les deux clés, toutes masquées', () => {
+    monter('woocommerce');
+    expect(screen.getByTestId('woocommerce-field-url')).toBeTruthy();
+    for (const champ of ['apiKey', 'apiSecret']) {
+      const input = screen.getByTestId(`woocommerce-field-${champ}`) as HTMLInputElement;
+      expect(input.type, champ).toBe('password');
+    }
+  });
+
+  it('envoie bien le Consumer secret comme `apiSecret`, et rien d’inventé', async () => {
+    api.connectEdge.mockResolvedValue({
+      data: {
+        connectorKey: 'woocommerce', status: 'connected', connected: true,
+        connectedTo: 'boutique.test', endpoint: 'https://boutique.test/wp-json/wc/v3',
+      },
+    });
+    monter('woocommerce');
+    fireEvent.change(screen.getByTestId('woocommerce-field-url'), { target: { value: 'https://boutique.test' } });
+    // `SEUIL_CLE` impose une longueur minimale : une clé courte est refusée
+    // AVANT tout appel réseau, et c'est le comportement voulu.
+    const CLE_WOO = 'ck_' + 'a'.repeat(40);
+    const SECRET_WOO = 'cs_' + 'b'.repeat(40);
+    fireEvent.change(screen.getByTestId('woocommerce-field-apiKey'), { target: { value: CLE_WOO } });
+    fireEvent.change(screen.getByTestId('woocommerce-field-apiSecret'), { target: { value: SECRET_WOO } });
+    fireEvent.click(screen.getByTestId('woocommerce-connect'));
+
+    // Le montage interroge l'état (`action: 'status'`) : on cible la connexion.
+    await waitFor(() =>
+      expect(api.connectEdge.mock.calls.some(([, c]) => c?.action === 'connect')).toBe(true),
+    );
+    const [, payload] = api.connectEdge.mock.calls.find(([, c]) => c?.action === 'connect')!;
+    expect(payload).toMatchObject({ connectorKey: 'woocommerce', url: 'https://boutique.test', apiKey: CLE_WOO, apiSecret: SECRET_WOO });
+    /*
+     * Le secret est effacé dès la réponse : le formulaire se replie sur le
+     * panneau « connectée », où AUCUN champ de saisie ne subsiste. C'est plus
+     * fort qu'un champ vidé — il n'y a plus de champ du tout.
+     */
+    await waitFor(() => expect(screen.queryByTestId('woocommerce-field-apiSecret')).toBeNull());
+    expect(screen.queryByTestId('woocommerce-field-apiKey')).toBeNull();
+    expect(screen.getByTestId('woocommerce-connect-form').textContent).toMatch(/connectée/i);
   });
 
   it('ne demande jamais de secret quand la connexion est déjà établie', async () => {

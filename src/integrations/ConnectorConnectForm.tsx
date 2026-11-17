@@ -138,7 +138,23 @@ export function ConnectorConnectForm({
       : 'not-configured';
 
   const estConnecte = etatAffiche === 'connected';
-  const dernierChampSecret = requirement.fields.filter((f) => f.secret).at(-1);
+  const champsSecrets = requirement.fields.filter((f) => f.secret);
+  /*
+   * Deux secrets au plus. Le nom du champ est PRIORITAIRE : WooCommerce déclare
+   * `apiKey` (Consumer key) puis `apiSecret` (Consumer secret), et le serveur
+   * recompose le secret stocké dans cet ordre. Se fier à la position avait
+   * inversé les deux — la clé publique partait comme secret et inversement,
+   * produisant un 401 que le marchand n'aurait pas pu expliquer.
+   *
+   * Le repli positionnel ne sert qu'aux connecteurs à un seul secret, dont le
+   * champ peut porter n'importe quel nom (`cle`, `jeton`, …).
+   */
+  const champCle = champsSecrets.find((f) => f.name === 'apiKey')
+    // Champ unique, quel que soit son nom : c'est la clé.
+    ?? (champsSecrets.length === 1 ? champsSecrets[0] : undefined);
+  const champSecret = champsSecrets.find((f) => f.name === 'apiSecret')
+    // Deux secrets sans noms conventionnels : le second est le secret.
+    ?? (champsSecrets.length > 1 ? champsSecrets[1] : undefined);
 
   function majValeur(nom: string, valeur: string) {
     setValeurs((precedent) => ({ ...precedent, [nom]: valeur }));
@@ -188,7 +204,8 @@ export function ConnectorConnectForm({
     // le contrat existant, sans le modifier : les Edge Functions déployées
     // continuent de fonctionner à l'identique.
     const url = (valeurs.url ?? '').trim();
-    const cle = (dernierChampSecret ? valeurs[dernierChampSecret.name] ?? '' : '').trim();
+    const cle = (champCle ? valeurs[champCle.name] ?? '' : '').trim();
+    const secretSecondaire = champSecret ? (valeurs[champSecret.name] ?? '').trim() : '';
 
     setEnCours(true);
     setErreur(null);
@@ -198,6 +215,7 @@ export function ConnectorConnectForm({
         connectorKey: cleConnecteur(requirement!.key),
         ...(url ? { url } : {}),
         apiKey: cle,
+        ...(secretSecondaire ? { apiSecret: secretSecondaire } : {}),
       });
       // Effacement AVANT tout rendu : même si la suite échouait, le secret
       // aurait déjà quitté l'état du composant.

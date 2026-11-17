@@ -891,9 +891,15 @@ describe('Business Grow', () => {
     const facebook = screen.getByTestId('integration-facebook').textContent ?? '';
     expect(facebook).not.toContain('Non connecté');
     expect(facebook).not.toContain('Connecté');
-    // Shopify n'a pas d'approbation externe : il lui manque nos identifiants.
-    expect(screen.getByTestId('integration-shopify').textContent).toContain('Configuration requise');
-    expect(screen.getByTestId('integration-woocommerce')).toBeTruthy();
+    /*
+     * Shopify et WooCommerce ont désormais un moteur : sans ligne de connexion,
+     * leur état est « Non connecté » (cliquable, avec formulaire), et non plus
+     * « Configuration requise ». OpenCart, qui n'a réellement aucun moteur,
+     * conserve le second libellé — c'est lui qui porte désormais ce cas.
+     */
+    expect(screen.getByTestId('integration-shopify').textContent).toContain('Non connecté');
+    expect(screen.getByTestId('integration-woocommerce').textContent).toContain('Non connecté');
+    expect(screen.getByTestId('integration-opencart').textContent).toContain('Configuration requise');
   });
 
   it('le catalogue de 26 fournisseurs est le catalogue principal de Business Grow', async () => {

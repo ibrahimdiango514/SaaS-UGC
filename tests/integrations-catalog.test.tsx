@@ -117,7 +117,7 @@ describe('catalogue — structure', () => {
      * pas de branche par connecteur dans le handler — c'est justement ce qui le
      * rend universel. Il est donc vérifié séparément, plus bas.
      */
-    const MOTEURS_ECRITS = new Set(['prestashop', 'chariow']);
+    const MOTEURS_ECRITS = new Set(['prestashop', 'chariow', 'shopify', 'woocommerce']);
     for (const entry of INTEGRATIONS) {
       if (MOTEURS_ECRITS.has(entry.id)) {
         expect(entry.engine, `${entry.id} : moteur annoncé`).not.toBeNull();
@@ -284,8 +284,25 @@ describe('deriveStatus — le statut ne peut pas mentir', () => {
   });
 
   it('canConnect est faux tant qu’aucun moteur n’existe', () => {
-    expect(canConnect(shopify, 'needs_config')).toBe(false);
+    // OpenCart n'a ni moteur ni parcours de connexion : c'est le cas réel
+    // restant. Shopify a désormais un moteur, il ne sert donc plus d'exemple.
+    const opencart = INTEGRATION_BY_ID.opencart as IntegrationEntry;
+    expect(opencart.engine).toBeNull();
+    expect(canConnect(opencart, 'not_connected')).toBe(false);
+    expect(canConnect(opencart, 'needs_config')).toBe(false);
+    expect(canConnect(opencart, 'needs_approval')).toBe(false);
+  });
+
+  it('canConnect distingue « à configurer » de « à autoriser »', () => {
+    /*
+     * `needs_config` est CONNECTABLE : c'est l'état normal d'un connecteur à clé
+     * (« il me manque des identifiants, laissez-moi les saisir »). Le bouton doit
+     * donc s'afficher. `needs_approval` et `connected` le ferment.
+     */
+    expect(canConnect(shopify, 'needs_config')).toBe(true);
+    expect(canConnect(shopify, 'not_connected')).toBe(true);
     expect(canConnect(shopify, 'needs_approval')).toBe(false);
+    expect(canConnect(shopify, 'connected')).toBe(false);
   });
 
   it('canConnect est vrai quand un moteur existe et que l’état le permet', () => {
@@ -440,9 +457,13 @@ describe('catalogue — capacités réellement implémentées', () => {
   it('Shopify et WooCommerce n’annoncent que ce que store-import lit', () => {
     for (const id of ['shopify', 'woocommerce']) {
       expect(entrees(id).capabilities.sort(), id).toEqual(['catalog-read', 'inventory-read']);
-      // `engine: null` est exact : il n'y a pas d'authentification, seulement
-      // une lecture anonyme du catalogue public.
-      expect(entrees(id).engine, id).toBeNull();
+      /*
+       * `engine: 'api-key'` depuis la phase E : un parcours de connexion
+       * authentifié existe réellement, avec vérification de la clé côté serveur
+       * et lecture par l'API officielle. Aucune écriture n'est annoncée — les
+       * capacités d'écriture n'existent même pas dans le type.
+       */
+      expect(entrees(id).engine, id).toBe('api-key');
     }
   });
 
@@ -466,9 +487,13 @@ describe('catalogue — capacités réellement implémentées', () => {
     expect(opencart.auth.some((a) => a.mode === 'file-import')).toBe(true);
   });
 
-  it('Shopify et WooCommerce expliquent que l’import est anonyme', () => {
+  it('Shopify et WooCommerce disent qu’ils sont en LECTURE SEULE', () => {
     for (const id of ['shopify', 'woocommerce']) {
-      expect(entrees(id).caveat ?? '', id).toMatch(/sans authentification|aucun identifiant/i);
+      const caveat = entrees(id).caveat ?? '';
+      expect(caveat, id).toMatch(/lecture seule/i);
+      // Et rappellent qu'aucune commande n'est lue : ce sont des données
+      // personnelles d'acheteurs, hors périmètre.
+      if (id === 'woocommerce') expect(caveat).toMatch(/commande/i);
     }
   });
 });

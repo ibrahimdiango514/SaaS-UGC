@@ -60,6 +60,16 @@ import {
 } from '../../../src/business/importer/chariow-catalog.ts';
 import { sameShopOrigin } from '../../../src/business/importer/chariow-pricing.ts';
 import {
+  probeShopify,
+  normalizeShopDomain,
+  validateShopifyToken,
+} from '../../../src/business/importer/shopify-api.ts';
+import {
+  probeWooCommerce,
+  normalizeWooSite,
+  validateWooCredentials,
+} from '../../../src/business/importer/woocommerce-api.ts';
+import {
   buildAuthHeaders,
   parseCustomApiBaseUrl,
   parseCustomApiEndpoint,
@@ -290,10 +300,18 @@ export function credentialName(userId: string, connectorKey: string): string {
  */
 const CONNECTEURS: Record<
   string,
-  { platform: CatalogPlatform; label: string; mode: 'shop-api' | 'hosted-api' }
+  { platform: CatalogPlatform; label: string; mode: 'shop-api' | 'hosted-api' | 'shopify-admin' | 'woo-rest' }
 > = {
   prestashop: { platform: 'prestashop', label: 'PrestaShop', mode: 'shop-api' },
   chariow: { platform: 'chariow', label: 'Chariow', mode: 'hosted-api' },
+  /*
+   * Shopify et WooCommerce ont leurs propres parcours : le premier s'adresse
+   * à une API d'administration fixe déduite du domaine `*.myshopify.com`, le
+   * second à l'API REST du site du marchand avec une paire de clés. Aucun des
+   * deux ne rentre dans le formulaire « URL + une clé » de PrestaShop.
+   */
+  shopify: { platform: 'shopify', label: 'Shopify', mode: 'shopify-admin' },
+  woocommerce: { platform: 'woocommerce', label: 'WooCommerce', mode: 'woo-rest' },
 };
 
 /* ---------------------------------- actions -------------------------------- */
@@ -316,6 +334,12 @@ async function connecter(
   // de boutique obligatoire — Chariow, lui, la déduit de l'API.
   if (connecteur.mode === 'hosted-api') {
     return connecterHerberge(body, { userId, workspaceId, corsOrigin, deps, connectorKey });
+  }
+  if (connecteur.mode === 'shopify-admin') {
+    return connecterShopify(body, { userId, workspaceId, corsOrigin, deps, connectorKey });
+  }
+  if (connecteur.mode === 'woo-rest') {
+    return connecterWooCommerce(body, { userId, workspaceId, corsOrigin, deps, connectorKey });
   }
 
   const apiKey = normalizeApiKey(body.apiKey);
@@ -722,6 +746,299 @@ async function journaliserEchec(
       erreur: erreur instanceof Error ? erreur.message : 'inconnue',
     });
   }
+}
+
+
+/* ------------------------- Shopify (API Admin) ----------------------------- */
+/*
+ * Pendant Shopify du parcours PrestaShop, avec trois différences qui comptent :
+ *
+ * 1. **Le domaine est `*.myshopify.com`**, pas l'adresse de la vitrine. C'est
+ *    le seul hôte qui parle l'API d'administration ; une vitrine sur domaine
+ *    personnalisé n'y répond pas. On refuse donc plutôt que de deviner.
+ * 2. **L'hôte est épinglé comme les autres** : c'est une adresse fournie par
+ *    l'utilisateur, donc passée à la garde SSRF avant tout appel.
+ * 3. **Les scopes sont vérifiés réellement.** Un jeton valide sans
+ *    `read_products` est refusé AVANT d'être rangé dans Vault : sinon le
+ *    marchand verrait « connecté » puis un import en échec.
+ */
+async function connecterShopify(
+  body: Record<string, unknown>,
+  contexte: { userId: string; workspaceId: string; corsOrigin: string; deps: ConnectDependencies; connectorKey: string },
+): Promise<Response> {
+  const { userId, workspaceId, corsOrigin, deps, connectorKey } = contexte;
+
+  const domaine = normalizeShopDomain(body.url ?? body.shopDomain);
+  if (!domaine.ok) {
+    return jsonResponse(failure('SHOPIFY_DOMAIN_INVALID', domaine.error.message), 400, corsOrigin);
+  }
+  const jeton = validateShopifyToken(body.apiKey);
+  if (!jeton.ok) {
+    return jsonResponse(failure('API_KEY_REQUIRED', jeton.error.message), 400, corsOrigin);
+  }
+
+  // Garde SSRF et épinglage : même chemin que PrestaShop.
+  const debut = (deps.now ?? Date.now)();
+  let connectedTo: string;
+  try {
+    const verifie = await verifierCible(`https://${domaine.value.domain}`, deps);
+    connectedTo = verifie.connectedTo;
+  } catch (erreur) {
+    if (erreur instanceof ConnectError) {
+      return jsonResponse(failure(erreur.code, erreur.message), erreur.status, corsOrigin);
+    }
+    throw erreur;
+  }
+
+  const sonde = await probeShopify(
+    { shopDomain: domaine.value.domain, accessToken: jeton.value },
+    { fetchImpl: deps.fetchImpl, pause: async () => {} },
+  );
+
+  if (!sonde.ok) {
+    const duree = (deps.now ?? Date.now)() - debut;
+    await journaliserEchec(deps, {
+      userId, workspaceId, connectorKey, duree,
+      erreur: { code: sonde.error.code, message: sonde.error.message },
+      phase: 'probe',
+    });
+    return jsonResponse(
+      failure(sonde.error.code.toUpperCase(), sonde.error.message),
+      statutPourErreurExterne(sonde.error),
+      corsOrigin,
+    );
+  }
+
+  const rapport = sonde.value;
+
+  let credentialRef: string;
+  try {
+    /*
+     * Le secret porte le domaine ET le jeton, séparés par un saut de ligne.
+     *
+     * `store-import` a besoin du domaine pour épingler sa sortie réseau : c'est
+     * une adresse fournie par l'utilisateur, elle doit passer la garde SSRF à
+     * CHAQUE import, pas seulement à la connexion. Un jeton seul ne le permettrait
+     * pas, et le redemander au navigateur ferait circuler un secret à chaque
+     * aperçu.
+     */
+    credentialRef = await deps.storeCredential({
+      userId,
+      connectorKey,
+      secret: `${domaine.value.domain}\n${jeton.value}`,
+    });
+  } catch (erreur) {
+    deps.log?.('store-connect: dépôt du secret Shopify impossible', {
+      erreur: erreur instanceof Error ? erreur.message : 'inconnue',
+    });
+    return jsonResponse(
+      failure('SECRET_STORE_UNAVAILABLE', 'Le jeton n’a pas pu être enregistré de façon sécurisée. Réessayez.'),
+      503, corsOrigin,
+    );
+  }
+
+  const duree = (deps.now ?? Date.now)() - debut;
+  let enregistrement: { connectionId: string; status: string };
+  try {
+    enregistrement = await deps.recordConnection({
+      userId,
+      workspaceId,
+      connectorKey,
+      credentialRef,
+      // Le domaine, jamais le jeton.
+      externalAccountRef: rapport.domain,
+      resourcesRead: rapport.resourcesRead,
+      totalProducts: rapport.totalProducts,
+      durationMs: duree,
+    });
+  } catch (erreur) {
+    await deps.deleteCredential(credentialRef).catch(() => {});
+    return await reponseEnregistrementImpossible(erreur, 'shopify', corsOrigin, deps);
+  }
+
+  return jsonResponse({
+    data: {
+      connectorKey,
+      status: enregistrement.status,
+      connected: true,
+      shopName: rapport.shopName,
+      domain: rapport.domain,
+      currency: rapport.currency,
+      totalProducts: rapport.totalProducts,
+      grantedScopes: rapport.grantedScopes,
+      inventoryScope: rapport.inventoryScope,
+      resourcesRead: rapport.resourcesRead,
+      connectedTo,
+    },
+  }, 200, corsOrigin);
+}
+
+/* ---------------------- WooCommerce (API REST v3) -------------------------- */
+/*
+ * Ici, pas de domaine imposé : chaque site WooCommerce est indépendant. La
+ * garde SSRF est donc celle de PrestaShop — résolution + épinglage — et la paire
+ * de clés est vérifiée en lisant réellement une page de produits.
+ *
+ * La permission « Lecture » suffit et est la seule demandée : le client
+ * n'émet que des `GET`, et `safe-egress.ts` refuse toute autre méthode.
+ */
+async function connecterWooCommerce(
+  body: Record<string, unknown>,
+  contexte: { userId: string; workspaceId: string; corsOrigin: string; deps: ConnectDependencies; connectorKey: string },
+): Promise<Response> {
+  const { userId, workspaceId, corsOrigin, deps, connectorKey } = contexte;
+
+  const site = normalizeWooSite(text(body.url, 500));
+  if (!site.ok) {
+    return jsonResponse(failure('WOO_SITE_INVALID', site.error.message), 400, corsOrigin);
+  }
+  const cles = validateWooCredentials(body.apiKey, body.apiSecret);
+  if (!cles.ok) {
+    return jsonResponse(failure('API_KEY_REQUIRED', cles.error.message), 400, corsOrigin);
+  }
+
+  const debut = (deps.now ?? Date.now)();
+  let connectedTo: string;
+  try {
+    const verifie = await verifierCible(site.value.siteUrl, deps);
+    connectedTo = verifie.connectedTo;
+  } catch (erreur) {
+    if (erreur instanceof ConnectError) {
+      return jsonResponse(failure(erreur.code, erreur.message), erreur.status, corsOrigin);
+    }
+    throw erreur;
+  }
+
+  const sonde = await probeWooCommerce(
+    { siteUrl: site.value.siteUrl, consumerKey: cles.value.key, consumerSecret: cles.value.secret },
+    { fetchImpl: deps.fetchImpl, pause: async () => {} },
+  );
+
+  if (!sonde.ok) {
+    const duree = (deps.now ?? Date.now)() - debut;
+    await journaliserEchec(deps, {
+      userId, workspaceId, connectorKey, duree,
+      erreur: { code: sonde.error.code, message: sonde.error.message },
+      phase: 'probe',
+    });
+    return jsonResponse(
+      failure(sonde.error.code.toUpperCase(), sonde.error.message),
+      statutPourErreurExterne(sonde.error),
+      corsOrigin,
+    );
+  }
+
+  const rapport = sonde.value;
+
+  /*
+   * Les DEUX clés et l'adresse du site sont rangées, séparées par des sauts de
+   * ligne : `store-import` les relit ensemble, et l'adresse lui sert à épingler
+   * sa sortie réseau. Le secret Vault est chiffré au repos, et ce bloc ne sort
+   * jamais du serveur.
+   */
+  let credentialRef: string;
+  try {
+    credentialRef = await deps.storeCredential({
+      userId,
+      connectorKey,
+      secret: `${cles.value.key}\n${cles.value.secret}\n${site.value.siteUrl}`,
+    });
+  } catch (erreur) {
+    deps.log?.('store-connect: dépôt des clés WooCommerce impossible', {
+      erreur: erreur instanceof Error ? erreur.message : 'inconnue',
+    });
+    return jsonResponse(
+      failure('SECRET_STORE_UNAVAILABLE', 'Les clés n’ont pas pu être enregistrées de façon sécurisée. Réessayez.'),
+      503, corsOrigin,
+    );
+  }
+
+  const duree = (deps.now ?? Date.now)() - debut;
+  let enregistrement: { connectionId: string; status: string };
+  try {
+    enregistrement = await deps.recordConnection({
+      userId,
+      workspaceId,
+      connectorKey,
+      credentialRef,
+      externalAccountRef: redactedUrl(site.value.siteUrl),
+      resourcesRead: rapport.resourcesRead,
+      totalProducts: rapport.totalProducts,
+      durationMs: duree,
+    });
+  } catch (erreur) {
+    await deps.deleteCredential(credentialRef).catch(() => {});
+    return await reponseEnregistrementImpossible(erreur, 'woocommerce', corsOrigin, deps);
+  }
+
+  return jsonResponse({
+    data: {
+      connectorKey,
+      status: enregistrement.status,
+      connected: true,
+      shopName: rapport.storeName,
+      siteUrl: rapport.siteUrl,
+      totalProducts: rapport.totalProducts,
+      totalPages: rapport.totalPages,
+      hasVariableProducts: rapport.hasVariableProducts,
+      resourcesRead: rapport.resourcesRead,
+      connectedTo,
+    },
+  }, 200, corsOrigin);
+}
+
+/** Statut HTTP pour une erreur de sonde Shopify ou WooCommerce. */
+function statutPourErreurExterne(erreur: { code: string }): number {
+  switch (erreur.code) {
+    case 'auth_required':
+      return 400;
+    case 'auth_invalid':
+      return 401;
+    case 'insufficient_scope':
+    case 'rest_disabled':
+      return 403;
+    case 'shop_mismatch':
+    case 'not_found':
+      return 409;
+    case 'rate_limited':
+      return 429;
+    case 'blocked_url':
+      return 400;
+    case 'dns_failed':
+    case 'network_failed':
+      return 502;
+    case 'not_json':
+      return 502;
+    default:
+      return 502;
+  }
+}
+
+/**
+ * Réponse commune quand l'enregistrement de la connexion échoue.
+ *
+ * Mutualisé pour Shopify et WooCommerce : la cause est toujours la même
+ * (abonnement, droits sur l'entreprise, autre), et deux copies finiraient par
+ * diverger.
+ */
+async function reponseEnregistrementImpossible(
+  erreur: unknown,
+  connecteur: string,
+  corsOrigin: string,
+  deps: ConnectDependencies,
+): Promise<Response> {
+  const message = erreur instanceof Error ? erreur.message : '';
+  if (/SUBSCRIPTION_REQUIRED|SUBSCRIPTION_EXPIRED|SUBSCRIPTION_CANCELED/i.test(message)) {
+    return jsonResponse(
+      failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Ground actif et payé est requis pour connecter une boutique.'),
+      403, corsOrigin,
+    );
+  }
+  if (/WORKSPACE_ACCESS_DENIED|forbidden/i.test(message)) {
+    return jsonResponse(failure('WORKSPACE_ACCESS_DENIED', 'Droits insuffisants sur cette entreprise.'), 403, corsOrigin);
+  }
+  deps.log?.(`store-connect: enregistrement ${connecteur} impossible`, { erreur: message || 'inconnue' });
+  return jsonResponse(failure('CONNECTION_NOT_SAVED', 'La connexion vérifiée n’a pas pu être enregistrée.'), 500, corsOrigin);
 }
 
 /* --------------------------------- routeur -------------------------------- */

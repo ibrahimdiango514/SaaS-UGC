@@ -279,58 +279,72 @@ export const INTEGRATIONS: IntegrationEntry[] = [
      * (voir `engine`), et `safe-egress.ts` refuse toute méthode autre que GET.
      * Les afficher revenait à promettre une écriture impossible.
      */
-    description: 'Import du catalogue public de votre boutique Shopify (produits et variantes).',
+    description: 'Import du catalogue de votre boutique Shopify par l’API Admin (produits, variantes, stock).',
+    /*
+     * Ce qui est RÉELLEMENT implémenté, et rien de plus :
+     *
+     * - `catalog-read` et `inventory-read` : lus par l'API Admin, variantes et
+     *   quantités comprises.
+     * - `catalog-write`, `inventory-write` et `orders-read` restent RETIRÉS :
+     *   aucune ligne de code ne les implémente, et `safe-egress.ts` refuse toute
+     *   méthode autre que GET. Les annoncer promettrait une écriture impossible.
+     *
+     * L'authentification retenue est le **jeton d'application personnalisée**
+     * (`shpat_…`), pas OAuth d'application publique : sans `SHOPIFY_API_SECRET`
+     * côté serveur, un parcours OAuth échouerait dès la première redirection.
+     * OAuth est donc absent de `auth`, et la fiche le dit.
+     */
     capabilities: ['catalog-read', 'inventory-read'],
     auth: [
       {
-        mode: 'oauth2',
-        label: 'Installation de l’application sur votre boutique',
-        serverConfigKey: 'SHOPIFY_API_KEY',
+        mode: 'api-key',
+        label: 'Jeton d’API Admin d’une application personnalisée (shpat_…)',
       },
       {
         mode: 'public-catalog',
-        label: 'Lecture du catalogue public via /products.json',
+        label: 'Lecture du catalogue public via /products.json (sans connexion)',
       },
       {
         mode: 'file-import',
         label: 'Import d’un export CSV Shopify',
       },
     ],
-    engine: null,
+    engine: 'api-key',
     docsUrl: 'https://shopify.dev/docs/api',
     caveat:
-      'L’import se fait sans authentification, à partir du catalogue public : aucun identifiant n’est demandé, '
-      + 'et aucune commande n’est lue. Si votre boutique masque ses produits aux visiteurs, l’import échouera : '
-      + 'exportez alors un CSV.',
+      'Lecture seule : VYORA ne crée, ne modifie et ne supprime rien dans Shopify. Le jeton se révoque '
+      + 'en désinstallant l’application. Les produits en brouillon et archivés sont écartés et comptés. '
+      + 'Le catalogue public reste lisible sans connexion, pour les boutiques qui le publient.',
   },
   {
     id: 'woocommerce',
     name: 'WooCommerce',
     category: 'commerce',
     /*
-     * Même raisonnement que Shopify : le catalogue public
-     * (`/wp-json/wc/store/v1/products`) est lu et normalisé, rien de plus.
-     * Aucun code n'écrit, et la clé REST WooCommerce (consumer key + secret)
-     * n'a pas de parcours de connexion : `engine` reste donc `null`.
+     * Même raisonnement que Shopify, avec une différence : WooCommerce n'expose
+     * que trois droits (lecture, écriture, suppression), sans scope par
+     * ressource. On demande donc « Lecture » seule, et le client n'émet que des
+     * `GET`. `orders-read` est RETIRÉ : aucune commande n'est lue, et les
+     * commandes contiennent des données personnelles d'acheteurs.
      */
-    description: 'Import du catalogue public de votre boutique WooCommerce (produits et variantes).',
+    description: 'Import du catalogue de votre site WooCommerce par l’API REST (produits, variations, stock).',
     capabilities: ['catalog-read', 'inventory-read'],
     auth: [
       {
         mode: 'api-key',
-        label: 'Clé REST WooCommerce (consumer key + secret)',
-        serverConfigKey: 'WOOCOMMERCE_ALLOW_KEYS',
+        label: 'Clés API REST WooCommerce (Consumer key + Consumer secret), droit « Lecture »',
       },
       {
         mode: 'file-import',
         label: 'Import d’un export CSV WooCommerce',
       },
     ],
-    engine: null,
+    engine: 'api-key',
     docsUrl: 'https://woocommerce.github.io/woocommerce-rest-api-docs/',
     caveat:
-      'L’import se fait sans authentification, à partir du catalogue public de la boutique : aucun identifiant '
-      + 'n’est demandé, et aucune commande n’est lue. Les clés REST WooCommerce ne sont pas encore prises en charge.',
+      'Lecture seule : le droit « Lecture » suffit, et VYORA n’émet que des requêtes de lecture. '
+      + 'L’API REST exige des permaliens autres que « Simple » — sinon /wp-json/ renvoie 404. '
+      + 'Aucune commande n’est lue : les commandes contiennent des données personnelles d’acheteurs.',
   },
   {
     id: 'prestashop',

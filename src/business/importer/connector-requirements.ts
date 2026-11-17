@@ -189,6 +189,108 @@ export const CONNECTOR_REQUIREMENTS: Record<string, ConnectorRequirement> = {
     docsUrl: 'https://devdocs.prestashop-project.org/',
   },
 
+
+  shopify: {
+    key: 'shopify',
+    label: 'Shopify',
+    /*
+     * `shop` : l'API est chez le marchand, sur SON domaine
+     * `*.myshopify.com`. Ce n'est donc ni un hôte fixe (comme Chariow) ni
+     * l'adresse de la vitrine : c'est un domaine d'administration, résolu et
+     * épinglé à chaque import.
+     */
+    apiLocation: 'shop',
+    fields: [
+      {
+        name: 'url',
+        label: 'Domaine de la boutique',
+        hint: 'Le domaine « …myshopify.com » de Shopify → Paramètres → Domaines — pas l’adresse de votre vitrine.',
+        placeholder: 'ma-boutique.myshopify.com',
+        format: 'url',
+        secret: false,
+        required: true,
+      },
+      {
+        name: 'apiKey',
+        label: 'Jeton d’API Admin',
+        hint: 'Shopify → Paramètres → Applications → Développer des applications : créez une application, '
+          + 'donnez-lui « read_products », installez-la, puis copiez le jeton « shpat_… ».',
+        placeholder: 'shpat_…',
+        format: 'api-key',
+        secret: true,
+        required: true,
+      },
+    ],
+    capabilities: {
+      catalogRead: true,
+      // `inventory_quantity` est publié par l'API Admin : le stock est réel.
+      inventoryRead: true,
+      // Variantes exposées, avec prix, SKU et quantité par déclinaison.
+      variants: true,
+      sku: true,
+      // Shopify ne publie pas de total : la pagination est un curseur.
+      totalKnown: false,
+    },
+    setupHint:
+      'Créez une application personnalisée dans Shopify → Paramètres → Applications, '
+      + 'accordez-lui uniquement « read_products », installez-la, puis copiez le jeton d’accès.',
+    docsUrl: 'https://shopify.dev/docs/api/admin-rest',
+    caveat:
+      'Lecture seule : VYORA n’écrit jamais dans Shopify. Le jeton se révoque à tout moment en '
+      + 'désinstallant l’application. Les produits en brouillon et archivés sont écartés, et comptés.',
+  },
+
+  woocommerce: {
+    key: 'woocommerce',
+    label: 'WooCommerce',
+    apiLocation: 'shop',
+    fields: [
+      {
+        name: 'url',
+        label: 'Adresse du site',
+        hint: 'Racine du site WordPress, en https. Un sous-dossier est accepté (ex. /boutique).',
+        placeholder: 'https://ma-boutique.com',
+        format: 'url',
+        secret: false,
+        required: true,
+      },
+      {
+        name: 'apiKey',
+        label: 'Consumer key',
+        hint: 'WooCommerce → Réglages → Avancé → API REST → Ajouter une clé, avec le droit « Lecture ».',
+        placeholder: 'ck_…',
+        format: 'api-key',
+        secret: true,
+        required: true,
+      },
+      {
+        name: 'apiSecret',
+        label: 'Consumer secret',
+        hint: 'Affiché une seule fois à la création de la clé. Copiez-le en entier.',
+        placeholder: 'cs_…',
+        format: 'api-key',
+        secret: true,
+        required: true,
+      },
+    ],
+    capabilities: {
+      catalogRead: true,
+      inventoryRead: true,
+      // Les variations sont lues par un appel dédié sur les produits variables.
+      variants: true,
+      sku: true,
+      // `X-WP-Total` publie le total : la pagination est bornée.
+      totalKnown: true,
+    },
+    setupHint:
+      'Créez une clé API REST dans WooCommerce → Réglages → Avancé → API REST, '
+      + 'avec le droit « Lecture » uniquement, puis copiez les deux clés.',
+    docsUrl: 'https://woocommerce.github.io/woocommerce-rest-api-docs/',
+    caveat:
+      'Lecture seule. Le droit « Lecture » suffit, et VYORA n’émet que des requêtes de lecture. '
+      + 'L’API REST exige des permaliens autres que « Simple » : sinon /wp-json/ renvoie une erreur 404.',
+  },
+
   chariow: {
     key: 'chariow',
     label: 'Chariow',

@@ -865,12 +865,26 @@ function FicheDetail({
                  * parcours n'est pas livré tombe dans la branche suivante et
                  * n'affiche aucun champ de saisie.
                  */
-                <ConnectorConnectForm
-                  connectorKey={entry.id}
-                  workspaceId={workspaceId}
-                  connected={statut === 'connected'}
-                  onChanged={onChanged}
-                />
+                <>
+                  {/*
+                   * Une ligne de connexion peut exister SANS qu'aucune
+                   * autorisation n'ait été obtenue (statut
+                   * `authorization_missing`). Le formulaire ci-dessous permet
+                   * enfin de se connecter pour de vrai ; ce texte empêche de
+                   * lire le formulaire comme « c'est déjà branché ».
+                   */}
+                  {statut === 'authorization_missing' && (
+                    <div className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-100">
+                      {expliquerIndisponibilite(statut, entry)}
+                    </div>
+                  )}
+                  <ConnectorConnectForm
+                    connectorKey={entry.id}
+                    workspaceId={workspaceId}
+                    connected={statut === 'connected'}
+                    onChanged={onChanged}
+                  />
+                </>
               ) : connectable && entry.engine === 'api-key' ? (
                 <ConnectButton entry={entry} />
               ) : (
