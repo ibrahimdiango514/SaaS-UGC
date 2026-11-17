@@ -206,7 +206,7 @@ export interface RequeteRpc {
   id?: number | null;
 }
 
-interface ContexteClient {
+export interface ContexteClient {
   options: OptionsClient;
   deps: EgressDeps;
   session: EtatSession | null;
@@ -285,15 +285,24 @@ async function envoyer(
     if (status !== undefined) {
       return echec('http', `Le serveur MCP a répondu ${status}.`, { httpStatus: status });
     }
+    /*
+     * Une URL refusée par le contrôle SSRF n'est PAS une panne réseau : c'est
+     * un refus volontaire. Les distinguer permet à l'appelant d'afficher
+     * « adresse non autorisée » plutôt que « serveur injoignable », et
+     * d'éviter de réessayer ce qui ne réussira jamais.
+     */
+    const refusLocal = reponse.error.code === 'blocked_url'
+      || reponse.error.code === 'dns_failed'
+      || reponse.error.code === 'dns_empty';
     const code = reponse.error.code === 'timeout'
       ? 'timeout'
       : reponse.error.code === 'too_large'
         ? 'trop_gros'
-        : reponse.error.code === 'blocked_url' || reponse.error.code === 'dns_failed'
-          || reponse.error.code === 'dns_empty' || reponse.error.code === 'connect_failed'
-          || reponse.error.code === 'tls_failed'
-          ? 'reseau'
-          : 'protocole';
+        : refusLocal
+          ? 'serveur_invalide'
+          : reponse.error.code === 'connect_failed' || reponse.error.code === 'tls_failed'
+            ? 'reseau'
+            : 'protocole';
     return echec(code, reponse.error.message);
   }
 

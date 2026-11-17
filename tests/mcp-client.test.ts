@@ -536,7 +536,12 @@ describe('Sécurité réseau : rien n’est assoupli pour MCP', () => {
     const contexte = creerContexte({ url: 'https://mcp.exemple.com/mcp' }, deps);
     const resultat = await initialiser(contexte);
     expect(resultat.ok).toBe(false);
-    if (!resultat.ok) expect(resultat.error.code).toBe('reseau');
+    if (!resultat.ok) {
+      // Refus SSRF explicite, distinct d'une panne réseau : l'appelant doit
+      // pouvoir dire « adresse non autorisée » et ne pas réessayer.
+      expect(resultat.error.code).toBe('serveur_invalide');
+      expect(resultat.error.code).not.toBe('reseau');
+    }
     expect(connect).not.toHaveBeenCalled();
   });
 
