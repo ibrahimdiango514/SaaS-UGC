@@ -47,6 +47,7 @@ import {
 // vérifie en lisant réellement des ressources, la seconde construit le
 // catalogue. `prestashop-api.ts` ne fait que parler à l'API.
 import { probePrestashop, readPrestashopCatalog } from '../../../src/business/importer/prestashop-catalog.ts';
+import { resolveCorsOrigin } from '../../../src/lib/origin-allowlist.ts';
 import {
   assertPublicAddresses,
   explainRejection,
@@ -428,8 +429,11 @@ export async function handleStoreConnect(
   deps: ConnectDependencies,
   options: { allowedOrigins: string[] } = { allowedOrigins: [] },
 ): Promise<Response> {
-  const origin = request.headers.get('origin') ?? '';
-  const corsOrigin = options.allowedOrigins.includes(origin) ? origin : 'null';
+  const origin = request.headers.get('origin');
+  // Motifs (joker compris) plutôt qu'égalité stricte : sinon
+  // `https://deploy-preview-*--…` ne correspondait à rien, et la prévisualisation
+  // Netlify recevait un CORS refusé.
+  const corsOrigin = resolveCorsOrigin(options.allowedOrigins, origin);
   const corsHeaders = {
     'access-control-allow-origin': corsOrigin,
     'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',

@@ -31,6 +31,7 @@ import { minorToDecimal } from '../../../src/business/importer/normalize.ts';
 // L'analyseur de fichier, importé explicitement : sans lui, `parseFile` levait
 // un ReferenceError à l'exécution et tout import de fichier finissait en 500.
 import { importFile } from '../../../src/business/importer/files.ts';
+import { buildAllowedOrigins } from '../../../src/lib/origin-allowlist.ts';
 
 const env = (name: string): string => (globalThis as unknown as { Deno?: { env: { get(k: string): string | undefined } } }).Deno?.env.get(name) ?? '';
 
@@ -41,22 +42,9 @@ const databaseUrl = env('STORE_IMPORT_DATABASE_URL') || env('BUSINESS_GROW_DATAB
 // CORS : les mêmes origines que Business Grow. CORS n'est pas la frontière
 // d'authentification (chaque requête exige un JWT), mais une origine inconnue
 // n'est pas traitée.
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:4173',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:4173',
-  'https://vyora-ugc.netlify.app',
-  'https://saas-ugc-growth.netlify.app',
-  'https://deploy-preview-*--saas-ugc-growth.netlify.app',
-  'https://deploy-preview-*--vyora.netlify.app',
-  'https://reelora.netlify.app',
-  'https://*.e2b.app',
-  ...(env('STORE_IMPORT_ALLOWED_ORIGINS') || '').split(','),
-]
-  .map((origin) => origin.trim())
-  .filter(Boolean)
-  .filter((origin, index, all) => all.indexOf(origin) === index);
+// La liste (et la correspondance des motifs) est partagée avec `store-connect` :
+// deux listes séparées avaient déjà divergé, l'une d'elles étant vide.
+const allowedOrigins = buildAllowedOrigins(env('STORE_IMPORT_ALLOWED_ORIGINS'));
 
 const sql = databaseUrl
   ? postgres(databaseUrl, {

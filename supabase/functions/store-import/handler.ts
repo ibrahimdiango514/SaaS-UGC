@@ -38,6 +38,7 @@
 
 import { probeStore } from '../../../src/business/importer/sources.ts';
 import { detectPlatform } from '../../../src/business/importer/platform.ts';
+import { matchesOrigin } from '../../../src/lib/origin-allowlist.ts';
 import {
   formatPreviewPrice,
   isImportable,
@@ -392,15 +393,17 @@ function uuid(value: unknown): string | null {
     : null;
 }
 
+/**
+ * Origine autorisée ?
+ *
+ * Délègue à `matchesOrigin` : la même règle sert à `store-connect`. Deux
+ * implémentations de la correspondance de motifs avaient déjà divergé (dont
+ * une qui n'acceptait qu'un `*` en tête), et l'une d'elles laissait passer une
+ * origine sans correspondance exacte du suffixe.
+ */
 function allowedOrigin(origin: string | null, liste: string[]): boolean {
   if (!origin) return false;
-  return liste.some((motif) => {
-    if (motif === origin) return true;
-    if (!motif.includes('*')) return false;
-    // Motif simple : un seul `*` en tête de sous-domaine.
-    const [prefixe, suffixe] = motif.split('*');
-    return origin.startsWith(prefixe) && origin.endsWith(suffixe);
-  });
+  return liste.some((motif) => matchesOrigin(motif, origin));
 }
 
 function jsonResponse(payload: unknown, status: number, origin: string | null): Response {
