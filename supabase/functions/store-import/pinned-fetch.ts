@@ -133,9 +133,43 @@ export async function connectPinnedTls(ip: string, hostname: string, port = 443)
   }
 }
 
-/** Construit la requête HTTP/1.1. Aucun secret n'y est jamais placé. */
+/**
+ * En-têtes qu'un appelant peut faire passer par la sortie épinglée.
+ *
+ * ## Pourquoi une liste, et pas « tous »
+ *
+ * `buildRequest` écrit le message HTTP/1.1 à la main. Un nom d'en-tête non
+ * maîtrisé (ou une valeur contenant un saut de ligne) permettrait d'injecter
+ * des lignes supplémentaires dans ce message. La liste garantit que seuls des
+ * en-têtes choisis, et contrôlés, peuvent en sortir.
+ *
+ * ## Pourquoi elle s'est élargie
+ *
+ * Elle ne contenait que `authorization`, ce qui suffisait à PrestaShop et à
+ * Chariow. Un connecteur générique doit pouvoir s'authentifier comme les API
+ * réelles le demandent : `X-Api-Key`, `X-Shopify-Access-Token`… Ces noms sont
+ * exactement ceux de la politique côté application
+ * (`ALLOWED_AUTH_HEADERS` dans `custom-api-guard.ts`), et ce n'est pas une
+ * coïncidence : les deux listes doivent rester alignées. Un test le vérifie.
+ *
+ * ## Ce qui reste interdit
+ *
+ * `host`, `content-length`, `transfer-encoding`, `connection`… ne sont pas
+ * dans la liste, et `buildRequest` les écrit lui-même à partir de valeurs
+ * calculées. Aucun appelant ne peut les influencer.
+ */
+const EN_TETES_TRANSMIS = [
+  'authorization',
+  'x-api-key',
+  'api-key',
+  'apikey',
+  'x-auth-token',
+  'x-shopify-access-token',
+  'x-restli-protocol-version',
+] as const;
+
 /** En-têtes qu'un appelant peut faire passer par la sortie épinglée. */
-const EN_TETES_TRANSMIS = ['authorization'] as const;
+export const EN_TETES_TRANSMIS_EXPORTES: readonly string[] = EN_TETES_TRANSMIS;
 
 export function buildRequest(
   hostname: string,
@@ -151,11 +185,23 @@ export function buildRequest(
   // contenir un saut de ligne — c'est ce qui empêche une clé de sortir du
   // message HTTP en injectant des en-têtes supplémentaires.
   const lignes: string[] = [];
-  for (const nom of EN_TETES_TRANSMIS) {
-    const valeur = extraHeaders[nom];
+  // On parcourt les en-têtes REÇUS et on les filtre, plutôt que de parcourir la
+  // liste blanche : un appelant peut ainsi n'envoyer qu'un sous-ensemble, et
+  // l'ordre qu'il choisit est conservé (certaines API y sont sensibles).
+  for (const [nomBrut, valeur] of Object.entries(extraHeaders)) {
+    const nom = nomBrut.toLowerCase();
+    if (!(EN_TETES_TRANSMIS as readonly string[]).includes(nom)) continue;
     if (typeof valeur !== 'string' || valeur.length === 0) continue;
+    // Une valeur contenant un saut de ligne sortirait du message HTTP et
+    // ajouterait des en-têtes arbitraires. C'est LE contrôle qui empêche une
+    // clé de se transformer en injection.
     if (/[\r\n]/.test(valeur)) throw new PinnedFetchFailure('protocol_error', 'En-tête de requête invalide.');
-    lignes.push(`${nom === 'authorization' ? 'Authorization' : nom}: ${valeur}`);
+    // Casse canonique : « Authorization », « X-Api-Key »… Un nom d'en-tête est
+    // insensible à la casse, mais un serveur strict peut comparer la chaîne.
+    const nomCanonique = nom === 'authorization'
+      ? 'Authorization'
+      : nom.split('-').map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('-');
+    lignes.push(`${nomCanonique}: ${valeur}`);
   }
   return [
     `GET ${path || '/'} HTTP/1.1`,

@@ -32,7 +32,7 @@ import {
   type UrlRejection,
 } from '../../../src/business/importer/url-guard.ts';
 import type { FetchLike, StoreProbe } from '../../../src/business/importer/sources.ts';
-import { httpGetPinned, type PinnedSocket } from './pinned-fetch.ts';
+import { EN_TETES_TRANSMIS_EXPORTES, httpGetPinned, type PinnedSocket } from './pinned-fetch.ts';
 
 /** Nombre maximal de redirections examinées. */
 export const MAX_REDIRECTS = 3;
@@ -285,14 +285,32 @@ export function pinnedFetchLike(deps: EgressDeps, defaults: { accept: string; ma
     }
     const entetes = new Headers(init?.headers ?? {});
     const accept = entetes.get('accept') ?? defaults.accept;
-    // L'autorisation — et rien d'autre — est transmise à la connexion
-    // épinglée. Sans cela, une API qui exige un en-tête `Authorization`
-    // (PrestaShop Webservice) répondait 401 alors que la requête partait
-    // pourtant sur la bonne adresse.
-    const autorisation = entetes.get('authorization');
-    const entetesTransmis = autorisation ? { authorization: autorisation } : undefined;
+    /*
+     * Seuls les en-têtes d'AUTHENTIFICATION sont transmis, et seulement ceux de
+     * la liste blanche de `buildRequest`. Tout le reste (`accept`, `user-agent`,
+     * `host`…) est réécrit plus bas par le constructeur de requête à partir de
+     * valeurs calculées : un appelant ne peut ni les choisir ni les fausser.
+     *
+     * `authorization` suffisait à PrestaShop et Chariow ; un connecteur
+     * générique doit pouvoir utiliser `X-Api-Key` ou `X-Shopify-Access-Token`,
+     * qui sont les pratiques réelles des API de catalogue. La liste est la même
+     * que celle de `custom-api-guard.ts` côté application — un test le vérifie.
+     */
+    const entetesTransmis: Record<string, string> = {};
+    for (const nom of EN_TETES_TRANSMIS_EXPORTES) {
+      const valeur = entetes.get(nom);
+      if (valeur) entetesTransmis[nom] = valeur;
+    }
     // Un délai propre à l'appel est respecté s'il est fourni (AbortSignal).
-    const resultat = await safeGet(input, { accept, maxBytes: defaults.maxBytes, headers: entetesTransmis }, deps);
+    const resultat = await safeGet(
+      input,
+      {
+        accept,
+        maxBytes: defaults.maxBytes,
+        headers: Object.keys(entetesTransmis).length > 0 ? entetesTransmis : undefined,
+      },
+      deps,
+    );
     if (!resultat.ok) {
       throw new PinnedNetworkError(resultat.error.code, resultat.error.message, resultat.httpStatus);
     }
