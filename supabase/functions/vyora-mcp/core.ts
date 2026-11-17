@@ -176,9 +176,10 @@ export const OUTILS_LECTURE: Outil[] = [
     name: 'vyora_account_info',
     title: 'Mon compte VYORA',
     description:
-      "Renvoie l'identité VYORA de l'utilisateur du jeton : identifiant de compte, date d'adhésion "
-      + 'et espaces de travail accessibles avec leur rôle. Aucune donnée d’un autre utilisateur '
-      + "n'est accessible.",
+      "Renvoie l'état réel du compte de l'utilisateur du jeton : abonnement (statut, période, "
+      + 'actif ou non), formule (nom, crédits mensuels, prix) et crédits VYORA disponibles. '
+      + 'Chaque valeur vient de la base ; `null` signifie « aucune ligne », jamais « zéro ». '
+      + "Aucune donnée d’un autre utilisateur n'est accessible.",
     scope: 'read',
     rpc: 'mcp_account_info',
     args: argsSimple,
