@@ -327,27 +327,29 @@ describe('catalogue — affichage', () => {
 
   it('filtre par catégorie au clic', async () => {
     monter();
-    await waitFor(() => expect(screen.getByText(/Shopify/i)).toBeTruthy());
+    // Le nom du fournisseur apparaît dans le titre ET dans sa description :
+    // on vise la carte par son identifiant, sinon le sélecteur est ambigu.
+    await waitFor(() => expect(screen.getByTestId('integration-shopify')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /^Productivité \(\d+\)$/ }));
     await waitFor(() => {
-      expect(screen.queryByText('Shopify')).toBeNull();
-      expect(screen.getByText('Gmail')).toBeTruthy();
+      expect(screen.queryByTestId('integration-shopify')).toBeNull();
+      expect(screen.getByTestId('integration-gmail')).toBeTruthy();
     });
   });
 
   it('recherche et filtre la grille', async () => {
     monter();
-    await waitFor(() => expect(screen.getByText(/Shopify/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('integration-shopify')).toBeTruthy());
     fireEvent.change(screen.getByLabelText(/Rechercher une intégration/i), { target: { value: 'notion' } });
     await waitFor(() => {
-      expect(screen.getByText('Notion')).toBeTruthy();
-      expect(screen.queryByText('Shopify')).toBeNull();
+      expect(screen.getByTestId('integration-notion')).toBeTruthy();
+      expect(screen.queryByTestId('integration-shopify')).toBeNull();
     });
   });
 
   it('affiche un état honnête, jamais « Connecté » sans compte', async () => {
     monter();
-    await waitFor(() => expect(screen.getByText(/Shopify/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('integration-shopify')).toBeTruthy());
     expect(screen.queryByText('Connecté')).toBeNull();
     // Les états attendus sans connecteur ni compte.
     expect(screen.getAllByText(/Configuration requise|Validation externe requise/i).length).toBeGreaterThan(0);
@@ -397,5 +399,68 @@ describe('catalogue — affichage', () => {
     await waitFor(() => expect(screen.getByRole('dialog', { name: /Fiche Instagram/i })).toBeTruthy());
     // Message d'approbation externe, pas un bouton actif trompeur.
     expect(screen.getByText(/exige une validation de son côté/i)).toBeTruthy();
+  });
+});
+
+/**
+ * Phase B — les capacités affichées doivent correspondre au code qui existe.
+ *
+ * Le défaut corrigé : Shopify et WooCommerce annonçaient `catalog-write`,
+ * `inventory-write` et `orders-read`. Aucune ligne ne les implémente, aucun
+ * parcours d'authentification n'existe (`engine: null`) et la sortie réseau des
+ * Edge Functions refuse toute méthode autre que GET. OpenCart annonçait
+ * `orders-read` alors que son API cœur n'expose même pas les produits.
+ */
+describe('catalogue — capacités réellement implémentées', () => {
+  const entrees = (id: string) => INTEGRATION_BY_ID[id] as IntegrationEntry;
+
+  /*
+   * Périmètre : les boutiques. Les connecteurs hors commerce (OAuth social et
+   * productivité) déclarent encore des écritures sans moteur — écart réel,
+   * distinct, qui ne relève pas de cette mission et qui est consigné dans
+   * `docs/audit-connexions-boutiques.md`. Le test est volontairement borné
+   * plutôt que d'être affaibli pour tout le catalogue.
+   */
+  it('aucune boutique sans moteur ne déclare de capacité d’écriture', () => {
+    for (const entry of INTEGRATIONS) {
+      if (entry.category !== 'commerce' || entry.engine !== null) continue;
+      const ecritures = entry.capabilities.filter((c) => /write/.test(c));
+      expect(ecritures, `${entry.id} déclare ${ecritures.join(',')} sans moteur`).toEqual([]);
+    }
+  });
+
+  it('Shopify et WooCommerce n’annoncent que ce que store-import lit', () => {
+    for (const id of ['shopify', 'woocommerce']) {
+      expect(entrees(id).capabilities.sort(), id).toEqual(['catalog-read', 'inventory-read']);
+      // `engine: null` est exact : il n'y a pas d'authentification, seulement
+      // une lecture anonyme du catalogue public.
+      expect(entrees(id).engine, id).toBeNull();
+    }
+  });
+
+  it('les deux connecteurs implémentés ne promettent pas d’écriture', () => {
+    for (const id of ['prestashop', 'chariow']) {
+      const entry = entrees(id);
+      expect(entry.engine, id).toBe('api-key');
+      expect(entry.capabilities, id).toEqual(expect.arrayContaining(['catalog-read']));
+      expect(entry.capabilities.some((c) => /write/.test(c)), id).toBe(false);
+    }
+  });
+
+  it('OpenCart ne prétend ni catalogue ni commandes par API', () => {
+    const opencart = entrees('opencart');
+    // L'API cœur est à session et n'expose pas les produits : déclarer
+    // `catalog-read` enverrait l'utilisateur chercher une clé inutile.
+    expect(opencart.capabilities).toEqual([]);
+    expect(opencart.engine).toBeNull();
+    expect(opencart.caveat ?? '').toMatch(/session|export/i);
+    // L'export reste proposé : c'est le seul chemin réel.
+    expect(opencart.auth.some((a) => a.mode === 'file-import')).toBe(true);
+  });
+
+  it('Shopify et WooCommerce expliquent que l’import est anonyme', () => {
+    for (const id of ['shopify', 'woocommerce']) {
+      expect(entrees(id).caveat ?? '', id).toMatch(/sans authentification|aucun identifiant/i);
+    }
   });
 });

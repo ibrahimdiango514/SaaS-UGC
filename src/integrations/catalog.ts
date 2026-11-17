@@ -260,8 +260,19 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     id: 'shopify',
     name: 'Shopify',
     category: 'commerce',
-    description: 'Import du catalogue, commandes et stocks de votre boutique.',
-    capabilities: ['catalog-read', 'catalog-write', 'orders-read', 'inventory-read', 'inventory-write'],
+    /*
+     * Capacités RÉELLES, pas souhaitées.
+     *
+     * `catalog-read` et `inventory-read` existent : `store-import` lit
+     * `/products.json` et normalise les variantes.
+     *
+     * `catalog-write`, `inventory-write` et `orders-read` sont RETIRÉS : aucune
+     * ligne de code ne les implémente, aucun moyen d'authentification n'existe
+     * (voir `engine`), et `safe-egress.ts` refuse toute méthode autre que GET.
+     * Les afficher revenait à promettre une écriture impossible.
+     */
+    description: 'Import du catalogue public de votre boutique Shopify (produits et variantes).',
+    capabilities: ['catalog-read', 'inventory-read'],
     auth: [
       {
         mode: 'oauth2',
@@ -279,14 +290,23 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     ],
     engine: null,
     docsUrl: 'https://shopify.dev/docs/api',
-    caveat: 'Le catalogue public suffit pour importer les produits, pas pour lire les commandes.',
+    caveat:
+      'L’import se fait sans authentification, à partir du catalogue public : aucun identifiant n’est demandé, '
+      + 'et aucune commande n’est lue. Si votre boutique masque ses produits aux visiteurs, l’import échouera : '
+      + 'exportez alors un CSV.',
   },
   {
     id: 'woocommerce',
     name: 'WooCommerce',
     category: 'commerce',
-    description: 'Produits, commandes et stocks de votre boutique WordPress.',
-    capabilities: ['catalog-read', 'catalog-write', 'orders-read', 'inventory-read', 'inventory-write'],
+    /*
+     * Même raisonnement que Shopify : le catalogue public
+     * (`/wp-json/wc/store/v1/products`) est lu et normalisé, rien de plus.
+     * Aucun code n'écrit, et la clé REST WooCommerce (consumer key + secret)
+     * n'a pas de parcours de connexion : `engine` reste donc `null`.
+     */
+    description: 'Import du catalogue public de votre boutique WooCommerce (produits et variantes).',
+    capabilities: ['catalog-read', 'inventory-read'],
     auth: [
       {
         mode: 'api-key',
@@ -300,7 +320,9 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     ],
     engine: null,
     docsUrl: 'https://woocommerce.github.io/woocommerce-rest-api-docs/',
-    caveat: 'Les clés REST ne doivent jamais transiter par le navigateur : elles sont saisies côté serveur.',
+    caveat:
+      'L’import se fait sans authentification, à partir du catalogue public de la boutique : aucun identifiant '
+      + 'n’est demandé, et aucune commande n’est lue. Les clés REST WooCommerce ne sont pas encore prises en charge.',
   },
   {
     id: 'prestashop',
@@ -386,14 +408,24 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     id: 'opencart',
     name: 'OpenCart',
     category: 'commerce',
-    description: 'Produits et commandes OpenCart.',
-    capabilities: ['catalog-read', 'orders-read'],
+    description: 'Import des produits de votre boutique OpenCart par export, ou par API personnalisée.',
+    /*
+     * `orders-read` est RETIRÉ et `catalog-read` ne s'applique PAS à une API
+     * OpenCart : celle-ci est à session (login + cookie, `api_token` en
+     * paramètre d'URL) et le cœur d'OpenCart n'expose AUCUNE route produits.
+     * Il n'y a donc rien à connecter nativement — le dire ici évite d'envoyer
+     * l'utilisateur chercher une clé qui ne lui donnerait pas ses produits.
+     */
+    capabilities: [],
     auth: [
-      { mode: 'api-key', label: 'Clé API OpenCart', serverConfigKey: 'OPENCART_ALLOW_KEYS' },
-      { mode: 'file-import', label: 'Import CSV OpenCart' },
+      { mode: 'file-import', label: 'Import d’un export CSV, XLSX ou XML OpenCart' },
     ],
     engine: null,
     docsUrl: 'https://docs.opencart.com/',
+    caveat:
+      'L’API d’OpenCart est à session et n’expose pas le catalogue : il n’existe pas de clé permettant '
+      + 'd’importer les produits. Utilisez un export CSV, ou le connecteur « API personnalisée » si vous '
+      + 'disposez d’une extension exposant vos produits en JSON.',
   },
   {
     id: 'wix',

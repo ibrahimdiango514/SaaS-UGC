@@ -174,6 +174,15 @@ avec la limitation écrite noir sur blanc. Aucun bouton de connexion mort.
    → **Phase D**, avec liste blanche stricte.
 6. Capacités PrestaShop/Chariow surdéclarées (`write`/`modify`).
    → **Phase B**, déjà corrigé.
+7. **Constaté en Phase B, hors périmètre, non corrigé** : plusieurs
+   fournisseurs *hors commerce* déclarent aussi des écritures sans moteur —
+   `google_calendar`, `google_drive`, `notion`, `hubspot`, `wix`,
+   `bigcommerce`, `magento`, `ecwid`, `shopify`/`woocommerce` avant correction.
+   Leur connexion passe par OAuth et ne concerne pas l'import de boutiques.
+   Les corriger suppose de rouvrir le catalogue produit OAuth : cela sort du
+   périmètre de cette mission, et le faire au passage reviendrait à modifier des
+   écrans dont aucun test ne couvre l'écriture. Le test de non-régression est
+   donc **borné au commerce**, ce qui est explicite dans le code.
 
 ---
 
