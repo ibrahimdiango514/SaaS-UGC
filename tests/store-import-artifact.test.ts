@@ -143,6 +143,37 @@ describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nom
     expect((artefact as string).length).toBe(built.chars);
   });
 
+  it('les modules PARTAGÉS sont couverts par l’artefact épinglé', () => {
+    /*
+     * `safe-egress.ts` et `pinned-fetch.ts` sont importés par `store-import` ET
+     * `store-connect`. Les modifier change donc DEUX bundles déjà déployés sans
+     * que rien ne le signale — c'est exactement ce qui s'est produit en ajoutant
+     * `POST` pour le client MCP : 6 tests de parité sont tombés.
+     *
+     * Ce contrôle ne remplace pas la régénération, il rend la cause lisible :
+     * quand l'empreinte diffère, le message doit dire QUELLE source partagée a
+     * bougé, au lieu de laisser chercher.
+     */
+    const built = buildArtifact(nomFonction);
+    const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
+    const epingle = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
+    if (epingle === built.sha256) return;
+
+    const partages = [
+      'supabase/functions/store-import/safe-egress.ts',
+      'supabase/functions/store-import/pinned-fetch.ts',
+    ];
+    const empreintes = partages.map((chemin) => {
+      const contenu = readFileSync(chemin, 'utf8');
+      return `${chemin.split('/').pop()} ${createHash('sha256').update(contenu, 'utf8').digest('hex').slice(0, 12)}`;
+    });
+    expect.fail(
+      `le bundle de ${nomFonction} a changé (épinglé ${epingle?.slice(0, 12)}, actuel ${built.sha256.slice(0, 12)}). `
+      + `Souvent un module partagé modifié : ${empreintes.join(', ')}. `
+      + 'Régénérez les artefacts puis réépinglez (voir la procédure dans le README du script).',
+    );
+  });
+
   it('ne réintroduit pas l’ancien chargement depuis la base', () => {
     // Garde-fou explicite : une future génération ne doit pas ramener le
     // mécanisme « artefact en base », absent de la production.
