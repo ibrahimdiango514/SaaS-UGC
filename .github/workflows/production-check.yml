@@ -84,6 +84,44 @@ jobs:
           # et citable qu'un échec, sinon il n'est pas une preuve.
           echo "::notice::site HTTP $site_code · cachet servi ${cachet:-absent} · main ${attendu:-inconnu}"
 
+          # --- Bundle servi : le front vise-t-il le backend en URL absolue ? --
+          # Régression P6e : sans repli, l'URL des routes MCP devenait relative et
+          # le site « marchait » sans jamais appeler Supabase. On vérifie donc le
+          # JavaScript réellement servi, pas le dépôt.
+          bundle_js=$(grep -o 'src="/assets/index-[^"]*\.js"' /tmp/site.html | head -1 | sed 's/src="//; s/"$//')
+          bundle_abs="non mesuré"
+          if [ -n "$bundle_js" ]; then
+            if curl -sS --max-time 30 "$SITE$bundle_js" 2>/dev/null | grep -q 'xbuuhfwobrafcbgtdgjx\.supabase\.co'; then
+              bundle_abs="oui (URL Supabase absolue présente dans $bundle_js)"
+            else
+              bundle_abs="NON — $bundle_js ne contient pas l'URL Supabase"
+            fi
+          fi
+          echo "| Bundle → backend absolu | $bundle_abs |" >> "$summary"
+          echo "::notice::bundle servi : $bundle_abs"
+
+          # --- CORS depuis le domaine public vers mcp-client ------------------
+          # Un navigateur sur $SITE ne peut lire la réponse que si l'origine est
+          # renvoyée telle quelle. Sans jeton, 401 attendu : CORS ≠ authentification.
+          origin_site=$(echo "$SITE" | sed 's#/*$##')
+          mcp_url="https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/mcp-client/gestion/lister"
+          mcp_rc=0
+          mcp_code=$(curl -sS -o /tmp/mcp.json -D /tmp/mcp.h -w '%{http_code}' --max-time 30 \
+            -X POST "$mcp_url" -H "origin: $origin_site" -H 'content-type: application/json' \
+            --data '{}' 2>/tmp/mcp.err) || mcp_rc=$?
+          mcp_acao=$(grep -i '^access-control-allow-origin:' /tmp/mcp.h 2>/dev/null | tr -d '\r' | sed 's/^[^:]*: *//')
+          mcp_body=$(head -c 200 /tmp/mcp.json 2>/dev/null | tr '\n' ' ')
+          {
+            echo "| mcp-client (origine $origin_site) | HTTP $mcp_code (curl rc=$mcp_rc) |"
+            echo "| access-control-allow-origin | \`${mcp_acao:-absent}\` |"
+            echo "| Réponse mcp-client | \`${mcp_body:-vide}\` |"
+          } >> "$summary"
+          if [ "$mcp_acao" = "$origin_site" ] && [ "$mcp_code" = "401" ]; then
+            echo "::notice::mcp-client : origine $origin_site acceptée (CORS) et jeton exigé (401)."
+          else
+            echo "::warning::mcp-client depuis $origin_site : HTTP $mcp_code, ACAO ${mcp_acao:-absent} — le navigateur du site ne pourra pas lire les réponses."
+          fi
+
           # --- Edge Function ---------------------------------------------------
           # verify_jwt = true : un appel anonyme DOIT être refusé en 401.
           # 503 = fonction joignable mais artefact non chargeable.
