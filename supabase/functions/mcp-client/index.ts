@@ -31,6 +31,9 @@
 import postgres from 'npm:postgres@3.4.5';
 import { traiterRequete } from './http.ts';
 import { creerAccesReel, type SqlTag } from './accueil.ts';
+import { traiterRequeteGestion } from './gestion-http.ts';
+import { estCheminGestion } from './gestion.ts';
+import { creerAccesGestion, type DependancesGestion } from './gestion-serveur.ts';
 import type { EgressDeps } from '../store-import/safe-egress.ts';
 import { PinnedFetchFailure } from '../store-import/pinned-fetch.ts';
 import type { DependancesP5 } from './execution.ts';
@@ -169,6 +172,13 @@ function dependances(): DependancesP5 {
   };
 }
 
+function dependancesGestion(): DependancesGestion {
+  return {
+    base: creerAccesGestion({ sql: ouvrirSql }),
+    egress: egressReel(),
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* HTTP                                                                         */
 /* -------------------------------------------------------------------------- */
@@ -179,12 +189,38 @@ function dependances(): DependancesP5 {
  * de `npm:postgres`, donc le seul qui ne peut pas être exercé par Vitest.
  */
 const depsSingleton = () => dependances();
+const depsGestionSingleton = () => dependancesGestion();
 
+/*
+ * Deux transports sur une seule fonction :
+ *
+ *   - `/gestion/<route>` : gestion des connexions (créer, tester, permissions,
+ *     révoquer). C'est ce que consomme l'interface VYORA.
+ *   - tout le reste : le transport MCP d'appel d'outil, inchangé.
+ *
+ * L'aiguillage se fait AVANT tout traitement, pour qu'une route de gestion ne
+ * soit jamais interprétée comme du JSON-RPC — le même piège que `vyora-mcp`
+ * évite avec ses routes OAuth.
+ */
 if (runtimeDeno?.serve) {
-  runtimeDeno.serve((request: Request) =>
-    traiterRequete(request, depsSingleton, {
+  runtimeDeno.serve((request: Request) => {
+    const chemin = new URL(request.url).pathname;
+    if (estCheminGestion(chemin)) {
+      /*
+       * Une route `/gestion/` inconnue reste une route de gestion : elle reçoit
+       * un 404 explicite de `traiterRequeteGestion`, et ne tombe jamais dans le
+       * transport d'appel d'outil. C'est le sens de `estCheminGestion` (teste
+       * la présence du marqueur) distinct de `routeGestion` (renvoie la route
+       * reconnue ou `null`).
+       */
+      return traiterRequeteGestion(request, depsGestionSingleton, {
+        originesSupplementaires: ORIGINES_SUPPLEMENTAIRES,
+        identite: identiteDepuisJwt,
+      });
+    }
+    return traiterRequete(request, depsSingleton, {
       originesSupplementaires: ORIGINES_SUPPLEMENTAIRES,
       identite: identiteDepuisJwt,
-    }),
-  );
+    });
+  });
 }
