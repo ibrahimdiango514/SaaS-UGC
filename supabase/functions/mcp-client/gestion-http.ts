@@ -244,16 +244,6 @@ export async function traiterRequeteGestion(
       route,
       code: traduction.code,
     });
-    // DIAGNOSTIC TEMPORAIRE — à retirer. Gated par un nonce aléatoire.
-    const diag = request.headers.get('x-vyora-diag');
-    if (diag === 'd99283c15539c637aaf578a1') {
-      const brut = erreur instanceof Error ? `${erreur.name}: ${erreur.message}` : String(erreur);
-      return construireReponse(500, {
-        error: 'diag',
-        cause: brut.slice(0, 400),
-        pile: erreur instanceof Error ? String(erreur.stack ?? '').slice(0, 600) : '',
-      }, cors);
-    }
     return construireReponse(traduction.status, { error: traduction.code, message: traduction.message }, cors);
   }
 }
