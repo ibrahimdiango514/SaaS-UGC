@@ -62,6 +62,23 @@ export function traduireErreurSql(message: string): { status: number; code: stri
   for (const [motif, status, messageLisible] of connus) {
     if (texte.includes(motif)) return { status, code: motif, message: messageLisible };
   }
+  /*
+   * Une panne réseau n'est PAS une panne de base.
+   *
+   * `tester` fait deux choses : lire/écrire en base, puis joindre un serveur
+   * distant. Si la sortie réseau échoue (DNS indisponible, TLS refusé,
+   * connexion tombée), annoncer « la base n'a pas pu traiter la demande »
+   * envoie l'utilisateur — et nous — au mauvais endroit. On distingue donc les
+   * deux, sans jamais relayer le message d'origine : il peut contenir un nom
+   * d'hôte interne.
+   */
+  if (/dns|résolution|resolution|connect_failed|tls_failed|timeout|timed out|econn|socket|network|réseau|reseau/i.test(texte)) {
+    return {
+      status: 502,
+      code: 'reseau_indisponible',
+      message: 'Le serveur MCP n’a pas pu être joint depuis VYORA.',
+    };
+  }
   // Jamais de message SQL brut : il décrit le schéma interne.
   return { status: 500, code: 'erreur_base', message: 'La base n’a pas pu traiter la demande.' };
 }

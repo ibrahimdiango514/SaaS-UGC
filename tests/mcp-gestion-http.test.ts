@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect as netConnect, type Socket } from 'node:net';
-import { traiterRequeteGestion } from '../supabase/functions/mcp-client/gestion-http';
+import { traiterRequeteGestion, traduireErreurSql } from '../supabase/functions/mcp-client/gestion-http';
 import type { AccesGestion, DependancesGestion, ServeurGere } from '../supabase/functions/mcp-client/gestion-serveur';
 import type { EgressDeps } from '../supabase/functions/store-import/safe-egress';
 
@@ -502,5 +502,30 @@ describe('journal', () => {
       { originesSupplementaires: null, identite: identiteA, journal: (_m, details) => lignes.push(details) },
     );
     expect(JSON.stringify(lignes)).not.toContain('secret-a-ne-jamais-journaliser');
+  });
+});
+
+describe('diagnostic : une panne réseau n’est pas une panne de base', () => {
+  it('nomme le réseau quand la sortie échoue, sans relayer le message d’origine', () => {
+    const cas = [
+      'Résolution DNS indisponible dans cet environnement.',
+      'connect_failed',
+      'tls_failed',
+      'AbortError: The operation timed out',
+      'ECONNRESET',
+    ];
+    for (const message of cas) {
+      const t = traduireErreurSql(message);
+      expect(t.code).toBe('reseau_indisponible');
+      expect(t.status).toBe(502);
+      // Le message d'origine peut citer un hôte interne : jamais relayé.
+      expect(t.message).not.toContain(message);
+    }
+  });
+
+  it('une vraie erreur SQL reste « erreur_base » et ne fuit pas', () => {
+    const t = traduireErreurSql('column "secret_ref" does not exist');
+    expect(t.code).toBe('erreur_base');
+    expect(t.message).not.toContain('secret_ref');
   });
 });
