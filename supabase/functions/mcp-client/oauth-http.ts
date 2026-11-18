@@ -29,6 +29,7 @@ import {
   enregistrerClient,
   genererEtat,
   genererVerificateur,
+  revoquerJeton,
   urlAutorisation,
   type ClientOAuth,
 } from './oauth.ts';
@@ -45,9 +46,24 @@ export interface OptionsOAuth {
   originesSupplementaires: string | null;
   identite: ResolveurIdentite;
   journal?: (message: string, details: Record<string, unknown>) => void;
+  /**
+   * URL publique de retour, FIXÉE par la configuration (`SUPABASE_URL`), jamais
+   * déduite de la requête en production.
+   *
+   * Constaté en réel (P6d) : derrière le proxy Supabase, `request.url` n'est
+   * pas l'URL publique — l'enregistrement dynamique chez Linear était refusé
+   * alors que le même corps, avec l'URL https publique, passait en 201. Et un
+   * `redirect_uri` dérivé de la requête serait, par construction, influençable
+   * par l'émetteur de la requête ; un `redirect_uri` doit être une constante.
+   */
+  urlCallback?: string;
 }
 
-/** URL publique de retour, dérivée de la requête réelle (jamais codée en dur). */
+/**
+ * URL de retour dérivée de la requête : UNIQUEMENT quand aucune URL fixe n'est
+ * configurée (tests, exécution locale). En production `index.ts` fournit
+ * toujours `urlCallback`.
+ */
 export function urlCallback(request: Request): string {
   const url = new URL(request.url);
   const chemin = url.pathname;
@@ -55,6 +71,18 @@ export function urlCallback(request: Request): string {
     ? chemin.slice(0, chemin.indexOf('/gestion/'))
     : chemin.replace(/\/+$/, '');
   return `${url.origin}${base}/oauth/callback`;
+}
+
+/** Résout l'URL de retour, et refuse tout ce qui n'est pas https. */
+export function resoudreUrlCallback(request: Request, fixe: string | undefined): string | null {
+  const brute = (fixe ?? '').trim() || urlCallback(request);
+  try {
+    const url = new URL(brute);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -127,7 +155,15 @@ export async function traiterDemarrageOAuth(
     }, cors);
   }
 
-  const redirectUri = urlCallback(request);
+  const redirectUri = resoudreUrlCallback(request, options.urlCallback);
+  if (!redirectUri) {
+    // Mieux vaut refuser que d'enregistrer un client avec une URL de retour
+    // en `http://` : le fournisseur la refuserait, ou pire, l'accepterait.
+    return construireReponse(500, {
+      error: 'callback_non_https',
+      message: 'L’URL de retour OAuth de VYORA n’est pas configurée en https.',
+    }, cors);
+  }
 
   // Client existant, ou enregistrement dynamique.
   let client: ClientOAuth | null = serveur.oauthClientId
@@ -167,7 +203,8 @@ export async function traiterDemarrageOAuth(
     redirectUri,
   });
 
-  const portees = decouverte.metadonnees.scopes_supported;
+  // Portées de la ressource d'abord (RFC 9728), sinon celles de l'AS.
+  const portees = decouverte.porteesRessource ?? decouverte.metadonnees.scopes_supported;
   const autorisation = urlAutorisation({
     metadonnees: decouverte.metadonnees,
     clientId: client.clientId,
@@ -197,6 +234,7 @@ export async function traiterDemarrageOAuth(
     serveurAutorisation: decouverte.serveurAutorisation,
     sourceMetadonnees: decouverte.source,
     portees: portees ?? null,
+    redirectUri,
     clientEnregistre: client.enregistre,
     /*
      * `pkceAnnonce = false` signifie : le serveur n'a pas listé S256 dans ses
@@ -208,11 +246,24 @@ export async function traiterDemarrageOAuth(
   }, cors);
 }
 
-/** Petite page HTML : c'est le navigateur qui arrive ici, pas un client JSON. */
-function pageHtml(titre: string, texte: string, statut: number): Response {
-  const echapper = (v: string) => v.replace(/[&<>"']/g, (c) => (
+/** Échappement HTML : tout texte venant du fournisseur ou de l'URL passe ici. */
+export function echapperHtml(v: string): string {
+  return v.replace(/[&<>"']/g, (c) => (
     c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
   ));
+}
+
+/**
+ * Petite page HTML : c'est le navigateur qui arrive ici, pas un client JSON.
+ *
+ * `texte` est un fragment HTML DÉJÀ sûr : les appelants n'y insèrent des
+ * valeurs externes qu'à travers `echapperHtml`. Constaté en réel (P6d) :
+ * `error_description` était recopié tel quel, et `<b>gras</b>` dans l'URL de
+ * retour ressortait en balise — une injection réfléchie sur un domaine qui
+ * reçoit des codes d'autorisation.
+ */
+function pageHtml(titre: string, texte: string, statut: number): Response {
+  const echapper = echapperHtml;
   const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${echapper(titre)} — VYORA</title>
@@ -254,7 +305,7 @@ export async function traiterCallbackOAuth(
     // Refus explicite de l'utilisateur chez le fournisseur, ou erreur de celui-ci.
     return pageHtml(
       'Autorisation refusée',
-      `Le serveur d’autorisation a refusé la demande : <code>${descriptionAs ?? erreurAs}</code>. `
+      `Le serveur d’autorisation a refusé la demande : <code>${echapperHtml((descriptionAs ?? erreurAs).slice(0, 300))}</code>. `
         + 'Vous pouvez relancer l’autorisation depuis VYORA.',
       400,
     );
@@ -316,7 +367,7 @@ export async function traiterCallbackOAuth(
     journal('[mcp-client] oauth échange refusé', { serverId: serveur.id, code: echange.code });
     return pageHtml(
       'Échange refusé',
-      `Le serveur d’autorisation n’a pas délivré de jeton : <code>${echange.message}</code>`,
+      `Le serveur d’autorisation n’a pas délivré de jeton : <code>${echapperHtml(echange.message.slice(0, 300))}</code>`,
       502,
     );
   }
@@ -369,4 +420,126 @@ function erreurReponse(erreur: unknown, cors: Record<string, string>): Response 
     return construireReponse(404, { error: 'server_not_found', message: 'Connexion MCP introuvable.' }, cors);
   }
   return construireReponse(500, { error: 'erreur_base', message: 'La demande n’a pas pu être traitée.' }, cors);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Révocation                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export type RevocationDistante = 'revoque' | 'refuse' | 'indisponible' | 'aucun_jeton';
+
+/**
+ * `POST /gestion/oauth-revoquer` : retire l'accès OAuth d'une connexion.
+ *
+ * Ordre : identité → propriété → révocation DISTANTE (si le fournisseur expose
+ * un point RFC 7009) → destruction LOCALE (Vault, flux en attente, colonnes
+ * d'état). La destruction locale a lieu même si le distant refuse : un jeton
+ * qu'on ne peut plus lire chez nous ne peut plus servir depuis VYORA, et c'est
+ * ce que l'utilisateur demande. Le résultat distant est DIT, pas masqué.
+ *
+ * La connexion n'est pas supprimée ni marquée `revoked` : elle repasse en
+ * `auth_required` et peut être réautorisée. Nom, URL, outils découverts,
+ * permissions et identifiant client (public) sont conservés.
+ */
+export async function traiterRevocationOAuth(
+  request: Request,
+  corps: unknown,
+  deps: () => DependancesGestion,
+  options: OptionsOAuth,
+): Promise<Response> {
+  const cors = entetesCors(options.originesSupplementaires, request.headers.get('origin'));
+  const journal = options.journal ?? console.error;
+
+  const identite = await options.identite(request.headers.get('authorization') ?? '');
+  if (!identite) {
+    return construireReponse(401, { error: 'authentification_requise', message: 'Jeton absent ou invalide.' }, cors);
+  }
+  const validation = validerCible(corps);
+  if (!validation.ok) {
+    return construireReponse(validation.status, { error: validation.code, message: validation.message }, cors);
+  }
+
+  const base = deps().base;
+  let serveur: ServeurGere | null;
+  try {
+    serveur = await base.lireServeur({ userId: identite.userId, serverId: validation.demande.serverId });
+  } catch (erreur) {
+    return erreurReponse(erreur, cors);
+  }
+  if (!serveur) {
+    return construireReponse(404, { error: 'server_not_found', message: 'Connexion MCP introuvable.' }, cors);
+  }
+  if (serveur.authKind !== 'oauth') {
+    return construireReponse(400, {
+      error: 'mode_non_oauth',
+      message: 'Cette connexion n’utilise pas OAuth : utilisez la révocation de la connexion.',
+    }, cors);
+  }
+
+  const oauth = await base.lireOAuth(serveur.id);
+  const jetons: { valeur: string; type: 'refresh_token' | 'access_token' }[] = [];
+  if (oauth?.refresh) jetons.push({ valeur: oauth.refresh, type: 'refresh_token' });
+  if (oauth?.access) jetons.push({ valeur: oauth.access, type: 'access_token' });
+
+  let distant: RevocationDistante = 'aucun_jeton';
+  let detailDistant: string | null = null;
+  const revocationEndpoint = lireRevocationEndpoint(serveur);
+
+  if (jetons.length > 0) {
+    if (!revocationEndpoint || !oauth?.clientId) {
+      // Fournisseur sans RFC 7009 (ou client inconnu) : on ne peut pas lui
+      // demander d'oublier le jeton. On le détruit chez nous et on le dit.
+      distant = 'indisponible';
+    } else {
+      const client: ClientOAuth = {
+        clientId: oauth.clientId,
+        ...(oauth.clientSecret ? { clientSecret: oauth.clientSecret } : {}),
+        enregistre: false,
+      };
+      distant = 'revoque';
+      for (const jeton of jetons) {
+        const resultat = await revoquerJeton({
+          revocationEndpoint,
+          jeton: jeton.valeur,
+          client,
+          typeJeton: jeton.type,
+        }, deps().egress);
+        if (!resultat.ok) {
+          distant = 'refuse';
+          detailDistant = resultat.message;
+          break;
+        }
+      }
+    }
+  }
+
+  try {
+    await base.detruireOAuth(serveur.id);
+  } catch {
+    return construireReponse(500, {
+      error: 'destruction_impossible',
+      message: 'Les jetons n’ont pas pu être détruits côté serveur.',
+      distant,
+    }, cors);
+  }
+
+  journal('[mcp-client] oauth révoqué', {
+    userId: identite.userId,
+    serverId: serveur.id,
+    distant,
+    jetons: jetons.length,
+  });
+
+  return construireReponse(200, {
+    ok: true,
+    distant,
+    ...(detailDistant ? { detailDistant } : {}),
+    jetonsDetruits: jetons.length,
+    status: 'auth_required',
+  }, cors);
+}
+
+function lireRevocationEndpoint(serveur: ServeurGere): string | null {
+  const endpoint = (serveur.oauthAs ?? {})['revocation_endpoint'];
+  return typeof endpoint === 'string' && endpoint.startsWith('https://') ? endpoint : null;
 }

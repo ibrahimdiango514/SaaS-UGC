@@ -579,10 +579,20 @@ export async function testerServeurReel(
   let jeton: string | null = null;
   if (serveur.authKind !== 'none') {
     if (!serveur.aSecret) {
-      return {
-        status: 409,
-        body: { error: 'secret_manquant', message: 'Aucun secret n’est configuré pour cette connexion.' },
-      };
+      // En OAuth, « pas de secret » veut dire « pas encore autorisé » : le
+      // remède n'est pas de coller un jeton mais de lancer l'autorisation.
+      return serveur.authKind === 'oauth'
+        ? {
+          status: 409,
+          body: {
+            error: 'auth_required',
+            message: 'Cette connexion n’est pas encore autorisée : cliquez sur « Autoriser » pour lancer OAuth.',
+          },
+        }
+        : {
+          status: 409,
+          body: { error: 'secret_manquant', message: 'Aucun secret n’est configuré pour cette connexion.' },
+        };
     }
     jeton = await deps.base.lireSecret({ userId: input.userId, serverId: input.serverId });
     if (!jeton) {

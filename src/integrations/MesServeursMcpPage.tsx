@@ -46,6 +46,7 @@ import {
   LIBELLES_AUTH,
   LIBELLES_ETAT,
   listerServeurs,
+  revoquerOAuth,
   revoquerServeur,
   testerConnexion,
   texteDuContenu,
@@ -206,6 +207,34 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
     }
   }, []);
 
+  /**
+   * Retire l'accès OAuth sans supprimer la connexion. Le résultat DISTANT est
+   * affiché tel quel : « refusé » et « indisponible » ne sont pas des succès
+   * déguisés — le fournisseur peut encore croire le jeton valide.
+   */
+  const retirerAccesOAuth = useCallback(async (serveur: ServeurMcp) => {
+    setEnCours(serveur.id);
+    setMessage(null);
+    try {
+      const resultat = await revoquerOAuth(serveur.id);
+      const textes: Record<typeof resultat.distant, string> = {
+        revoque: 'Accès retiré : le fournisseur a révoqué le jeton et VYORA l’a détruit.',
+        refuse: `Jetons détruits côté VYORA, mais le fournisseur a refusé la révocation${resultat.detailDistant ? ` (${resultat.detailDistant})` : ''}. Vérifiez aussi dans ses réglages.`,
+        indisponible: 'Jetons détruits côté VYORA. Ce fournisseur n’expose pas de révocation : retirez aussi l’accès dans ses réglages.',
+        aucun_jeton: 'Aucun jeton à révoquer : la connexion est déjà en attente d’autorisation.',
+      };
+      setMessage({ ton: resultat.distant === 'revoque' || resultat.distant === 'aucun_jeton' ? 'succes' : 'info', texte: textes[resultat.distant] });
+    } catch (erreur) {
+      setMessage({
+        ton: 'erreur',
+        texte: erreur instanceof ErreurGestion ? erreur.message : 'Le retrait de l’accès OAuth a échoué.',
+      });
+    } finally {
+      setEnCours('');
+      await rafraichir();
+    }
+  }, [rafraichir]);
+
   const revoquer = useCallback(async () => {
     if (!aRevoquer) return;
     setEnCours(aRevoquer.id);
@@ -286,7 +315,21 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
 
   return (
     <div className="space-y-5">
-      {!sansEnTete && (
+      {/*
+        * Les actions vivent dans l'en-tête quand il est affiché ; sans en-tête
+        * (page unifiée « Connexions MCP »), elles doivent exister quand même —
+        * sinon, dès qu'un serveur existe, plus rien ne permet d'en ajouter un.
+        */}
+      {sansEnTete ? (
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={() => void charger()} disabled={chargement}>
+            <RefreshCw className="mr-1.5 h-4 w-4" /> Rafraîchir
+          </Button>
+          <Button onClick={() => setCreationOuverte(true)} disabled={!workspaceId}>
+            <Plus className="mr-1.5 h-4 w-4" /> Ajouter un serveur
+          </Button>
+        </div>
+      ) : (
       <PageHeader
         eyebrow="VYORA · MCP"
         title="Mes serveurs MCP"
@@ -406,6 +449,16 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
                           >
                             {enTest ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Lock className="mr-1.5 h-4 w-4" />}
                             {serveur.oauthExpireLe ? 'Réautoriser' : 'Autoriser'}
+                          </Button>
+                        )}
+                        {serveur.authKind === 'oauth' && serveur.aSecret && (
+                          <Button
+                            variant="ghost"
+                            aria-label="Retirer l’accès OAuth"
+                            onClick={() => void retirerAccesOAuth(serveur)}
+                            disabled={enTest}
+                          >
+                            <XCircle className="mr-1.5 h-4 w-4" /> Retirer l’accès
                           </Button>
                         )}
                         <Button variant="ghost" onClick={() => void tester(serveur)} disabled={enTest}>
@@ -645,7 +698,8 @@ function FormulaireCreation({
     if (!workspaceId) { setErreur('Aucun espace de travail disponible.'); return; }
     if (!nom.trim()) { setErreur('Donnez un nom à ce serveur.'); return; }
     if (!/^https:\/\//i.test(url.trim())) { setErreur('L’URL doit commencer par https://'); return; }
-    if (authKind !== 'none' && !secret.trim()) { setErreur('Ce mode d’authentification exige un secret.'); return; }
+    // En OAuth, le jeton est obtenu par « Autoriser » après la création.
+    if (authKind !== 'none' && authKind !== 'oauth' && !secret.trim()) { setErreur('Ce mode d’authentification exige un secret.'); return; }
 
     setEnvoi(true);
     try {
@@ -655,7 +709,7 @@ function FormulaireCreation({
         url: url.trim(),
         authKind,
         // Le secret est envoyé une seule fois, puis oublié de l'état React.
-        ...(authKind === 'none' ? {} : { secret }),
+        ...(authKind === 'none' || !secret.trim() ? {} : { secret }),
       });
       const nomCree = nom.trim();
       // Vidé AVANT le rappel : même si l'affichage échouait, le secret ne
@@ -709,12 +763,19 @@ function FormulaireCreation({
           <option value="api_key">Clé d’API</option>
           <option value="oauth">OAuth</option>
         </Select>
+        {authKind === 'oauth' && (
+          <p className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-sky-200/90">
+            Aucun jeton à coller : après la création, cliquez sur « Autoriser » pour ouvrir la page
+            d’autorisation du fournisseur. VYORA découvre ses points de terminaison, s’enregistre
+            s’il le permet, et range le jeton dans Vault.
+          </p>
+        )}
         {authKind !== 'none' && (
           <Input
-            label="Secret"
+            label={authKind === 'oauth' ? 'Jeton d’accès déjà obtenu (facultatif)' : 'Secret'}
             type="password"
             autoComplete="off"
-            placeholder="Collez votre jeton"
+            placeholder={authKind === 'oauth' ? 'Laissez vide pour passer par « Autoriser »' : 'Collez votre jeton'}
             hint="Stocké dans Vault côté serveur. Jamais renvoyé au navigateur, jamais journalisé."
             value={secret}
             onChange={(e) => setSecret(e.target.value)}

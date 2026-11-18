@@ -30,7 +30,7 @@ import {
   validerPermission,
 } from './gestion.ts';
 import { executerOutilExterne, statutHttp } from './execution.ts';
-import { traiterDemarrageOAuth } from './oauth-http.ts';
+import { traiterDemarrageOAuth, traiterRevocationOAuth } from './oauth-http.ts';
 import { testerServeurReel, versJson, type DependancesGestion, type ServeurGere } from './gestion-serveur.ts';
 import type { ResolveurIdentite } from './http.ts';
 
@@ -41,6 +41,8 @@ export interface OptionsGestion {
   originesSupplementaires: string | null;
   identite: ResolveurIdentite;
   journal?: (message: string, details: Record<string, unknown>) => void;
+  /** URL de retour OAuth fixée par la configuration (voir `oauth-http.ts`). */
+  urlCallbackOAuth?: string;
 }
 
 /**
@@ -224,6 +226,15 @@ export async function traiterRequeteGestion(
          * les réimplémenter ici. La fonction garde la même identité GoTrue.
          */
         return traiterDemarrageOAuth(request, corps, deps, {
+          originesSupplementaires: options.originesSupplementaires,
+          identite: options.identite,
+          ...(options.journal ? { journal: options.journal } : {}),
+          ...(options.urlCallbackOAuth ? { urlCallback: options.urlCallbackOAuth } : {}),
+        });
+      }
+
+      case 'oauth-revoquer': {
+        return traiterRevocationOAuth(request, corps, deps, {
           originesSupplementaires: options.originesSupplementaires,
           identite: options.identite,
           ...(options.journal ? { journal: options.journal } : {}),

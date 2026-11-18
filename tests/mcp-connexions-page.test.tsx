@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   revoquerServeur: vi.fn(),
   executerOutil: vi.fn(),
   demarrerOAuth: vi.fn(),
+  revoquerOAuth: vi.fn(),
   getWorkspaces: vi.fn(),
   // Le MCP entrant a ses propres appels : tous simulés ici.
   listerJetons: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock('../src/mcp/serveurs', async () => {
     revoquerServeur: mocks.revoquerServeur,
     executerOutil: mocks.executerOutil,
     demarrerOAuth: mocks.demarrerOAuth,
+    revoquerOAuth: mocks.revoquerOAuth,
   };
 });
 
@@ -176,5 +178,53 @@ describe('Section B — autorisation OAuth', () => {
     render(<ConnexionsMcpPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Autoriser via OAuth' }));
     expect(await screen.findByText(/n’accepte pas PKCE S256/)).toBeTruthy();
+  });
+});
+
+describe('Section B — retrait de l’accès OAuth (P6d)', () => {
+  it('propose « Retirer l’accès » seulement quand un jeton OAuth existe', async () => {
+    mocks.listerServeurs.mockResolvedValue([serveur({ authKind: 'oauth', aSecret: false, status: 'auth_required' })]);
+    render(<ConnexionsMcpPage />);
+    await screen.findByRole('button', { name: 'Autoriser via OAuth' });
+    expect(screen.queryByRole('button', { name: 'Retirer l’accès OAuth' })).toBeNull();
+  });
+
+  it('appelle la route de révocation et affiche le résultat DISTANT tel quel', async () => {
+    mocks.listerServeurs.mockResolvedValue([serveur({ authKind: 'oauth', aSecret: true, oauthExpireLe: '2026-12-01T00:00:00Z' })]);
+    mocks.revoquerOAuth.mockResolvedValue({ ok: true, distant: 'indisponible', jetonsDetruits: 1, status: 'auth_required' });
+    render(<ConnexionsMcpPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Retirer l’accès OAuth' }));
+    await waitFor(() => expect(mocks.revoquerOAuth).toHaveBeenCalledWith('33333333-3333-3333-3333-333333333333'));
+    // « indisponible » n'est pas présenté comme un succès complet.
+    expect(await screen.findByText(/n’expose pas de révocation/)).toBeTruthy();
+    // La liste est relue : la connexion n'a pas disparu.
+    await waitFor(() => expect(mocks.listerServeurs).toHaveBeenCalledTimes(2));
+  });
+
+  it('un refus du fournisseur est affiché, pas masqué', async () => {
+    mocks.listerServeurs.mockResolvedValue([serveur({ authKind: 'oauth', aSecret: true })]);
+    mocks.revoquerOAuth.mockResolvedValue({ ok: true, distant: 'refuse', detailDistant: 'Révocation refusée (statut 400).', jetonsDetruits: 2, status: 'auth_required' });
+    render(<ConnexionsMcpPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Retirer l’accès OAuth' }));
+    expect(await screen.findByText(/le fournisseur a refusé la révocation/)).toBeTruthy();
+    expect(screen.getByText(/Révocation refusée \(statut 400\)/)).toBeTruthy();
+  });
+});
+
+describe('Section B — création OAuth sans jeton (P6d)', () => {
+  it('en mode OAuth, le formulaire n’exige plus de secret et explique « Autoriser »', async () => {
+    mocks.creerServeur.mockResolvedValue({ serverId: 'n', serveur: null });
+    render(<ConnexionsMcpPage />);
+    await screen.findByText('CRM de test');
+    fireEvent.click(screen.getByRole('button', { name: /Ajouter un serveur/ }));
+    fireEvent.change(screen.getByLabelText(/Nom/), { target: { value: 'Linear' } });
+    fireEvent.change(screen.getByLabelText(/URL du serveur/), { target: { value: 'https://mcp.linear.app/mcp' } });
+    fireEvent.change(screen.getByLabelText(/Authentification/), { target: { value: 'oauth' } });
+    expect(screen.getByText(/Aucun jeton à coller/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter' }));
+    await waitFor(() => expect(mocks.creerServeur).toHaveBeenCalledTimes(1));
+    const envoi = mocks.creerServeur.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(envoi.authKind).toBe('oauth');
+    expect('secret' in envoi).toBe(false);
   });
 });

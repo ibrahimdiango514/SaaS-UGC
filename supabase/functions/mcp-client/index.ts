@@ -55,6 +55,16 @@ const DATABASE_URL = env('MCP_CLIENT_DATABASE_URL') || env('SUPABASE_DB_URL');
  * donc `access-control-allow-origin: null` à toutes les requêtes.
  */
 const ORIGINES_SUPPLEMENTAIRES = env('VYORA_ALLOWED_ORIGINS');
+/*
+ * URL publique du retour OAuth. Comme `vyora-mcp` pour son `issuer`, elle est
+ * dérivée de `SUPABASE_URL` (toujours présente côté Edge) ou d'une variable
+ * explicite pour un domaine personnalisé — jamais de `request.url`, qui n'est
+ * pas l'URL publique derrière le proxy Supabase.
+ */
+const URL_CALLBACK_OAUTH = (
+  env('MCP_CLIENT_CALLBACK_URL').trim()
+  || (SUPABASE_URL ? `${SUPABASE_URL.replace(/\/+$/, '')}/functions/v1/mcp-client/oauth/callback` : '')
+);
 
 /* -------------------------------------------------------------------------- */
 /* Dépendances réseau réelles                                                   */
@@ -232,6 +242,7 @@ if (runtimeDeno?.serve) {
       return traiterRequeteGestion(request, depsGestionSingleton, {
         originesSupplementaires: ORIGINES_SUPPLEMENTAIRES,
         identite: identiteDepuisJwt,
+        ...(URL_CALLBACK_OAUTH ? { urlCallbackOAuth: URL_CALLBACK_OAUTH } : {}),
       });
     }
     return traiterRequete(request, depsSingleton, {

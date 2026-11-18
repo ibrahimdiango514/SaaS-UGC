@@ -39,6 +39,7 @@ export const ROUTES_GESTION = [
   'revoquer',
   'executer',
   'oauth-demarrer',
+  'oauth-revoquer',
 ] as const;
 
 export type RouteGestion = typeof ROUTES_GESTION[number];
@@ -142,7 +143,14 @@ export function validerCreation(corps: unknown): { ok: true; demande: DemandeCre
   }
   const secret = typeof secretBrut === 'string' ? secretBrut : undefined;
 
-  if (authKind !== 'none' && (!secret || secret.trim() === '')) {
+  /*
+   * `oauth` est le seul mode où le secret peut manquer à la création : le
+   * jeton est obtenu ENSUITE par le flux d'autorisation (P6c). Exiger un
+   * secret ici obligeait l'utilisateur à coller un jeton pour pouvoir… lancer
+   * le flux qui sert à ne pas coller de jeton. Un jeton fourni reste accepté
+   * (mode « jeton d'accès stocké » de P6b).
+   */
+  if (authKind !== 'none' && authKind !== 'oauth' && (!secret || secret.trim() === '')) {
     return refus(400, 'secret_requis', 'Ce mode d’authentification exige un secret.');
   }
   if (authKind === 'none' && secret && secret.trim() !== '') {

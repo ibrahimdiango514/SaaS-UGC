@@ -58,6 +58,15 @@ export type Decouverte =
     source: string;
     /** Vrai si PKCE S256 est explicitement annoncé. */
     pkceS256: boolean;
+    /**
+     * Portées annoncées par la RESSOURCE (RFC 9728), quand elles existent.
+     * Elles priment sur celles du serveur d'autorisation : l'AS liste tout ce
+     * qu'il sait délivrer (Linear : `read write openid email`, Vercel :
+     * `openid email offline_access profile`), la ressource ce dont ELLE a
+     * besoin (`read write`, `openid`). Demander plus que la ressource n'exige
+     * est contraire au moindre privilège, et certains fournisseurs refusent.
+     */
+    porteesRessource?: string[];
   }
   | { ok: false; code: string; message: string };
 
@@ -94,6 +103,19 @@ function urlSure(brut: unknown): URL | null {
  * maintenir. L'épinglage, le refus des redirections et le plafond de taille sont
  * les mêmes.
  */
+/** Extrait ` (code)` d'un corps d'erreur OAuth JSON, ou une chaîne vide. */
+function codeErreurOAuth(corps: string): string {
+  try {
+    const brut = JSON.parse(corps) as { error?: unknown; error_description?: unknown };
+    const code = typeof brut.error === 'string' ? brut.error.slice(0, 64) : '';
+    const description = typeof brut.error_description === 'string' ? brut.error_description.slice(0, 160) : '';
+    if (!code) return '';
+    return description ? ` (${code} : ${description})` : ` (${code})`;
+  } catch {
+    return '';
+  }
+}
+
 async function lireJson(
   url: URL,
   deps: EgressDeps,
@@ -113,7 +135,10 @@ async function lireJson(
     return echec('reseau', `Impossible de joindre ${url.host} (${reponse.error.code}).`);
   }
   if (reponse.valeur.status < 200 || reponse.valeur.status >= 300) {
-    return echec('http', `${url.host} a répondu ${reponse.valeur.status}.`);
+    // RFC 6749 §5.2 : un refus porte un code `error` court. On le remonte, et
+    // rien d'autre du corps : c'est ce qui permet de lire « invalid_redirect_uri »
+    // au lieu d'un 400 muet, sans recopier une page d'erreur entière.
+    return echec('http', `${url.host} a répondu ${reponse.valeur.status}${codeErreurOAuth(reponse.valeur.body)}.`);
   }
   try {
     return json(JSON.parse(reponse.valeur.body) as Record<string, unknown>);
@@ -203,7 +228,18 @@ export async function decouvrir(
     const as = urlSure(premier);
     if (!as) { essais.push(`${url.pathname}:authorization_server_invalide`); continue; }
     const trouve = await metadonneesAutorisation(as, deps);
-    if (trouve.ok) return { ok: true, ...trouve.valeur, source: url.pathname };
+    if (trouve.ok) {
+      const brutes = lecture.valeur.scopes_supported;
+      const porteesRessource = Array.isArray(brutes)
+        ? brutes.filter((p): p is string => typeof p === 'string' && p.trim() !== '')
+        : [];
+      return {
+        ok: true,
+        ...trouve.valeur,
+        source: url.pathname,
+        ...(porteesRessource.length > 0 ? { porteesRessource } : {}),
+      };
+    }
     essais.push(`${as.host}:${trouve.code}`);
   }
 
@@ -330,7 +366,9 @@ export async function enregistrerClient(
     corps,
     entetes: { 'content-type': 'application/json' },
   });
-  if (!lecture.ok) return echec('enregistrement_refuse', `Enregistrement refusé (${lecture.code}).`);
+  // Le détail (statut HTTP, hôte) est conservé : « refusé (http) » ne permet
+  // pas de distinguer un redirect_uri rejeté d'un point d'enregistrement fermé.
+  if (!lecture.ok) return echec('enregistrement_refuse', `Enregistrement refusé : ${lecture.message}`);
 
   const clientId = lecture.valeur.client_id;
   if (typeof clientId !== 'string' || clientId.trim() === '') {
@@ -434,7 +472,9 @@ async function demanderJetons(
   if (!reponseJeton.ok) {
     lecture = echec('echange_refuse', `Point de jeton injoignable (${reponseJeton.error.code}).`);
   } else if (reponseJeton.valeur.status < 200 || reponseJeton.valeur.status >= 300) {
-    lecture = echec('echange_refuse', `Point de jeton : statut ${reponseJeton.valeur.status}.`);
+    // Le code d'erreur RFC 6749 (`invalid_grant`, `invalid_client`…) est la
+    // seule information actionnable : on le garde, borné, sans le reste du corps.
+    lecture = echec('echange_refuse', `Point de jeton : statut ${reponseJeton.valeur.status}${codeErreurOAuth(reponseJeton.valeur.body)}.`);
   } else {
     try {
       lecture = json(JSON.parse(reponseJeton.valeur.body) as Record<string, unknown>);
@@ -450,7 +490,7 @@ async function demanderJetons(
      * On le remonte, car la différence décide de ce que l'utilisateur doit
      * faire : reconnecter, ou patienter.
      */
-    return echec('echange_refuse', `Échange de jeton refusé (${lecture.code}).`);
+    return echec('echange_refuse', `Échange de jeton refusé : ${lecture.message}`);
   }
 
   const access = lecture.valeur.access_token;
@@ -504,7 +544,13 @@ export function rafraichirJetons(
 }
 
 export async function revoquerJeton(
-  entree: { revocationEndpoint: string; jeton: string; client: ClientOAuth },
+  entree: {
+    revocationEndpoint: string;
+    jeton: string;
+    client: ClientOAuth;
+    /** RFC 7009 §2.1 : indication du type, pour que l'AS cherche au bon endroit. */
+    typeJeton?: 'access_token' | 'refresh_token';
+  },
   deps: EgressDeps,
 ): Promise<ResultatOAuth<void>> {
   const url = urlSure(entree.revocationEndpoint);
@@ -519,7 +565,7 @@ export async function revoquerJeton(
     typeContenu: 'application/x-www-form-urlencoded',
     corps: corpsFormulaire({
       token: entree.jeton,
-      token_type_hint: 'refresh_token',
+      token_type_hint: entree.typeJeton ?? 'refresh_token',
       ...(entree.client.clientSecret ? {} : { client_id: entree.client.clientId }),
     }),
     ...(Object.keys(entetes).length > 0 ? { entetes } : {}),

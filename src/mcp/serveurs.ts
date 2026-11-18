@@ -82,6 +82,21 @@ export interface DemarrageOAuth {
    * mais l'écran doit le dire : ce n'est pas une vérification.
    */
   pkceAnnonce: boolean;
+  /** URL de retour effectivement enregistrée chez le fournisseur (publique). */
+  redirectUri?: string;
+}
+
+export interface RevocationOAuth {
+  ok: boolean;
+  /**
+   * Ce que le fournisseur a fait : `revoque` (RFC 7009 accepté), `refuse`
+   * (il a répondu non : nos jetons sont détruits mais il peut les croire
+   * valides), `indisponible` (pas de point de révocation), `aucun_jeton`.
+   */
+  distant: 'revoque' | 'refuse' | 'indisponible' | 'aucun_jeton';
+  detailDistant?: string;
+  jetonsDetruits: number;
+  status: 'auth_required';
 }
 
 export interface ResultatTest {
@@ -268,6 +283,15 @@ export function texteDuContenu(contenu: unknown, max = 4_000): string {
 /** Révoque : le secret est détruit côté serveur, la ligne reste (historique). */
 export async function revoquerServeur(serverId: string): Promise<void> {
   await appeler<{ ok: boolean }>('revoquer', { serverId });
+}
+
+/**
+ * Retire l'accès OAuth : révocation chez le fournisseur quand il le permet,
+ * destruction des jetons locaux dans tous les cas. La connexion repasse en
+ * `auth_required` et peut être réautorisée ; elle n'est pas supprimée.
+ */
+export async function revoquerOAuth(serverId: string): Promise<RevocationOAuth> {
+  return appeler<RevocationOAuth>('oauth-revoquer', { serverId });
 }
 
 /* -------------------------------------------------------------------------- */

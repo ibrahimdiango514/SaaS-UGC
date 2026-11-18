@@ -15,7 +15,15 @@ import {
   urlsMetadonneesAutorisation,
   urlsMetadonneesRessource,
 } from '../supabase/functions/mcp-client/oauth';
-import { traiterCallbackOAuth, traiterDemarrageOAuth, urlCallback } from '../supabase/functions/mcp-client/oauth-http';
+import {
+  echapperHtml,
+  resoudreUrlCallback,
+  traiterCallbackOAuth,
+  traiterDemarrageOAuth,
+  traiterRevocationOAuth,
+  urlCallback,
+} from '../supabase/functions/mcp-client/oauth-http';
+import { validerCreation } from '../supabase/functions/mcp-client/gestion';
 import { executerOutilExterne, type AccesBase, type ConnexionServeur, type DependancesP5 } from '../supabase/functions/mcp-client/execution';
 import type { AccesGestion, DependancesGestion, ServeurGere } from '../supabase/functions/mcp-client/gestion-serveur';
 import type { EgressDeps } from '../supabase/functions/store-import/safe-egress';
@@ -64,6 +72,8 @@ const banc = {
   statutJeton: 200,
   /** Réponse de l'enregistrement dynamique. */
   reponseEnregistrement: { client_id: 'client-banc' } as Record<string, unknown>,
+  /** Statut du point de révocation (RFC 7009 : 200 vide = succès). */
+  statutRevocation: 200,
 };
 
 function lireCorps(requete: IncomingMessage): Promise<string> {
@@ -116,6 +126,7 @@ beforeAll(async () => {
     }
     if (chemin === '/register') { repondre(reponse, banc.reponseEnregistrement); return; }
     if (chemin === '/token') { repondre(reponse, banc.reponseJeton, banc.statutJeton); return; }
+    if (chemin === '/revoke') { repondre(reponse, {}, banc.statutRevocation); return; }
     if (chemin === '/mcp') {
       // Serveur MCP minimal : suffisant pour prouver quel jeton a été envoyé.
       const message = JSON.parse(corps || '{}') as { id?: number; method?: string };
@@ -172,6 +183,7 @@ beforeEach(() => {
   banc.reponseJeton = { access_token: 'at-1', refresh_token: 'rt-1', expires_in: 3600, token_type: 'Bearer' };
   banc.statutJeton = 200;
   banc.reponseEnregistrement = { client_id: 'client-banc' };
+  banc.statutRevocation = 200;
 });
 
 function pinnedSocket(socket: Socket) {
@@ -844,5 +856,229 @@ describe('Exécution — renouvellement automatique du jeton', () => {
     await executerOutilExterne({ serverId: SERVER_ID, outil: 'list_products' }, { userId: USER_A }, d);
     const depot = premierArgument<{ expireLe: string | null }>(stockage) as { expireLe: string | null };
     expect(depot.expireLe).not.toBeNull();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* P6d — défauts constatés en réel, corrigés, et verrouillés ici              */
+/* -------------------------------------------------------------------------- */
+
+describe('P6d — URL de retour fixée par la configuration', () => {
+  it('préfère l’URL configurée à celle déduite de la requête', () => {
+    const requete = new Request('http://localhost:9000/functions/v1/mcp-client/gestion/oauth-demarrer');
+    expect(resoudreUrlCallback(requete, 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/mcp-client/oauth/callback'))
+      .toBe('https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/mcp-client/oauth/callback');
+  });
+
+  it('refuse une URL de retour non https, configurée ou déduite', () => {
+    const http = new Request('http://localhost:9000/functions/v1/mcp-client/gestion/oauth-demarrer');
+    expect(resoudreUrlCallback(http, undefined)).toBeNull();
+    expect(resoudreUrlCallback(http, 'http://exemple.test/oauth/callback')).toBeNull();
+    // Ni paramètres ni fragment : un redirect_uri est une constante exacte.
+    expect(resoudreUrlCallback(http, 'https://exemple.test/oauth/callback?x=1')).toBeNull();
+  });
+
+  it('la route refuse de démarrer (500) plutôt que d’enregistrer un retour en http', async () => {
+    const { base, appels } = accesGestion();
+    const requete = new Request('http://localhost:9000/functions/v1/mcp-client/gestion/oauth-demarrer', {
+      method: 'POST', headers: { authorization: 'Bearer jwt-a' }, body: '{}',
+    });
+    recu.length = 0;
+    const r = await traiterDemarrageOAuth(requete, CORPS_DEMARRAGE, options(base).deps, options(base));
+    expect(r.status).toBe(500);
+    expect(((await r.json()) as { error: string }).error).toBe('callback_non_https');
+    // La découverte a eu lieu (métadonnées), mais AUCUN enregistrement.
+    expect(recu.some((x) => x.chemin === '/register')).toBe(false);
+    expect(appels.client).not.toHaveBeenCalled();
+  });
+
+  it('la route utilise l’URL configurée dans l’enregistrement ET l’URL d’autorisation', async () => {
+    const { base } = accesGestion();
+    const fixe = 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/mcp-client/oauth/callback';
+    const r = await traiterDemarrageOAuth(requeteDemarrage(CORPS_DEMARRAGE), CORPS_DEMARRAGE, options(base).deps, {
+      ...options(base), urlCallback: fixe,
+    });
+    expect(r.status).toBe(200);
+    const corps = (await r.json()) as { autorisationUrl: string; redirectUri: string };
+    expect(corps.redirectUri).toBe(fixe);
+    expect(new URL(corps.autorisationUrl).searchParams.get('redirect_uri')).toBe(fixe);
+    const enregistrement = recu.find((x) => x.chemin === '/register');
+    expect(JSON.parse(enregistrement?.corps ?? '{}')).toMatchObject({ redirect_uris: [fixe] });
+  });
+});
+
+describe('P6d — portées : la ressource prime sur le serveur d’autorisation', () => {
+  it('demande les portées de la ressource (RFC 9728) quand elle en annonce', async () => {
+    // Cas réel Linear : l’AS liste `read write openid email`, la ressource `read write`.
+    banc.metadonneesAs = { ...banc.metadonneesAs, scopes_supported: ['read', 'write', 'openid', 'email'] };
+    banc.metadonneesRessource = { ...banc.metadonneesRessource, scopes_supported: ['read', 'write'] };
+    const { base } = accesGestion();
+    const r = await traiterDemarrageOAuth(requeteDemarrage(CORPS_DEMARRAGE), CORPS_DEMARRAGE, options(base).deps, options(base));
+    expect(r.status).toBe(200);
+    const corps = (await r.json()) as { autorisationUrl: string; portees: string[] };
+    expect(corps.portees).toEqual(['read', 'write']);
+    expect(new URL(corps.autorisationUrl).searchParams.get('scope')).toBe('read write');
+  });
+
+  it('retombe sur les portées de l’AS quand la ressource n’en annonce pas', async () => {
+    const { base } = accesGestion();
+    const r = await traiterDemarrageOAuth(requeteDemarrage(CORPS_DEMARRAGE), CORPS_DEMARRAGE, options(base).deps, options(base));
+    const corps = (await r.json()) as { portees: string[] };
+    expect(corps.portees).toEqual(['mcp:read']);
+  });
+});
+
+describe('P6d — aucune injection HTML dans la page de retour', () => {
+  function requeteCallback(params: Record<string, string>): Request {
+    const url = new URL('https://fn.example/functions/v1/mcp-client/oauth/callback');
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    return new Request(url.toString());
+  }
+
+  it('échappe les cinq caractères significatifs', () => {
+    expect(echapperHtml(`<b a="1" c='2'>&</b>`)).toBe('&lt;b a=&quot;1&quot; c=&#39;2&#39;&gt;&amp;&lt;/b&gt;');
+  });
+
+  it('un error_description hostile ressort inerte (constaté en réel sur v8)', async () => {
+    const { base } = accesGestion();
+    const r = await traiterCallbackOAuth(
+      requeteCallback({ error: 'access_denied', error_description: 'refus</code><b>gras</b><code>' }),
+      () => depsGestion(base),
+    );
+    const html = await r.text();
+    expect(r.status).toBe(400);
+    expect(html).not.toContain('<b>gras</b>');
+    expect(html).toContain('&lt;b&gt;gras&lt;/b&gt;');
+  });
+
+  it('un message d’erreur du point de jeton est échappé lui aussi', async () => {
+    banc.statutJeton = 400;
+    banc.reponseJeton = { error: 'invalid_grant', error_description: '<img src=x>' };
+    const { base } = accesGestion({
+      consommerFluxOAuth: async () => ({ serverId: SERVER_ID, userId: USER_A, verifier: 'v', redirectUri: 'https://fn.example/oauth/callback' }),
+      lireServeur: async () => serveurGere({ oauthClientId: 'client-banc', oauthAs: { token_endpoint: `${BASE()}/token` } }),
+      lireOAuth: async () => ({ access: null, refresh: null, expireLe: null, scope: null, clientId: 'client-banc', clientSecret: null }),
+    });
+    const r = await traiterCallbackOAuth(requeteCallback({ state: 's', code: 'c' }), () => depsGestion(base));
+    const html = await r.text();
+    expect(r.status).toBe(502);
+    expect(html).not.toContain('<img');
+    expect(html).toContain('invalid_grant');
+  });
+});
+
+describe('P6d — création OAuth sans secret', () => {
+  const base = { workspaceId: WS_ID, nom: 'X', url: 'https://x.example/mcp' };
+  it('accepte `oauth` sans secret (le jeton viendra du flux)', () => {
+    const v = validerCreation({ ...base, authKind: 'oauth' });
+    expect(v.ok).toBe(true);
+  });
+  it('accepte toujours `oauth` AVEC un jeton déjà obtenu', () => {
+    const v = validerCreation({ ...base, authKind: 'oauth', secret: 'jeton' });
+    expect(v.ok && v.demande.secret).toBe('jeton');
+  });
+  it('exige toujours un secret pour `bearer` et `api_key`', () => {
+    for (const authKind of ['bearer', 'api_key']) {
+      const v = validerCreation({ ...base, authKind });
+      expect(v.ok).toBe(false);
+      if (!v.ok) expect(v.code).toBe('secret_requis');
+    }
+  });
+});
+
+describe('P6d — route oauth-revoquer', () => {
+  const CORPS = { serverId: SERVER_ID };
+  function requete(authorization: string | null = 'Bearer jwt-a'): Request {
+    const entetes: Record<string, string> = { 'content-type': 'application/json' };
+    if (authorization !== null) entetes.authorization = authorization;
+    return new Request('https://fn.example/functions/v1/mcp-client/gestion/oauth-revoquer', { method: 'POST', headers: entetes, body: '{}' });
+  }
+  const jetons = (partiel: Partial<{ access: string | null; refresh: string | null }> = {}) => async () => ({
+    access: 'at-1', refresh: 'rt-1', expireLe: null, scope: null, clientId: 'client-banc', clientSecret: null, ...partiel,
+  });
+  const avecRevocation = () => serveurGere({ oauthAs: { token_endpoint: `${BASE()}/token`, revocation_endpoint: `${BASE()}/revoke` } });
+
+  it('refuse sans jeton VYORA (401), sans réseau ni destruction', async () => {
+    const { base, appels } = accesGestion({ lireOAuth: jetons() });
+    recu.length = 0;
+    const r = await traiterRevocationOAuth(requete(null), CORPS, options(base).deps, options(base));
+    expect(r.status).toBe(401);
+    expect(recu).toHaveLength(0);
+    expect(appels.detruire).not.toHaveBeenCalled();
+  });
+
+  it('refuse une connexion qui n’appartient pas à l’utilisateur (404)', async () => {
+    const { base, appels } = accesGestion({ lireServeur: async () => null, lireOAuth: jetons() });
+    const r = await traiterRevocationOAuth(requete(), CORPS, options(base).deps, options(base));
+    expect(r.status).toBe(404);
+    expect(appels.detruire).not.toHaveBeenCalled();
+  });
+
+  it('refuse une connexion non OAuth (400)', async () => {
+    const { base, appels } = accesGestion({ lireServeur: async () => serveurGere({ authKind: 'bearer' }) });
+    const r = await traiterRevocationOAuth(requete(), CORPS, options(base).deps, options(base));
+    expect(r.status).toBe(400);
+    expect(appels.detruire).not.toHaveBeenCalled();
+  });
+
+  it('révoque refresh PUIS access chez le fournisseur (RFC 7009), puis détruit en local', async () => {
+    const { base, appels } = accesGestion({ lireServeur: async () => avecRevocation(), lireOAuth: jetons() });
+    recu.length = 0;
+    const r = await traiterRevocationOAuth(requete(), CORPS, options(base).deps, options(base));
+    expect(r.status).toBe(200);
+    const corps = (await r.json()) as { distant: string; jetonsDetruits: number; status: string };
+    expect(corps).toMatchObject({ distant: 'revoque', jetonsDetruits: 2, status: 'auth_required' });
+
+    const revocations = recu.filter((x) => x.chemin === '/revoke');
+    expect(revocations).toHaveLength(2);
+    expect(revocations[0]?.entetes['content-type']).toContain('application/x-www-form-urlencoded');
+    expect(new URLSearchParams(revocations[0]?.corps).get('token')).toBe('rt-1');
+    expect(new URLSearchParams(revocations[0]?.corps).get('token_type_hint')).toBe('refresh_token');
+    expect(new URLSearchParams(revocations[1]?.corps).get('token')).toBe('at-1');
+    expect(new URLSearchParams(revocations[1]?.corps).get('token_type_hint')).toBe('access_token');
+    expect(appels.detruire).toHaveBeenCalledTimes(1);
+    // Rien de secret dans la réponse.
+    const texte = JSON.stringify(corps);
+    expect(texte).not.toContain('at-1');
+    expect(texte).not.toContain('rt-1');
+  });
+
+  it('détruit en local même si le fournisseur refuse, et le dit (`refuse`)', async () => {
+    banc.statutRevocation = 400;
+    const { base, appels } = accesGestion({ lireServeur: async () => avecRevocation(), lireOAuth: jetons() });
+    const r = await traiterRevocationOAuth(requete(), CORPS, options(base).deps, options(base));
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { distant: string }).distant).toBe('refuse');
+    expect(appels.detruire).toHaveBeenCalledTimes(1);
+  });
+
+  it('fournisseur sans point de révocation : destruction locale, `indisponible`, aucun réseau', async () => {
+    const { base, appels } = accesGestion({ lireOAuth: jetons() });
+    recu.length = 0;
+    const r = await traiterRevocationOAuth(requete(), CORPS, options(base).deps, options(base));
+    expect(((await r.json()) as { distant: string }).distant).toBe('indisponible');
+    expect(recu).toHaveLength(0);
+    expect(appels.detruire).toHaveBeenCalledTimes(1);
+  });
+
+  it('sans aucun jeton : `aucun_jeton`, destruction locale idempotente, aucun réseau', async () => {
+    const { base, appels } = accesGestion({ lireServeur: async () => avecRevocation(), lireOAuth: jetons({ access: null, refresh: null }) });
+    recu.length = 0;
+    const r = await traiterRevocationOAuth(requete(), CORPS, options(base).deps, options(base));
+    expect(((await r.json()) as { distant: string; jetonsDetruits: number })).toMatchObject({ distant: 'aucun_jeton', jetonsDetruits: 0 });
+    expect(recu).toHaveLength(0);
+    expect(appels.detruire).toHaveBeenCalledTimes(1);
+  });
+
+  it('un point de révocation non https n’est jamais appelé', async () => {
+    const { base, appels } = accesGestion({
+      lireServeur: async () => serveurGere({ oauthAs: { revocation_endpoint: 'http://banc-oauth.example/revoke' } }),
+      lireOAuth: jetons(),
+    });
+    recu.length = 0;
+    const r = await traiterRevocationOAuth(requete(), CORPS, options(base).deps, options(base));
+    expect(((await r.json()) as { distant: string }).distant).toBe('indisponible');
+    expect(recu).toHaveLength(0);
+    expect(appels.detruire).toHaveBeenCalledTimes(1);
   });
 });
