@@ -210,7 +210,16 @@ if (name && !process.argv.includes('--import-only')) {
   const built = buildArtifact(name);
   const loaderPath = join(process.cwd(), FUNCTIONS[name].loader);
   const commit = (process.env.EDGE_PIN_COMMIT || '').trim().toLowerCase();
-  const code = renderLoader(name, built, commit || '0'.repeat(40));
+  // `--check` compare à l'existant : le commit épinglé est alors DÉJÀ dans le
+  // chargeur committé. Exiger de le retaper invitait à recopier un SHA de
+  // travers, ce qui produisait un faux « désynchronisé » — ou pire, un faux
+  // « à jour ». On le relit dans le fichier.
+  const commitEpingle = process.argv.includes('--check')
+    ? (/const COMMIT = "([0-9a-f]{40})"/.exec(
+        existsSync(loaderPath) ? readFileSync(loaderPath, 'utf8') : '',
+      )?.[1] ?? '')
+    : commit;
+  const code = renderLoader(name, built, commitEpingle || '0'.repeat(40));
   if (process.argv.includes('--print')) {
     console.log(JSON.stringify({ name, sha256: built.sha256, chars: built.chars, loaderChars: code.length }));
     process.exit(0);
@@ -220,7 +229,7 @@ if (name && !process.argv.includes('--import-only')) {
     console.log(artifactSql(name, built));
     process.exit(0);
   }
-  if (!/^[0-9a-f]{40}$/.test(commit)) {
+  if (!/^[0-9a-f]{40}$/.test(commitEpingle)) {
     // Sans commit épinglé, le chargeur généré pointerait sur une URL invalide.
     // On refuse plutôt que d'écrire un fichier inutilisable.
     console.error('EDGE_PIN_COMMIT doit être un SHA de commit complet (40 hexadécimaux).');
