@@ -200,65 +200,6 @@ export function deleteWhatsAppTemplate(workspaceId: string, name: string) {
   return call<{ deleted: boolean }>('whatsapp.template.delete', { workspaceId, name });
 }
 
-/* ---------------------------- parcours de test ----------------------------- */
-
-/**
- * État du parcours WhatsApp de test, tel que le serveur le rend.
- *
- * Aucun secret ici : uniquement des identifiants Meta publics (WABA, numéro),
- * un booléen de disponibilité et la connexion éventuelle.
- */
-export interface MetaTestFlowState {
-  available: boolean;
-  reason: string | null;
-  wabaId: string | null;
-  phoneNumberId: string | null;
-  displayPhoneNumber: string | null;
-}
-
-export interface MetaTestFlowStatus {
-  testFlow: MetaTestFlowState;
-  connection: {
-    status: string;
-    flow: string | null;
-    wabaId: string | null;
-    phoneNumberId: string | null;
-    displayPhoneNumber: string | null;
-    webhookSubscribed: boolean | null;
-    lastError: string | null;
-  } | null;
-}
-
-/**
- * Le serveur décide, le navigateur affiche.
- *
- * Ces trois appels n'envoient AUCUN identifiant Meta : même en modifiant le
- * corps de la requête, le serveur utilise sa propre configuration. Un client
- * non administrateur reçoit 404 et la fiche n'affiche rien de plus.
- */
-export function readMetaTestFlow(workspaceId: string) {
-  return call<MetaTestFlowStatus>('whatsapp.test.status', { workspaceId });
-}
-
-export function connectMetaTestFlow(workspaceId: string) {
-  return call<{
-    connected: boolean;
-    wabaId: string;
-    phoneNumberId: string;
-    displayPhoneNumber: string | null;
-    webhookSubscribed: boolean;
-    warning: string | null;
-    connections: MetaConnectionView[];
-  }>('whatsapp.test.connect', { workspaceId });
-}
-
-export function disconnectMetaTestFlow(workspaceId: string) {
-  return call<{ disconnected: boolean; connections: MetaConnectionView[] }>(
-    'whatsapp.test.disconnect',
-    { workspaceId },
-  );
-}
-
 /* -------------------------------- Messenger -------------------------------- */
 
 export function sendMessenger(workspaceId: string, input: { pageId: string; recipientId: string; text: string }) {

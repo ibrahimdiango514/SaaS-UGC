@@ -6,16 +6,16 @@
 // toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
 // JAMAIS exécuté.
 //
-// Épinglé sur meta-connect.js (48103 caractères).
+// Épinglé sur meta-connect.js (42055 caractères).
 //
 // Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "538cf630cdca3d6805e94f3f7ddc0ec48b8edd8b";
+const COMMIT = "0000000000000000000000000000000000000000";
 const PATH = "supabase/functions/_artifacts/meta-connect.js";
-const ARTIFACT_SHA256 = "d0942b3d8dd4a023037cc9e2be4df1c4e639ec0ecfbcdf7209edeb45dcfe92ac";
-const ARTIFACT_CHARS = 48103;
+const ARTIFACT_SHA256 = "2240222a0d9d1cabf4e4d2ae7a0949e4342eaf97f479d07fc99dbe4b7eb53698";
+const ARTIFACT_CHARS = 42055;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
 // porte sur le fichier tel qu'il est committé.

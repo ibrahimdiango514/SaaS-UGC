@@ -92,9 +92,6 @@ function depsAvec(overrides: Partial<MetaDeps> = {}, options: {
 
   const deps: MetaDeps = {
     config,
-    // Parcours de test désactivé ici : ce fichier couvre le parcours client.
-    testFlow: undefined,
-    isAdmin: async () => false,
     getUserId: async (authorization: string) =>
       authorization === `Bearer jwt-${USER}` ? USER : null,
     checkImportAccess: async () => ({

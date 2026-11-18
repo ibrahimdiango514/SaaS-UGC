@@ -26,7 +26,6 @@ import postgres from 'npm:postgres@3.4.5';
 import { handleMetaConnect, type ConnectionRow, type MetaConfig, type MetaDeps, type PageRow } from './handler.ts';
 import { type MetaProduct } from '../../../src/business/meta/products.ts';
 import { buildAllowedOrigins } from '../../../src/lib/origin-allowlist.ts';
-import { readTestFlowConfig } from '../../../src/business/meta/test-flow.ts';
 
 /**
  * Lecture d'environnement par `globalThis` : ce fichier reste vérifiable par
@@ -40,16 +39,6 @@ const SUPABASE_URL = env('SUPABASE_URL');
 const ANON_KEY = env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY');
 const DATABASE_URL = env('META_CONNECT_DATABASE_URL') || env('SUPABASE_DB_URL');
 const ALLOWED_ORIGINS = buildAllowedOrigins(env('VYORA_ALLOWED_ORIGINS'));
-
-/**
- * Jeton du parcours de test — lu depuis l'environnement, jamais d'une requête.
- *
- * Il est posé sur `globalThis` (et non passé dans `MetaDeps`) pour qu'aucune
- * action cliente ne puisse l'atteindre : `deps` est sérialisé nulle part, mais
- * un jeton qui n'apparaît pas dans la structure partagée ne peut pas fuiter par
- * inadvertance dans une réponse qui la parcourrait.
- */
-(globalThis as unknown as { __metaTestToken?: string }).__metaTestToken = env('META_TEST_ACCESS_TOKEN');
 
 const config: MetaConfig = {
   appId: env('META_APP_ID'),
@@ -142,29 +131,7 @@ function asProduct(value: unknown): MetaProduct {
 
 const deps: MetaDeps = {
   config,
-  // Le parcours de test est fermé tant que META_TEST_FLOW_ENABLED n'est pas
-  // explicitement à 'true'. Son absence ne l'ouvre jamais.
-  testFlow: readTestFlowConfig(env),
   getUserId,
-
-  /**
-   * Administrateur propriétaire, décidé par la BASE pour l'identifiant GoTrue
-   * vérifié. Aucune adresse e-mail, aucun en-tête, aucun paramètre de requête
-   * n'entre dans cette décision : un client ne peut pas se déclarer admin.
-   */
-  async isAdmin(userId: string) {
-    try {
-      return await withDb(async (db: Sql) => {
-        const [ligne] = await db<{ admin: boolean }[]>`
-          select saas_business.meta_is_admin(${userId}::uuid) as admin`;
-        return ligne?.admin === true;
-      });
-    } catch {
-      // Panne de lecture = refus. Un doute ne doit jamais ouvrir un parcours
-      // réservé à l'administrateur.
-      return false;
-    }
-  },
 
   async checkImportAccess(userId: string) {
     return withDb(async (db: Sql) => {
