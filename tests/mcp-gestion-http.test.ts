@@ -138,6 +138,12 @@ function serveurGere(partiel: Partial<ServeurGere> = {}): ServeurGere {
     derniereErreur: null,
     createdAt: '2026-11-21T00:00:00Z',
     revokedAt: null,
+    // Champs OAuth : neutres ici, les tests dédiés les renseignent.
+    oauthClientId: null,
+    authorizationServer: null,
+    oauthExpireLe: null,
+    oauthScope: null,
+    oauthAs: null,
     ...partiel,
   };
 }
@@ -152,6 +158,12 @@ function acces(partiel: Partial<AccesGestion> = {}) {
     permission: vi.fn(async () => ({ list_products: 'allowed' })),
     revoquer: vi.fn(async () => true),
     secret: vi.fn(async () => JETON as string | null),
+    fluxCreer: vi.fn(async () => undefined),
+    fluxConsommer: vi.fn(async () => null),
+    clientOAuth: vi.fn(async () => undefined),
+    lireOAuth: vi.fn(async () => null),
+    stockerOAuth: vi.fn(async () => undefined),
+    detruireOAuth: vi.fn(async () => undefined),
   };
   const base: AccesGestion = {
     listerServeurs: appels.lister as unknown as AccesGestion['listerServeurs'],
@@ -161,6 +173,12 @@ function acces(partiel: Partial<AccesGestion> = {}) {
     definirPermission: appels.permission as unknown as AccesGestion['definirPermission'],
     revoquer: appels.revoquer as unknown as AccesGestion['revoquer'],
     lireSecret: appels.secret as unknown as AccesGestion['lireSecret'],
+    creerFluxOAuth: appels.fluxCreer as unknown as AccesGestion['creerFluxOAuth'],
+    consommerFluxOAuth: appels.fluxConsommer as unknown as AccesGestion['consommerFluxOAuth'],
+    enregistrerClientOAuth: appels.clientOAuth as unknown as AccesGestion['enregistrerClientOAuth'],
+    lireOAuth: appels.lireOAuth as unknown as AccesGestion['lireOAuth'],
+    stockerJetonsOAuth: appels.stockerOAuth as unknown as AccesGestion['stockerJetonsOAuth'],
+    detruireOAuth: appels.detruireOAuth as unknown as AccesGestion['detruireOAuth'],
     ...partiel,
   };
   return { base, appels };

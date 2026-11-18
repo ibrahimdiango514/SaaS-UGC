@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  BookOpen, Check, ChevronLeft, ChevronRight, Compass, Image as ImageIcon, MessageSquarePlus,
+  BookOpen, Check, ChevronLeft, ChevronRight, Compass, Image as ImageIcon, Link2, MessageSquarePlus,
   MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plug, Search, Settings, Sparkles,
   Server, Trash2, TrendingUp, User, X,
 } from 'lucide-react';
@@ -196,6 +196,10 @@ export function Sidebar({
           <RailLink to="/app/connect" icon={<Plug size={16} />} label="Intégrations" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/connexions-ia" icon={<Sparkles size={16} />} label="MCP et connexions IA" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/mes-serveurs-mcp" icon={<Server size={16} />} label="Mes serveurs MCP" collapsed={collapsed} onClick={onCloseMobile} />
+          {/* Entrée unifiée : les deux sens du protocole sur un seul écran,
+              chacun dans sa section. Les deux entrées ci-dessus restent pour
+              ceux qui arrivent par un lien direct. */}
+          <RailLink to="/app/connexions-mcp" icon={<Link2 size={16} />} label="Connexions MCP" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/ai/explorer" icon={<Compass size={16} />} label="Explorer" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/business" icon={<TrendingUp size={16} />} label="Espace Business" collapsed={collapsed} onClick={onCloseMobile} />
         </nav>

@@ -30,6 +30,7 @@ import {
   validerPermission,
 } from './gestion.ts';
 import { executerOutilExterne, statutHttp } from './execution.ts';
+import { traiterDemarrageOAuth } from './oauth-http.ts';
 import { testerServeurReel, versJson, type DependancesGestion, type ServeurGere } from './gestion-serveur.ts';
 import type { ResolveurIdentite } from './http.ts';
 
@@ -214,6 +215,19 @@ export async function traiterRequeteGestion(
           etat: permission.demande.etat,
         });
         return construireReponse(200, { ok: true, toolPermissions: fusion }, cors);
+      }
+
+      case 'oauth-demarrer': {
+        /*
+         * Délégué à `oauth-http.ts` : la découverte, l'enregistrement et PKCE
+         * ont leur propre module, et cette route les réutilise plutôt que de
+         * les réimplémenter ici. La fonction garde la même identité GoTrue.
+         */
+        return traiterDemarrageOAuth(request, corps, deps, {
+          originesSupplementaires: options.originesSupplementaires,
+          identite: options.identite,
+          ...(options.journal ? { journal: options.journal } : {}),
+        });
       }
 
       case 'executer': {

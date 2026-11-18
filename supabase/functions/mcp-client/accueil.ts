@@ -24,6 +24,7 @@
  * source de vérité, et il reste vrai si un appelant oublie une vérification.
  */
 import type { AccesBase, ConnexionServeur } from './execution.ts';
+import { lireOAuthBase, stockerJetonsBase, type SqlOAuth } from './oauth-acces.ts';
 
 /**
  * Client SQL minimal, compatible `postgres.js`.
@@ -54,6 +55,7 @@ interface LigneServeur {
   revoked_at: string | null;
   tools: unknown;
   tool_permissions: unknown;
+  oauth_as?: unknown;
 }
 
 const AUTH_KINDS = new Set(['none', 'bearer', 'api_key', 'oauth']);
@@ -121,6 +123,7 @@ export function depuisLigne(ligne: LigneServeur): ConnexionServeur {
      * cache intermédiaire à invalider.
      */
     toolPermissions: permissions,
+    oauthAs: objetJson(ligne.oauth_as),
     /*
      * AUCUNE écriture n'est autorisée. La migration P2 ne porte pas de colonne
      * d'autorisation d'écriture, et la consigne est explicite : rien ne doit
@@ -146,7 +149,7 @@ export function creerAccesReel(options: OptionsAcces): AccesBase {
           select
             s.id, s.user_id, s.workspace_id, s.name, s.url, s.auth_kind,
             s.secret_ref, sec.vault_name, s.status, s.revoked_at,
-            s.tools, s.tool_permissions
+            s.tools, s.tool_permissions, s.oauth_as
           from public.mcp_servers s
           left join public.mcp_servers_secrets sec on sec.server_id = s.id
           where s.id = ${serverId}::uuid
@@ -156,6 +159,31 @@ export function creerAccesReel(options: OptionsAcces): AccesBase {
         ` as LigneServeur[];
         if (!Array.isArray(lignes) || lignes.length === 0) return null;
         return depuisLigne(lignes[0]);
+      } finally {
+        await sql.end({ timeout: 5 }).catch(() => {});
+      }
+    },
+
+    async lireOAuth(serverId: string) {
+      const sql = options.sql();
+      try {
+        return await lireOAuthBase(sql as unknown as SqlOAuth, serverId);
+      } finally {
+        await sql.end({ timeout: 5 }).catch(() => {});
+      }
+    },
+
+    async stockerJetonsOAuth(input: {
+      userId: string;
+      serverId: string;
+      access: string;
+      refresh?: string;
+      expireLe: string | null;
+      scope?: string | null;
+    }): Promise<void> {
+      const sql = options.sql();
+      try {
+        await stockerJetonsBase(sql as unknown as SqlOAuth, input);
       } finally {
         await sql.end({ timeout: 5 }).catch(() => {});
       }

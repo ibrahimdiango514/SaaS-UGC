@@ -315,6 +315,11 @@ describe('sérialisation vers le navigateur — liste blanche', () => {
     derniereErreur: null,
     createdAt: '2026-11-21T00:00:00Z',
     revokedAt: null,
+    oauthClientId: null,
+    authorizationServer: null,
+    oauthExpireLe: null,
+    oauthScope: null,
+    oauthAs: null,
   };
 
   it('ne contient aucun champ de secret', () => {

@@ -40,6 +40,7 @@ import { getWorkspaces } from '../lib/api';
 import {
   creerServeur,
   definirPermission,
+  demarrerOAuth,
   etatPermission,
   executerOutil,
   LIBELLES_AUTH,
@@ -74,7 +75,7 @@ function tonBadge(ton: 'ok' | 'attention' | 'erreur' | 'neutre'): string {
   }
 }
 
-export function MesServeursMcpPage() {
+export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolean } = {}) {
   const [serveurs, setServeurs] = useState<ServeurMcp[] | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string>('');
   const [chargement, setChargement] = useState(true);
@@ -167,6 +168,44 @@ export function MesServeursMcpPage() {
     }
   }, [rafraichir]);
 
+  /**
+   * Lance l'autorisation OAuth : on demande une URL au serveur, puis on y
+   * envoie le navigateur.
+   *
+   * Rien n'est stocké ici : ni verifier PKCE, ni état. Ils vivent côté serveur,
+   * dans une table à usage unique. Si la navigation n'a pas lieu, l'état expire
+   * en dix minutes et ne laisse aucun résidu exploitable.
+   *
+   * En cas d'échec, on affiche le motif RÉEL du serveur : « ce fournisseur
+   * n'annonce pas PKCE S256 » est une information dont l'utilisateur a besoin,
+   * pas un détail technique à masquer derrière « une erreur est survenue ».
+   */
+  const autoriserOAuth = useCallback(async (serveur: ServeurMcp) => {
+    setEnCours(serveur.id);
+    setMessage(null);
+    try {
+      const demarrage = await demarrerOAuth(serveur.id);
+      if (!demarrage.pkceAnnonce) {
+        setMessage({
+          ton: 'info',
+          texte: 'Ce fournisseur n’annonce pas PKCE S256 dans ses métadonnées. '
+            + 'VYORA l’envoie quand même, mais la protection n’est pas confirmée par le serveur.',
+        });
+      }
+      window.location.assign(demarrage.autorisationUrl);
+      return;
+    } catch (erreur) {
+      setMessage({
+        ton: 'erreur',
+        texte: erreur instanceof ErreurGestion
+          ? erreur.message
+          : 'L’autorisation OAuth n’a pas pu être préparée.',
+      });
+    } finally {
+      setEnCours('');
+    }
+  }, []);
+
   const revoquer = useCallback(async () => {
     if (!aRevoquer) return;
     setEnCours(aRevoquer.id);
@@ -247,6 +286,7 @@ export function MesServeursMcpPage() {
 
   return (
     <div className="space-y-5">
+      {!sansEnTete && (
       <PageHeader
         eyebrow="VYORA · MCP"
         title="Mes serveurs MCP"
@@ -262,6 +302,7 @@ export function MesServeursMcpPage() {
           </div>
         )}
       />
+      )}
 
       {message && (
         <div
@@ -350,6 +391,23 @@ export function MesServeursMcpPage() {
                       </span>
                     ) : (
                       <>
+                        {serveur.authKind === 'oauth' && (
+                          /*
+                           * `aria-label` explicite : « Autoriser » seul serait
+                           * ambigu à l'écran comme pour un lecteur d'écran,
+                           * puisqu'un bouton « Autoriser » existe aussi par
+                           * outil. Deux actions différentes, deux noms.
+                           */
+                          <Button
+                            variant="ghost"
+                            aria-label={serveur.oauthExpireLe ? 'Réautoriser via OAuth' : 'Autoriser via OAuth'}
+                            onClick={() => void autoriserOAuth(serveur)}
+                            disabled={enTest}
+                          >
+                            {enTest ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Lock className="mr-1.5 h-4 w-4" />}
+                            {serveur.oauthExpireLe ? 'Réautoriser' : 'Autoriser'}
+                          </Button>
+                        )}
                         <Button variant="ghost" onClick={() => void tester(serveur)} disabled={enTest}>
                           {enTest ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1.5 h-4 w-4" />}
                           Tester

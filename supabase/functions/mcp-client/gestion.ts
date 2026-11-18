@@ -38,6 +38,7 @@ export const ROUTES_GESTION = [
   'permissions',
   'revoquer',
   'executer',
+  'oauth-demarrer',
 ] as const;
 
 export type RouteGestion = typeof ROUTES_GESTION[number];

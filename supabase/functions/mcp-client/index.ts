@@ -30,6 +30,7 @@
  */
 import postgres from 'npm:postgres@3.4.5';
 import { traiterRequete } from './http.ts';
+import { traiterCallbackOAuth, estCheminCallback } from './oauth-http.ts';
 import { creerAccesReel, type SqlTag } from './accueil.ts';
 import { traiterRequeteGestion } from './gestion-http.ts';
 import { estCheminGestion } from './gestion.ts';
@@ -211,6 +212,15 @@ const depsGestionSingleton = () => dependancesGestion();
 if (runtimeDeno?.serve) {
   runtimeDeno.serve((request: Request) => {
     const chemin = new URL(request.url).pathname;
+    /*
+     * Le retour OAuth arrive par NAVIGATION du navigateur : il n'a pas d'en-tête
+     * `Authorization`, et ne doit donc pas passer par le contrôle de jeton
+     * GoTrue. Il est traité AVANT l'aiguillage de gestion, dont il ne partage
+     * ni le contrat ni la sécurité (state à usage unique + PKCE).
+     */
+    if (estCheminCallback(chemin)) {
+      return traiterCallbackOAuth(request, depsGestionSingleton, {});
+    }
     if (estCheminGestion(chemin)) {
       /*
        * Une route `/gestion/` inconnue reste une route de gestion : elle reçoit

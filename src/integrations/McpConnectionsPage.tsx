@@ -94,7 +94,7 @@ function formaterDate(iso: string | null): string {
 
 type Message = { tone: 'success' | 'error'; text: string };
 
-export function McpConnectionsPage() {
+export function McpConnectionsPage({ sansEnTete = false }: { sansEnTete?: boolean } = {}) {
   const [jetons, setJetons] = useState<JetonMcp[] | null>(null);
   const [activite, setActivite] = useState<EvenementMcp[]>([]);
   const [chargement, setChargement] = useState(true);
@@ -227,6 +227,7 @@ export function McpConnectionsPage() {
 
   return (
     <div className="space-y-5" data-testid="mcp-page">
+      {!sansEnTete && (
       <header>
         <h1 className="font-display text-xl font-semibold text-white">MCP et connexions IA</h1>
         <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-400">
@@ -235,6 +236,7 @@ export function McpConnectionsPage() {
           jamais d’un identifiant transmis par le client.
         </p>
       </header>
+      )}
 
       {message && (
         <p
@@ -556,6 +558,21 @@ export function McpConnectionsPage() {
           <li>4. Lancez l’initialisation : le client doit recevoir la liste des outils.</li>
           <li>5. Revenez ici : « Dernier appel » et le journal confirmeront que la connexion fonctionne.</li>
         </ol>
+        {/*
+          * Honnêteté de la promesse : VYORA implémente le protocole MCP, mais
+          * aucun client tiers n'est certifié par un essai réel de bout en bout.
+          * Annoncer « compatible ChatGPT » sans l'avoir essayé serait un
+          * mensonge que l'utilisateur découvrirait à ses frais.
+          */}
+        <p
+          className="mt-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2.5 py-2 text-[0.68rem] leading-relaxed text-amber-100/90"
+          data-testid="avertissement-compatibilite"
+        >
+          VYORA parle le protocole MCP (Streamable HTTP + OAuth 2.1/PKCE). Aucun client tiers
+          (ChatGPT, Claude Code, Cursor, VS Code…) n’a encore été validé par un essai réel de bout
+          en bout : considérez la compatibilité comme <strong>attendue</strong>, pas certifiée.
+          Le journal ci-dessus est la preuve de ce qui se passe réellement.
+        </p>
         <p className="mt-2 flex items-start gap-1.5 text-[0.68rem] leading-relaxed text-slate-500">
           <Loader2 size={11} className="mt-0.5 shrink-0" />
           Si votre client reste « non connecté » alors que le journal montre des appels, c’est

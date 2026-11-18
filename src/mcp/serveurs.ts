@@ -59,6 +59,29 @@ export interface ServeurMcp {
   derniereErreur: string | null;
   createdAt: string;
   revokedAt: string | null;
+  /** Identifiant client OAuth (public), `null` hors OAuth. */
+  oauthClientId?: string | null;
+  /** Serveur d'autorisation retenu, `null` hors OAuth. */
+  authorizationServer?: string | null;
+  /** Expiration du jeton OAuth courant, ISO. */
+  oauthExpireLe?: string | null;
+  /** Portées obtenues. */
+  oauthScope?: string | null;
+}
+
+/** Ce que le serveur renvoie quand on prépare une autorisation OAuth. */
+export interface DemarrageOAuth {
+  autorisationUrl: string;
+  state: string;
+  serveurAutorisation: string;
+  portees: string[] | null;
+  clientEnregistre: boolean;
+  /**
+   * Faux quand le serveur n'a pas ANNONCÉ S256 dans ses métadonnées. La
+   * demande part quand même (beaucoup de serveurs l'omettent et l'exigent),
+   * mais l'écran doit le dire : ce n'est pas une vérification.
+   */
+  pkceAnnonce: boolean;
 }
 
 export interface ResultatTest {
@@ -134,6 +157,18 @@ async function appeler<T>(route: string, corps: unknown): Promise<T> {
     throw new ErreurGestion(message, code, reponse.status);
   }
   return charge as T;
+}
+
+/**
+ * Prépare une autorisation OAuth et renvoie l'URL vers laquelle envoyer
+ * l'utilisateur.
+ *
+ * Ce module ne reçoit AUCUN jeton : la réponse ne contient qu'une URL, un état
+ * et des métadonnées publiques. Les jetons sont échangés côté serveur, lors du
+ * retour du navigateur, et rangés dans Vault.
+ */
+export async function demarrerOAuth(serverId: string): Promise<DemarrageOAuth> {
+  return appeler<DemarrageOAuth>('oauth-demarrer', { serverId });
 }
 
 /** Liste les serveurs de l'utilisateur connecté. */

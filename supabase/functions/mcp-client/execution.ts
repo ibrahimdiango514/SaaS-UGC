@@ -34,6 +34,8 @@
  * alimenté par un secret lu côté serveur.
  */
 import type { EgressDeps } from '../store-import/safe-egress.ts';
+import { dateExpiration, fautRafraichir, rafraichirJetons } from './oauth.ts';
+import type { JetonsOAuth } from './oauth-acces.ts';
 import {
   deciderAppel,
   executerOutil,
@@ -78,6 +80,12 @@ export interface ConnexionServeur {
   toolPermissions: Record<string, unknown>;
   /** Écritures explicitement autorisées, outil par outil. */
   ecrituresAutorisees: Record<string, unknown>;
+  /**
+   * Métadonnées du serveur d'autorisation, mémorisées à l'autorisation.
+   * Elles contiennent le point de terminaison de jeton, indispensable au
+   * renouvellement. Publiques : le serveur les publie lui-même.
+   */
+  oauthAs?: Record<string, unknown> | null;
 }
 
 /** Accès aux données, injecté pour être testable sans base. */
@@ -86,6 +94,20 @@ export interface AccesBase {
   lireConnexion(input: { userId: string; serverId: string }): Promise<ConnexionServeur | null>;
   /** Lit la VALEUR d'un secret Vault par son nom. Jamais renvoyée au client. */
   lireSecret(vaultName: string): Promise<string | null>;
+  /**
+   * Jetons OAuth d'un serveur. Optionnel : une base sans OAuth (ou un test P5)
+   * n'a pas à l'implémenter. Absent = aucune connexion OAuth exploitable.
+   */
+  lireOAuth?(serverId: string): Promise<JetonsOAuth | null>;
+  /** Écrit les jetons renouvelés. Appelé uniquement après un refresh réussi. */
+  stockerJetonsOAuth?(input: {
+    userId: string;
+    serverId: string;
+    access: string;
+    refresh?: string;
+    expireLe: string | null;
+    scope?: string | null;
+  }): Promise<void>;
 }
 
 /** Ce que le client demande — un indice, pas une autorisation. */
@@ -209,10 +231,22 @@ export async function executerOutilExterne(
     };
   }
 
-  // Le secret est lu AVANT la décision : s'il manque alors qu'il est requis,
-  // l'appel échouerait de toute façon, mais avec un message trompeur (401).
+  /*
+   * Le jeton est obtenu AVANT la décision : s'il manque alors qu'il est requis,
+   * l'appel échouerait de toute façon, mais avec un message trompeur (401).
+   *
+   * OAuth a un traitement distinct. Un jeton OAuth expire : la valeur rangée
+   * dans Vault au moment de l'autorisation peut être morte depuis longtemps.
+   * On lit donc les jetons, on renouvelle si nécessaire, on réécrit, puis on
+   * n'envoie QUE la valeur fraîche. Sans cette étape, l'utilisateur devrait
+   * réautoriser à la main à chaque expiration, ce qui vide la connexion de sens.
+   */
   let jeton: string | null = null;
-  if (connexion.authKind !== 'none') {
+  if (connexion.authKind === 'oauth') {
+    const obtention = await obtenirJetonOAuth(connexion, deps);
+    if (!obtention.ok) return { ok: false, code: obtention.code, message: obtention.message };
+    jeton = obtention.jeton;
+  } else if (connexion.authKind !== 'none') {
     if (!connexion.secretVaultName) {
       return { ok: false, code: 'secret_manquant', message: 'Aucun secret n’est configuré pour cette connexion.' };
     }
@@ -292,6 +326,122 @@ export async function executerOutilExterne(
     return { ok: false, code: resultat.error.code, message: resultat.error.message };
   }
   return { ok: true, contenu: resultat.value.contenu, isError: resultat.value.isError };
+}
+
+/* -------------------------------------------------------------------------- */
+/* 3 bis. Jeton OAuth : lecture, renouvellement, réécriture                      */
+/* -------------------------------------------------------------------------- */
+
+type ResultatJeton =
+  | { ok: true; jeton: string }
+  | { ok: false; code: string; message: string };
+
+/**
+ * Obtient un jeton d'accès utilisable pour CET appel.
+ *
+ * Trois issues, et une seule est un refus :
+ *
+ *   1. jeton valide et pas près d'expirer → utilisé tel quel ;
+ *   2. jeton à renouveler → `refresh_token` échangé, nouveaux jetons RÉÉCRITS,
+ *      nouveau jeton utilisé ;
+ *   3. renouvellement impossible ou refusé → si l'ancien jeton n'est pas encore
+ *      expiré on l'utilise quand même (il fonctionne), sinon on refuse avec
+ *      `auth_required` : c'est un état que l'utilisateur doit voir et corriger
+ *      en réautorisant, pas une erreur serveur à réessayer en boucle.
+ *
+ * L'échec de réécriture n'est jamais silencieux : sans écriture, le prochain
+ * appel renverrait le jeton périmé. On refuse alors l'appel plutôt que de
+ * laisser une connexion qui échouerait de façon incompréhensible.
+ */
+async function obtenirJetonOAuth(connexion: ConnexionServeur, deps: DependancesP5): Promise<ResultatJeton> {
+  const jetons = deps.base.lireOAuth ? await deps.base.lireOAuth(connexion.id) : null;
+  if (!jetons?.access) {
+    return {
+      ok: false,
+      code: 'auth_required',
+      message: 'Cette connexion n’a pas encore de jeton OAuth : autorisez-la depuis « Connexions MCP ».',
+    };
+  }
+
+  if (!fautRafraichir(jetons.expireLe)) return { ok: true, jeton: jetons.access };
+
+  const expirable = estExpire(jetons.expireLe);
+  const tokenEndpoint = pointTerminaisonJeton(connexion);
+
+  if (!jetons.refresh || !jetons.clientId || !tokenEndpoint) {
+    // Pas de quoi renouveler. Un jeton encore valide reste utilisable.
+    if (expirable) {
+      return {
+        ok: false,
+        code: 'auth_required',
+        message: 'Le jeton OAuth a expiré et ne peut pas être renouvelé automatiquement : réautorisez la connexion.',
+      };
+    }
+    return { ok: true, jeton: jetons.access };
+  }
+
+  const renouvellement = await rafraichirJetons({
+    tokenEndpoint,
+    refresh: jetons.refresh,
+    client: {
+      clientId: jetons.clientId,
+      ...(jetons.clientSecret ? { clientSecret: jetons.clientSecret } : {}),
+      enregistre: false,
+    },
+  }, deps.egress);
+
+  if (!renouvellement.ok) {
+    if (expirable) {
+      return {
+        ok: false,
+        code: 'auth_required',
+        message: 'Le renouvellement du jeton OAuth a échoué : réautorisez la connexion.',
+      };
+    }
+    // Encore valide quelques secondes : on l'utilise, le serveur tranchera.
+    return { ok: true, jeton: jetons.access };
+  }
+
+  const nouveaux = renouvellement.valeur;
+  if (!deps.base.stockerJetonsOAuth) {
+    return {
+      ok: false,
+      code: 'renouvellement_non_persiste',
+      message: 'Jeton renouvelé mais non enregistrable : la connexion serait cassée au prochain appel.',
+    };
+  }
+  try {
+    await deps.base.stockerJetonsOAuth({
+      userId: connexion.userId,
+      serverId: connexion.id,
+      access: nouveaux.access,
+      // Certains fournisseurs ne renvoient PAS de nouveau refresh_token : la
+      // conserver est obligatoire, sinon le renouvellement suivant échouerait.
+      ...(nouveaux.refresh ?? jetons.refresh ? { refresh: nouveaux.refresh ?? jetons.refresh ?? undefined } : {}),
+      expireLe: dateExpiration(nouveaux.expireDans),
+      scope: nouveaux.scope ?? jetons.scope ?? null,
+    });
+  } catch {
+    return {
+      ok: false,
+      code: 'renouvellement_non_persiste',
+      message: 'Jeton renouvelé mais non enregistré : la connexion serait cassée au prochain appel.',
+    };
+  }
+
+  return { ok: true, jeton: nouveaux.access };
+}
+
+function estExpire(expireLe: string | null | undefined, maintenant = Date.now()): boolean {
+  if (!expireLe) return false;
+  const date = Date.parse(expireLe);
+  return Number.isFinite(date) ? date <= maintenant : false;
+}
+
+/** Le point de terminaison de jeton vient des métadonnées mémorisées, jamais du client. */
+function pointTerminaisonJeton(connexion: ConnexionServeur): string | null {
+  const endpoint = (connexion.oauthAs ?? {})['token_endpoint'];
+  return typeof endpoint === 'string' && endpoint.startsWith('https://') ? endpoint : null;
 }
 
 /* -------------------------------------------------------------------------- */
