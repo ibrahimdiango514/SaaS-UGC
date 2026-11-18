@@ -1,0 +1,112 @@
+name: Frontend — publication Cloudflare Pages (manuelle)
+
+# Objet : publier le frontend VYORA sur Cloudflare Pages SANS Netlify (crédits
+# épuisés) et SANS GitHub Pages (ses conditions d'utilisation excluent
+# explicitement l'hébergement d'un SaaS commercial).
+#
+# Ce workflow ne se déclenche JAMAIS tout seul : aucun `push`, uniquement un
+# lancement manuel, après les vérifications listées dans
+# docs/rapport-p6d-oauth-reel.md (CORS des Edge Functions, URL de redirection
+# GoTrue, domaine, retour arrière).
+#
+# Préalables (une fois, hors de ce dépôt) :
+#   1. Un projet Cloudflare Pages créé en « Direct Upload » (pas en intégration
+#      Git, pour que ce workflow reste la seule voie de publication).
+#   2. Deux secrets de dépôt : CLOUDFLARE_API_TOKEN (permission « Cloudflare
+#      Pages : Edit ») et CLOUDFLARE_ACCOUNT_ID.
+#
+# Retour arrière : chaque publication est conservée par Cloudflare ; le bouton
+# « Rollback » du tableau de bord rétablit la précédente en quelques secondes.
+# Ce workflow peut aussi être relancé sur n'importe quel commit antérieur.
+#
+# Aucun secret n'est compilé dans le bundle : les valeurs VITE_* sont des
+# valeurs PUBLIQUES (URL du projet, clé publiable), déjà présentes par défaut
+# dans src/lib/supabase.ts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_name:
+        description: "Nom du projet Cloudflare Pages"
+        required: true
+        default: "vyora"
+      environnement:
+        description: "production = branche de production du projet Pages ; preview = URL d'aperçu isolée"
+        required: true
+        default: "preview"
+        type: choice
+        options: ["preview", "production"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-pages-${{ inputs.project_name }}-${{ inputs.environnement }}
+  cancel-in-progress: false
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Préalables présents ?
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -u
+          manque=""
+          [ -n "$TOKEN" ] || manque="$manque CLOUDFLARE_API_TOKEN"
+          [ -n "$ACCOUNT" ] || manque="$manque CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$manque" ]; then
+            echo "::error::Secrets manquants :$manque — rien n'a été publié."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Construire
+        env:
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+        run: |
+          npm ci
+          npm run build
+          # La révision publiée doit être lisible dans le HTML servi.
+          grep -o 'name="vyora-revision" content="[^"]*"' dist/index.html
+          # Repli SPA : Cloudflare Pages lit public/_redirects (copié dans dist).
+          test -f dist/_redirects && cat dist/_redirects
+
+      - name: Publier sur Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy dist
+            --project-name=${{ inputs.project_name }}
+            --branch=${{ inputs.environnement == 'production' && 'main' || format('preview-{0}', github.ref_name) }}
+            --commit-hash=${{ github.sha }}
+            --commit-message="${{ github.ref_name }} @ ${{ github.sha }}"
+
+      - name: Résumé
+        run: |
+          {
+            echo "## Publication frontend"
+            echo
+            echo "| Élément | Valeur |"
+            echo "| --- | --- |"
+            echo "| Projet Pages | ${{ inputs.project_name }} |"
+            echo "| Environnement | ${{ inputs.environnement }} |"
+            echo "| Commit | ${{ github.sha }} |"
+            echo "| Branche Git | ${{ github.ref_name }} |"
+            echo
+            echo "Vérifier ensuite : l'origine publiée est-elle autorisée en CORS par les Edge Functions"
+            echo "(VYORA_ALLOWED_ORIGINS) et dans les URL de redirection GoTrue ? Sinon, connexion et"
+            echo "appels MCP échoueront depuis ce domaine."
+          } >> "$GITHUB_STEP_SUMMARY"
