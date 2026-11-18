@@ -164,7 +164,7 @@ export interface StoreImportDependencies {
   /** Vérifie l'utilisateur à partir de l'en-tête Authorization. */
   getUserId(authorization: string): Promise<string | null>;
   /**
-   * Vérifie l'abonnement Business Ground de CET utilisateur.
+   * Vérifie l'abonnement Business Grow de CET utilisateur.
    *
    * Obligatoire : sans cette dépendance, le module refuse de servir
    * (`IMPORT_ACCESS_UNAVAILABLE`). On préfère indisponible à ouvert.
@@ -571,7 +571,7 @@ export function createStoreImportHandler(dependencies: StoreImportDependencies) 
         {
           error: {
             code: 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
-            message: access?.message || 'Un abonnement Business Ground actif est requis.',
+            message: access?.message || 'Un abonnement Business Grow actif est requis.',
             reason: access?.reason ?? 'NO_SUBSCRIPTION',
             // Le client utilise ces champs pour afficher l'état réel et le lien
             // de souscription ; ils ne donnent aucun droit.

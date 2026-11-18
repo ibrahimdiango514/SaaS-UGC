@@ -28,7 +28,7 @@
  * ## Sécurité, dans l'ordre où elle s'applique
  *
  * 1. Authentification GoTrue (jamais un en-tête de confiance).
- * 2. Abonnement Business Ground **actif et payé** (`bg_import_access`).
+ * 2. Abonnement Business Grow **actif et payé** (`bg_import_access`).
  * 3. Accès en écriture à l'entreprise (`bg_require_workspace(…, true)`).
  * 4. Validation d'URL + résolution DNS + épinglage IP (aucun SSRF possible).
  * 5. La clé n'est utilisée que pour un `GET` sortant, jamais renvoyée.
@@ -423,7 +423,7 @@ async function connecter(
     const message = erreur instanceof Error ? erreur.message : '';
     if (/SUBSCRIPTION_REQUIRED/i.test(message)) {
       return jsonResponse(
-        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Ground actif et payé est requis pour connecter une boutique.'),
+        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Grow actif et payé est requis pour connecter une boutique.'),
         403, corsOrigin,
       );
     }
@@ -570,7 +570,7 @@ async function connecterHerberge(
     const message = erreur instanceof Error ? erreur.message : '';
     if (/SUBSCRIPTION_REQUIRED/i.test(message)) {
       return jsonResponse(
-        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Ground actif et payé est requis pour connecter une boutique.'),
+        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Grow actif et payé est requis pour connecter une boutique.'),
         403, corsOrigin,
       );
     }
@@ -1030,7 +1030,7 @@ async function reponseEnregistrementImpossible(
   const message = erreur instanceof Error ? erreur.message : '';
   if (/SUBSCRIPTION_REQUIRED|SUBSCRIPTION_EXPIRED|SUBSCRIPTION_CANCELED/i.test(message)) {
     return jsonResponse(
-      failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Ground actif et payé est requis pour connecter une boutique.'),
+      failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Grow actif et payé est requis pour connecter une boutique.'),
       403, corsOrigin,
     );
   }
@@ -1125,7 +1125,7 @@ export async function handleStoreConnect(
         ? 403 : acces.reason === 'NO_SUBSCRIPTION' ? 402 : 403;
       return new Response(JSON.stringify(failure(
         acces.reason || 'SUBSCRIPTION_REQUIRED',
-        acces.message || 'Un abonnement Business Ground actif est requis.',
+        acces.message || 'Un abonnement Business Grow actif est requis.',
       )), {
         status: statut, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
       });

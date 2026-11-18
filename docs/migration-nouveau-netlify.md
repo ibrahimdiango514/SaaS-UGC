@@ -19,7 +19,7 @@ par des variables d'environnement ou des réglages de la console.
 | Relais Netlify Edge (`netlify/edge-functions/*.js`) | Ciblent `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/...` : correct, le backend ne change pas. |
 | Liste d'origines par défaut (`src/lib/origin-allowlist.ts`) | Contient l'ancien domaine et les aperçus ; la nouvelle origine se déclare par secret (voir §4) — aucune redéploiement d'Edge Function n'est nécessaire pour l'ajouter. |
 | Outils de constat (`.github/workflows/production-check.yml`, `scripts/verify-production.mjs`) | Paramétrés : variable de dépôt `VYORA_SITE_URL` / variable d'environnement `VYORA_SITE_URL` / option `--site`. L'ancien domaine n'est qu'un repli. |
-| Garde de build `netlify.toml` | Testée par `tests/business-grow-deployment-guard.test.ts` (10 cas, `sh -c` réel) : l'ancien site `vyora-ugc` ne construit plus jamais ; seul un site déclarant `VYORA_BUILD_ENABLED=true` construit, et seulement `main`. |
+| Garde de build `netlify.toml` | Testée par `tests/business-grow-deployment-guard.test.ts` (12 cas, `sh -c` réel) : le nouveau site porte le **même nom** `vyora-ugc` que l'ancien, la garde est donc épinglée sur le **Site ID** `fc88d197-fe0b-47c7-a6e3-fba44eeccda9` (variable Netlify `SITE_ID`). Seul ce site, déclarant `VYORA_BUILD_ENABLED=true`, construit — et seulement `main`. Tout autre site (dont l'ancien, homonyme) obtient « build cancelled » sans consommer de crédit. |
 
 ---
 
@@ -27,7 +27,9 @@ par des variables d'environnement ou des réglages de la console.
 
 - **Ne déclencher aucun build sur l'ancien site `vyora-ugc`** (24 crédits restants).
 - La garde de build de `main` annule désormais tout build déclenché par Git sur ce site
-  (`[ "$SITE_NAME" = "vyora-ugc" ]` → code 0 → « build cancelled », aucun crédit consommé).
+  (`[ "$SITE_ID" != "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ]` → code 0 → « build cancelled »,
+  aucun crédit consommé). Le nom `vyora-ugc` ne suffit plus à distinguer les deux sites : le
+  nouveau porte le même ; c'est l'identifiant qui tranche.
   Un bouton **Trigger deploy** manuel ignore cette garde : ne pas l'utiliser.
 - Si l'ancien site doit être détaché du dépôt : *Site configuration → Build & deploy → Continuous
   deployment → Manage repository → Unlink*. Facultatif ; la garde suffit.

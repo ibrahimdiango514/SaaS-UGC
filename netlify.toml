@@ -2,27 +2,31 @@
   command = "npm ci && npm run build"
   publish = "dist"
   # ---------------------------------------------------------------------------
-  # GARDE DE BUILD (2026-11-18, préparation du nouveau compte Netlify)
+  # GARDE DE BUILD (2026-11-18, révisée 2026-11-22 : nouveau compte Netlify)
   #
   # Convention Netlify : si cette commande renvoie 0, le build est ANNULÉ avant
   # toute installation ; tout autre code = build normal. Elle n'est évaluée que
   # pour les builds déclenchés par Git ; un « Trigger deploy » manuel l'ignore.
   #
+  # Pourquoi l'identifiant et non le nom : l'ancien site et le nouveau portent
+  # le MÊME nom `vyora-ugc` (même URL https://vyora-ugc.netlify.app). Une garde
+  # par `$SITE_NAME` bloquait donc aussi le nouveau site. `$SITE_ID` (API ID,
+  # UUID attribué à la création, visible dans Site configuration → General →
+  # Site details) est le seul identifiant que deux sites ne partagent jamais.
+  #
   # Trois conditions, dans l'ordre ; la première vraie annule le build :
-  #   1. `$SITE_NAME` = « vyora-ugc » : l'ANCIEN site Netlify (24 crédits
-  #      restants) ne doit plus rien construire. Tant qu'il reste relié au
-  #      dépôt, chaque fusion dans `main` tenterait un build : il est coupé ici,
-  #      quelle que soit la branche.
-  #   2. `$VYORA_BUILD_ENABLED` ≠ « true » : seul un site qui déclare
-  #      explicitement cette variable d'environnement (Site configuration →
-  #      Environment variables) construit. Le nouveau site la définit ; aucun
-  #      site relié par erreur ne consomme de crédit. C'est aussi ce qui permet
-  #      de ne PAS inventer le nom du futur site dans ce fichier.
+  #   1. `$SITE_ID` ≠ identifiant du NOUVEAU site (compte Netlify actuel) :
+  #      l'ancien site (supprimé, autre identifiant), tout site recréé ou relié
+  #      par erreur au dépôt est coupé ici, quelle que soit la branche. Changer
+  #      de site = mettre à jour cette valeur dans une PR, jamais à la volée.
+  #   2. `$VYORA_BUILD_ENABLED` ≠ « true » : le site doit en plus déclarer
+  #      explicitement cette variable (Site configuration → Environment
+  #      variables). Deux preuves indépendantes valent mieux qu'une.
   #   3. `$BRANCH` ≠ « main » : aucune branche de travail, aucun Deploy Preview.
-  #      `main` est la seule source importée dans le nouveau compte.
+  #      `main` est la seule source déployée en production.
   #
   # Voir docs/migration-nouveau-netlify.md pour la procédure complète.
-  ignore = '[ "$SITE_NAME" = "vyora-ugc" ] || [ "$VYORA_BUILD_ENABLED" != "true" ] || [ "$BRANCH" != "main" ]'
+  ignore = '[ "$SITE_ID" != "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ] || [ "$VYORA_BUILD_ENABLED" != "true" ] || [ "$BRANCH" != "main" ]'
 
 [build.environment]
   NODE_VERSION = "22"

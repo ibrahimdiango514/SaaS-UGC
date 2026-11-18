@@ -229,7 +229,7 @@ const egress: EgressDeps = { resolveHost };
 const deps: ConnectDependencies = {
   getUserId,
 
-  /** Abonnement Business Ground : la seule source de vérité, lue en base. */
+  /** Abonnement Business Grow : la seule source de vérité, lue en base. */
   async checkImportAccess(userId: string) {
     const db = requiredSql();
     try {
@@ -242,7 +242,7 @@ const deps: ConnectDependencies = {
         reason: typeof droits.reason === 'string' ? droits.reason : 'UNKNOWN',
         message: typeof droits.message === 'string'
           ? droits.message
-          : 'Un abonnement Business Ground actif est requis.',
+          : 'Un abonnement Business Grow actif est requis.',
         status: typeof droits.status === 'string' ? droits.status : null,
         planKey: typeof droits.plan_key === 'string' ? droits.plan_key : null,
       };
@@ -464,7 +464,7 @@ function messagePourCode(code: string): string {
       return 'Droits insuffisants sur cette entreprise.';
     case 'SUBSCRIPTION_REQUIRED':
     case 'SUBSCRIPTION_EXPIRED':
-      return 'Un abonnement Business Ground actif est requis.';
+      return 'Un abonnement Business Grow actif est requis.';
     default:
       return 'La configuration n’a pas pu être enregistrée.';
   }

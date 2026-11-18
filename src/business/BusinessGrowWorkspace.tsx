@@ -14,13 +14,13 @@ import {
   type BusinessGrowEntryIntent,
   type BusinessGrowGrowthTab,
 } from '../contracts/business-grow';
-import { IntegrationsCenter } from '../integrations/CatalogPage';
+import { IntegrationsCenter, type SubscriptionRefusal } from '../integrations/CatalogPage';
 import GrowthWorkspace from './growth/GrowthWorkspace';
 import AgentReports from './agent/AgentReports';
 import { BusinessAssistant } from '../ai/BusinessAssistant';
 import type { Brand, Product, Workspace } from '../lib/types';
 import {
-  BusinessGrowApiError, businessGrowApi,
+  BusinessGrowApiError, businessGrowApi, subscriptionRefusalOf,
   type BusinessAgentMemory, type BusinessConversation, type BusinessIntegrationConnection, type BusinessMemory,
   type BusinessMessage, type BusinessModelRecord, type BusinessProviderStatus,
   type BusinessQuotaStatus, type BusinessRoutingPreference, type BusinessSendOptions,
@@ -1510,6 +1510,8 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
   const [tools, setTools] = useState<BusinessToolExecution[]>([]);
   const [integrations, setIntegrations] = useState<BusinessIntegrationConnection[] | null>(null);
   const [integrationLoadError, setIntegrationLoadError] = useState<string | null>(null);
+  /** Refus d'abonnement renvoyé par `integrations.list` : affiché comme tel, pas comme une panne. */
+  const [integrationRefusal, setIntegrationRefusal] = useState<SubscriptionRefusal | null>(null);
   const [integrationBusyKey, setIntegrationBusyKey] = useState<string | null>(null);
   const [integrationNotice, setIntegrationNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [conversations, setConversations] = useState<BusinessConversation[]>([]);
@@ -1609,6 +1611,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
     setTools([]);
     setIntegrations(null);
     setIntegrationLoadError(null);
+    setIntegrationRefusal(null);
     setSavedRouting([]);
     setConversations([]);
     setConversationsLoaded(false);
@@ -1673,11 +1676,16 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
       if (!Array.isArray(result.connections) || result.connections.some((connection) => connection.workspace_id !== workspaceId)) {
         throw new Error('Réponse invalide pour cette entreprise.');
       }
-      if (seq === integrationLoadSequence.current && accountScopeRef.current === scope) setIntegrations(result.connections);
+      if (seq === integrationLoadSequence.current && accountScopeRef.current === scope) {
+        setIntegrations(result.connections);
+        setIntegrationRefusal(null);
+      }
     } catch (cause) {
       if (seq === integrationLoadSequence.current && accountScopeRef.current === scope) {
         setIntegrations(null);
-        setIntegrationLoadError(cause instanceof Error ? cause.message : 'Réessayez plus tard.');
+        const refus = subscriptionRefusalOf(cause);
+        setIntegrationRefusal(refus);
+        setIntegrationLoadError(refus ? null : cause instanceof Error ? cause.message : 'Réessayez plus tard.');
       }
       throw cause;
     }
@@ -1739,8 +1747,15 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
     } catch (error) {
       if (accountScopeRef.current === scope) {
         setIntegrations(null);
-        setIntegrationLoadError('Opération non confirmée. Rechargez l’état avant de poursuivre.');
-        setIntegrationNotice({ tone: 'error', text: `${asAppError(error).message} Vérifiez l’état avant de recommencer.` });
+        const refus = subscriptionRefusalOf(error);
+        setIntegrationRefusal(refus);
+        setIntegrationLoadError(refus ? null : 'Opération non confirmée. Rechargez l’état avant de poursuivre.');
+        setIntegrationNotice({
+          tone: 'error',
+          text: refus
+            ? 'Opération refusée : abonnement Business Grow requis. Rien n’a été enregistré.'
+            : `${asAppError(error).message} Vérifiez l’état avant de recommencer.`,
+        });
       }
     } finally {
       integrationMutationPending.current = false;
@@ -2640,6 +2655,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
                 controller={{
                   connections: integrations,
                   loadError: integrationLoadError,
+                  subscriptionRefusal: integrationRefusal,
                   busyKey: integrationBusyKey,
                   notice: integrationNotice,
                   onRetry: () => { void loadIntegrations().catch(() => {}); },

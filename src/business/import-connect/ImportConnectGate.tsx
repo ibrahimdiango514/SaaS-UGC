@@ -42,7 +42,7 @@ function Loading() {
   return (
     <div className="flex items-center gap-2 p-5 text-xs text-slate-400">
       <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-      Vérification de votre abonnement Business Ground…
+      Vérification de votre abonnement Business Grow…
     </div>
   );
 }
@@ -65,7 +65,7 @@ function LockedView({ access, onRetry }: { access: ImportAccessState; onRetry: (
 
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Réservé aux abonnés Business Ground
+            Réservé aux abonnés Business Grow
           </p>
           <ul className="mt-2 grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
             {[
@@ -85,7 +85,7 @@ function LockedView({ access, onRetry }: { access: ImportAccessState; onRetry: (
         <div className="flex flex-wrap items-center gap-2">
           {guide.showSubscribe && (
             <Link to={SUBSCRIPTION_PATH} className="btn btn-primary btn-sm">
-              Voir les offres Business Ground <ArrowRight size={13} />
+              Voir les offres Business Grow <ArrowRight size={13} />
             </Link>
           )}
           {/* Toujours proposé : après un renouvellement confirmé côté serveur,

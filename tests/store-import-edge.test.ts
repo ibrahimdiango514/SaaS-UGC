@@ -138,7 +138,7 @@ function fixture(overrides: Partial<StoreImportDependencies> = {}, options: {
     checkImportAccess: vi.fn(async () => ({
       allowed: true,
       reason: 'OK',
-      message: 'Abonnement Business Ground actif.',
+      message: 'Abonnement Business Grow actif.',
       status: 'active',
       planKey: 'essentiel',
       currentPeriodEnd: null,

@@ -1317,7 +1317,7 @@ describe('Business Agent Phase 3 · API cloisonnée et consentement', () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Import & Connect — abonnement Business Ground requis                       */
+/* Import & Connect — abonnement Business Grow requis                       */
 /* -------------------------------------------------------------------------- */
 
 describe('Business Grow — Import & Connect exige un abonnement actif', () => {

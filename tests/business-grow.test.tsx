@@ -169,12 +169,13 @@ const businessMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../src/business/api', () => ({
-  BusinessGrowApiError: class BusinessGrowApiError extends Error {
-    constructor(message: string, readonly code: string) { super(message); }
-  },
-  businessGrowApi: businessMocks,
-}));
+vi.mock('../src/business/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/business/api')>();
+  return {
+    ...actual,
+    businessGrowApi: businessMocks,
+  };
+});
 
 vi.mock('../src/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/api')>();
@@ -969,6 +970,60 @@ describe('Business Grow', () => {
     await waitFor(() =>
       expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
     );
+  });
+
+  it('affiche « Abonnement requis » (et non une panne) quand le serveur refuse la lecture faute d’abonnement actif', async () => {
+    // Le handler répond 403 BUSINESS_GROW_SUBSCRIPTION_REQUIRED avec le motif
+    // précis à la racine de `error` ; le client le reconstitue dans `details`.
+    const refus = new BusinessGrowApiError(
+      'Abonnement Business Grow requis pour Import & Connect.',
+      'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
+      403,
+      { reason: 'NO_SUBSCRIPTION', subscription_status: null, plan_key: null, current_period_end: null },
+    );
+    businessMocks.listIntegrations.mockRejectedValue(refus);
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    const bandeau = await screen.findByTestId('integrations-subscription-required');
+    expect(bandeau.textContent).toContain('Abonnement Business Grow requis');
+    expect(within(bandeau).getByRole('link', { name: /Voir l’abonnement Business Grow/ }).getAttribute('href')).toBe('/app/business/abonnement');
+    // Ce n'est pas une panne : le message d'indisponibilité n'apparaît pas.
+    expect(screen.queryByText(/État des intégrations indisponible/)).toBeNull();
+    const facebook = screen.getByTestId('integration-facebook');
+    expect(facebook.textContent).toContain('Abonnement requis');
+    expect(facebook.textContent).not.toContain('État inconnu');
+    expect(facebook.textContent).not.toContain('Non connecté');
+    // La fiche reste consultable mais aucune action n'est proposée.
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    expect(within(fiche).getByText(/Abonnement requis : aucune action n’est proposée/i)).toBeTruthy();
+    expect(within(fiche).queryByRole('button', { name: 'Demander l’activation' })).toBeNull();
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Retour' }));
+    // Une fois l'abonnement attribué (par un administrateur), « Revérifier » relit l'état réel.
+    businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
+    fireEvent.click(within(bandeau).getByRole('button', { name: 'Revérifier' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+    );
+    expect(screen.queryByTestId('integrations-subscription-required')).toBeNull();
+  });
+
+  it('refuse une mutation d’intégration sans abonnement et l’affiche comme telle', async () => {
+    businessMocks.requestIntegration.mockRejectedValueOnce(
+      new BusinessGrowApiError('Abonnement requis.', 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED', 403, { reason: 'SUBSCRIPTION_EXPIRED', plan_key: 'essentiel', current_period_end: '2026-10-01T00:00:00Z' }),
+    );
+    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    const facebook = await screen.findByTestId('integration-facebook');
+    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
+    fireEvent.click(facebook);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
+    expect(await screen.findByText(/Opération refusée : abonnement Business Grow requis/)).toBeTruthy();
+    expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
+    const bandeau = await screen.findByTestId('integrations-subscription-required');
+    expect(bandeau.textContent).toContain('expiré');
+    expect(screen.getByTestId('integration-facebook').textContent).toContain('Abonnement requis');
   });
 
   it('ne réessaie pas une mutation d’intégration non confirmée et impose une nouvelle lecture', async () => {

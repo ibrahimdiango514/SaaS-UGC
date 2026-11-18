@@ -884,6 +884,55 @@ export async function adminSetPlan(userId: string, planKey: string) {
   return rpc<boolean>('reelora_admin_set_plan', { p_user_id: userId, p_plan_key: planKey });
 }
 
+/* -------------------------------------------------------------------------- */
+/* Business Grow — attribution manuelle d'une formule (administration)        */
+/* -------------------------------------------------------------------------- */
+
+/** Résultat de `vyora_admin_set_business_subscription` / `..._revoke_...`. */
+export interface AdminBusinessSubscriptionResult {
+  subscription_id: string;
+  user_id?: string;
+  plan_key?: string;
+  status: string;
+  billing_provider?: string;
+  reference?: string;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
+  renewed?: boolean;
+  /** Droit d'accès Import & Connect recalculé par la règle unique, juste après. */
+  access: { allowed: boolean; reason: string; message: string; current_period_end?: string | null };
+}
+
+/**
+ * Attribue ou renouvelle manuellement une formule Business Grow à un compte
+ * client. La RPC revérifie le rôle administrateur, la cible, la formule et la
+ * date de fin ; elle journalise et notifie. Aucune facturation n'est engagée.
+ */
+export async function adminSetBusinessSubscription(input: {
+  userId: string; planKey: string; periodEnd: Date; note?: string;
+}): Promise<AdminBusinessSubscriptionResult> {
+  return rpc<AdminBusinessSubscriptionResult>('vyora_admin_set_business_subscription', {
+    p_user_id: input.userId,
+    p_plan_key: input.planKey,
+    p_period_end: input.periodEnd.toISOString(),
+    p_note: input.note?.trim() || null,
+  });
+}
+
+/** Résilie l'attribution manuelle Business Grow d'un compte (accès fermé immédiatement). */
+export async function adminRevokeBusinessSubscription(userId: string, note?: string): Promise<AdminBusinessSubscriptionResult> {
+  return rpc<AdminBusinessSubscriptionResult>('vyora_admin_revoke_business_subscription', {
+    p_user_id: userId,
+    p_note: note?.trim() || null,
+  });
+}
+
+/** Formules Business Grow visibles (catalogue public, formules actives uniquement). */
+export async function listBusinessGrowPlans(): Promise<Array<{ plan_key: string; display_name: string; active: boolean }>> {
+  const catalog = await rpc<{ plans?: Array<{ plan_key: string; display_name: string; active: boolean }> }>('business_grow_catalog');
+  return Array.isArray(catalog?.plans) ? catalog.plans : [];
+}
+
 export async function adminSetAccountStatus(userId: string, status: 'active' | 'suspended' | 'cancelled') {
   return rpc<boolean>('reelora_admin_set_account_status', { p_user_id: userId, p_status: status });
 }

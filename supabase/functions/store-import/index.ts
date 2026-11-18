@@ -203,7 +203,7 @@ const store: StoreImportDependencies = {
   getUserId,
 
   /**
-   * Abonnement Business Ground — la SEULE source de vérité.
+   * Abonnement Business Grow — la SEULE source de vérité.
    *
    * Appel à `saas_business.bg_import_access`, qui lit `subscriptions` et
    * `plans` et applique la règle (statut actif, période en cours, formule
@@ -225,7 +225,7 @@ const store: StoreImportDependencies = {
       reason: typeof droits.reason === 'string' ? droits.reason : 'UNKNOWN',
       message: typeof droits.message === 'string'
         ? droits.message
-        : 'Un abonnement Business Ground actif est requis.',
+        : 'Un abonnement Business Grow actif est requis.',
       status: typeof droits.status === 'string' ? droits.status : null,
       planKey: typeof droits.plan_key === 'string' ? droits.plan_key : null,
       currentPeriodEnd: typeof droits.current_period_end === 'string'
