@@ -18,30 +18,53 @@
  * `previewId` émis par le serveur — le navigateur ne peut donc pas écrire un
  * catalogue qu'il n'a pas prévisualisé.
  *
+ * ## Import par fichier : aussi via le serveur
+ *
+ * Le fichier était auparavant analysé localement puis écrit par des `insert`
+ * PostgREST successifs. Ces `insert` ne sont contrôlés que par l'appartenance à
+ * l'entreprise (`ugc_private.can_edit_workspace`), **pas par l'abonnement** :
+ * un compte sans abonnement pouvait donc créer des produits, alors qu'il était
+ * refusé sur le chemin URL. Un verrou qui ne protège qu'une porte n'est pas un
+ * verrou.
+ *
+ * Le fichier est maintenant envoyé à la même Edge Function, qui vérifie
+ * l'abonnement avant toute analyse et n'écrit qu'après confirmation explicite.
+ *
  * ## Ce que l'interface ne fait pas
  *
- * - Aucune requête réseau directe vers la boutique (import fichier = lecture
- *   locale ; import URL = serveur).
+ * - Aucune requête réseau directe vers la boutique.
+ * - Aucune écriture directe dans `ugc_products` : l'écriture est serveur, donc
+ *   soumise à la garde d'abonnement.
  * - Aucun produit affiché tant que la prévisualisation n'a pas réussi.
  * - Aucune écriture sans confirmation explicite.
  * - Aucun produit créé pendant l'aperçu, ni côté navigateur ni côté serveur.
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, ImageOff, Link2, Loader2, Package, Upload, X,
+  AlertTriangle, ArrowLeft, Check, FileSpreadsheet, Globe, KeyRound, Link2, Loader2, Package,
+  RotateCcw, Upload, X,
 } from 'lucide-react';
 import { Button, cn } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
-import { createProduct } from '../../lib/api';
-import {
-  formatPreviewPrice, runFileImport, type ImportBatch,
-} from './pipeline';
 import { PLATFORM_LABELS } from './platform';
-import { importStore, previewStore, type StorePreview } from './relay';
+import {
+  importStore, previewConnectedStore, previewFile, previewStore, previewValidity,
+  type PreviewValidity, type StorePreview,
+} from './relay';
+import {
+  connectStore, disconnectStore, readConnection,
+  type StoreConnectionResult, type StoreConnectionState,
+} from './connect-relay';
 
 export interface StoreImportPanelProps {
   workspaceId: string | null;
-  /** Catalogue existant, pour la détection de doublons. */
+  /**
+   * Catalogue existant.
+   *
+   * Conservé dans l'interface publique, mais **plus utilisé pour décider** : la
+   * détection de doublons est faite par le serveur, sur son propre catalogue.
+   * Un navigateur qui se tromperait ne peut donc pas contourner la règle.
+   */
   existing: Array<{ id: string; name: string }>;
   /** Appelé après une écriture réussie, pour rafraîchir la liste. */
   onImported: () => void | Promise<void>;
@@ -50,9 +73,8 @@ export interface StoreImportPanelProps {
 
 type Étape = 'source' | 'apercu' | 'ecriture';
 
-export function StoreImportPanel({ workspaceId, existing, onImported, onClose }: StoreImportPanelProps) {
+export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImportPanelProps) {
   const [étape, setÉtape] = useState<Étape>('source');
-  const [lot, setLot] = useState<ImportBatch | null>(null);
   const [erreurs, setErreurs] = useState<string[]>([]);
   const [avertissements, setAvertissements] = useState<string[]>([]);
   const [chargement, setChargement] = useState(false);
@@ -60,9 +82,63 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
   const [résultat, setRésultat] = useState<{ créés: number; échecs: Array<{ nom: string; raison: string }> } | null>(null);
   const [glisser, setGlisser] = useState(false);
   const fichierInput = useRef<HTMLInputElement>(null);
+  /**
+   * L'adresse de la boutique PrestaShop (`urlPrestashop`) et celle de l'aperçu
+   * public (`url`) sont deux champs distincts : partager un seul état ferait
+   * qu'une adresse de connexion écraserait silencieusement l'URL d'un aperçu en
+   * cours, et l'utilisateur verrait deux champs identiques se répercuter l'un
+   * l'autre.
+   */
   const [url, setUrl] = useState('');
+  const [urlPrestashop, setUrlPrestashop] = useState('');
   /** Aperçu renvoyé par le serveur : seule source d'une écriture par URL. */
   const [apercuServeur, setApercuServeur] = useState<StorePreview | null>(null);
+  /**
+   * Validité de l'aperçu, recalculée chaque seconde.
+   *
+   * `null` tant qu'aucun aperçu n'existe. L'état `expired` désactive le bouton
+   * de confirmation : on ne propose jamais une action que le serveur refusera.
+   */
+  const [validité, setValidité] = useState<PreviewValidity | null>(null);
+  /**
+   * Dernière source prévisualisée, conservée pour la relance.
+   *
+   * Sans elle, « relancer l'analyse » obligerait l'utilisateur à retrouver son
+   * fichier et à le redéposer — c'est précisément la confusion à éviter quand
+   * un aperçu expire.
+   */
+  const [dernièreSource, setDernièreSource] = useState<
+    | { kind: 'file'; fichier: File }
+    | { kind: 'url'; url: string }
+    | { kind: 'chariow' }
+    | null
+  >(null);
+
+  /*
+   * Connexion par clé d'API (PrestaShop).
+   *
+   * La clé saisie ne quitte cet état qu'une fois envoyée au serveur : elle
+   * n'est ni recopiée dans l'URL, ni conservée après la réponse, ni renvoyée
+   * par l'API. Ce qui reste à l'écran après une connexion réussie est la
+   * PREUVE de ce qui a été lu (boutique, version, nombre de produits),
+   * jamais le secret.
+   */
+  const [cléApi, setCléApi] = useState('');
+  /**
+   * Clé Chariow et état de SA connexion, séparés de ceux de PrestaShop.
+   *
+   * Un état partagé ferait qu'une clé PrestaShop saisie resterait affichée
+   * après avoir basculé sur Chariow, et que « connecté » d'un connecteur
+   * s'afficherait pour l'autre. Deux connecteurs, deux secrets, deux états.
+   */
+  const [cléChariow, setCléChariow] = useState('');
+  const [connexionChariow, setConnexionChariow] = useState<StoreConnectionState | null>(null);
+  const [connexionChariowEnCours, setConnexionChariowEnCours] = useState(false);
+  const [connexionChariowErreur, setConnexionChariowErreur] = useState<string | null>(null);
+  const [connexion, setConnexion] = useState<StoreConnectionState | null>(null);
+  const [connexionEnCours, setConnexionEnCours] = useState(false);
+  const [connexionErreur, setConnexionErreur] = useState<string | null>(null);
+  const [, setConnexionOk] = useState<StoreConnectionResult | null>(null);
 
   /**
    * L'aperçu par URL passe par l'Edge Function `store-import`, seule à disposer
@@ -71,29 +147,222 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
    */
   const relaisDisponible = typeof window !== 'undefined';
 
+  /**
+   * Relit l'état de connexion quand l'entreprise change.
+   *
+   * L'écran doit refléter la réalité au retour de l'utilisateur : afficher
+   * « non connecté » alors qu'une connexion existe l'obligerait à ressaisir sa
+   * clé, et afficher « connecté » après une déconnexion ferait échouer son
+   * aperçu sans explication. En cas d'échec de lecture, on n'invente rien — on
+   * laisse l'état inconnu et la saisie disponible.
+   */
+  useEffect(() => {
+    let annulé = false;
+    setConnexion(null);
+    setConnexionOk(null);
+    setConnexionErreur(null);
+    if (!workspaceId) return;
+    void (async () => {
+      try {
+        const état = await readConnection({ workspaceId, connectorKey: 'prestashop' });
+        if (!annulé) setConnexion(état);
+      } catch {
+        if (!annulé) setConnexion(null);
+      }
+      // Chariow a sa PROPRE connexion : la lire ici aussi, sinon l'écran
+      // afficherait « non connecté » sur une boutique déjà liée, et l'utilisateur
+      // ressaisirait une clé qu'il n'a plus (elle n'est affichée qu'une fois).
+      try {
+        const état = await readConnection({ workspaceId, connectorKey: 'chariow' });
+        if (!annulé) setConnexionChariow(état);
+      } catch {
+        if (!annulé) setConnexionChariow(null);
+      }
+    })();
+    return () => { annulé = true; };
+  }, [workspaceId]);
+
+  /**
+   * Connecte la boutique : le serveur vérifie la clé en lisant réellement
+   * l'API, puis dépose le secret dans Vault.
+   */
+  const connecter = async () => {
+    if (!workspaceId) {
+      setConnexionErreur('Sélectionnez une entreprise avant de connecter une boutique.');
+      return;
+    }
+    const adresse = urlPrestashop.trim();
+    if (!adresse) {
+      setConnexionErreur('Saisissez l’adresse de votre boutique PrestaShop.');
+      return;
+    }
+    if (cléApi.trim().length < 8) {
+      setConnexionErreur('La clé Webservice PrestaShop est requise (au moins 8 caractères).');
+      return;
+    }
+    setConnexionEnCours(true);
+    setConnexionErreur(null);
+    setConnexionOk(null);
+    try {
+      const résultat = await connectStore({
+        workspaceId, connectorKey: 'prestashop', url: adresse, apiKey: cléApi.trim(),
+      });
+      setConnexionOk(résultat);
+      // La clé n'est plus nécessaire : le serveur la retrouve dans Vault.
+      setCléApi('');
+      setConnexion({
+        connectorKey: 'prestashop',
+        status: résultat.status,
+        connectedTo: résultat.connectedTo,
+        endpoint: résultat.endpoint,
+        shopName: résultat.shopName,
+        version: résultat.version,
+        totalProducts: résultat.totalProducts,
+        resourcesRead: résultat.resourcesRead,
+        checkedAt: new Date().toISOString(),
+        lastError: null,
+      });
+    } catch (erreur) {
+      setConnexionErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionEnCours(false);
+    }
+  };
+
+  /** Déconnecte : la boutique n'est plus lisible, l'aperçu le dira clairement. */
+  const déconnecter = async () => {
+    if (!workspaceId) return;
+    setConnexionEnCours(true);
+    setConnexionErreur(null);
+    try {
+      await disconnectStore({ workspaceId, connectorKey: 'prestashop' });
+      setConnexionOk(null);
+      setConnexion(null);
+    } catch (erreur) {
+      setConnexionErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionEnCours(false);
+    }
+  };
+
+  /**
+   * Connecte la boutique Chariow : le serveur vérifie la clé en lisant
+   * réellement `GET /v1/store` puis `GET /v1/products`, puis la range dans
+   * Vault. Aucune URL n'est demandée : l'API est hébergée chez Chariow.
+   */
+  const connecterChariow = async () => {
+    if (!workspaceId) {
+      setConnexionChariowErreur('Sélectionnez une entreprise avant de connecter une boutique.');
+      return;
+    }
+    const clé = cléChariow.trim();
+    if (!clé.startsWith('sk_') || clé.length < 20) {
+      setConnexionChariowErreur('Collez la clé Chariow complète (elle commence par « sk_ »).');
+      return;
+    }
+    setConnexionChariowEnCours(true);
+    setConnexionChariowErreur(null);
+    try {
+      const résultat = await connectStore({ workspaceId, connectorKey: 'chariow', apiKey: clé });
+      // Effacée avant tout rendu : elle ne doit pas rester dans l'état.
+      setCléChariow('');
+      setConnexionChariow({
+        connectorKey: 'chariow',
+        status: résultat.status,
+        connected: true,
+        connectedTo: résultat.connectedTo,
+        endpoint: résultat.endpoint,
+        shopName: résultat.shopName,
+        version: null,
+        totalProducts: résultat.totalProducts,
+        resourcesRead: résultat.resourcesRead,
+        storeUrl: résultat.storeUrl ?? null,
+        storeStatus: résultat.storeStatus ?? null,
+        checkedAt: new Date().toISOString(),
+        lastError: null,
+      });
+    } catch (erreur) {
+      setConnexionChariowErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionChariowEnCours(false);
+    }
+  };
+
+  /** Déconnecte Chariow : le secret quitte Vault, l'aperçu le dira ensuite. */
+  const déconnecterChariow = async () => {
+    if (!workspaceId) return;
+    setConnexionChariowEnCours(true);
+    setConnexionChariowErreur(null);
+    try {
+      await disconnectStore({ workspaceId, connectorKey: 'chariow' });
+      setConnexionChariow(null);
+      setCléChariow('');
+    } catch (erreur) {
+      setConnexionChariowErreur(asAppError(erreur).message);
+    } finally {
+      setConnexionChariowEnCours(false);
+    }
+  };
+
+  /**
+   * Aperçu du catalogue Chariow — **aucune écriture**.
+   *
+   * Aucune URL n'est envoyée : la clé vient de Vault côté serveur, et l'hôte
+   * de l'API est fixe. Le navigateur ne contacte donc ni Chariow ni la vitrine.
+   */
+  const prévisualiserChariow = async () => {
+    if (!workspaceId) {
+      setErreurs(['Sélectionnez une entreprise avant d’importer.']);
+      return;
+    }
+    setChargement(true);
+    setErreurs([]);
+    setAvertissements([]);
+    setRésultat(null);
+    setApercuServeur(null);
+    try {
+      const apercu = await previewConnectedStore({ workspaceId, connectorKey: 'chariow' });
+      setApercuServeur(apercu);
+      setAvertissements(apercu.warnings);
+      setDernièreSource({ kind: 'chariow' });
+      setÉtape('apercu');
+    } catch (erreur) {
+      setErreurs([asAppError(erreur).message]);
+    } finally {
+      setChargement(false);
+    }
+  };
+
   const réinitialiser = useCallback(() => {
-    setLot(null);
     setErreurs([]);
     setAvertissements([]);
     setRésultat(null);
     setÉtape('source');
   }, []);
 
+  /**
+   * Import par fichier — **via le serveur**.
+   *
+   * Le fichier n'est plus analysé localement puis écrit par des `insert`
+   * PostgREST : il part à l'Edge Function, qui vérifie l'abonnement avant même
+   * de l'analyser. C'est ce qui rend la restriction réelle et non décorative.
+   */
   const traiterFichier = async (fichier: File) => {
+    if (!workspaceId) {
+      setErreurs(['Sélectionnez une entreprise avant d’importer.']);
+      return;
+    }
     setChargement(true);
     setErreurs([]);
     setAvertissements([]);
     setRésultat(null);
+    setApercuServeur(null);
     try {
       const octets = new Uint8Array(await fichier.arrayBuffer());
-      const résultat = await runFileImport(octets, fichier.name, { existing });
-      if (!résultat.ok) {
-        setErreurs(résultat.errors);
-        setLot(null);
-        return;
-      }
-      setLot(résultat.batch);
-      setAvertissements(résultat.batch.warnings);
+      const apercu = await previewFile({ workspaceId, fileName: fichier.name, bytes: octets });
+      setApercuServeur(apercu);
+      setAvertissements(apercu.warnings);
+      setDernièreSource({ kind: 'file', fichier });
       setÉtape('apercu');
     } catch (erreur) {
       setErreurs([asAppError(erreur).message]);
@@ -124,11 +393,11 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
     setAvertissements([]);
     setRésultat(null);
     setApercuServeur(null);
-    setLot(null);
     try {
       const apercu = await previewStore({ workspaceId, url: saisie });
       setApercuServeur(apercu);
       setAvertissements(apercu.warnings);
+      setDernièreSource({ kind: 'url', url: saisie });
       setÉtape('apercu');
     } catch (erreur) {
       setErreurs([asAppError(erreur).message]);
@@ -138,13 +407,13 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
   };
 
   /**
-   * Confirmation de l'import par URL.
+   * Confirmation de l'import — URL **ou** fichier.
    *
    * Envoie le `previewId` émis par le serveur : le navigateur ne peut pas
    * écrire un catalogue qu'il n'a pas prévisualisé, et un aperçu ne se rejoue
    * pas. Les produits retenus sont ceux que le serveur a marqués importables.
    */
-  const confirmerUrl = async () => {
+  const confirmer = async () => {
     if (!apercuServeur || !workspaceId) return;
     setÉcriture(true);
     setÉtape('ecriture');
@@ -171,59 +440,51 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
     }
   };
 
+  /**
+   * Recale la validité de l'aperçu, une fois par seconde.
+   *
+   * ## Pourquoi un minuteur côté client alors que le serveur décide
+   * Le serveur reste seul juge (il refuse un aperçu échu, quel que soit
+   * l'affichage). Le minuteur sert uniquement à prévenir avant l'échec et à
+   * désactiver un bouton qui ne mènerait nulle part. Il ne peut donc pas rendre
+   * un aperçu valide : au pire, il l'affiche expiré un instant trop tôt, et
+   * l'utilisateur relance — jamais l'inverse.
+   */
+  useEffect(() => {
+    if (!apercuServeur) {
+      setValidité(null);
+      return;
+    }
+    const recalculer = () => setValidité(previewValidity(apercuServeur.expiresAt, Date.now()));
+    recalculer();
+    const minuteur = setInterval(recalculer, 1000);
+    return () => clearInterval(minuteur);
+  }, [apercuServeur]);
+
+  /**
+   * Relance l'analyse de la même source.
+   *
+   * Conserve la source d'origine pour éviter de faire redéposer le fichier.
+   * Le nouvel aperçu reçoit un nouvel identifiant : l'ancien reste consommable
+   * par le serveur jusqu'à son échéance, mais l'interface n'en propose plus la
+   * confirmation.
+   */
+  const relancer = async () => {
+    if (!dernièreSource) return;
+    if (dernièreSource.kind === 'file') await traiterFichier(dernièreSource.fichier);
+    else if (dernièreSource.kind === 'chariow') await prévisualiserChariow();
+    else {
+      setUrl(dernièreSource.url);
+      await prévisualiserUrl();
+    }
+  };
+
   const surDépôt = async (événement: React.DragEvent<HTMLDivElement>) => {
     événement.preventDefault();
     setGlisser(false);
     const fichier = événement.dataTransfer.files?.[0];
     if (fichier) await traiterFichier(fichier);
   };
-
-  /**
-   * Écriture.
-   *
-   * Un produit en échec n'interrompt pas les suivants : on rapporte le détail.
-   * Les doublons internes au lot sont ignorés à l'écriture (le premier garde la
-   * place) ; les doublons du catalogue existant sont créés, car l'utilisateur a
-   * pu le décider explicitement en confirmant.
-   */
-  const écrire = async () => {
-    if (!lot || !workspaceId) return;
-    setÉcriture(true);
-    setÉtape('ecriture');
-    const doublonsInternes = new Set(lot.duplicates.filter((d) => d.kind === 'in-batch').map((d) => d.index));
-    const échecs: Array<{ nom: string; raison: string }> = [];
-    let créés = 0;
-
-    for (const [index, produit] of lot.products.entries()) {
-      if (doublonsInternes.has(index)) continue;
-      try {
-        await createProduct({
-          workspace_id: workspaceId,
-          name: produit.name,
-          description: produit.description || null,
-          price_amount: produit.priceMinor === null
-            ? null
-            : (['XOF', 'XAF', 'JPY', 'KRW', 'CLP'].includes(produit.currency)
-              ? produit.priceMinor
-              : produit.priceMinor / 100),
-          price_currency: produit.currency,
-          product_url: produit.productUrl,
-          key_benefits: produit.categories.slice(0, 8),
-        });
-        créés += 1;
-      } catch (erreur) {
-        échecs.push({ nom: produit.name, raison: asAppError(erreur).message });
-      }
-    }
-
-    setRésultat({ créés, échecs });
-    setÉcriture(false);
-    if (créés > 0) await onImported();
-  };
-
-  const aperçu = useMemo(() => lot?.products.slice(0, 40) ?? [], [lot]);
-  const total = lot?.summary.total ?? 0;
-  const àCréer = lot ? lot.summary.importable : 0;
 
   return (
     <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/[0.03] p-4" data-testid="store-importer">
@@ -288,6 +549,177 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
             </Button>
           </div>
 
+          {/* Connexion PrestaShop — la clé part au serveur, jamais l'inverse */}
+          <div className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5" data-testid="store-connect">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+              <KeyRound size={13} className="text-slate-500" /> Boutique PrestaShop (clé Webservice)
+            </p>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+              La clé est vérifiée par le serveur, puis rangée dans un coffre chiffré.
+              Elle ne revient jamais dans le navigateur, et n’apparaît ni dans les
+              journaux ni dans les réponses.
+            </p>
+
+            {connexion?.status === 'connected' ? (
+              <div className="mt-2 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.05] px-2.5 py-2 text-[10px] text-emerald-100" data-testid="store-connect-connected">
+                <p className="flex items-center gap-1.5 font-semibold"><Check size={11} /> Boutique connectée</p>
+                {connexion.shopName && <p className="mt-0.5 text-slate-300">{connexion.shopName}{connexion.version ? ` · ${connexion.version}` : ''}</p>}
+                {connexion.totalProducts !== null && (
+                  <p className="text-slate-400">{connexion.totalProducts} produit(s) annoncé(s) par l’API</p>
+                )}
+                {connexion.connectedTo && (
+                  // Preuve du contrôle SSRF : l'adresse réellement contactée.
+                  <p className="text-slate-500">adresse contrôlée : {connexion.connectedTo}</p>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-1.5"
+                  loading={connexionEnCours}
+                  onClick={() => void déconnecter()}
+                  icon={<X size={12} />}
+                  data-testid="store-connect-disconnect"
+                >
+                  Déconnecter
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                  <input
+                    type="url"
+                    inputMode="url"
+                    value={urlPrestashop}
+                    onChange={(événement) => setUrlPrestashop(événement.target.value)}
+                    placeholder="https://ma-boutique.com"
+                    aria-label="Adresse de la boutique PrestaShop"
+                    disabled={connexionEnCours || !workspaceId}
+                    className="rounded-lg border border-white/[0.09] bg-black/30 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600 focus:border-cyan-300/40 focus:outline-none disabled:opacity-50"
+                    data-testid="store-connect-url"
+                  />
+                  {/* `type="password"` : la clé ne doit pas rester lisible à l'écran. */}
+                  <input
+                    type="password"
+                    value={cléApi}
+                    onChange={(événement) => setCléApi(événement.target.value)}
+                    placeholder="Clé Webservice"
+                    aria-label="Clé Webservice PrestaShop"
+                    autoComplete="off"
+                    disabled={connexionEnCours || !workspaceId}
+                    className="rounded-lg border border-white/[0.09] bg-black/30 px-2.5 py-1.5 text-[11px] text-slate-200 placeholder:text-slate-600 focus:border-cyan-300/40 focus:outline-none disabled:opacity-50"
+                    data-testid="store-connect-key"
+                  />
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={connexionEnCours}
+                    disabled={!workspaceId || !urlPrestashop.trim() || cléApi.trim().length < 8}
+                    onClick={() => void connecter()}
+                    icon={<KeyRound size={13} />}
+                    data-testid="store-connect-submit"
+                  >
+                    Vérifier et connecter
+                  </Button>
+                  {connexion?.status === 'error' && connexion.lastError && (
+                    <span className="text-[10px] text-amber-200">{connexion.lastError}</span>
+                  )}
+                </div>
+              </>
+            )}
+
+            {connexionErreur && (
+              <p className="mt-1.5 text-[10px] text-rose-200" data-testid="store-connect-error">{connexionErreur}</p>
+            )}
+          </div>
+
+          {/* --- Chariow : clé API, sans URL (API hébergée chez l'éditeur) --- */}
+          <div
+            className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5"
+            data-testid="store-chariow-block"
+          >
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+              <KeyRound size={13} className="text-slate-500" /> Boutique Chariow (clé API)
+            </p>
+
+            {connexionChariow?.connected ? (
+              <>
+                <p className="mt-1 text-[10px] leading-relaxed text-emerald-200" data-testid="store-chariow-connected">
+                  Connectée : {connexionChariow.shopName ?? 'boutique Chariow'}
+                  {connexionChariow.storeUrl ? ` · ${connexionChariow.storeUrl}` : ''}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={chargement}
+                    disabled={!workspaceId}
+                    onClick={() => void prévisualiserChariow()}
+                    icon={<Link2 size={13} />}
+                    data-testid="store-chariow-preview"
+                  >
+                    Prévisualiser le catalogue
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={connexionChariowEnCours}
+                    onClick={() => void déconnecterChariow()}
+                    data-testid="store-chariow-disconnect"
+                  >
+                    Déconnecter
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  Clé créée dans app.chariow.com → Settings → API Keys, avec les scopes
+                  « products.read » et « store.read ». Le serveur la vérifie en lisant réellement
+                  votre boutique, puis la range dans le coffre. Elle n’est jamais renvoyée au navigateur.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    type="password"
+                    value={cléChariow}
+                    onChange={(événement) => setCléChariow(événement.target.value)}
+                    onKeyDown={(événement) => {
+                      if (événement.key === 'Enter') {
+                        événement.preventDefault();
+                        void connecterChariow();
+                      }
+                    }}
+                    placeholder="sk_live_…"
+                    aria-label="Clé API Chariow"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={connexionChariowEnCours || !workspaceId}
+                    className="min-w-0 flex-1 rounded-lg border border-white/[0.09] bg-black/30 px-2.5 py-1.5 font-mono text-[11px] text-slate-200 placeholder:text-slate-600 focus:border-cyan-300/40 focus:outline-none disabled:opacity-50"
+                    data-testid="store-chariow-key"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={connexionChariowEnCours}
+                    disabled={!workspaceId || cléChariow.trim().length < 20}
+                    onClick={() => void connecterChariow()}
+                    icon={<KeyRound size={13} />}
+                    data-testid="store-chariow-connect"
+                  >
+                    Vérifier et connecter
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {connexionChariowErreur && (
+              <p className="mt-1.5 text-[10px] text-rose-200" data-testid="store-chariow-error">
+                {connexionChariowErreur}
+              </p>
+            )}
+          </div>
+
           <div className="rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
               <Globe size={13} className="text-slate-500" /> Importer depuis une URL de boutique
@@ -336,12 +768,17 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
         </div>
       )}
 
-      {/* Étape 2 (URL) — aperçu renvoyé par le serveur, aucune écriture */}
+      {/* Étape 2 — aperçu (serveur, quel que soit le type de source) */}
       {étape === 'apercu' && apercuServeur && (
-        <div className="mt-3" data-testid="store-url-preview-panel">
+        <div
+          className="mt-3"
+          data-testid={apercuServeur.origin.kind === 'file' ? 'store-file-preview-panel' : 'store-url-preview-panel'}
+        >
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
             <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-0.5 text-cyan-100">
-              {PLATFORM_LABELS[apercuServeur.origin.platform]}
+              {apercuServeur.origin.kind === 'file'
+                ? apercuServeur.origin.reference
+                : PLATFORM_LABELS[apercuServeur.origin.platform]}
             </span>
             <span className="text-slate-400">{apercuServeur.summary.total} produit(s) détecté(s)</span>
             {apercuServeur.summary.duplicateInBatch > 0 && (
@@ -361,7 +798,78 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
             </div>
           )}
 
-          <ul className="vy-scroll mt-3 max-h-80 space-y-1.5 overflow-y-auto pr-1" data-testid="store-url-preview">
+          {/*
+            Rappel explicite : un aperçu n'écrit rien. Placé dans le bloc unifié
+            pour qu'il soit dit aussi bien après un fichier qu'après une URL.
+          */}
+          {/*
+            Validité de l'aperçu, affichée en clair.
+
+            Trois états distincts, et pas un seul bandeau : « valable », « ça
+            approche », « expiré ». Le bouton de confirmation suit le dernier —
+            on ne propose jamais une action que le serveur refusera, et le
+            serveur reste seul juge (il revérifie l'échéance).
+          */}
+          {validité && (
+            <div
+              role={validité.state === 'expiring' || validité.state === 'expired' ? 'alert' : 'status'}
+              className={cn(
+                'mt-2 rounded-lg border px-3 py-2 text-[10px]',
+                validité.state === 'expired'
+                  ? 'border-rose-400/25 bg-rose-400/[0.06] text-rose-100'
+                  : validité.state === 'expiring'
+                    ? 'border-amber-400/25 bg-amber-400/[0.06] text-amber-100'
+                    : 'border-white/[0.07] bg-black/20 text-slate-400',
+              )}
+              data-testid="preview-validity"
+              data-state={validité.state}
+            >
+              <p className="flex items-center gap-1.5">
+                {validité.state === 'expired' || validité.state === 'expiring'
+                  ? <AlertTriangle size={11} />
+                  : <Check size={11} />}
+                {validité.label}
+              </p>
+              {validité.state === 'expired' && (
+                <p className="mt-1 text-slate-400">
+                  Rien n’a été enregistré. Relancez l’analyse pour obtenir un nouvel
+                  aperçu — vous n’avez pas à redéposer le fichier.
+                </p>
+              )}
+            </div>
+          )}
+
+          <p className="mt-2 text-[10px] text-slate-500">
+            Aucun produit n’a été créé à cette étape. L’import n’a lieu qu’après votre
+            confirmation, et l’aperçu expire au bout de dix minutes.
+          </p>
+
+          {/*
+            * Brouillons écartés chez la source (Chariow).
+            *
+            * Affiché à part, et pas seulement noyé dans les avertissements :
+            * « 3 produits » sur une boutique qui en compte 8 ferait conclure à
+            * une panne d'import. Ce décompte dit exactement ce qui a été laissé
+            * de côté, et pourquoi.
+            */}
+          {(apercuServeur.draftsSkipped ?? 0) > 0 && (
+            <div
+              className="mt-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.05] px-3 py-2 text-[10px] text-amber-100"
+              data-testid="preview-drafts-skipped"
+            >
+              {apercuServeur.draftsSkipped} produit(s) non publié(s) chez Chariow (brouillon ou suspendu)
+              {apercuServeur.draftsSkipped === 1 ? ' a' : ' ont'} été écarté(s) : seuls les produits
+              publiés sont importés.
+            </div>
+          )}
+
+          {apercuServeur.rejected.length > 0 && (
+            <div className="mt-2 rounded-lg border border-rose-400/20 bg-rose-400/[0.05] px-3 py-2 text-[10px] text-rose-100">
+              {apercuServeur.rejected.slice(0, 4).map((r) => <p key={`${r.line}-${r.reason}`}>· ligne {r.line} : {r.reason}</p>)}
+            </div>
+          )}
+
+          <ul className="vy-scroll mt-3 max-h-80 space-y-1.5 overflow-y-auto pr-1" data-testid="import-preview">
             {apercuServeur.products.slice(0, 40).map((produit) => (
               <li
                 key={`${produit.index}-${produit.name}`}
@@ -369,17 +877,12 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
                   'flex items-start gap-2.5 rounded-lg border px-2.5 py-2',
                   produit.duplicate ? 'border-amber-400/20 bg-amber-400/[0.04]' : 'border-white/[0.07] bg-black/20',
                 )}
-                data-testid={`store-url-preview-${produit.index}`}
+                data-testid={`import-preview-${produit.index}`}
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white/[0.05] text-slate-600">
-                  <Package size={13} />
-                </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium text-white">{produit.name}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-                    <span className={produit.price ? 'text-slate-300' : 'text-amber-300/80'}>
-                      {produit.price || 'prix à compléter'}
-                    </span>
+                    <span className="text-slate-300">{produit.price}</span>
                     {produit.productUrl && (
                       <a
                         href={produit.productUrl}
@@ -394,6 +897,30 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
                   {produit.warnings.length > 0 && (
                     <p className="mt-0.5 text-[10px] text-amber-200/80">{produit.warnings.join(' · ')}</p>
                   )}
+                  {(produit.variants?.length ?? 0) > 0 && (
+                    /**
+                     * Le détail des déclinaisons, pas seulement leur nombre :
+                     * l'utilisateur doit voir CE QUI sera écrit (option, prix,
+                     * stock) pour pouvoir vérifier avant de confirmer.
+                     */
+                    <ul className="mt-1 flex flex-wrap gap-1" data-testid={`import-variants-${produit.index}`}>
+                      {produit.variants!.slice(0, 8).map((variante, position) => (
+                        <li
+                          key={`${variante.name}-${position}`}
+                          className="rounded border border-cyan-300/20 bg-cyan-400/[0.05] px-1.5 py-0.5 text-[9px] text-cyan-100/90"
+                        >
+                          {variante.attributeName ? `${variante.attributeName} ` : ''}
+                          {variante.name}
+                          {' · '}{variante.price}
+                          {variante.stock !== null ? ` · stock ${variante.stock}` : ''}
+                          {variante.sku ? ` · ${variante.sku}` : ''}
+                        </li>
+                      ))}
+                      {(produit.variants?.length ?? 0) > 8 && (
+                        <li className="text-[9px] text-slate-500">+{(produit.variants?.length ?? 0) - 8} autre(s)</li>
+                      )}
+                    </ul>
+                  )}
                   {produit.duplicate && (
                     <p className="mt-0.5 text-[10px] text-amber-300">
                       {produit.duplicate === 'in-batch'
@@ -407,7 +934,8 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
           </ul>
           {apercuServeur.products.length > 40 && (
             <p className="mt-1 text-[10px] text-slate-500">
-              Aperçu limité à 40 produits sur {apercuServeur.summary.total}.
+              Aperçu limité à 40 produits sur {apercuServeur.summary.total}. Tous les produits
+              importables seront écrits.
             </p>
           )}
 
@@ -415,127 +943,32 @@ export function StoreImportPanel({ workspaceId, existing, onImported, onClose }:
             <Button
               size="sm"
               variant="primary"
-              disabled={écriture || !workspaceId || apercuServeur.summary.importable === 0}
-              onClick={() => void confirmerUrl()}
-              icon={<Check size={13} />}
-              data-testid="store-url-confirm"
-            >
-              Importer {apercuServeur.summary.importable} produit(s)
-            </Button>
-            <Button size="sm" variant="ghost" onClick={réinitialiser} icon={<ArrowLeft size={13} />}>
-              Changer de source
-            </Button>
-          </div>
-          <p className="mt-2 text-[10px] text-slate-500">
-            Aucun produit n’a été créé à cette étape. L’import n’a lieu qu’après votre
-            confirmation, et l’aperçu expire au bout de dix minutes.
-          </p>
-        </div>
-      )}
-
-      {/* Étape 2 — aperçu */}
-      {étape === 'apercu' && lot && (
-        <div className="mt-3">
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <span className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-0.5 text-cyan-100">
-              {lot.origin.kind === 'file' ? lot.origin.reference : PLATFORM_LABELS[lot.origin.platform]}
-            </span>
-            <span className="text-slate-400">{lot.summary.total} produit(s) détecté(s)</span>
-            {lot.summary.duplicateInBatch > 0 && (
-              <span className="text-amber-200">{lot.summary.duplicateInBatch} doublon(s) dans le fichier</span>
-            )}
-            {lot.summary.duplicateExisting > 0 && (
-              <span className="text-amber-200">{lot.summary.duplicateExisting} déjà dans votre catalogue</span>
-            )}
-            {lot.summary.unpriced > 0 && (
-              <span className="text-slate-500">{lot.summary.unpriced} sans prix (à compléter)</span>
-            )}
-          </div>
-
-          {avertissements.length > 0 && (
-            <div className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-3 py-2 text-[10px] text-amber-100">
-              {avertissements.slice(0, 4).map((avertissement) => <p key={avertissement}>· {avertissement}</p>)}
-            </div>
-          )}
-
-          <ul className="vy-scroll mt-3 max-h-80 space-y-1.5 overflow-y-auto pr-1" data-testid="import-preview">
-            {aperçu.map((produit, index) => {
-              const doublon = lot.duplicates.find((d) => d.index === index);
-              return (
-                <li
-                  key={`${produit.fingerprint}-${index}`}
-                  className={cn(
-                    'flex items-start gap-2.5 rounded-lg border px-2.5 py-2',
-                    doublon ? 'border-amber-400/20 bg-amber-400/[0.04]' : 'border-white/[0.07] bg-black/20',
-                  )}
-                  data-testid={`import-preview-${index}`}
-                >
-                  {produit.imageUrl ? (
-                    // Aperçu distant : l'URL a déjà été validée en https par la
-                    // normalisation. `loading="lazy"` évite 40 requêtes d'un coup.
-                    <img
-                      src={produit.imageUrl}
-                      alt=""
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      className="h-9 w-9 shrink-0 rounded object-cover"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-white/[0.05] text-slate-600">
-                      <ImageOff size={13} />
-                    </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-medium text-white">{produit.name}</p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
-                      <span className={produit.priceMinor === null ? 'text-amber-300/80' : 'text-slate-300'}>
-                        {formatPreviewPrice(produit)}
-                      </span>
-                      {produit.categories.length > 0 && <span>· {produit.categories.slice(0, 2).join(', ')}</span>}
-                      {produit.variants.length > 0 && <span>· {produit.variants.length} variante(s)</span>}
-                      {produit.productUrl && (
-                        <a
-                          href={produit.productUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-0.5 text-cyan-300/80 underline underline-offset-2"
-                        >
-                          <Link2 size={9} /> fiche
-                        </a>
-                      )}
-                    </p>
-                    {produit.warnings.length > 0 && (
-                      <p className="mt-0.5 text-[10px] text-amber-200/80">{produit.warnings.join(' · ')}</p>
-                    )}
-                    {doublon && (
-                      <p className="mt-0.5 text-[10px] text-amber-300">
-                        {doublon.kind === 'in-batch'
-                          ? 'Doublon dans le fichier — ne sera pas créé deux fois'
-                          : 'Existe déjà dans votre catalogue — sera créé si vous confirmez'}
-                      </p>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-          {lot.products.length > aperçu.length && (
-            <p className="mt-1 text-[10px] text-slate-500">
-              Aperçu limité à {aperçu.length} produits sur {total}. Tous seront importés.
-            </p>
-          )}
-
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={écriture || !workspaceId}
-              onClick={() => void écrire()}
+              // Rien d'importable ⇒ rien à confirmer : un bouton « Importer 0
+              // produit(s) » serait un piège, pas une action.
+              // Un aperçu échu n'est pas confirmable : le serveur le refuse, et
+              // proposer le bouton ferait perdre le clic. Rien d'importable ⇒
+              // rien à confirmer non plus.
+              disabled={
+                écriture
+                || !workspaceId
+                || apercuServeur.summary.importable === 0
+                || validité?.state === 'expired'
+              }
+              onClick={() => void confirmer()}
               icon={<Check size={13} />}
               data-testid="import-confirm"
             >
-              Importer {àCréer} produit(s)
+              Importer {apercuServeur.summary.importable} produit(s)
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              loading={chargement}
+              onClick={() => void relancer()}
+              icon={<RotateCcw size={13} />}
+              data-testid="preview-restart"
+            >
+              Relancer l’analyse
             </Button>
             <Button size="sm" variant="ghost" onClick={réinitialiser} icon={<ArrowLeft size={13} />}>
               Changer de source

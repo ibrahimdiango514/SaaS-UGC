@@ -8,7 +8,11 @@
  *   - l'aperçu montre les prix, images, catégories et doublons ;
  *   - un import partiel est rapporté fidèlement (créés / échoués) ;
  *   - les doublons internes au fichier ne créent pas de produit en double ;
- *   - l'import par URL passe par le serveur et n'écrit qu'après confirmation.
+ *   - **fichier comme URL passent par le serveur** : le navigateur n'écrit plus
+ *     dans `ugc_products`, donc l'abonnement ne peut plus être contourné.
+ *
+ * Les tests ci-dessous simulent l'Edge Function (`invokeEdge`) et non plus un
+ * parseur local : c'est bien le contrat serveur qui est vérifié.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -16,11 +20,46 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 const api = vi.hoisted(() => ({
   createProduct: vi.fn(),
   invokeEdge: vi.fn(),
+  /** Route `store-connect` : état de connexion, connexion, déconnexion. */
+  connectEdge: vi.fn(),
 }));
 
+/** Aperçu serveur minimal, tel que `store-import` le renvoie. */
+function apercuServeur(surcharge: Record<string, unknown> = {}) {
+  return {
+    data: {
+      previewId: 'apercu-1',
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      summary: { total: 2, importable: 2, duplicateInBatch: 0, duplicateExisting: 0, unpriced: 0 },
+      products: [
+        { index: 0, name: 'Sérum éclat', price: '12 000 XOF', currency: 'XOF', productUrl: null, warnings: [], duplicate: null, importable: true },
+        { index: 1, name: 'Baume', price: '4 500 XOF', currency: 'XOF', productUrl: null, warnings: [], duplicate: null, importable: true },
+      ],
+      rejected: [],
+      warnings: [],
+      origin: { kind: 'file', platform: 'unknown', endpoint: 'csv', reference: 'catalogue.csv' },
+      connectedTo: '',
+      ...surcharge,
+    },
+  };
+}
+
+/**
+ * Le panneau parle à DEUX Edge Functions : `store-import` (aperçu, import) et
+ * `store-connect` (état de connexion, connexion). Les router séparément évite
+ * qu'une réponse programmée pour l'un soit consommée par l'autre — un
+ * `mockResolvedValueOnce` destiné à l'aperçu partait sinon sur la lecture
+ * d'état faite au montage, et tous les tests d'aperçu échouaient.
+ */
 vi.mock('../src/lib/api', async () => {
   const reel = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api');
-  return { ...reel, createProduct: api.createProduct, invokeEdge: api.invokeEdge };
+  return {
+    ...reel,
+    createProduct: api.createProduct,
+    invokeEdge: (nom: string, corps: Record<string, unknown>) => (
+      nom === 'store-connect' ? api.connectEdge(nom, corps) : api.invokeEdge(nom, corps)
+    ),
+  };
 });
 
 import { StoreImportPanel } from '../src/business/importer/StoreImportPanel';
@@ -46,6 +85,10 @@ function déposer(fichierCsv: File) {
 beforeEach(() => {
   vi.clearAllMocks();
   api.createProduct.mockResolvedValue({ id: 'p-1' });
+  api.invokeEdge.mockImplementation(async (_fn: string, body: { action: string }) => {
+    if (body.action === 'preview') return apercuServeur();
+    return { data: { created: 2, failed: [] } };
+  });
 });
 afterEach(cleanup);
 
@@ -82,26 +125,51 @@ describe('étape 2 — aperçu avant écriture', () => {
     expect(within(aperçu).getByText('Baume')).toBeTruthy();
     expect(screen.getByText(/2 produit\(s\) détecté\(s\)/i)).toBeTruthy();
 
-    // Le point essentiel : aucune écriture avant confirmation.
+    // Le point essentiel : aucune écriture avant confirmation, et c'est le
+    // SERVEUR qui a produit l'aperçu (pas un parseur local).
     expect(api.createProduct).not.toHaveBeenCalled();
+    // Seuls les appels d'import comptent : le panneau lit aussi l'état de
+    // connexion au montage (`store-connect`, action `status`), qui n'écrit rien.
+    const appels = api.invokeEdge.mock.calls.filter(([nom]) => nom === 'store-import');
+    expect(appels).toHaveLength(1);
+    expect(appels[0][1].action).toBe('preview');
+    expect(appels[0][1].fileBase64).toBeTruthy();
     expect(screen.getByTestId('import-confirm').textContent).toContain('2');
   });
 
   it('signale un prix manquant comme « à compléter », sans le remplacer par zéro', async () => {
+    api.invokeEdge.mockResolvedValueOnce(apercuServeur({
+      summary: { total: 1, importable: 1, duplicateInBatch: 0, duplicateExisting: 0, unpriced: 1 },
+      products: [{ index: 0, name: 'Sérum', price: 'à compléter', currency: 'XOF', productUrl: null, warnings: [], duplicate: null, importable: true }],
+    }));
     déposer(fichier('name,price\nSérum,sur-devis', 'c.csv'));
     await waitFor(() => expect(screen.getByTestId('import-preview')).toBeTruthy());
-    expect(screen.getByText('prix à compléter')).toBeTruthy();
+    // Le serveur rend « à compléter » : l'interface ne substitue pas zéro.
+    expect(screen.getByText('à compléter')).toBeTruthy();
     expect(screen.getByText(/1 sans prix/i)).toBeTruthy();
   });
 
   it('détecte un doublon interne au fichier et l’annonce', async () => {
+    api.invokeEdge.mockResolvedValueOnce(apercuServeur({
+      summary: { total: 2, importable: 1, duplicateInBatch: 1, duplicateExisting: 0, unpriced: 0 },
+      products: [
+        { index: 0, name: 'Sérum', price: '1 000 XOF', currency: 'XOF', productUrl: null, warnings: [], duplicate: null, importable: true },
+        { index: 1, name: 'SERUM', price: '1 000 XOF', currency: 'XOF', productUrl: null, warnings: [], duplicate: 'in-batch', importable: false },
+      ],
+    }));
     déposer(fichier('name,price\nSérum,1000\nSERUM,1000', 'c.csv'));
     await waitFor(() => expect(screen.getByTestId('import-preview')).toBeTruthy());
-    expect(screen.getByText(/1 doublon\(s\) dans le fichier/i)).toBeTruthy();
+    expect(screen.getByText(/1 doublon\(s\) dans la source/i)).toBeTruthy();
     expect(screen.getByText(/ne sera pas créé deux fois/i)).toBeTruthy();
+    // Un seul produit importable : le bouton ne promet pas deux écritures.
+    expect(screen.getByTestId('import-confirm').textContent).toContain('1');
   });
 
   it('détecte un doublon face au catalogue existant', async () => {
+    api.invokeEdge.mockResolvedValueOnce(apercuServeur({
+      summary: { total: 1, importable: 1, duplicateInBatch: 0, duplicateExisting: 1, unpriced: 0 },
+      products: [{ index: 0, name: 'Sérum Éclat', price: '1 000 XOF', currency: 'XOF', productUrl: null, warnings: [], duplicate: 'existing', importable: true }],
+    }));
     render(
       <StoreImportPanel
         workspaceId="w"
@@ -118,16 +186,22 @@ describe('étape 2 — aperçu avant écriture', () => {
   });
 
   it('un fichier illisible affiche l’erreur sans aperçu trompeur', async () => {
+    api.invokeEdge.mockRejectedValueOnce(Object.assign(new Error('Fichier illisible.'), { code: 'FILE_UNREADABLE' }));
     déposer(fichier('nimporte quoi sans entete', 'c.csv'));
-    await waitFor(() => expect(screen.getByText(/Import impossible/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Fichier illisible/i)).toBeTruthy());
     expect(screen.queryByTestId('import-preview')).toBeNull();
     expect(api.createProduct).not.toHaveBeenCalled();
   });
 
   it('un fichier XML avec DOCTYPE est refusé avec un message de sécurité', async () => {
+    // Le refus vient du serveur : le navigateur ne fait plus l'analyse, il relaie
+    // la raison exacte renvoyée par l'Edge Function.
+    api.invokeEdge.mockRejectedValueOnce(
+      Object.assign(new Error('DTD interdite.'), { code: 'FILE_UNREADABLE' }),
+    );
     déposer(fichier('<?xml version="1.0"?><!DOCTYPE x SYSTEM "file:///etc/passwd"><catalog></catalog>', 'flux.xml'));
-    await waitFor(() => expect(screen.getByText(/Import impossible/i)).toBeTruthy());
-    expect(screen.getByText(/DOCTYPE/i)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/DTD interdite/i)).toBeTruthy());
+    expect(screen.queryByTestId('import-preview')).toBeNull();
   });
 });
 
@@ -142,30 +216,47 @@ describe('étape 3 — écriture après confirmation', () => {
     fireEvent.click(screen.getByTestId('import-confirm'));
     await waitFor(() => expect(screen.getByTestId('import-result')).toBeTruthy());
 
-    expect(api.createProduct).toHaveBeenCalledTimes(2);
-    // Le prix part en unité principale, la devise est conservée.
-    const premier = api.createProduct.mock.calls[0][0];
-    expect(premier.name).toBe('Sérum');
-    expect(premier.price_amount).toBe(12000);
-    expect(premier.price_currency).toBe('XOF');
-    expect(premier.workspace_id).toBe('w');
+    // Aucune écriture navigateur : tout passe par l'Edge Function.
+    expect(api.createProduct).not.toHaveBeenCalled();
+    const écriture = api.invokeEdge.mock.calls.find(([, body]) => body.action === 'import');
+    expect(écriture).toBeTruthy();
+    expect(écriture![1].workspaceId).toBe('w');
+    expect(écriture![1].previewId).toBe('apercu-1');
     expect(onImported).toHaveBeenCalled();
   });
 
   it('n’écrit pas deux fois un doublon interne au fichier', async () => {
+    api.invokeEdge.mockImplementation(async (_fn: string, body: { action: string }) => {
+      if (body.action === 'preview') {
+        return apercuServeur({
+          summary: { total: 2, importable: 1, duplicateInBatch: 1, duplicateExisting: 0, unpriced: 0 },
+          products: [
+            { index: 0, name: 'Sérum', price: '1 000 XOF', currency: 'XOF', productUrl: null, warnings: [], duplicate: null, importable: true },
+            { index: 1, name: 'SERUM', price: '1 000 XOF', currency: 'XOF', productUrl: null, warnings: [], duplicate: 'in-batch', importable: false },
+          ],
+        });
+      }
+      return { data: { created: 1, failed: [] } };
+    });
     render(<StoreImportPanel workspaceId="w" existing={[]} onImported={vi.fn()} onClose={vi.fn()} />);
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [fichier('name,price\nSérum,1000\nSERUM,1000', 'c.csv')] } });
     await waitFor(() => expect(screen.getByTestId('import-confirm')).toBeTruthy());
     fireEvent.click(screen.getByTestId('import-confirm'));
     await waitFor(() => expect(screen.getByTestId('import-result')).toBeTruthy());
-    expect(api.createProduct).toHaveBeenCalledTimes(1);
+    // La sélection envoyée ne contient que les produits importables : le doublon
+    // n'est pas transmis du tout, il ne peut donc pas être écrit deux fois.
+    const écriture = api.invokeEdge.mock.calls.find(([, body]) => body.action === 'import');
+    expect(écriture![1].selection).toHaveLength(1);
+    expect(api.createProduct).not.toHaveBeenCalled();
   });
 
   it('rapporte fidèlement un échec partiel, sans le masquer', async () => {
-    api.createProduct
-      .mockResolvedValueOnce({ id: 'p-1' })
-      .mockRejectedValueOnce(new Error('Quota dépassé'));
+    // Le serveur rapporte lui-même l'échec partiel : 1 créé, 1 refusé.
+    api.invokeEdge.mockImplementation(async (_fn: string, body: { action: string }) => {
+      if (body.action === 'preview') return apercuServeur();
+      return { data: { created: 1, failed: [{ name: 'Baume', reason: 'Quota dépassé' }] } };
+    });
     render(<StoreImportPanel workspaceId="w" existing={[]} onImported={vi.fn()} onClose={vi.fn()} />);
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [fichier('name,price\nSérum,1000\nBaume,2000', 'c.csv')] } });
@@ -179,12 +270,15 @@ describe('étape 3 — écriture après confirmation', () => {
     expect(résultat.textContent).toContain('Quota dépassé');
   });
 
-  it('sans entreprise active, le bouton d’import est inactif', async () => {
+  it('sans entreprise active, aucun envoi au serveur n’est tenté', async () => {
     render(<StoreImportPanel workspaceId={null} existing={[]} onImported={vi.fn()} onClose={vi.fn()} />);
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [fichier('name,price\nSérum,1000', 'c.csv')] } });
-    await waitFor(() => expect(screen.getByTestId('import-confirm')).toBeTruthy());
-    expect((screen.getByTestId('import-confirm') as HTMLButtonElement).disabled).toBe(true);
+    // Le fichier n'est même pas lu : la validation d'entreprise intervient avant,
+    // ce qui évite un aller-retour réseau voué à l'échec.
+    await waitFor(() => expect(screen.getByText(/Sélectionnez une entreprise avant d’importer/i)).toBeTruthy());
+    expect(api.invokeEdge).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('import-confirm')).toBeNull();
     expect(api.createProduct).not.toHaveBeenCalled();
   });
 

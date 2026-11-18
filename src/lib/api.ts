@@ -7,6 +7,7 @@ import type {
   ServiceCatalogItem, Subscription, VideoActionResult, VideoCatalogResponse, VideoCostEstimate,
   Workspace, WorkspaceMember, MuApiParamDef, ProviderQuote, ReeloraModelStatus,
 } from './types';
+import { normalizeVariants, type ProductVariant } from '../business/importer/variants-model';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyResult = { data: any; error: any };
@@ -326,6 +327,51 @@ export async function deleteProduct(id: string) {
     supabase.from('ugc_products').delete().eq('id', id).select('id').maybeSingle() as unknown as PromiseLike<AnyResult>,
   );
   if (!deleted) throw new AppError('Produit introuvable ou inaccessible.', 'NOT_FOUND');
+}
+
+/**
+ * Catalogue avec ses variantes, par la RPC `vyora_ugc_catalog`.
+ *
+ * ## Pourquoi une RPC et pas une lecture de table
+ * `ugc_product_variants` n'est pas exposée à PostgREST. La RPC vérifie en base
+ * l'appartenance à l'espace de travail et renvoie les variantes de chaque
+ * produit, dans l'ordre voulu par la source. Le client ne filtre rien.
+ *
+ * ## `read_only`
+ * La RPC dit elle-même si l'abonnement ouvre l'écriture. L'interface s'en sert
+ * pour désactiver les boutons ; elle ne décide d'aucun droit.
+ */
+export interface CatalogSnapshot {
+  products: Array<{ id: string; variants: ProductVariant[] }>;
+  /** `true` = abonnement expiré : consultation seule. `null` = inconnu. */
+  readOnly: boolean | null;
+}
+
+export async function loadCatalog(workspaceId: string): Promise<CatalogSnapshot> {
+  const raw = await rpc<unknown>('vyora_ugc_catalog', { p_workspace_id: workspaceId });
+  return normalizeCatalog(raw);
+}
+
+/**
+ * Lit la réponse du catalogue.
+ *
+ * Forme attendue : `{ read_only, products: [{ id, variants: [...] }] }`. Un
+ * produit sans identifiant est ignoré : sans identifiant, aucune variante ne
+ * peut lui être rattachée, et l'afficher créerait une entrée fantôme.
+ */
+export function normalizeCatalog(raw: unknown): CatalogSnapshot {
+  const source = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const lignes = Array.isArray(source.products) ? source.products : Array.isArray(raw) ? raw : [];
+  const products = lignes.flatMap((entree) => {
+    const ligne = (entree && typeof entree === 'object' ? entree : {}) as Record<string, unknown>;
+    const id = typeof ligne.id === 'string' ? ligne.id : '';
+    if (!id) return [];
+    return [{ id, variants: normalizeVariants(ligne.variants, id) }];
+  });
+  return {
+    products,
+    readOnly: typeof source.read_only === 'boolean' ? source.read_only : null,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -836,6 +882,55 @@ export async function adminSetRole(userId: string, role: 'admin' | 'user') {
 
 export async function adminSetPlan(userId: string, planKey: string) {
   return rpc<boolean>('reelora_admin_set_plan', { p_user_id: userId, p_plan_key: planKey });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Business Grow — attribution manuelle d'une formule (administration)        */
+/* -------------------------------------------------------------------------- */
+
+/** Résultat de `vyora_admin_set_business_subscription` / `..._revoke_...`. */
+export interface AdminBusinessSubscriptionResult {
+  subscription_id: string;
+  user_id?: string;
+  plan_key?: string;
+  status: string;
+  billing_provider?: string;
+  reference?: string;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
+  renewed?: boolean;
+  /** Droit d'accès Import & Connect recalculé par la règle unique, juste après. */
+  access: { allowed: boolean; reason: string; message: string; current_period_end?: string | null };
+}
+
+/**
+ * Attribue ou renouvelle manuellement une formule Business Grow à un compte
+ * client. La RPC revérifie le rôle administrateur, la cible, la formule et la
+ * date de fin ; elle journalise et notifie. Aucune facturation n'est engagée.
+ */
+export async function adminSetBusinessSubscription(input: {
+  userId: string; planKey: string; periodEnd: Date; note?: string;
+}): Promise<AdminBusinessSubscriptionResult> {
+  return rpc<AdminBusinessSubscriptionResult>('vyora_admin_set_business_subscription', {
+    p_user_id: input.userId,
+    p_plan_key: input.planKey,
+    p_period_end: input.periodEnd.toISOString(),
+    p_note: input.note?.trim() || null,
+  });
+}
+
+/** Résilie l'attribution manuelle Business Grow d'un compte (accès fermé immédiatement). */
+export async function adminRevokeBusinessSubscription(userId: string, note?: string): Promise<AdminBusinessSubscriptionResult> {
+  return rpc<AdminBusinessSubscriptionResult>('vyora_admin_revoke_business_subscription', {
+    p_user_id: userId,
+    p_note: note?.trim() || null,
+  });
+}
+
+/** Formules Business Grow visibles (catalogue public, formules actives uniquement). */
+export async function listBusinessGrowPlans(): Promise<Array<{ plan_key: string; display_name: string; active: boolean }>> {
+  const catalog = await rpc<{ plans?: Array<{ plan_key: string; display_name: string; active: boolean }> }>('business_grow_catalog');
+  return Array.isArray(catalog?.plans) ? catalog.plans : [];
 }
 
 export async function adminSetAccountStatus(userId: string, status: 'active' | 'suspended' | 'cancelled') {
