@@ -4,8 +4,8 @@ name: Frontend — publication Cloudflare Pages (manuelle)
 # épuisés) et SANS GitHub Pages (ses conditions d'utilisation excluent
 # explicitement l'hébergement d'un SaaS commercial).
 #
-# Déclenchement : manuel (bouton « Run workflow », environnement au choix) ou
-# automatique à chaque publication sur `main` (environnement production).
+# Déclenchement : manuel uniquement (bouton « Run workflow », environnement au
+# choix). Aucun déclenchement automatique.
 # Les prérequis côté backend sont déjà en place (P6e) : origines
 # `https://vyora.pages.dev` et `https://*.vyora.pages.dev` autorisées en CORS
 # (VYORA_ALLOWED_ORIGINS, STORE_IMPORT_ALLOWED_ORIGINS, liste par défaut) et
@@ -29,9 +29,9 @@ name: Frontend — publication Cloudflare Pages (manuelle)
 # valeurs PUBLIQUES (URL du projet, clé publiable), déjà présentes par défaut
 # dans src/lib/supabase.ts.
 
+# 2026-11-18 : Netlify est redevenu l'hébergeur de production (décision
+# explicite). Ce workflow reste disponible en secours, MANUEL uniquement.
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
     inputs:
       project_name:

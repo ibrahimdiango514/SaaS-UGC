@@ -13,12 +13,14 @@
   # travail en cours sont ajoutées à la liste : aucun commit ne peut déclencher
   # de build ni de Deploy Preview. Le build reste actif sur `main` et pour la
   # publication groupée décidée explicitement.
-  # 2026-11-18 (P6e) : crédits Netlify épuisés, hébergement du front transféré
-  # vers Cloudflare Pages (.github/workflows/frontend-cloudflare-pages.yml).
-  # Aucun build Netlify ne doit plus partir, y compris sur `main` : code 0 =
-  # build annulé avant toute installation. Pour réactiver Netlify, remplacer
-  # cette ligne par la condition précédente (visible dans l'historique Git).
-  ignore = "exit 0"
+  # 2026-11-18 (P6e) : builds coupés partout (« exit 0 ») le temps d'étudier
+  # une alternative. Décision du 2026-11-18 (mission « déploiement complet ») :
+  # Netlify redevient l'hébergeur de production, en acceptant la consommation
+  # des crédits restants. Règle : SEULE la branche `main` se construit ; toute
+  # autre branche (Deploy Preview, branche de travail) est ignorée, pour que
+  # chaque crédit serve au site public. `$BRANCH` est la branche construite
+  # (pour un Deploy Preview : la branche source de la PR).
+  ignore = '[ "$BRANCH" != "main" ]'
 
 [build.environment]
   NODE_VERSION = "22"
