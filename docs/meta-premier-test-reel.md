@@ -65,15 +65,34 @@ pouvez aussi tout saisir dans **Supabase → Project Settings → Edge Functions
 `META_MESSENGER_CONFIG_ID` et `META_INSTAGRAM_CONFIG_ID` peuvent être ajoutés plus tard : les
 fiches concernées resteront en « configuration manquante », ce qui est l'état honnête.
 
-**Étape 2 — déployer les deux fonctions** (voir §0.4 : c'est le **chargeur** qui part, pas
-`index.ts`).
+**Étape 2 — déployer les deux fonctions.**
+
+Un script dédié existe : `scripts/deploy-meta-functions.sh`. Il ne peut déployer **que**
+`meta-connect` et `meta-webhook` — les autres fonctions n'y figurent pas, donc une faute de frappe ne
+peut pas redéployer Reelora ou Business Grow.
 
 ```bash
-# Vérifie d'abord que le chargeur committé correspond au dépôt (échoue si dérive).
+# 1. Contrôles à blanc : parité des chargeurs, commit épinglé joignable sur GitHub,
+#    présence des secrets (par NOM seulement). N'écrit RIEN.
+bash scripts/deploy-meta-functions.sh
+
+# 2. Déploiement réel, après autorisation explicite.
+bash scripts/deploy-meta-functions.sh --apply
+```
+
+Sans `--apply`, le script s'arrête après les contrôles et affiche :
+
+```
+Contrôles passés. Rien n'a été déployé.
+```
+
+Le script déploie le **chargeur** (`--entrypoint loader.ts`), jamais `index.ts` : voir §0.4.
+
+Si vous préférez la main, les commandes équivalentes sont :
+
+```bash
 node scripts/build-edge-artifact.mjs meta-connect --check
 node scripts/build-edge-artifact.mjs meta-webhook --check
-
-# Déploie LE CHARGEUR seul, sans les imports qu'il ne peut pas transporter.
 supabase functions deploy meta-connect \
   --project-ref xbuuhfwobrafcbgtdgjx --no-verify-jwt --entrypoint loader.ts
 supabase functions deploy meta-webhook \
