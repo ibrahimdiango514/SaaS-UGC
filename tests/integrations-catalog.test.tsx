@@ -24,6 +24,8 @@ vi.mock('../src/lib/supabase', () => ({
   isSupabaseConfigured: true,
 }));
 
+import { existsSync, readFileSync } from 'node:fs';
+
 import CatalogPage from '../src/integrations/CatalogPage';
 import {
   INTEGRATIONS, INTEGRATION_BY_ID, CAPABILITY_LABELS, countByCategory,
@@ -104,11 +106,57 @@ describe('catalogue — structure', () => {
   });
 
   it('aucune intégration ne déclare un connecteur inexistant', () => {
-    // Livraison 2 = catalogue seul. Un `engine` non nul alors qu'aucun
-    // connecteur n'est écrit serait un mensonge dans le modèle.
+    // Un `engine` non nul est une PROMESSE : il doit exister un connecteur
+    // réel derrière. On vérifie donc la présence du code, pas seulement la
+    // forme du modèle. PrestaShop est aujourd'hui le seul dont le moteur est
+    // écrit (clé vérifiée côté serveur, catalogue lu par l'API Webservice ou
+    // par l'API Chariow) ; les autres fiches restent à `null` et l'affichent.
+    /*
+     * `custom-api` est un moteur ÉCRIT (actions `probe-custom` et `save-custom`
+     * de `store-connect`), mais il ne se vérifie pas de la même façon : il n'a
+     * pas de branche par connecteur dans le handler — c'est justement ce qui le
+     * rend universel. Il est donc vérifié séparément, plus bas.
+     */
+    const MOTEURS_ECRITS = new Set(['prestashop', 'chariow', 'shopify', 'woocommerce']);
     for (const entry of INTEGRATIONS) {
-      expect(entry.engine).toBeNull();
+      if (MOTEURS_ECRITS.has(entry.id)) {
+        expect(entry.engine, `${entry.id} : moteur annoncé`).not.toBeNull();
+        // Le point qui rend la promesse vérifiable : le code du connecteur et
+        // son point d'entrée déployé existent dans le dépôt.
+        expect(existsSync(`supabase/functions/store-connect/handler.ts`)).toBe(true);
+        expect(existsSync(`supabase/functions/store-connect/index.ts`)).toBe(true);
+        // Le connecteur doit être RÉELLEMENT branché dans les deux fonctions :
+        // une fiche à `engine: 'api-key'` sans branchement serait un bouton
+        // qui échoue à la première requête.
+        const handler = readFileSync('supabase/functions/store-connect/handler.ts', 'utf8');
+        expect(handler).toContain(`'${entry.id}'`);
+        const importHandler = readFileSync('supabase/functions/store-import/handler.ts', 'utf8');
+        expect(importHandler).toContain(`'${entry.id}'`);
+      } else if (entry.id === 'custom-api') {
+        expect(entry.engine).toBe('custom-api');
+      } else {
+        expect(entry.engine, `${entry.id} : aucun moteur écrit`).toBeNull();
+      }
     }
+  });
+
+  it('PrestaShop ne déclare que des capacités réellement fournies', () => {
+    const prestashop = INTEGRATION_BY_ID.prestashop as IntegrationEntry;
+    // `orders-read` était annoncé sans qu'aucune commande ne soit lue.
+    expect(prestashop.capabilities).toContain('catalog-read');
+    expect(prestashop.capabilities).toContain('inventory-read');
+    expect(prestashop.capabilities).not.toContain('orders-read');
+  });
+
+  it('un connecteur au moteur écrit est proposé dès le premier usage', () => {
+    const prestashop = INTEGRATION_BY_ID.prestashop as IntegrationEntry;
+    // Premier usage : aucune ligne de connexion ⇒ `needs_config`. Le bouton
+    // doit être proposé, sinon le connecteur existe sans être atteignable.
+    expect(canConnect(prestashop, 'needs_config')).toBe(true);
+    expect(canConnect(prestashop, 'not_connected')).toBe(true);
+    // On ne repropose pas de connecter ce qui l'est déjà.
+    expect(canConnect(prestashop, 'connected')).toBe(false);
+    expect(canConnect(prestashop, 'requested')).toBe(false);
   });
 
   it('chaque intégration a au moins un mode d’authentification décrit', () => {
@@ -236,8 +284,25 @@ describe('deriveStatus — le statut ne peut pas mentir', () => {
   });
 
   it('canConnect est faux tant qu’aucun moteur n’existe', () => {
-    expect(canConnect(shopify, 'needs_config')).toBe(false);
+    // OpenCart n'a ni moteur ni parcours de connexion : c'est le cas réel
+    // restant. Shopify a désormais un moteur, il ne sert donc plus d'exemple.
+    const opencart = INTEGRATION_BY_ID.opencart as IntegrationEntry;
+    expect(opencart.engine).toBeNull();
+    expect(canConnect(opencart, 'not_connected')).toBe(false);
+    expect(canConnect(opencart, 'needs_config')).toBe(false);
+    expect(canConnect(opencart, 'needs_approval')).toBe(false);
+  });
+
+  it('canConnect distingue « à configurer » de « à autoriser »', () => {
+    /*
+     * `needs_config` est CONNECTABLE : c'est l'état normal d'un connecteur à clé
+     * (« il me manque des identifiants, laissez-moi les saisir »). Le bouton doit
+     * donc s'afficher. `needs_approval` et `connected` le ferment.
+     */
+    expect(canConnect(shopify, 'needs_config')).toBe(true);
+    expect(canConnect(shopify, 'not_connected')).toBe(true);
     expect(canConnect(shopify, 'needs_approval')).toBe(false);
+    expect(canConnect(shopify, 'connected')).toBe(false);
   });
 
   it('canConnect est vrai quand un moteur existe et que l’état le permet', () => {
@@ -287,27 +352,29 @@ describe('catalogue — affichage', () => {
 
   it('filtre par catégorie au clic', async () => {
     monter();
-    await waitFor(() => expect(screen.getByText(/Shopify/i)).toBeTruthy());
+    // Le nom du fournisseur apparaît dans le titre ET dans sa description :
+    // on vise la carte par son identifiant, sinon le sélecteur est ambigu.
+    await waitFor(() => expect(screen.getByTestId('integration-shopify')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /^Productivité \(\d+\)$/ }));
     await waitFor(() => {
-      expect(screen.queryByText('Shopify')).toBeNull();
-      expect(screen.getByText('Gmail')).toBeTruthy();
+      expect(screen.queryByTestId('integration-shopify')).toBeNull();
+      expect(screen.getByTestId('integration-gmail')).toBeTruthy();
     });
   });
 
   it('recherche et filtre la grille', async () => {
     monter();
-    await waitFor(() => expect(screen.getByText(/Shopify/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('integration-shopify')).toBeTruthy());
     fireEvent.change(screen.getByLabelText(/Rechercher une intégration/i), { target: { value: 'notion' } });
     await waitFor(() => {
-      expect(screen.getByText('Notion')).toBeTruthy();
-      expect(screen.queryByText('Shopify')).toBeNull();
+      expect(screen.getByTestId('integration-notion')).toBeTruthy();
+      expect(screen.queryByTestId('integration-shopify')).toBeNull();
     });
   });
 
   it('affiche un état honnête, jamais « Connecté » sans compte', async () => {
     monter();
-    await waitFor(() => expect(screen.getByText(/Shopify/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('integration-shopify')).toBeTruthy());
     expect(screen.queryByText('Connecté')).toBeNull();
     // Les états attendus sans connecteur ni compte.
     expect(screen.getAllByText(/Configuration requise|Validation externe requise/i).length).toBeGreaterThan(0);
@@ -357,5 +424,76 @@ describe('catalogue — affichage', () => {
     await waitFor(() => expect(screen.getByRole('dialog', { name: /Fiche Instagram/i })).toBeTruthy());
     // Message d'approbation externe, pas un bouton actif trompeur.
     expect(screen.getByText(/exige une validation de son côté/i)).toBeTruthy();
+  });
+});
+
+/**
+ * Phase B — les capacités affichées doivent correspondre au code qui existe.
+ *
+ * Le défaut corrigé : Shopify et WooCommerce annonçaient `catalog-write`,
+ * `inventory-write` et `orders-read`. Aucune ligne ne les implémente, aucun
+ * parcours d'authentification n'existe (`engine: null`) et la sortie réseau des
+ * Edge Functions refuse toute méthode autre que GET. OpenCart annonçait
+ * `orders-read` alors que son API cœur n'expose même pas les produits.
+ */
+describe('catalogue — capacités réellement implémentées', () => {
+  const entrees = (id: string) => INTEGRATION_BY_ID[id] as IntegrationEntry;
+
+  /*
+   * Périmètre : les boutiques. Les connecteurs hors commerce (OAuth social et
+   * productivité) déclarent encore des écritures sans moteur — écart réel,
+   * distinct, qui ne relève pas de cette mission et qui est consigné dans
+   * `docs/audit-connexions-boutiques.md`. Le test est volontairement borné
+   * plutôt que d'être affaibli pour tout le catalogue.
+   */
+  it('aucune boutique sans moteur ne déclare de capacité d’écriture', () => {
+    for (const entry of INTEGRATIONS) {
+      if (entry.category !== 'commerce' || entry.engine !== null) continue;
+      const ecritures = entry.capabilities.filter((c) => /write/.test(c));
+      expect(ecritures, `${entry.id} déclare ${ecritures.join(',')} sans moteur`).toEqual([]);
+    }
+  });
+
+  it('Shopify et WooCommerce n’annoncent que ce que store-import lit', () => {
+    for (const id of ['shopify', 'woocommerce']) {
+      expect(entrees(id).capabilities.sort(), id).toEqual(['catalog-read', 'inventory-read']);
+      /*
+       * `engine: 'api-key'` depuis la phase E : un parcours de connexion
+       * authentifié existe réellement, avec vérification de la clé côté serveur
+       * et lecture par l'API officielle. Aucune écriture n'est annoncée — les
+       * capacités d'écriture n'existent même pas dans le type.
+       */
+      expect(entrees(id).engine, id).toBe('api-key');
+    }
+  });
+
+  it('les deux connecteurs implémentés ne promettent pas d’écriture', () => {
+    for (const id of ['prestashop', 'chariow']) {
+      const entry = entrees(id);
+      expect(entry.engine, id).toBe('api-key');
+      expect(entry.capabilities, id).toEqual(expect.arrayContaining(['catalog-read']));
+      expect(entry.capabilities.some((c) => /write/.test(c)), id).toBe(false);
+    }
+  });
+
+  it('OpenCart ne prétend ni catalogue ni commandes par API', () => {
+    const opencart = entrees('opencart');
+    // L'API cœur est à session et n'expose pas les produits : déclarer
+    // `catalog-read` enverrait l'utilisateur chercher une clé inutile.
+    expect(opencart.capabilities).toEqual([]);
+    expect(opencart.engine).toBeNull();
+    expect(opencart.caveat ?? '').toMatch(/session|export/i);
+    // L'export reste proposé : c'est le seul chemin réel.
+    expect(opencart.auth.some((a) => a.mode === 'file-import')).toBe(true);
+  });
+
+  it('Shopify et WooCommerce disent qu’ils sont en LECTURE SEULE', () => {
+    for (const id of ['shopify', 'woocommerce']) {
+      const caveat = entrees(id).caveat ?? '';
+      expect(caveat, id).toMatch(/lecture seule/i);
+      // Et rappellent qu'aucune commande n'est lue : ce sont des données
+      // personnelles d'acheteurs, hors périmètre.
+      if (id === 'woocommerce') expect(caveat).toMatch(/commande/i);
+    }
   });
 });

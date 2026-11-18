@@ -26,10 +26,33 @@ export interface StorePreviewProduct {
   warnings: string[];
   duplicate: 'in-batch' | 'existing' | null;
   importable: boolean;
+  /**
+   * Déclinaisons du produit, telles que le serveur les écrira.
+   *
+   * Optionnel dans le type et non obligatoire : un serveur plus ancien (ou une
+   * réponse mise en cache) n'en renvoie pas, et l'interface doit alors afficher
+   * la fiche sans variantes plutôt que de casser sur `undefined`.
+   */
+  variants?: Array<{
+    name: string;
+    price: string;
+    currency: string;
+    sku: string | null;
+    stock: number | null;
+    attributeName: string | null;
+  }>;
 }
 
 export interface StorePreview {
   previewId: string;
+  /**
+   * Nombre de produits écartés parce que NON PUBLIÉS chez la source (Chariow).
+   *
+   * Absent pour les sources qui n'ont pas de notion de brouillon. Sa présence
+   * permet à l'écran de distinguer « 3 produits » de « 3 produits, 5 brouillons
+   * ignorés » — sinon un marchand croirait son catalogue incomplet.
+   */
+  draftsSkipped?: number;
   expiresAt: string;
   summary: ImportBatch['summary'];
   products: StorePreviewProduct[];
@@ -50,6 +73,45 @@ interface Enveloppe<T> {
 }
 
 /**
+ * Encode un fichier en base64 pour l'envoi au serveur.
+ *
+ * `btoa` n'accepte que du latin-1 : on passe par les octets, jamais par la
+ * chaîne Unicode. Le découpage par blocs évite de dépasser la taille maximale
+ * d'arguments lors de l'étalement d'un très gros tableau.
+ */
+export function fichierEnBase64(octets: Uint8Array): string {
+  let binaire = '';
+  const bloc = 0x8000;
+  for (let i = 0; i < octets.length; i += bloc) {
+    binaire += String.fromCharCode(...octets.subarray(i, i + bloc));
+  }
+  return btoa(binaire);
+}
+
+/**
+ * Demande l'aperçu d'un FICHIER. **N'écrit rien.**
+ *
+ * Le fichier était auparavant analysé dans le navigateur, puis écrit par des
+ * `insert` PostgREST successifs que seule l'appartenance à l'entreprise
+ * contrôlait : un compte sans abonnement pouvait donc créer des produits, alors
+ * qu'il était refusé sur le chemin URL. En passant par la même Edge Function, la
+ * garde d'abonnement est évaluée **avant** l'analyse du fichier.
+ */
+export async function previewFile(input: {
+  workspaceId: string;
+  fileName: string;
+  bytes: Uint8Array;
+}): Promise<StorePreview> {
+  const { data } = await invokeEdge<Enveloppe<StorePreview>>('store-import', {
+    action: 'preview',
+    workspaceId: input.workspaceId,
+    fileName: input.fileName,
+    fileBase64: fichierEnBase64(input.bytes),
+  });
+  return data;
+}
+
+/**
  * Demande un aperçu. **N'écrit rien.**
  *
  * Lève `AppError` avec le code serveur (`URL_REFUSED`, `RESOLVER_UNAVAILABLE`,
@@ -64,6 +126,35 @@ export async function previewStore(input: {
     action: 'preview',
     workspaceId: input.workspaceId,
     url: input.url,
+  });
+  return data;
+}
+
+/**
+ * Demande un aperçu pour un connecteur à clé d'API **hébergée** (Chariow).
+ *
+ * Pourquoi une fonction distincte plutôt qu'un `url` facultatif :
+ *
+ * - Pour PrestaShop, l'URL **est** l'API : elle est obligatoire, et l'oublier
+ *   donne un aperçu qui échoue à l'exécution.
+ * - Pour Chariow, l'API est chez l'éditeur (`api.chariow.com`) : la clé vient
+ *   de Vault, et l'adresse de vitrine ne sert qu'à nommer la source. Un appel
+ *   « aperçu d'une boutique par URL » laisserait croire que le serveur va
+ *   contacter cette adresse, ce qui est faux.
+ *
+ * Le type sépare donc deux intentions réelles, au lieu de rendre un paramètre
+ * optionnel qui serait obligatoire dans un cas et ignoré dans l'autre.
+ */
+export async function previewConnectedStore(input: {
+  workspaceId: string;
+  connectorKey: 'chariow';
+}): Promise<StorePreview> {
+  const { data } = await invokeEdge<Enveloppe<StorePreview>>('store-import', {
+    action: 'preview',
+    workspaceId: input.workspaceId,
+    // Le serveur lit la clé dans Vault sous ce connecteur. L'absence d'URL est
+    // volontaire : pour Chariow, il n'y a pas de boutique à joindre.
+    connectorKey: input.connectorKey,
   });
   return data;
 }
@@ -114,3 +205,12 @@ export function previewToBatch(preview: StorePreview): ImportBatch {
     summary: preview.summary,
   };
 }
+
+// La logique de validité vit dans `preview-validity.ts` : elle est pure et
+// testable sans navigateur, alors que ce module importe la couche `api` (qui
+// touche `window`). On la ré-exporte ici pour que l'interface n'ait qu'un seul
+// point d'entrée à connaître.
+export {
+  PREVIEW_WARNING_MS, formaterDuree, previewValidity,
+  type PreviewValidity,
+} from './preview-validity';

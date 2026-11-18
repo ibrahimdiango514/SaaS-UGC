@@ -14,11 +14,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { writeFileSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 
-const api = vi.hoisted(() => ({ createProduct: vi.fn(), invokeEdge: vi.fn() }));
+const api = vi.hoisted(() => ({ createProduct: vi.fn(), invokeEdge: vi.fn(), connectEdge: vi.fn() }));
 
+/**
+ * Routage par Edge Function : le panneau interroge aussi `store-connect` au
+ * montage (état de connexion). Router évite qu'une réponse programmée pour
+ * l'aperçu parte sur cette lecture d'état.
+ */
 vi.mock('../src/lib/api', async () => {
   const reel = await vi.importActual<typeof import('../src/lib/api')>('../src/lib/api');
-  return { ...reel, createProduct: api.createProduct, invokeEdge: api.invokeEdge };
+  return {
+    ...reel,
+    createProduct: api.createProduct,
+    invokeEdge: (nom: string, corps: Record<string, unknown>) => (
+      nom === 'store-connect' ? api.connectEdge(nom, corps) : api.invokeEdge(nom, corps)
+    ),
+  };
 });
 
 import { StoreImportPanel } from '../src/business/importer/StoreImportPanel';
@@ -60,6 +71,7 @@ const STYLES = `
 describe('preuve de rendu — import par URL', () => {
   it('produit un artefact HTML de l’aperçu serveur, sans écriture', async () => {
     cleanup();
+    api.connectEdge.mockResolvedValue({ data: null });
     api.invokeEdge.mockResolvedValueOnce({ data: APERCU });
 
     const { container } = render(

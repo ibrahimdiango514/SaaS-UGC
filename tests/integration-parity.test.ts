@@ -49,7 +49,12 @@ describe('Une seule intégration MuAPI, de bout en bout', () => {
       expect(video).toContain(marker);
     }
     // Les sources média sont assemblées puis transmises à `buildMuapiBody`.
-    expect(video).toContain('buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, { videoUrl, audioUrl })');
+    // Depuis les références multiples, l'appel porte aussi les images de
+    // référence : le contrat vérifié est la présence de chaque source.
+    expect(video).toMatch(/buildMuapiBody\(model, payload, prompt, imageUrl, lastImageUrl, \{[^}]*videoUrl[^}]*audioUrl[^}]*\}/);
+    expect(video).toContain('imageUrls: extraImageUrls');
+    // Aucune liste d'images n'est envoyée si le modèle ne la déclare pas.
+    expect(video).toContain('for (const key of ["images_list", "image_urls", "reference_images"])');
     for (const marker of ['VIDEO_MISSING', 'AUDIO_MISSING', 'video_storage_path', 'audio_storage_path']) {
       expect(video).toContain(marker);
     }

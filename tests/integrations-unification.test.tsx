@@ -3,7 +3,7 @@
  * Unification des intégrations — garanties qui ne doivent jamais régresser.
  *
  * Ce fichier verrouille les huit règles énoncées avant le chantier :
- *   1. les 26 fournisseurs sont conservés ;
+ *   1. les 27 fournisseurs d'origine sont conservés ;
  *   2. les demandes d'activation existantes sont conservées ;
  *   3. les connexions OAuth réellement enregistrées sont conservées ;
  *   4. les huit états restent distincts ;
@@ -112,14 +112,16 @@ beforeEach(() => {
   mocks.disconnectIntegration.mockResolvedValue({ connectorKey: 'facebook', disconnected: true });
 });
 
-describe('règle 1 — les 26 fournisseurs sont conservés', () => {
+describe('règle 1 — les 27 fournisseurs d’origine sont conservés', () => {
   it('affiche le catalogue complet, sans en retirer aucun', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('integration-facebook')).toBeTruthy());
     for (const entry of INTEGRATIONS) {
       expect(screen.getByTestId(`integration-${entry.id}`)).toBeTruthy();
     }
-    expect(INTEGRATIONS).toHaveLength(26);
+    // 28 depuis « Autre plateforme (API personnalisée) » : le catalogue ne
+    // perd aucune fiche, il en gagne une.
+    expect(INTEGRATIONS).toHaveLength(28);
   });
 
   it('un fournisseur absent du catalogue ne peut pas apparaître par accident', async () => {
@@ -242,11 +244,32 @@ describe('règle 8 — aucune connexion inventée', () => {
   });
 
   it('l’absence de connecteur est expliquée, pas maquillée par un bouton actif', async () => {
+    /*
+     * OpenCart n'a ni moteur ni route produits : sa fiche doit l'EXPLIQUER et ne
+     * proposer aucun bouton « Connecter ». Shopify servait d'exemple avant la
+     * phase E ; il a désormais un vrai formulaire, donc il ne prouve plus rien
+     * ici — le vérifier serait verrouiller un état périmé.
+     */
     monter();
-    fireEvent.click(await screen.findByTestId('integration-shopify'));
-    const fiche = await screen.findByRole('dialog', { name: /Fiche Shopify/i });
+    fireEvent.click(await screen.findByTestId('integration-opencart'));
+    const fiche = await screen.findByRole('dialog', { name: /Fiche OpenCart/i });
     expect(within(fiche).getByText(/identifiants VYORA pour ce fournisseur ne sont pas encore configurés/i)).toBeTruthy();
     expect(within(fiche).queryByRole('button', { name: /^Connecter/ })).toBeNull();
+  });
+
+  it('Shopify et WooCommerce ouvrent un VRAI formulaire, pas un bouton mort', async () => {
+    monter();
+    for (const [cle, nom] of [['shopify', 'Shopify'], ['woocommerce', 'WooCommerce']] as const) {
+      fireEvent.click(await screen.findByTestId(`integration-${cle}`));
+      const fiche = await screen.findByRole('dialog', { name: new RegExp(`Fiche ${nom}`, 'i') });
+      // Le formulaire générique, piloté par les exigences déclaratives.
+      expect(await within(fiche).findByTestId(`${cle}-connect-form`), cle).toBeTruthy();
+      expect(within(fiche).getByTestId(`${cle}-connect`), cle).toBeTruthy();
+      // Et surtout : rien n'affirme qu'une connexion existe.
+      expect(within(fiche).queryByText(/ne sont pas encore configurés/i), cle).toBeNull();
+      fireEvent.click(within(fiche).getByLabelText('Retour'));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    }
   });
 });
 

@@ -44,6 +44,7 @@ export const LOADER_TARGETS = {
   'vyora-ai': { migration: '20261115220000' },
   'vyora-ai-providers': { migration: '20261115220100' },
   'vyora-provider-health': { migration: '20261115220200' },
+  'vyora-mcp': { migration: '20261120090200' },
 };
 
 /**
