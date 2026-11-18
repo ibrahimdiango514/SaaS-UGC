@@ -1,0 +1,149 @@
+name: Frontend — publication Cloudflare Pages (manuelle)
+
+# Objet : publier le frontend VYORA sur Cloudflare Pages SANS Netlify (crédits
+# épuisés) et SANS GitHub Pages (ses conditions d'utilisation excluent
+# explicitement l'hébergement d'un SaaS commercial).
+#
+# Déclenchement : manuel (bouton « Run workflow », environnement au choix) ou
+# automatique à chaque publication sur `main` (environnement production).
+# Les prérequis côté backend sont déjà en place (P6e) : origines
+# `https://vyora.pages.dev` et `https://*.vyora.pages.dev` autorisées en CORS
+# (VYORA_ALLOWED_ORIGINS, STORE_IMPORT_ALLOWED_ORIGINS, liste par défaut) et
+# dans les URL de redirection GoTrue.
+#
+# Sans les deux secrets Cloudflare, le workflow s'arrête AVANT toute action,
+# en « neutre » (pas d'échec rouge sur main pour une condition attendue), et
+# l'explique dans le résumé du run.
+#
+# Préalables (une fois, hors de ce dépôt) :
+#   1. Un projet Cloudflare Pages créé en « Direct Upload » (pas en intégration
+#      Git, pour que ce workflow reste la seule voie de publication).
+#   2. Deux secrets de dépôt : CLOUDFLARE_API_TOKEN (permission « Cloudflare
+#      Pages : Edit ») et CLOUDFLARE_ACCOUNT_ID.
+#
+# Retour arrière : chaque publication est conservée par Cloudflare ; le bouton
+# « Rollback » du tableau de bord rétablit la précédente en quelques secondes.
+# Ce workflow peut aussi être relancé sur n'importe quel commit antérieur.
+#
+# Aucun secret n'est compilé dans le bundle : les valeurs VITE_* sont des
+# valeurs PUBLIQUES (URL du projet, clé publiable), déjà présentes par défaut
+# dans src/lib/supabase.ts.
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      project_name:
+        description: "Nom du projet Cloudflare Pages (doit correspondre aux origines autorisées : vyora)"
+        required: true
+        default: "vyora"
+      environnement:
+        description: "production = branche de production du projet Pages ; preview = URL d'aperçu isolée"
+        required: true
+        default: "preview"
+        type: choice
+        options: ["preview", "production"]
+
+env:
+  PROJECT_NAME: ${{ inputs.project_name || 'vyora' }}
+  ENVIRONNEMENT: ${{ inputs.environnement || 'production' }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-pages-${{ inputs.project_name || 'vyora' }}-${{ inputs.environnement || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      pret: ${{ steps.prealables.outputs.pret }}
+    steps:
+      - name: Préalables présents ?
+        id: prealables
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -u
+          manque=""
+          [ -n "$TOKEN" ] || manque="$manque CLOUDFLARE_API_TOKEN"
+          [ -n "$ACCOUNT" ] || manque="$manque CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$manque" ]; then
+            {
+              echo "## Publication frontend — NON effectuée"
+              echo
+              echo "Secrets de dépôt manquants :$manque."
+              echo
+              echo "À faire une fois (Settings → Secrets and variables → Actions) :"
+              echo "1. Créer un projet Cloudflare Pages nommé \`vyora\` en Direct Upload, branche de production \`main\`."
+              echo "2. Ajouter CLOUDFLARE_ACCOUNT_ID (tableau de bord Cloudflare) et CLOUDFLARE_API_TOKEN (permission « Cloudflare Pages : Edit »)."
+              echo "3. Relancer ce workflow (bouton Run workflow) ou pousser sur main."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Secrets Cloudflare manquants :$manque — rien n'a été publié."
+            echo "pret=non" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pret=oui" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.prealables.outputs.pret == 'oui'
+
+      - uses: actions/setup-node@v4
+        if: steps.prealables.outputs.pret == 'oui'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Construire
+        if: steps.prealables.outputs.pret == 'oui'
+        env:
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          # Valeurs PUBLIQUES (identiques aux replis compilés dans src/lib/supabase.ts).
+          VITE_SUPABASE_URL: https://xbuuhfwobrafcbgtdgjx.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz
+          VITE_SITE_URL: ${{ env.ENVIRONNEMENT == 'production' && 'https://vyora.pages.dev' || format('https://preview-{0}.vyora.pages.dev', github.ref_name) }}
+        run: |
+          npm ci
+          npm run build
+          # La révision publiée doit être lisible dans le HTML servi.
+          grep -o 'name="vyora-revision" content="[^"]*"' dist/index.html
+          # Repli SPA : Cloudflare Pages lit public/_redirects (copié dans dist).
+          test -f dist/_redirects && cat dist/_redirects
+
+      - name: Publier sur Cloudflare Pages
+        if: steps.prealables.outputs.pret == 'oui'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy dist
+            --project-name=${{ env.PROJECT_NAME }}
+            --branch=${{ env.ENVIRONNEMENT == 'production' && 'main' || format('preview-{0}', github.ref_name) }}
+            --commit-hash=${{ github.sha }}
+            --commit-message="${{ github.ref_name }} @ ${{ github.sha }}"
+
+      - name: Résumé
+        if: steps.prealables.outputs.pret == 'oui'
+        run: |
+          {
+            echo "## Publication frontend"
+            echo
+            echo "| Élément | Valeur |"
+            echo "| --- | --- |"
+            echo "| Projet Pages | ${{ env.PROJECT_NAME }} |"
+            echo "| Environnement | ${{ env.ENVIRONNEMENT }} |"
+            echo "| URL attendue | ${{ env.ENVIRONNEMENT == 'production' && 'https://vyora.pages.dev' || format('https://preview-{0}.vyora.pages.dev', github.ref_name) }} |"
+            echo "| Commit | ${{ github.sha }} |"
+            echo "| Branche Git | ${{ github.ref_name }} |"
+            echo
+            echo "Vérifier ensuite : l'origine publiée est-elle autorisée en CORS par les Edge Functions"
+            echo "(VYORA_ALLOWED_ORIGINS) et dans les URL de redirection GoTrue ? Sinon, connexion et"
+            echo "appels MCP échoueront depuis ce domaine."
+          } >> "$GITHUB_STEP_SUMMARY"

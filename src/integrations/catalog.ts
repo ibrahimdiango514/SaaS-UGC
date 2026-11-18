@@ -54,7 +54,15 @@ export type AuthMode =
   | 'app-install'
   | 'public-catalog'
   | 'file-import'
-  | 'none';
+  | 'none'
+  /*
+   * `custom-api` n'est pas un mode d'authentification à proprement parler :
+   * c'est la marque d'une fiche dont l'utilisateur décrit lui-même la
+   * connexion (adresse, en-tête, chemin, mapping). Il vit dans cette union
+   * parce que `engine` et `auth[].mode` partagent le même vocabulaire, et parce
+   * qu'un mode à part évite de faire croire qu'une simple clé suffirait.
+   */
+  | 'custom-api';
 
 /** Ce qu'un fournisseur permet de faire une fois connecté. */
 export type Capability =
@@ -260,60 +268,150 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     id: 'shopify',
     name: 'Shopify',
     category: 'commerce',
-    description: 'Import du catalogue, commandes et stocks de votre boutique.',
-    capabilities: ['catalog-read', 'catalog-write', 'orders-read', 'inventory-read', 'inventory-write'],
+    /*
+     * Capacités RÉELLES, pas souhaitées.
+     *
+     * `catalog-read` et `inventory-read` existent : `store-import` lit
+     * `/products.json` et normalise les variantes.
+     *
+     * `catalog-write`, `inventory-write` et `orders-read` sont RETIRÉS : aucune
+     * ligne de code ne les implémente, aucun moyen d'authentification n'existe
+     * (voir `engine`), et `safe-egress.ts` refuse toute méthode autre que GET.
+     * Les afficher revenait à promettre une écriture impossible.
+     */
+    description: 'Import du catalogue de votre boutique Shopify par l’API Admin (produits, variantes, stock).',
+    /*
+     * Ce qui est RÉELLEMENT implémenté, et rien de plus :
+     *
+     * - `catalog-read` et `inventory-read` : lus par l'API Admin, variantes et
+     *   quantités comprises.
+     * - `catalog-write`, `inventory-write` et `orders-read` restent RETIRÉS :
+     *   aucune ligne de code ne les implémente, et `safe-egress.ts` refuse toute
+     *   méthode autre que GET. Les annoncer promettrait une écriture impossible.
+     *
+     * L'authentification retenue est le **jeton d'application personnalisée**
+     * (`shpat_…`), pas OAuth d'application publique : sans `SHOPIFY_API_SECRET`
+     * côté serveur, un parcours OAuth échouerait dès la première redirection.
+     * OAuth est donc absent de `auth`, et la fiche le dit.
+     */
+    capabilities: ['catalog-read', 'inventory-read'],
     auth: [
       {
-        mode: 'oauth2',
-        label: 'Installation de l’application sur votre boutique',
-        serverConfigKey: 'SHOPIFY_API_KEY',
+        mode: 'api-key',
+        label: 'Jeton d’API Admin d’une application personnalisée (shpat_…)',
       },
       {
         mode: 'public-catalog',
-        label: 'Lecture du catalogue public via /products.json',
+        label: 'Lecture du catalogue public via /products.json (sans connexion)',
       },
       {
         mode: 'file-import',
         label: 'Import d’un export CSV Shopify',
       },
     ],
-    engine: null,
+    engine: 'api-key',
     docsUrl: 'https://shopify.dev/docs/api',
-    caveat: 'Le catalogue public suffit pour importer les produits, pas pour lire les commandes.',
+    caveat:
+      'Lecture seule : VYORA ne crée, ne modifie et ne supprime rien dans Shopify. Le jeton se révoque '
+      + 'en désinstallant l’application. Les produits en brouillon et archivés sont écartés et comptés. '
+      + 'Le catalogue public reste lisible sans connexion, pour les boutiques qui le publient.',
   },
   {
     id: 'woocommerce',
     name: 'WooCommerce',
     category: 'commerce',
-    description: 'Produits, commandes et stocks de votre boutique WordPress.',
-    capabilities: ['catalog-read', 'catalog-write', 'orders-read', 'inventory-read', 'inventory-write'],
+    /*
+     * Même raisonnement que Shopify, avec une différence : WooCommerce n'expose
+     * que trois droits (lecture, écriture, suppression), sans scope par
+     * ressource. On demande donc « Lecture » seule, et le client n'émet que des
+     * `GET`. `orders-read` est RETIRÉ : aucune commande n'est lue, et les
+     * commandes contiennent des données personnelles d'acheteurs.
+     */
+    description: 'Import du catalogue de votre site WooCommerce par l’API REST (produits, variations, stock).',
+    capabilities: ['catalog-read', 'inventory-read'],
     auth: [
       {
         mode: 'api-key',
-        label: 'Clé REST WooCommerce (consumer key + secret)',
-        serverConfigKey: 'WOOCOMMERCE_ALLOW_KEYS',
+        label: 'Clés API REST WooCommerce (Consumer key + Consumer secret), droit « Lecture »',
       },
       {
         mode: 'file-import',
         label: 'Import d’un export CSV WooCommerce',
       },
     ],
-    engine: null,
+    engine: 'api-key',
     docsUrl: 'https://woocommerce.github.io/woocommerce-rest-api-docs/',
-    caveat: 'Les clés REST ne doivent jamais transiter par le navigateur : elles sont saisies côté serveur.',
+    caveat:
+      'Lecture seule : le droit « Lecture » suffit, et VYORA n’émet que des requêtes de lecture. '
+      + 'L’API REST exige des permaliens autres que « Simple » — sinon /wp-json/ renvoie 404. '
+      + 'Aucune commande n’est lue : les commandes contiennent des données personnelles d’acheteurs.',
   },
   {
     id: 'prestashop',
     name: 'PrestaShop',
     category: 'commerce',
-    description: 'Catalogue et commandes de votre boutique PrestaShop.',
-    capabilities: ['catalog-read', 'orders-read', 'inventory-read'],
+    description: 'Catalogue et stocks de votre boutique PrestaShop, lus par l’API Webservice.',
+    /*
+     * Capacités DÉCLARÉES par la fiche, donc vérifiables.
+     *
+     * `catalog-read` et `inventory-read` sont réellement fournis : l'import lit
+     * `products`, `combinations`, `stock_availables`, `product_options` et
+     * `product_option_values`, et la connexion n'est enregistrée qu'après une
+     * lecture réussie de `shops` et `languages`.
+     *
+     * `orders-read` est retiré : le connecteur ne lit aucune commande. Une
+     * capacité affichée mais non implémentée est une promesse fausse, et c'est
+     * exactement ce que cette fiche ne doit pas faire.
+     */
+    capabilities: ['catalog-read', 'inventory-read'],
     auth: [
-      { mode: 'api-key', label: 'Clé Webservice PrestaShop', serverConfigKey: 'PRESTASHOP_ALLOW_KEYS' },
-      { mode: 'file-import', label: 'Import CSV PrestaShop' },
+      { mode: 'api-key', label: 'Clé Webservice PrestaShop (droits de lecture sur le catalogue)' },
+      { mode: 'file-import', label: 'Import d’un export CSV PrestaShop' },
     ],
-    engine: null,
+    // Seul fournisseur dont le moteur est écrit : la clé est vérifiée par le
+    // serveur, rangée dans Vault, et le catalogue est lu par l'API officielle.
+    engine: 'api-key',
     docsUrl: 'https://devdocs.prestashop-project.org/',
+    caveat: 'La clé Webservice se crée dans PrestaShop : Paramètres avancés → Webservice. Elle ne doit jamais transiter par le navigateur : VYORA la vérifie et la range côté serveur.',
+  },
+  {
+    id: 'chariow',
+    name: 'Chariow',
+    category: 'commerce',
+    description: 'Catalogue de votre boutique Chariow, lu par l’API officielle (clé de boutique).',
+    /*
+     * Capacités DÉCLARÉES, donc vérifiables.
+     *
+     * `catalog-read` et `inventory-read` sont réellement fournis : l'import lit
+     * `GET /v1/products` et `GET /v1/store`, et la connexion n'est enregistrée
+     * qu'après une lecture réussie des deux.
+     *
+     * `orders-read` est volontairement ABSENT : le connecteur ne lit aucune
+     * commande, et les scopes demandés au marchand (`store.read`,
+     * `products.read`) ne le permettraient pas. Une capacité affichée mais non
+     * implémentée est une promesse fausse.
+     *
+     * `catalog-write` est absent pour la même raison, en plus fort : Chariow
+     * n'est utilisé qu'en lecture, et le code n'a aucun chemin d'écriture.
+     */
+    capabilities: ['catalog-read', 'inventory-read'],
+    auth: [
+      {
+        mode: 'api-key',
+        label: 'Clé de boutique Chariow — scopes `store.read` et `products.read` uniquement',
+      },
+      { mode: 'file-import', label: 'Import d’un export CSV de vos produits' },
+    ],
+    // Moteur réellement écrit : la clé est vérifiée par le serveur en lisant
+    // `GET /v1/store` puis `GET /v1/products`, rangée dans Vault, et le
+    // catalogue est lu par l'API officielle.
+    engine: 'api-key',
+    docsUrl: 'https://chariow.dev',
+    caveat:
+      'La clé se crée dans app.chariow.com → Settings → API Keys, et n’est affichée qu’une seule fois. '
+      + 'Cochez uniquement « store.read » et « products.read » : VYORA n’a besoin d’aucun autre droit. '
+      + 'Chariow n’expose pas les variantes détaillées ni de SKU : les produits à tarifs par variante sont importés '
+      + 'comme des fiches simples, avec un avertissement dans l’aperçu.',
   },
   {
     id: 'magento',
@@ -332,14 +430,24 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     id: 'opencart',
     name: 'OpenCart',
     category: 'commerce',
-    description: 'Produits et commandes OpenCart.',
-    capabilities: ['catalog-read', 'orders-read'],
+    description: 'Import des produits de votre boutique OpenCart par export, ou par API personnalisée.',
+    /*
+     * `orders-read` est RETIRÉ et `catalog-read` ne s'applique PAS à une API
+     * OpenCart : celle-ci est à session (login + cookie, `api_token` en
+     * paramètre d'URL) et le cœur d'OpenCart n'expose AUCUNE route produits.
+     * Il n'y a donc rien à connecter nativement — le dire ici évite d'envoyer
+     * l'utilisateur chercher une clé qui ne lui donnerait pas ses produits.
+     */
+    capabilities: [],
     auth: [
-      { mode: 'api-key', label: 'Clé API OpenCart', serverConfigKey: 'OPENCART_ALLOW_KEYS' },
-      { mode: 'file-import', label: 'Import CSV OpenCart' },
+      { mode: 'file-import', label: 'Import d’un export CSV, XLSX ou XML OpenCart' },
     ],
     engine: null,
     docsUrl: 'https://docs.opencart.com/',
+    caveat:
+      'L’API d’OpenCart est à session et n’expose pas le catalogue : il n’existe pas de clé permettant '
+      + 'd’importer les produits. Utilisez un export CSV, ou le connecteur « API personnalisée » si vous '
+      + 'disposez d’une extension exposant vos produits en JSON.',
   },
   {
     id: 'wix',
@@ -393,6 +501,35 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     ],
     engine: null,
     docsUrl: 'https://api-docs.ecwid.com/',
+  },
+  {
+    /*
+     * « Autre plateforme » n'est pas une plateforme : c'est le connecteur qui
+     * permet de décrire la sienne. Il a donc ses propres règles.
+     *
+     * - `capabilities: ['catalog-read']` — une seule, et elle est réelle : la
+     *   configuration n'ouvre que la lecture du catalogue. Rien d'autre n'est
+     *   codé, donc rien d'autre n'est annoncé.
+     * - `engine: 'custom-api'` — moteur distinct, pas `api-key` : il n'y a pas
+     *   UNE clé à demander mais une description complète à recueillir. Un
+     *   formulaire générique de clé n'aurait aucun sens ici.
+     * - Pas de `caveat` rassurant : celui-ci dit exactement ce qui est
+     *   attendu de l'utilisateur, y compris quand il n'a pas d'API.
+     */
+    id: 'custom-api',
+    name: 'Autre plateforme (API personnalisée)',
+    category: 'commerce',
+    description: 'Connectez une boutique dont l’API expose vos produits en JSON.',
+    capabilities: ['catalog-read'],
+    auth: [
+      { mode: 'custom-api', label: 'URL de l’API, mode d’authentification et correspondance des champs' },
+    ],
+    engine: 'custom-api',
+    caveat:
+      'Nécessite une API HTTPS qui renvoie vos produits en JSON. VYORA lit la première page, '
+      + 'propose une correspondance des champs, et n’enregistre rien avant un test réussi. '
+      + 'Si votre boutique n’expose pas d’API, utilisez l’import d’un export CSV : il n’existe '
+      + 'aucun moyen d’inventer les produits d’un site qui ne les publie pas.',
   },
 
   /* ------------------------------- Productivité -------------------------- */

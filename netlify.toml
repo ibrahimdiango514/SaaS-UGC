@@ -9,7 +9,16 @@
   # branches continuent de se construire exactement comme avant.
   # Garder aussi [skip netlify] dans les commits de ces branches et les titres
   # de leurs éventuelles PR. Une préproduction exige une cible isolée vérifiée.
-  ignore = '[ "$HEAD" = "arena/323bad30-saas-ugc" ] || [ "$BRANCH" = "arena/323bad30-saas-ugc" ] || [ "$HEAD" = "arena/ada94e4c-saas-ugc" ] || [ "$BRANCH" = "arena/ada94e4c-saas-ugc" ]'
+  # 2026-11-16 : consigne « économiser les crédits Netlify ». Les branches de
+  # travail en cours sont ajoutées à la liste : aucun commit ne peut déclencher
+  # de build ni de Deploy Preview. Le build reste actif sur `main` et pour la
+  # publication groupée décidée explicitement.
+  # 2026-11-18 (P6e) : crédits Netlify épuisés, hébergement du front transféré
+  # vers Cloudflare Pages (.github/workflows/frontend-cloudflare-pages.yml).
+  # Aucun build Netlify ne doit plus partir, y compris sur `main` : code 0 =
+  # build annulé avant toute installation. Pour réactiver Netlify, remplacer
+  # cette ligne par la condition précédente (visible dans l'historique Git).
+  ignore = "exit 0"
 
 [build.environment]
   NODE_VERSION = "22"

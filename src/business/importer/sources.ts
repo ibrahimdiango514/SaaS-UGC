@@ -304,13 +304,84 @@ export interface RawCatalogProduct {
   productUrl: string | null;
   imageUrl: string | null;
   categories: string[];
-  variants: Array<{ name: string; price: string | number | null; sku: string | null; available: boolean | null }>;
+  /**
+   * Déclinaisons du produit.
+   *
+   * `stock`, `attributeName` et `priceMinor` sont optionnels : Shopify et
+   * WooCommerce n'exposent pas ces informations de la même façon, et un lecteur
+   * qui ne les connaît pas ne doit pas les inventer. PrestaShop, lui, les
+   * fournit — d'où leur présence ici plutôt qu'un type parallèle.
+   */
+  variants: Array<{
+    name: string;
+    price: string | number | null;
+    sku: string | null;
+    available: boolean | null;
+    /** Quantité de CETTE déclinaison. `null` = inconnue, jamais zéro. */
+    stock?: number | null;
+    /** Nom du critère (« Taille », « Couleur »), quand la source le dit. */
+    attributeName?: string | null;
+    /**
+     * Prix déjà converti en unité mineure par le lecteur, quand la source
+     * publie un montant décimal à exposant inconnu (PrestaShop).
+     *
+     * Prioritaire sur `price` : `price` est une chaîne « humain » dont
+     * l'exposant dépend de la devise, ce qui oblige à deviner. Quand le
+     * lecteur sait, il le dit.
+     */
+    priceMinor?: number | null;
+  }>;
+  /** Quantité totale du produit. `null` = inconnue, jamais zéro. */
+  stock?: number | null;
+  /**
+   * Avertissements produits par le LECTEUR, rattachés à la fiche.
+   *
+   * Cas concret : Chariow publie `has_variant_pricing` sans exposer les
+   * variantes. Le lecteur le signale ici, et le normaliseur les fait remonter
+   * dans l'aperçu — sans quoi l'utilisateur importerait un produit à options
+   * en croyant avoir récupéré ses tarifs par variante.
+   */
+  warnings?: string[];
+  /**
+   * Prix déjà en unité mineure, quand le lecteur sait le convertir.
+   *
+   * Prioritaire sur `price` : PrestaShop publie un montant décimal dont
+   * l'exposant dépend de la devise de la boutique, et convertir deux fois
+   * ferait diverger le prix importé de celui affiché en boutique.
+   */
+  priceMinor?: number | null;
+  /**
+   * Référence produit fournie par la source (`sku` Shopify, `sku` Woo).
+   *
+   * Sert au rapprochement : une référence identique désigne le même produit,
+   * même après un renommage. `null` quand la source n'en fournit pas.
+   */
+  sku?: string | null;
+  /**
+   * Identifiant du produit chez la plateforme (`id` Shopify/Woo, `handle`).
+   *
+   * Plus stable qu'un nom, moins qu'une référence choisie par le marchand :
+   * c'est le premier indice de rapprochement, mais il ne décide jamais seul.
+   */
+  platformId?: string | null;
 }
 
+/**
+ * Catalogue lu chez une plateforme.
+ *
+ * `platform` s'élargit au fil des connecteurs. Shopify et WooCommerce restent
+ * lus par `fetchPublicCatalog` (catalogue public) ; PrestaShop et OpenCart
+ * passent par leur API authentifiée, et fournissent le même contrat — c'est ce
+ * qui permet à `normalizeCatalog` et au reste du moteur de ne pas changer.
+ */
+export type CatalogPlatform = 'shopify' | 'woocommerce' | 'prestashop' | 'opencart' | 'chariow';
+
 export interface PublicCatalog {
-  platform: 'shopify' | 'woocommerce';
+  platform: CatalogPlatform;
   endpoint: string;
   products: RawCatalogProduct[];
+  /** Devise de la boutique, quand la plateforme la publie globalement. */
+  currency?: string | null;
 }
 
 /**
@@ -343,6 +414,14 @@ export function mapShopifyProducts(payload: unknown): RawCatalogProduct[] {
         sku: typeof v.sku === 'string' && v.sku ? v.sku : null,
         available: typeof v.available === 'boolean' ? v.available : null,
       })),
+      // Une variante unique sans titre propre porte le SKU du produit : sur
+      // une boutique sans déclinaisons, c'est LE produit. Avec plusieurs
+      // variantes, le premier SKU appartient à une taille, pas au produit — on
+      // ne le promeut donc pas en référence de fiche.
+      sku: variants.length === 1 && typeof premier?.sku === 'string' && premier.sku ? premier.sku : null,
+      platformId: typeof p.id === 'number' || typeof p.id === 'string'
+        ? String(p.id)
+        : handle,
     };
   }).filter((p) => p.name !== '');
 }
@@ -371,6 +450,8 @@ export function mapWooProducts(payload: unknown): RawCatalogProduct[] {
       imageUrl: images[0] && typeof images[0].src === 'string' ? images[0].src : null,
       categories: categories.map((c) => (typeof c.name === 'string' ? c.name : '')).filter(Boolean),
       variants: [],
+      sku: typeof p.sku === 'string' && p.sku ? p.sku : null,
+      platformId: typeof p.id === 'number' || typeof p.id === 'string' ? String(p.id) : null,
     };
   }).filter((p) => p.name !== '');
 }

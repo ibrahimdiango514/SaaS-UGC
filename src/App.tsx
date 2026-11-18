@@ -38,6 +38,9 @@ const StudioProjects = lazy(() => import('./studio/StudioPages').then(({ StudioP
 const StudioSaved = lazy(() => import('./studio/StudioPages').then(({ StudioSaved: component }) => ({ default: component })));
 const Assistant = lazy(() => import('./pages/Assistant'));
 const Integrations = lazy(() => import('./integrations/CatalogPage'));
+const McpConnections = lazy(() => import('./integrations/McpConnectionsPage').then(({ McpConnectionsPage }) => ({ default: McpConnectionsPage })));
+const MesServeursMcp = lazy(() => import('./integrations/MesServeursMcpPage').then(({ MesServeursMcpPage }) => ({ default: MesServeursMcpPage })));
+const ConnexionsMcp = lazy(() => import('./integrations/ConnexionsMcpPage').then(({ ConnexionsMcpPage }) => ({ default: ConnexionsMcpPage })));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
 const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
@@ -100,6 +103,15 @@ export default function App() {
                         d'integrations suit la meme regle. */}
                     <Route path="/app/ai" element={<Assistant />} />
                     <Route path="/app/connect" element={<Integrations />} />
+                    <Route path="/app/connexions-ia" element={<McpConnections />} />
+                    {/* MCP SORTANT : l'utilisateur connecte ses propres serveurs
+                        MCP distants. Distinct de /app/connexions-ia, où VYORA
+                        est le serveur et l'utilisateur le client. */}
+                    <Route path="/app/mes-serveurs-mcp" element={<MesServeursMcp />} />
+                    {/* Page unifiée : les deux sens du protocole, côte à côte
+                        mais jamais confondus. Les deux routes ci-dessus restent
+                        en place pour les liens existants. */}
+                    <Route path="/app/connexions-mcp" element={<ConnexionsMcp />} />
                     <Route element={<AdminRoute />}>
                       <Route path="/admin" element={<Admin />} />
                       <Route path="/app/admin" element={<Navigate to="/admin" replace />} />

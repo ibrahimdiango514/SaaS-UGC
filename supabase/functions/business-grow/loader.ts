@@ -1,59 +1,70 @@
-// business-grow — chargeur de production (seule source déployée).
-// Généré par scripts/build-business-grow-artifact.mjs : ne pas éditer.
+// business-grow — chargeur épinglé sur un commit du dépôt public.
 //
-// Le canal de déploiement altère les sources longues : ce fichier reste court.
-// Le code métier (bundle esbuild de ce dossier) est lu dans
-// public._edge_function_artifact par nom + SHA-256, puis vérifié avant exécution :
-// un artefact absent ou modifié n'est jamais exécuté.
+// Le code métier est le bundle du dépôt, lu à un commit PRÉCIS (jamais `main`
+// ni une branche mouvante) : une URL contenant un SHA de commit ne peut pas
+// changer de contenu, et la taille + l'empreinte SHA-256 sont vérifiées avant
+// toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
+// JAMAIS exécuté.
+//
+// Épinglé sur business-grow.edge.js (88237 caractères).
+//
+// Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
-const ARTIFACT_NAME = "business-grow";
-const ARTIFACT_SHA256 = "5578a53bbed4cf0cce4f98b8fa36054d699dd2eee76e7e9240c82f5f0bbfb0ad";
-const ARTIFACT_CHARS = 88231;
+const REPO = "ibrahimdiango514/SaaS-UGC";
+const COMMIT = "e27e2f002175fe021f1f9394ba42aab93331eb86";
+const PATH = "supabase/functions/business-grow.edge.js";
+const ARTIFACT_SHA256 = "bf0b55895d2ecf84c918b9fb99fbf81d311d38f496808566fb261c76101915c9";
+const ARTIFACT_CHARS = 88237;
 
-async function readArtifact(): Promise<string> {
-  const base = Deno.env.get("SUPABASE_URL") ?? "";
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!base || !key) throw new Error("runtime_env_missing");
-  const url = base + "/rest/v1/_edge_function_artifact?select=source&name=eq." + ARTIFACT_NAME +
-    "&sha256=eq." + ARTIFACT_SHA256;
-  const res = await fetch(url, {
-    headers: { apikey: key, Authorization: "Bearer " + key },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error("artifact_read_failed:" + res.status);
-  const rows = (await res.json()) as Array<{ source?: unknown }>;
-  const source = rows[0]?.source;
-  if (typeof source !== "string") throw new Error("artifact_missing");
-  if (source.length !== ARTIFACT_CHARS) throw new Error("artifact_size_mismatch:" + source.length);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
-  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  if (hex !== ARTIFACT_SHA256) throw new Error("artifact_digest_mismatch");
-  return source;
+// Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
+// porte sur le fichier tel qu'il est committé.
+async function charger(): Promise<string> {
+  const urls = [
+    "https://raw.githubusercontent.com/" + REPO + "/" + COMMIT + "/" + PATH,
+    "https://api.github.com/repos/" + REPO + "/contents/" + PATH + "?ref=" + COMMIT,
+  ];
+  const echecs: string[] = [];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: url.startsWith("https://api.github.com/")
+          ? { accept: "application/vnd.github.raw+json" }
+          : {},
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) { echecs.push("http_" + res.status); continue; }
+      const source = await res.text();
+      if (source.length !== ARTIFACT_CHARS) { echecs.push("taille_" + source.length); continue; }
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+      const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      if (hex !== ARTIFACT_SHA256) { echecs.push("empreinte_" + hex.slice(0, 8)); continue; }
+      return source;
+    } catch (error) {
+      echecs.push(error instanceof Error ? error.name : "reseau");
+    }
+  }
+  throw new Error(echecs.join(","));
 }
 
 let CODE = "";
 let failure = "";
-// Trois essais : une lecture ratée à froid ne doit pas figer l'instance en panne.
-for (let attempt = 1; attempt <= 3 && !CODE; attempt++) {
+// Trois tentatives : une lecture ratée à froid ne doit pas figer l'instance.
+for (let essai = 1; essai <= 3 && !CODE; essai++) {
   try {
-    CODE = await readArtifact();
+    CODE = await charger();
     failure = "";
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
-    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    if (essai < 3) await new Promise((r) => setTimeout(r, 400 * essai));
   }
 }
 
 if (CODE) {
-  // Le bundle s'exécute hors module : il ne contient aucun import et reçoit
-  // postgres ici, AVANT son exécution. Il enregistre lui-même Deno.serve.
   (globalThis as { __bgPostgres?: typeof postgres }).__bgPostgres = postgres;
   new Function(CODE)();
 } else {
-  // Panne explicite et lisible par le navigateur (CORS ouvert : la réponse ne
-  // contient qu'un code d'erreur), au lieu d'un 500 opaque pris pour une
-  // absence de backend.
+  // Panne explicite et lisible, jamais un accès ouvert ni un 500 opaque.
   console.error("business-grow artifact load failed: " + failure);
   const headers = {
     "Content-Type": "application/json",
@@ -64,7 +75,7 @@ if (CODE) {
   const body = JSON.stringify({
     error: {
       code: "BUSINESS_GROW_ARTIFACT_UNAVAILABLE",
-      message: "Le service Business Grow n'a pas pu charger son code (" + failure + ").",
+      message: "Le service Business Grow n'a pas pu charger son code.",
     },
   });
   Deno.serve((request: Request) =>

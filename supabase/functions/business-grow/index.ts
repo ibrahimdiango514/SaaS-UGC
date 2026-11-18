@@ -302,16 +302,23 @@ const store: BusinessGrowStore = {
    * renvoie donc jamais un « autorisé » par défaut.
    */
   async checkImportConnectAccess(userId: string) {
+    // `bg_import_access` renvoie UN SEUL `jsonb` : `select *` exposerait une
+    // colonne unique (la fonction elle-même), et `row.allowed` serait toujours
+    // indéfini — c'est-à-dire un refus pour tout le monde, abonnés compris.
+    // Le correctif est la colonne nommée, exactement comme `store-import`.
     const [row] = await requiredSql()`
-      select * from saas_business.bg_import_access(${userId}::uuid, now())
+      select saas_business.bg_import_access(${userId}::uuid, now()) as droits
     `;
+    const droits = (row?.droits ?? {}) as Record<string, unknown>;
     if (!row) return { allowed: false, reason: 'UNKNOWN' };
     return {
-      allowed: row.allowed === true,
-      reason: (row.reason as string | undefined) ?? 'UNKNOWN',
-      status: (row.subscription_status as string | null | undefined) ?? null,
-      planKey: (row.plan_key as string | null | undefined) ?? null,
-      currentPeriodEnd: (row.current_period_end as string | null | undefined) ?? null,
+      allowed: droits.allowed === true,
+      reason: (droits.reason as string | undefined) ?? 'UNKNOWN',
+      // La fonction renvoie `status`, pas `subscription_status` : lire la
+      // mauvaise clé faisait afficher un motif vide au client.
+      status: (droits.status as string | null | undefined) ?? null,
+      planKey: (droits.plan_key as string | null | undefined) ?? null,
+      currentPeriodEnd: (droits.current_period_end as string | null | undefined) ?? null,
     };
   },
   async listIntegrationConnections(userId) {

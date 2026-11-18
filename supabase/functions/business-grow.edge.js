@@ -84,8 +84,8 @@ ${c}`),C=null;try{C=O&&e.store.getScopedMemory?await e.store.getScopedMemory(n,O
         ${a.json(B(o))}
       ) as resolved
     `;return u.resolved},async checkImportConnectAccess(e){let[r]=await f()`
-      select * from saas_business.bg_import_access(${e}::uuid, now())
-    `;return r?{allowed:r.allowed===!0,reason:r.reason??"UNKNOWN",status:r.subscription_status??null,planKey:r.plan_key??null,currentPeriodEnd:r.current_period_end??null}:{allowed:!1,reason:"UNKNOWN"}},async listIntegrationConnections(e){return L(await f()`select * from saas_business.bg_list_integration_connections(${e}::uuid)`)},async requestIntegrationConnection(e,r,t){let[o]=await f()`
+      select saas_business.bg_import_access(${e}::uuid, now()) as droits
+    `,t=r?.droits??{};return r?{allowed:t.allowed===!0,reason:t.reason??"UNKNOWN",status:t.status??null,planKey:t.plan_key??null,currentPeriodEnd:t.current_period_end??null}:{allowed:!1,reason:"UNKNOWN"}},async listIntegrationConnections(e){return L(await f()`select * from saas_business.bg_list_integration_connections(${e}::uuid)`)},async requestIntegrationConnection(e,r,t){let[o]=await f()`
       select saas_business.bg_request_integration_connection(
         ${e}::uuid, ${r}, ${t}::uuid
       ) as status
