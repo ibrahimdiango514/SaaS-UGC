@@ -37,6 +37,7 @@ export const ROUTES_GESTION = [
   'tester',
   'permissions',
   'revoquer',
+  'executer',
 ] as const;
 
 export type RouteGestion = typeof ROUTES_GESTION[number];
@@ -282,6 +283,102 @@ export function permissionsInitiales(
     sortie[nom] = ancien === 'allowed' || ancien === 'denied' ? ancien : 'pending';
   }
   return sortie;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 3 bis. Exécution d'un outil (demande d'appel)                                */
+/* -------------------------------------------------------------------------- */
+
+/** Longueur maximale d'un nom d'outil accepté en entrée. */
+export const MAX_NOM_OUTIL = 200;
+
+/** Plafond des arguments d'un appel, en caractères JSON. */
+export const MAX_ARGUMENTS_CHARS = 16 * 1024;
+
+export interface DemandeExecution {
+  serverId: string;
+  outil: string;
+  arguments?: Record<string, unknown>;
+}
+
+/**
+ * Valide une demande d'exécution.
+ *
+ * Ce validateur ne décide **pas** si l'appel est autorisé : il vérifie
+ * seulement que la demande est bien formée. L'autorisation est relue en base par
+ * `executerOutilExterne`, qui ne fait aucune confiance au corps de la requête.
+ *
+ * Ce que ce validateur refuse explicitement, et pourquoi :
+ *
+ * - un `outil` absent, vide ou trop long : on ne part pas sonder un serveur
+ *   distant avec un nom arbitraire ;
+ * - des `arguments` qui ne sont pas un objet JSON : `tools/call` attend un
+ *   objet, une chaîne ou un tableau serait une tentative de contourner le
+ *   contrat ;
+ * - des arguments trop volumineux : un appel n'est pas un téléversement ;
+ * - toute clé d'autorisation fournie par le client (`permission`,
+ *   `ecritureAutorisee`, `confirmationEcriture`, `allowed`, `userId`…). Elles
+ *   sont déjà ignorées par la porte ; les refuser ici rend l'intention visible
+ *   au lieu de la laisser silencieusement sans effet.
+ */
+export function validerExecution(corps: unknown): { ok: true; demande: DemandeExecution } | RefusValidation {
+  if (typeof corps !== 'object' || corps === null || Array.isArray(corps)) {
+    return refus(400, 'corps_invalide', 'Le corps doit être un objet JSON.');
+  }
+  const o = corps as Record<string, unknown>;
+
+  const serverId = o.serverId ?? o.server_id;
+  if (typeof serverId !== 'string' || !UUID.test(serverId)) {
+    return refus(400, 'server_id_invalide', 'Identifiant de connexion invalide.');
+  }
+
+  const outil = o.outil ?? o.tool;
+  if (typeof outil !== 'string' || outil.trim() === '' || outil.length > MAX_NOM_OUTIL) {
+    return refus(400, 'outil_invalide', 'Nom d’outil absent ou invalide.');
+  }
+
+  const clesInterdites = [
+    'permission', 'permissions', 'ecritureAutorisee', 'ecriture_autorisee',
+    'confirmationEcriture', 'confirmation', 'allowed', 'allowedTools',
+    'userId', 'user_id', 'workspaceId', 'workspace_id', 'secret', 'token',
+  ];
+  const fournie = clesInterdites.find((cle) => Object.prototype.hasOwnProperty.call(o, cle));
+  if (fournie) {
+    /*
+     * Refus explicite, pas ignoré en silence : un client qui envoie
+     * `ecritureAutorisee: true` croit obtenir un droit. Lui répondre « champ
+     * non accepté » dit la vérité (aucune écriture n'est accordable par cette
+     * route) au lieu de laisser croire que le champ a été pris en compte.
+     */
+    return refus(
+      400,
+      'champ_non_accepte',
+      `Le champ « ${fournie} » n’est pas accepté : les autorisations sont lues en base, jamais du corps de la requête.`,
+    );
+  }
+
+  let args: Record<string, unknown> | undefined;
+  const brut = o.arguments ?? o.args;
+  if (brut !== undefined && brut !== null) {
+    if (typeof brut !== 'object' || Array.isArray(brut)) {
+      return refus(400, 'arguments_invalides', 'Les arguments doivent être un objet JSON.');
+    }
+    let serialise: string;
+    try {
+      serialise = JSON.stringify(brut);
+    } catch {
+      return refus(400, 'arguments_invalides', 'Les arguments ne sont pas sérialisables.');
+    }
+    if (serialise.length > MAX_ARGUMENTS_CHARS) {
+      return refus(413, 'arguments_trop_volumineux', 'Les arguments de l’appel sont trop volumineux.');
+    }
+    args = brut as Record<string, unknown>;
+  }
+
+  return {
+    ok: true,
+    demande: { serverId, outil: outil.trim(), ...(args ? { arguments: args } : {}) },
+  };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -119,6 +119,28 @@ const VERBES_ECRITURE = [
   'move', 'rename', 'assign', 'grant', 'revoke', 'rotate', 'trigger', 'run',
   'execute', 'invoke', 'apply', 'replace', 'merge', 'clone', 'transfer',
   'upload', 'notify', 'schedule', 'confirm', 'void', 'close', 'purge',
+  /*
+   * Ajouts après un faux négatif constaté en revue : `search_and_destroy`
+   * passait pour une lecture. Le classement sert à décider si une action peut
+   * être destructive ; un verbe destructeur absent de cette liste est un trou,
+   * pas une simplification.
+   */
+  'destroy', 'drop', 'truncate', 'wipe', 'erase', 'write', 'modify', 'edit',
+  'save', 'alter', 'mutate', 'kill', 'terminate', 'disable', 'enable',
+  'suspend', 'resume', 'start', 'stop', 'deploy', 'migrate', 'import',
+  'install', 'uninstall', 'sync', 'push', 'commit', 'rollback',
+  /*
+   * Verbes français : la plateforme et ses utilisateurs décrivent en français,
+   * et un serveur MCP externe peut aussi le faire. Sans eux, un outil nommé en
+   * anglais mais décrit « supprime la commande » passait pour une lecture.
+   * Le risque d'un faux positif est un refus (fail-closed), pas un déblocage.
+   */
+  'supprime', 'supprimer', 'efface', 'effacer', 'cree', 'creer', 'modifie',
+  'modifier', 'ajoute', 'ajouter', 'envoie', 'envoyer', 'publie', 'publier',
+  'remplace', 'remplacer', 'annule', 'annuler', 'revoque', 'revoquer',
+  'deplace', 'deplacer', 'renomme', 'renommer', 'execute', 'executer',
+  'lance', 'lancer', 'arrete', 'arreter', 'desactive', 'desactiver',
+  'transfere', 'transferer', 'restaure', 'restaurer',
 ];
 
 /**
@@ -137,7 +159,6 @@ const VERBES_ECRITURE = [
 export function classerOutil(nom: string, description = ''): { lecture: boolean; raison: string } {
   const nomNormalise = nom.toLowerCase();
   const mots = nomNormalise.split(/[^a-z0-9]+/).filter(Boolean);
-  const texte = `${nomNormalise} ${description.toLowerCase()}`;
 
   /*
    * Le PREMIER mot est testé à part : `set_inventory` a pour premier mot
@@ -164,19 +185,37 @@ export function classerOutil(nom: string, description = ''): { lecture: boolean;
     return { lecture: false, raison: `la description contient « ${dansDescription} »` };
   }
 
-  const premierMot = tousLesMots[0] ?? '';
-  if (VERBES_LECTURE.includes(premierMot)) {
-    return { lecture: true, raison: `le nom commence par « ${premierMot} »` };
+  /*
+   * Un verbe de lecture dans le NOM suffit — pas seulement en tête.
+   *
+   * Correction d'un défaut constaté sur de vrais serveurs : les outils
+   * `microsoft_docs_search`, `microsoft_docs_fetch` et
+   * `microsoft_code_sample_search` étaient classés « écriture », parce que leur
+   * verbe de lecture n'était pas le premier mot (le préfixe est le nom du
+   * produit). Résultat : la fonctionnalité d'exécution refusait les trois outils
+   * d'un serveur parfaitement en lecture seule.
+   *
+   * Le durcissement obtenu au passage est plus important que ce correctif : un
+   * verbe d'ÉCRITURE n'importe où dans le nom ou la description l'emporte déjà
+   * (règles ci-dessus), y compris en composition (`get_and_delete_order`,
+   * `search_and_destroy`). Lire « lecture » ne dispense donc de rien : c'est
+   * l'absence totale de signal d'écriture qui autorise ce classement.
+   *
+   * `readOnlyHint` n'est toujours PAS consulté : c'est une affirmation du
+   * serveur, et un serveur ne décide pas seul que son outil est inoffensif.
+   */
+  const verbeLecture = VERBES_LECTURE.find((v) => tousLesMots.includes(v));
+  if (verbeLecture) {
+    return {
+      lecture: true,
+      raison: tousLesMots[0] === verbeLecture
+        ? `le nom commence par « ${verbeLecture} »`
+        : `le nom contient « ${verbeLecture} » et aucun verbe d'écriture`,
+    };
   }
-  // `readOnlyHint` n'est PAS consulté : c'est une affirmation du serveur.
-  // Lui faire confiance reviendrait à laisser un serveur décider seul s'il a le
-  // droit d'agir sur nos données.
-  const sembleLecture = VERBES_LECTURE.some((v) => new RegExp(`\\b${v}\\b`).test(texte));
   return {
     lecture: false,
-    raison: sembleLecture
-      ? 'verbe de lecture ambigu : confirmation demandée par prudence'
-      : 'nom non reconnu : traité comme une écriture',
+    raison: 'nom non reconnu : traité comme une écriture',
   };
 }
 

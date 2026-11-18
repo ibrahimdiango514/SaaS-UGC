@@ -32,6 +32,7 @@ import {
 } from './gestion.ts';
 import { entetesAuthentification, testerConnexion, type ServeurExterne } from './external.ts';
 import type { EgressDeps } from '../store-import/safe-egress.ts';
+import type { DependancesP5 } from './execution.ts';
 
 /* -------------------------------------------------------------------------- */
 /* 1. Types publics — aucun secret                                              */
@@ -86,6 +87,12 @@ export interface DependancesGestion {
   base: AccesGestion;
   egress: EgressDeps;
   delaiMs?: number;
+  /**
+   * Porte d'exécution des outils (P5). Optionnelle : sans elle, la route
+   * `executer` répond `execution_indisponible` plutôt que d'improviser un accès
+   * direct. Un chemin d'appel absent vaut mieux qu'un second chemin non testé.
+   */
+  execution?: DependancesP5;
 }
 
 /* -------------------------------------------------------------------------- */

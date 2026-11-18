@@ -176,6 +176,12 @@ function dependancesGestion(): DependancesGestion {
   return {
     base: creerAccesGestion({ sql: ouvrirSql }),
     egress: egressReel(),
+    /*
+     * La porte d'exécution est la MÊME que celle du transport MCP : une seule
+     * implémentation de la décision, donc aucun risque qu'une route de gestion
+     * applique une règle plus permissive que l'autre.
+     */
+    execution: dependances(),
   };
 }
 

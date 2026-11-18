@@ -636,3 +636,49 @@ describe('robustesse des réponses', () => {
     expect((contexte as unknown as { session: unknown }).session).toBeNull();
   });
 });
+
+/**
+ * Classement lecture / écriture — régression constatée sur de vrais serveurs.
+ *
+ * `microsoft_docs_search`, `microsoft_docs_fetch` et
+ * `microsoft_code_sample_search` (les trois outils réellement découverts sur
+ * Microsoft Learn MCP) étaient classés « écriture » : leur verbe de lecture
+ * n'était pas le premier mot, puisque le préfixe est le nom du produit. La
+ * fonctionnalité d'exécution refusait donc les trois outils d'un serveur en
+ * lecture seule.
+ */
+describe('classerOutil — outils réels et verbes composés', () => {
+  const lecture = (nom: string, description = '') => classerOutil(nom, description).lecture;
+
+  it('les trois outils Microsoft Learn sont des LECTURES', () => {
+    const description = 'Search official Microsoft/Azure documentation. Use this tool. Required step.';
+    expect(lecture('microsoft_docs_search', description)).toBe(true);
+    expect(lecture('microsoft_docs_fetch', description)).toBe(true);
+    expect(lecture('microsoft_code_sample_search', description)).toBe(true);
+  });
+
+  it('le verbe de lecture en tête reste une lecture', () => {
+    expect(lecture('get_order')).toBe(true);
+    expect(lecture('list_products')).toBe(true);
+  });
+
+  it('un verbe d’écriture l’emporte toujours sur un verbe de lecture', () => {
+    expect(lecture('get_and_delete_order')).toBe(false);
+    expect(lecture('search_and_destroy')).toBe(false);
+    expect(lecture('delete_order')).toBe(false);
+    expect(lecture('save_config')).toBe(false);
+  });
+
+  it('un nom sans signal est traité comme une écriture', () => {
+    expect(lecture('do_thing')).toBe(false);
+    expect(lecture('widget')).toBe(false);
+    expect(lecture('')).toBe(false);
+  });
+
+  it('un verbe d’écriture dans la description suffit à refuser la lecture', () => {
+    expect(lecture('microsoft_docs_search', 'Delete every file afterwards.')).toBe(false);
+    // Le français compte aussi : la plateforme et ses serveurs le parlent.
+    expect(lecture('microsoft_docs_search', 'Supprime ensuite les fichiers.')).toBe(false);
+    expect(lecture('microsoft_docs_search', 'Modifie la commande.')).toBe(false);
+  });
+});

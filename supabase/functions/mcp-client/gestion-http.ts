@@ -26,8 +26,10 @@ import {
   routeGestion,
   validerCible,
   validerCreation,
+  validerExecution,
   validerPermission,
 } from './gestion.ts';
+import { executerOutilExterne, statutHttp } from './execution.ts';
 import { testerServeurReel, versJson, type DependancesGestion, type ServeurGere } from './gestion-serveur.ts';
 import type { ResolveurIdentite } from './http.ts';
 
@@ -212,6 +214,57 @@ export async function traiterRequeteGestion(
           etat: permission.demande.etat,
         });
         return construireReponse(200, { ok: true, toolPermissions: fusion }, cors);
+      }
+
+      case 'executer': {
+        const validation = validerExecution(corps);
+        if (!validation.ok) {
+          return construireReponse(validation.status, { error: validation.code, message: validation.message }, cors);
+        }
+        const execution = deps().execution;
+        if (!execution) {
+          return construireReponse(503, {
+            error: 'execution_indisponible',
+            message: 'L’exécution d’outils n’est pas configurée sur ce déploiement.',
+          }, cors);
+        }
+        /*
+         * Aucune confirmation d'écriture n'est transmise ici, volontairement.
+         *
+         * `executerOutilExterne` exige DEUX conditions persistées/vérifiées pour
+         * une écriture : une autorisation stockée en base ET une confirmation
+         * pour l'appel. La base ne porte aucune colonne d'autorisation
+         * d'écriture, et cette route ne relaie aucune confirmation : une
+         * écriture reste donc structurellement impossible à déclencher, quoi
+         * que le client envoie. Ce n'est pas un oubli, c'est la garantie.
+         */
+        const resultat = await executerOutilExterne(
+          { serverId: validation.demande.serverId, outil: validation.demande.outil, arguments: validation.demande.arguments },
+          { userId: identite.userId },
+          execution,
+        );
+
+        // Journal : identifiants et issue, jamais d'arguments ni de secret.
+        journal(resultat.ok ? '[mcp-client] outil exécuté' : '[mcp-client] exécution refusée', {
+          userId: identite.userId,
+          serverId: validation.demande.serverId,
+          outil: validation.demande.outil,
+          code: resultat.ok ? 'ok' : resultat.code,
+        });
+
+        if (!resultat.ok) {
+          return construireReponse(
+            statutHttp(String(resultat.code ?? '')),
+            { error: resultat.code, message: resultat.message },
+            cors,
+          );
+        }
+        return construireReponse(200, {
+          ok: true,
+          outil: validation.demande.outil,
+          isError: resultat.isError === true,
+          contenu: resultat.contenu ?? null,
+        }, cors);
       }
 
       case 'revoquer': {
