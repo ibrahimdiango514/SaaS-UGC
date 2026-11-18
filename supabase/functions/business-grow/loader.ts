@@ -6,16 +6,16 @@
 // toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
 // JAMAIS exécuté.
 //
-// Épinglé sur business-grow.edge.js (88237 caractères).
+// Épinglé sur business-grow.edge.js (88235 caractères).
 //
 // Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "e27e2f002175fe021f1f9394ba42aab93331eb86";
+const COMMIT = "25385118f1ebc3e418fbae17d07e5262dafe3db9";
 const PATH = "supabase/functions/business-grow.edge.js";
-const ARTIFACT_SHA256 = "bf0b55895d2ecf84c918b9fb99fbf81d311d38f496808566fb261c76101915c9";
-const ARTIFACT_CHARS = 88237;
+const ARTIFACT_SHA256 = "ca9f76e5e83f7e1b169d123dc88b8519c608d0e6416417c1c3b3c2ad847bdfe7";
+const ARTIFACT_CHARS = 88235;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
 // porte sur le fichier tel qu'il est committé.

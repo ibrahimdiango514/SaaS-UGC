@@ -171,7 +171,7 @@ function environnement(options: {
       return {
         allowed,
         reason: options.reason ?? (allowed ? 'OK' : 'NO_SUBSCRIPTION'),
-        message: allowed ? 'Actif' : 'Un abonnement Business Ground actif est requis.',
+        message: allowed ? 'Actif' : 'Un abonnement Business Grow actif est requis.',
       };
     },
     async grantWorkspace() { return { canRead: true, canWrite: options.canWrite ?? true }; },

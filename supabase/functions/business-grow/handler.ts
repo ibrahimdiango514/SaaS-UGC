@@ -256,7 +256,7 @@ export class NoVerifiedProviderRouteError extends Error {
 
 /**
  * Droits d'accès au module Import & Connect, établis côté serveur.
- * `allowed` ne doit être vrai que si l'abonnement Business Ground est payé,
+ * `allowed` ne doit être vrai que si l'abonnement Business Grow est payé,
  * actif et en cours — la règle elle-même vit en base
  * (`saas_business.bg_import_access`), pas ici.
  */
@@ -379,7 +379,7 @@ function object(value: unknown): Record<string, unknown> {
 const INTEGRATION_CONNECTOR_KEYS = new Set(['facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce']);
 
 /**
- * Actions réservées aux abonnés Business Ground : tout ce qui touche à une
+ * Actions réservées aux abonnés Business Grow : tout ce qui touche à une
  * connexion de boutique (demande, annulation, déconnexion) et la lecture des
  * connexions existantes — l'historique et les clés d'API sont dans ce
  * périmètre.
@@ -546,7 +546,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
     const action = (versionedWorkspaceAction ? rawAction.slice(3) : rawAction) as BusinessAction;
 
     // -----------------------------------------------------------------------
-    // Import & Connect — accès réservé aux abonnés Business Ground.
+    // Import & Connect — accès réservé aux abonnés Business Grow.
     //
     // Placé AVANT la résolution du périmètre d'entreprise et AVANT toute
     // lecture ou mutation : un non-abonné n'apprend rien sur les connexions
@@ -580,7 +580,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
         return response(
           failure(
             'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
-            'Import & Connect est réservé aux abonnés Business Ground actifs.',
+            'Import & Connect est réservé aux abonnés Business Grow actifs.',
             {
               reason: access?.reason ?? 'UNKNOWN',
               subscription_status: access?.status ?? null,

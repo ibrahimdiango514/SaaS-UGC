@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertCircle, AlertTriangle, ArrowLeft, Check, Clock, ExternalLink, Filter, Plug, RefreshCw,
+  AlertCircle, AlertTriangle, ArrowLeft, ArrowRight, Check, Clock, ExternalLink, Filter, Lock, Plug, RefreshCw,
   Search, ShieldAlert, ShieldCheck, Unplug, X,
 } from 'lucide-react';
 import {
@@ -15,7 +15,8 @@ import {
   listAudit, listConnectedAccounts, missingCapabilities, normalizeProvider, revokeConnection,
   summarize, toActivationRequests, type AuditEntry,
 } from './connections';
-import { businessGrowApi, type BusinessIntegrationConnection } from '../business/api';
+import { businessGrowApi, subscriptionRefusalOf, type BusinessIntegrationConnection } from '../business/api';
+import { SUBSCRIPTION_PATH, accessGuidance, type ImportAccessReason } from '../business/import-connect/access';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
 import { ConnectorConnectForm } from './ConnectorConnectForm';
@@ -45,7 +46,37 @@ import '../ai/assistant.css';
  * Connecter un nouveau fournisseur : aucun connecteur n'est écrit (Livraison 3).
  * Les fiches concernées affichent « Configuration requise » ou « Validation
  * externe requise », et le bouton est désactivé avec l'explication.
- *//**
+ *//** Refus d'abonnement tel que transporté par `subscriptionRefusalOf`. */
+export type SubscriptionRefusal = NonNullable<ReturnType<typeof subscriptionRefusalOf>>;
+
+/**
+ * Pourquoi aucun statut de connexion n'est affiché, quand `connections` vaut
+ * `null`. Chaque cas a son libellé : « État inconnu » n'est plus un fourre-tout.
+ *
+ * - `subscription` : le serveur a refusé la lecture faute d'abonnement
+ *   Business Grow actif — rien n'est en panne, l'accès est réservé ;
+ * - `workspace`    : aucune entreprise active, la lecture n'a pas été tentée ;
+ * - `error`        : la lecture a échoué (réseau, serveur) ;
+ * - `loading`      : la première lecture est en cours.
+ */
+export type EtatIndetermine = {
+  kind: 'subscription' | 'workspace' | 'error' | 'loading';
+  label: string;
+  tone: 'neutral' | 'warning' | 'danger';
+};
+
+export function etatIndetermine(args: {
+  workspaceId: string | null;
+  loadError: string | null;
+  subscriptionRefusal: SubscriptionRefusal | null;
+}): EtatIndetermine {
+  if (args.subscriptionRefusal) return { kind: 'subscription', label: 'Abonnement requis', tone: 'warning' };
+  if (!args.workspaceId) return { kind: 'workspace', label: 'Entreprise non résolue', tone: 'neutral' };
+  if (args.loadError) return { kind: 'error', label: 'État inconnu', tone: 'danger' };
+  return { kind: 'loading', label: 'État inconnu', tone: 'neutral' };
+}
+
+/**
  * Contrôleur d'état fourni par l'espace hôte (Business Grow).
  *
  * Business Grow possède déjà des compteurs de séquence et un verrou de mutation
@@ -56,6 +87,12 @@ import '../ai/assistant.css';
 export interface IntegrationsController {
   connections: BusinessIntegrationConnection[] | null;
   loadError: string | null;
+  /**
+   * Refus d'abonnement renvoyé par le serveur lors de la lecture
+   * (`BUSINESS_GROW_SUBSCRIPTION_REQUIRED`). Distinct d'une panne : l'état
+   * n'est pas « inconnu », il est « réservé aux abonnés », et l'écran le dit.
+   */
+  subscriptionRefusal?: SubscriptionRefusal | null;
   busyKey: string | null;
   notice: { tone: 'success' | 'error'; text: string } | null;
   onRetry: () => void;
@@ -82,6 +119,7 @@ export function IntegrationsCenter({
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [interneLoadError, setInterneLoadError] = useState<string | null>(null);
+  const [interneRefus, setInterneRefus] = useState<SubscriptionRefusal | null>(null);
   /**
    * Panne de la source OAuth, distincte de celle des demandes d'activation.
    * Les deux sont signalées séparément : une source muette ne doit pas faire
@@ -99,6 +137,8 @@ export function IntegrationsCenter({
   const setConnections = controller ? () => {} : setInterneConnections;
   const loadError = controller ? controller.loadError : interneLoadError;
   const setLoadError = controller ? () => {} : setInterneLoadError;
+  const subscriptionRefusal = controller ? (controller.subscriptionRefusal ?? null) : interneRefus;
+  const setSubscriptionRefusal = controller ? () => {} : setInterneRefus;
   const busyKey = controller ? controller.busyKey : interneBusyKey;
   const setBusyKey = controller ? () => {} : setInterneBusyKey;
   const notice = controller ? controller.notice : interneNotice;
@@ -114,8 +154,10 @@ export function IntegrationsCenter({
    * Lecture des trois sources, entreprise par entreprise.
    *
    * `connections` reste `null` tant que la lecture n'a pas réussi : c'est ce
-   * `null` qui affiche « État inconnu » et désactive toutes les actions. Une
-   * lecture échouée ne doit jamais ressembler à une absence de connexion.
+   * `null` qui désactive toutes les actions et affiche, fiche par fiche, la
+   * raison précise (abonnement requis, entreprise non résolue, lecture
+   * impossible, chargement — voir `etatIndetermine`). Une lecture échouée ne
+   * doit jamais ressembler à une absence de connexion.
    *
    * Les comptes OAuth et le journal sont lus à part : leur panne ne doit pas
    * invalider les demandes d'activation, qui sont une autre source. Mais si la
@@ -133,6 +175,7 @@ export function IntegrationsCenter({
     ]);
 
     if (demandesRes.status === 'fulfilled') {
+      setSubscriptionRefusal(null);
       const recues = demandesRes.value;
       /*
        * Isolation par entreprise : le serveur filtre déjà sur `p_user_id` et
@@ -150,8 +193,12 @@ export function IntegrationsCenter({
       }
     } else {
       setConnections(null);
+      // Un refus d'abonnement n'est pas une panne : il est affiché comme tel,
+      // avec le motif précis du serveur, et sans message d'erreur générique.
+      const refus = subscriptionRefusalOf(demandesRes.reason);
+      setSubscriptionRefusal(refus);
       setLoadError(
-        demandesRes.reason instanceof Error ? demandesRes.reason.message : 'Lecture impossible.',
+        refus ? null : demandesRes.reason instanceof Error ? demandesRes.reason.message : 'Lecture impossible.',
       );
     }
 
@@ -215,8 +262,12 @@ export function IntegrationsCenter({
    */
   const apresMutationIncertaine = (erreur: unknown) => {
     setConnections(null);
-    setLoadError(erreur instanceof Error ? erreur.message : 'Réponse perdue.');
-    setNotice({ tone: 'error', text: 'Opération non confirmée. Relisez l’état avant de réessayer.' });
+    const refus = subscriptionRefusalOf(erreur);
+    setSubscriptionRefusal(refus);
+    setLoadError(refus ? null : erreur instanceof Error ? erreur.message : 'Réponse perdue.');
+    setNotice(refus
+      ? { tone: 'error', text: 'Opération refusée : abonnement Business Grow requis. Rien n’a été enregistré.' }
+      : { tone: 'error', text: 'Opération non confirmée. Relisez l’état avant de réessayer.' });
   };
 
   const demander = async (entry: IntegrationEntry) => {
@@ -306,6 +357,20 @@ export function IntegrationsCenter({
 
   const enCoursGlobal = busyKey !== null || enCours;
 
+  const indetermine = etatIndetermine({ workspaceId, loadError, subscriptionRefusal });
+  const guidanceAbonnement = subscriptionRefusal
+    ? accessGuidance({
+      allowed: false,
+      reason: subscriptionRefusal.reason as ImportAccessReason,
+      message: subscriptionRefusal.message,
+      status: subscriptionRefusal.status,
+      planKey: subscriptionRefusal.planKey,
+      currentPeriodEnd: subscriptionRefusal.currentPeriodEnd,
+      checkedAt: null,
+      unknown: false,
+    })
+    : null;
+
   return (
     <div className={embedded ? 'bg-transparent' : 'vy-ambient min-h-[100dvh] bg-ink'}>
       <div className={embedded ? 'w-full' : 'mx-auto w-full max-w-6xl px-4 py-8 sm:px-6'}>
@@ -362,6 +427,39 @@ export function IntegrationsCenter({
             </div>
             <Button variant="ghost" size="sm" onClick={() => (controller ? controller.onRetry() : void charger())} icon={<RefreshCw size={14} />}>
               Réessayer
+            </Button>
+          </div>
+        )}
+
+        {subscriptionRefusal && guidanceAbonnement && (
+          <div
+            role="status"
+            data-testid="integrations-subscription-required"
+            className={cn(
+              'mb-5 flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-xs',
+              guidanceAbonnement.tone === 'danger'
+                ? 'border-rose-400/25 bg-rose-400/[0.06] text-rose-100'
+                : 'border-violet-300/25 bg-violet-400/[0.06] text-violet-100',
+            )}
+          >
+            <Lock size={15} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium">{guidanceAbonnement.title}</p>
+              <p className="mt-0.5 opacity-80">{guidanceAbonnement.detail}</p>
+              <p className="mt-1 opacity-60">
+                Le catalogue reste consultable. L’état de vos connexions n’est pas lu tant que l’abonnement n’est pas actif : aucune connexion n’est supposée.
+              </p>
+              {guidanceAbonnement.showSubscribe && (
+                <Link
+                  to={SUBSCRIPTION_PATH}
+                  className="mt-2 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                >
+                  Voir l’abonnement Business Grow <ArrowRight size={12} />
+                </Link>
+              )}
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => (controller ? controller.onRetry() : void charger())} icon={<RefreshCw size={14} />}>
+              Revérifier
             </Button>
           </div>
         )}
@@ -487,7 +585,7 @@ export function IntegrationsCenter({
         </div>
 
         {/* Grille */}
-        {connections === null && !loadError ? (
+        {connections === null && indetermine.kind === 'loading' ? (
           <p role="status" className="mb-4 text-xs text-slate-400">Chargement des intégrations…</p>
         ) : resultats.length === 0 ? (
           <div className="rounded-2xl border border-line bg-white/[0.02] px-6 py-10 text-center">
@@ -503,6 +601,7 @@ export function IntegrationsCenter({
                 key={entry.id}
                 entry={entry}
                 statut={statutDe(entry)}
+                indetermine={indetermine}
                 onOpen={() => setSelection(entry)}
               />
             ))}
@@ -547,6 +646,7 @@ export function IntegrationsCenter({
         <FicheDetail
           entry={selection}
           statut={statutDe(selection)}
+          indetermine={indetermine}
           compte={accountFor(selection, accounts)}
           busy={enCoursGlobal}
           connection={connectionFor(selection)}
@@ -630,16 +730,17 @@ function Filtre({
 /**
  * Carte du catalogue.
  *
- * `statut === null` signifie « état inconnu » : la lecture a échoué ou
- * l'entreprise n'est pas résolue. On affiche alors « État inconnu » plutôt que
- * de retomber sur « Non connecté », qui laisserait croire à une lecture
- * réussie.
+ * `statut === null` signifie qu'aucun statut n'a pu être lu : abonnement
+ * requis, entreprise non résolue, lecture en échec ou en cours. Le libellé
+ * affiché nomme ce cas précis (`indetermine`) plutôt que de retomber sur
+ * « Non connecté », qui laisserait croire à une lecture réussie.
  */
 function Carte({
-  entry, statut, onOpen,
+  entry, statut, indetermine, onOpen,
 }: {
   entry: IntegrationEntry;
   statut: IntegrationStatus | null;
+  indetermine: EtatIndetermine;
   onOpen: () => void;
 }) {
   return (
@@ -655,8 +756,8 @@ function Carte({
           <p className="truncate text-sm font-semibold text-white">{entry.name}</p>
           <p className="text-[0.68rem] text-slate-500">{CATEGORY_LABELS[entry.category]}</p>
         </div>
-        <Badge tone={statut === null ? 'neutral' : STATUS_TONE[statut]}>
-          {statut === null ? 'État inconnu' : STATUS_LABELS[statut]}
+        <Badge tone={statut === null ? indetermine.tone : STATUS_TONE[statut]}>
+          {statut === null ? indetermine.label : STATUS_LABELS[statut]}
         </Badge>
       </div>
       <p className="mt-2.5 line-clamp-2 text-xs leading-relaxed text-slate-400">{entry.description}</p>
@@ -700,11 +801,12 @@ function Logo({ entry }: { entry: IntegrationEntry }) {
 }
 
 function FicheDetail({
-  entry, statut, compte, connection, busy, entrepriseActive, workspaceId, onChanged,
+  entry, statut, indetermine, compte, connection, busy, entrepriseActive, workspaceId, onChanged,
   onClose, onRevoke, onRequest, onCancelRequest, onDisconnect, onReload,
 }: {
   entry: IntegrationEntry;
   statut: IntegrationStatus | null;
+  indetermine: EtatIndetermine;
   compte: ConnectedAccount | null;
   connection: BusinessIntegrationConnection | null;
   busy: boolean;
@@ -748,12 +850,23 @@ function FicheDetail({
             <h2 className="truncate font-display text-lg font-semibold text-white">{entry.name}</h2>
             <p className="text-[0.7rem] text-slate-500">{CATEGORY_LABELS[entry.category]}</p>
           </div>
-          <Badge tone={statut === null ? 'neutral' : STATUS_TONE[statut]}>
-            {statut === null ? 'État inconnu' : STATUS_LABELS[statut]}
+          <Badge tone={statut === null ? indetermine.tone : STATUS_TONE[statut]}>
+            {statut === null ? indetermine.label : STATUS_LABELS[statut]}
           </Badge>
         </div>
 
         <p className="text-sm leading-relaxed text-slate-300">{entry.description}</p>
+
+        {statut === null && indetermine.kind === 'subscription' && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-violet-300/25 bg-violet-400/[0.08] px-3 py-2 text-xs text-violet-100">
+            <Lock size={13} className="mt-0.5 shrink-0" />
+            <p>
+              Réservé aux abonnés Business Grow actifs : l’état de cette connexion n’est pas lu et aucune
+              action n’est proposée tant que l’abonnement n’est pas actif.{' '}
+              <Link to={SUBSCRIPTION_PATH} className="font-medium underline underline-offset-2">Voir l’abonnement</Link>
+            </p>
+          </div>
+        )}
 
         {entry.caveat && (
           <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
@@ -835,8 +948,13 @@ function FicheDetail({
         <section className="mt-5 space-y-2">
           {!etatConnu ? (
             <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-3.5 py-3 text-xs leading-relaxed text-amber-100">
-              État inconnu : la lecture des intégrations a échoué. Aucune action n’est
-              proposée avant une relecture réussie.
+              {indetermine.kind === 'subscription'
+                ? 'Abonnement requis : aucune action n’est proposée tant que l’abonnement Business Grow n’est pas actif.'
+                : indetermine.kind === 'workspace'
+                  ? 'Aucune entreprise active : aucune action n’est proposée tant que l’entreprise n’est pas résolue.'
+                  : indetermine.kind === 'loading'
+                    ? 'État inconnu : lecture en cours. Aucune action n’est proposée avant une lecture réussie.'
+                    : 'État inconnu : la lecture des intégrations a échoué. Aucune action n’est proposée avant une relecture réussie.'}
             </div>
           ) : (
             <>
