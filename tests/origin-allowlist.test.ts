@@ -96,6 +96,10 @@ describe('origine renvoyée dans l’en-tête CORS', () => {
 
   it('renvoie `null` — jamais `*` — pour une origine inconnue', () => {
     // `*` laisserait toute page lire la réponse ; `null` bloque le navigateur.
+    expect(resolveCorsOrigin(DEFAULT_ALLOWED_ORIGINS, 'https://vyora.pages.dev')).toBe('https://vyora.pages.dev');
+    expect(resolveCorsOrigin(DEFAULT_ALLOWED_ORIGINS, 'https://preview-main.vyora.pages.dev'))
+      .toBe('https://preview-main.vyora.pages.dev');
+    expect(resolveCorsOrigin(DEFAULT_ALLOWED_ORIGINS, 'https://autre.pages.dev')).toBe('null');
     expect(resolveCorsOrigin(DEFAULT_ALLOWED_ORIGINS, 'https://evil.test')).toBe('null');
     expect(resolveCorsOrigin(DEFAULT_ALLOWED_ORIGINS, null)).toBe('null');
     expect(resolveCorsOrigin([], 'https://vyora-ugc.netlify.app')).toBe('null');

@@ -37,6 +37,10 @@ export const DEFAULT_ALLOWED_ORIGINS: readonly string[] = [
   'https://deploy-preview-*--vyora.netlify.app',
   'https://reelora.netlify.app',
   'https://*.e2b.app',
+  // Cloudflare Pages (P6e) : production du projet `vyora` et ses aperçus
+  // (`<hash>.vyora.pages.dev`, `preview-<branche>.vyora.pages.dev`).
+  'https://vyora.pages.dev',
+  'https://*.vyora.pages.dev',
 ];
 
 /**
