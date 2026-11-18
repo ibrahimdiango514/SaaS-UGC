@@ -395,7 +395,10 @@ async function obtenirJetonOAuth(connexion: ConnexionServeur, deps: DependancesP
       return {
         ok: false,
         code: 'auth_required',
-        message: 'Le renouvellement du jeton OAuth a échoué : réautorisez la connexion.',
+        // Le motif du fournisseur (`invalid_grant` = refresh révoqué/expiré,
+        // `invalid_client`…) est la seule chose qui distingue « réautorisez »
+        // de « réessayez » ; il est court et borné en amont.
+        message: `Le renouvellement du jeton OAuth a échoué (${renouvellement.message}) : réautorisez la connexion.`,
       };
     }
     // Encore valide quelques secondes : on l'utilise, le serveur tranchera.
@@ -457,6 +460,9 @@ export function statutHttp(refus: string): number {
     case 'revoked':
     case 'connexion_indisponible':
     case 'secret_manquant':
+    // Même statut que `tester` pour le même état : un 502 (« passerelle »)
+    // laissait croire à une panne alors que c'est l'utilisateur qui doit agir.
+    case 'auth_required':
       return 409;
     case 'outil_non_autorise':
     case 'ecriture_desactivee':
