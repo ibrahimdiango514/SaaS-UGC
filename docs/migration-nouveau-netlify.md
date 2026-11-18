@@ -1,0 +1,204 @@
+# Migration VYORA vers un nouveau compte Netlify
+
+Date de préparation : 2026-11-18. Source unique à importer : branche **`main`** du dépôt
+`ibrahimdiango514/SaaS-UGC`. Le backend Supabase (`xbuuhfwobrafcbgtdgjx`) **ne change pas** :
+seule l'origine qui sert le frontend change.
+
+La future URL n'est pas connue au moment d'écrire ce document : elle est notée
+`<NOUVELLE_URL_NETLIFY>` partout (forme attendue : `https://<nom-du-site>.netlify.app`, ou un
+domaine personnalisé). **Rien dans le dépôt ne doit être modifié pour la renseigner** : tout passe
+par des variables d'environnement ou des réglages de la console.
+
+---
+
+## 0. Ce qui a été vérifié avant d'écrire cette procédure
+
+| Point | Résultat mesuré |
+| --- | --- |
+| URL Netlify codée en dur dans `src/` | Aucune. Le frontend ne lit que `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SITE_URL` (`src/lib/supabase.ts`, repli `window.location.origin`). `src/business/api.ts` détecte seulement « suis-je sur `*.netlify.app` » pour choisir l'ordre des transports : valable pour tout nouveau site Netlify. |
+| Relais Netlify Edge (`netlify/edge-functions/*.js`) | Ciblent `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/...` : correct, le backend ne change pas. |
+| Liste d'origines par défaut (`src/lib/origin-allowlist.ts`) | Contient l'ancien domaine et les aperçus ; la nouvelle origine se déclare par secret (voir §4) — aucune redéploiement d'Edge Function n'est nécessaire pour l'ajouter. |
+| Outils de constat (`.github/workflows/production-check.yml`, `scripts/verify-production.mjs`) | Paramétrés : variable de dépôt `VYORA_SITE_URL` / variable d'environnement `VYORA_SITE_URL` / option `--site`. L'ancien domaine n'est qu'un repli. |
+| Garde de build `netlify.toml` | Testée par `tests/business-grow-deployment-guard.test.ts` (10 cas, `sh -c` réel) : l'ancien site `vyora-ugc` ne construit plus jamais ; seul un site déclarant `VYORA_BUILD_ENABLED=true` construit, et seulement `main`. |
+
+---
+
+## 1. Avant de commencer — l'ancien compte
+
+- **Ne déclencher aucun build sur l'ancien site `vyora-ugc`** (24 crédits restants).
+- La garde de build de `main` annule désormais tout build déclenché par Git sur ce site
+  (`[ "$SITE_NAME" = "vyora-ugc" ]` → code 0 → « build cancelled », aucun crédit consommé).
+  Un bouton **Trigger deploy** manuel ignore cette garde : ne pas l'utiliser.
+- Si l'ancien site doit être détaché du dépôt : *Site configuration → Build & deploy → Continuous
+  deployment → Manage repository → Unlink*. Facultatif ; la garde suffit.
+- Ne pas supprimer l'ancien site tant que la nouvelle URL n'a pas été ajoutée partout (§4 à §6) :
+  les utilisateurs connectés sur l'ancienne URL doivent pouvoir terminer leur session.
+
+---
+
+## 2. Créer le site dans le nouveau compte
+
+1. Netlify → **Add new site → Import an existing project → GitHub** → autoriser l'accès au dépôt
+   `ibrahimdiango514/SaaS-UGC`.
+2. Paramètres de build (tous déjà dans `netlify.toml`, à laisser tels quels si Netlify les lit) :
+
+   | Réglage | Valeur |
+   | --- | --- |
+   | Branch to deploy | `main` |
+   | Base directory | *(vide — racine du dépôt)* |
+   | Build command | `npm ci && npm run build` |
+   | Publish directory | `dist` |
+   | Functions directory | *(aucune ; les Edge Functions Netlify sont dans `netlify/edge-functions`, déclarées par `netlify.toml`)* |
+   | Node | `22` (`NODE_VERSION` dans `netlify.toml`) |
+
+3. **Avant le premier déploiement**, renseigner les variables d'environnement (§3). Netlify lance
+   un premier build automatiquement à la fin de l'import : si les variables ne sont pas encore
+   saisies, ce build est annulé par la garde (aucun crédit consommé) — relancer ensuite par
+   *Deploys → Trigger deploy → Deploy site* (un déclenchement manuel n'évalue pas la garde) ou par
+   un push sur `main`.
+4. Désactiver les Deploy Previews et les branch deploys (*Site configuration → Build & deploy →
+   Continuous deployment → Deploy contexts*) : la garde les annule de toute façon (`$BRANCH` ≠
+   `main`), mais autant ne pas les déclencher.
+5. Relever l'URL attribuée (`https://<nom>.netlify.app`) : c'est `<NOUVELLE_URL_NETLIFY>`.
+   Si vous changez le nom du site (*Site configuration → Site details → Change site name*),
+   faites-le **avant** les étapes 4–6, sinon tout est à refaire.
+
+---
+
+## 3. Variables d'environnement Netlify (Site configuration → Environment variables)
+
+Toutes sont **publiques** (compilées dans le bundle ou lues par le build). Aucun secret.
+
+| Variable | Valeur | Rôle |
+| --- | --- | --- |
+| `VYORA_BUILD_ENABLED` | `true` (exactement, minuscules) | Autorise la garde de `netlify.toml` à construire ce site. Toute autre valeur = build annulé. |
+| `VITE_SUPABASE_URL` | `https://xbuuhfwobrafcbgtdgjx.supabase.co` | Projet Supabase (inchangé). |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz` | Clé publiable (publique, livrée au navigateur). |
+| `VITE_SITE_URL` | `<NOUVELLE_URL_NETLIFY>` sans `/` final | Adresse de retour après connexion / lien magique. Si absente, le code se replie sur `window.location.origin` ; la renseigner évite toute ambiguïté. |
+
+Laisser la portée par défaut (*All scopes*, ou au minimum *Builds*) : la garde et Vite lisent ces
+variables pendant le build. `VITE_SUPABASE_URL` et `VITE_SUPABASE_PUBLISHABLE_KEY` ont les mêmes
+valeurs par défaut dans le code (`src/lib/supabase.ts`) : les renseigner rend la configuration
+explicite, leur absence ne casse pas le build.
+Facultatif : `NPM_FLAGS` et `NODE_VERSION` sont déjà dans `netlify.toml`.
+**Ne jamais** y mettre `SUPABASE_SERVICE_ROLE_KEY`, une clé `sb_secret_*`, ni un secret serveur.
+
+Après saisie : *Deploys → Trigger deploy → Deploy site* (premier build), ou pousser sur `main`.
+
+---
+
+## 4. Supabase — secrets des Edge Functions à **compléter** (valeurs à saisir manuellement)
+
+Console Supabase → *Edge Functions → Secrets* (ou `supabase secrets set`). Chaque secret est une
+liste séparée par des virgules ; **ajouter** la nouvelle origine, ne pas retirer l'ancienne tant que
+l'ancien site sert encore des utilisateurs. Toute modification de secret redémarre les fonctions
+(chaque version +1) : c'est normal.
+
+| Secret | Fonctions qui le lisent | Action |
+| --- | --- | --- |
+| `VYORA_ALLOWED_ORIGINS` | `store-connect` (v13), `mcp-client` (v13), `reelora-owner-bootstrap` (v9, page « Propriétaire ») | Ajouter `<NOUVELLE_URL_NETLIFY>`. Sans cela : `access-control-allow-origin: null` (boutiques, MCP) et `403 origin_not_allowed` (propriétaire). |
+| `STORE_IMPORT_ALLOWED_ORIGINS` | `store-import` (v22) — lit uniquement ce secret | Ajouter `<NOUVELLE_URL_NETLIFY>` |
+| `BUSINESS_GROW_ALLOWED_ORIGINS` | `business-grow` (v33) | Ajouter `<NOUVELLE_URL_NETLIFY>`. Sur Netlify, le navigateur passe d'abord par le relais `/api/business-grow` (serveur → serveur, sans origine) : Business Grow fonctionne même avant cet ajout ; le secret couvre le transport direct de repli (`403 ORIGIN_NOT_ALLOWED` sinon). |
+| `VYORA_PAYMENTS_ALLOWED_ORIGINS` | `vyora-payments`, `vyora-payments-reconcile`, `vyora-saspay-webhook` (bundle `vyora-saspay`) | **Créer** (n'existe pas aujourd'hui) avec `<NOUVELLE_URL_NETLIFY>` exacte. La liste codée n'accepte que l'ancien domaine et ses aperçus ; aucun joker n'est admis car l'origine sert aussi à construire l'adresse de retour après paiement. Sans cela : `403 ORIGIN_NOT_ALLOWED` à l'achat de crédits. |
+
+Valeur actuelle de `VYORA_ALLOWED_ORIGINS` = `STORE_IMPORT_ALLOWED_ORIGINS` (publique, mesurée) :
+`https://vyora-ugc.netlify.app,https://deploy-preview-*--vyora-ugc.netlify.app,https://vyora.pages.dev,https://*.vyora.pages.dev`
+→ nouvelle valeur : la même + `,<NOUVELLE_URL_NETLIFY>`.
+
+Fonctions **sans** liste d'origines (répondent `*`, rien à faire ; vérifié dans la source de
+chaque fonction le 2026-11-18) : `reelora-video`, `reelora-video-worker`, `reelora-ai`,
+`reelora-health`, `video-quote`, `vyora-ai`, `vyora-ai-providers`, `vyora-mcp`,
+`vyora-provider-health`, `vyora-oauth` (source : branche `arena/vyora-mcp-connecteurs`, bundle
+`4a3f6206…`). `vyora-bg-seed` n'est pas appelée par le navigateur.
+
+Secrets serveur existants (28, inchangés, **noms seulement**) : `SUPABASE_*` (7, injectés),
+`MUAPI_API_KEY`, `BUSINESS_GROW_{GROQ,GEMINI}_API_KEY`, `BUSINESS_GROW_{GROQ,GEMINI}_MODEL`,
+`BUSINESS_GROW_PROVIDER_ORDER`, `BUSINESS_GROW_{OPENROUTER,GONKA,LLM7,OLLAMA}_API_KEY`,
+`BUSINESS_GROW_CLOUDFLARE_API_TOKEN`, `BUSINESS_GROW_ALLOWED_ORIGINS`, `VYORA_ALLOWED_ORIGINS`,
+`STORE_IMPORT_ALLOWED_ORIGINS`, `VYORA_OAUTH_ENCRYPTION_KEY`, `VYORA_OWNER_ADMIN_EMAIL`,
+`VYORA_SASPAY_SECRET_KEY`, `VYORA_SASPAY_WEBHOOK_SECRET`, `SASPAY_SECRET_KEY`,
+`SASPAY_WEBHOOK_SECRET`, `SOFIA_APP_BASE_URL` (autre produit). Aucun ne contient l'URL Netlify.
+
+---
+
+## 5. Supabase — Authentification (GoTrue)
+
+Console Supabase → *Authentication → URL Configuration*.
+
+| Réglage | Valeur actuelle | Nouvelle valeur |
+| --- | --- | --- |
+| Site URL | `https://vyora-ugc.netlify.app` | `<NOUVELLE_URL_NETLIFY>` |
+| Redirect URLs (`uri_allow_list`) | ancien domaine, aperçus `deploy-preview-*--vyora-ugc.netlify.app`, `vyora.pages.dev`, `localhost` | **Ajouter** `<NOUVELLE_URL_NETLIFY>` et `<NOUVELLE_URL_NETLIFY>/**` ; conserver le reste pendant la transition |
+
+Attention : la mise à jour de la liste **remplace** la liste entière — recopier les entrées
+existantes puis ajouter la nouvelle. Le frontend envoie `emailRedirectTo` =
+`VITE_SITE_URL/auth/callback` (inscription, mot de passe oublié) et
+`VITE_SITE_URL/proprietaire/confirmation` (premier administrateur) — repli : origine courante ; si la nouvelle URL n'est pas dans la liste, GoTrue redirige vers le
+`Site URL` et la connexion par lien échoue silencieusement.
+
+Fournisseurs OAuth tiers (Google, Facebook, etc.) : aucun n'est activé dans GoTrue aujourd'hui
+(`external_*_enabled = false`, mesuré le 2026-11-18) ; rien à mettre à jour. Le projet Supabase
+héberge aussi d'autres produits (entrées `lovable.app`, `sbc-ai-agency-dashbord.netlify.app` dans la
+liste) : ne pas les retirer sans vérification, et noter que `Site URL` est global au projet — il
+désignait déjà VYORA (`vyora-ugc`), le passer à la nouvelle URL ne change rien pour les autres. Les OAuth gérés par VYORA (MCP sortant via `mcp-client`, connecteurs via
+`vyora-oauth`) utilisent des URL de retour **côté Supabase**
+(`https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/mcp-client/oauth/callback`, dérivée de
+`SUPABASE_URL`) : elles ne dépendent pas de Netlify.
+
+---
+
+## 6. GitHub — après connaissance de l'URL
+
+- *Settings → Secrets and variables → Actions → Variables* : créer `VYORA_SITE_URL` =
+  `<NOUVELLE_URL_NETLIFY>`. Le workflow `production-check.yml` mesurera alors le nouveau site à
+  chaque push sur `main` (aucun commit nécessaire).
+- Facultatif, à faire dans une PR ultérieure une fois l'URL connue : ajouter le nouveau domaine à
+  `DEFAULT_ALLOWED_ORIGINS` (`src/lib/origin-allowlist.ts`) et à `STATIC_ORIGINS`
+  (`supabase/functions/_shared/saspay/http.ts`), puis régénérer/redéployer les artefacts
+  concernés. Ce n'est **pas** requis pour fonctionner : les secrets du §4 suffisent.
+
+---
+
+## 7. Vérifications après le premier déploiement
+
+Ne cocher que ce qui a été mesuré.
+
+1. `curl -sI <NOUVELLE_URL_NETLIFY>/` → `200`, en-têtes `x-content-type-options: nosniff`,
+   `x-frame-options: DENY`, `cache-control: no-cache, no-store, must-revalidate`.
+2. `curl -s <NOUVELLE_URL_NETLIFY>/ | grep vyora-revision` → le SHA du commit `main` déployé.
+3. SPA : `curl -sI <NOUVELLE_URL_NETLIFY>/app/studio` et `/connexion` → `200` (pas `404`).
+4. Relais : `curl -si <NOUVELLE_URL_NETLIFY>/api/business-grow -X POST -H 'content-type: application/json' -d '{}'`
+   → `401` JSON (jeton exigé), **pas** `404` ni `502`.
+5. CORS : `curl -si https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-connect -X POST -H "origin: <NOUVELLE_URL_NETLIFY>" -H "apikey: <clé publiable>" -H "authorization: Bearer <clé publiable>" -H 'content-type: application/json' -d '{"action":"status"}'`
+   → `401` avec `access-control-allow-origin: <NOUVELLE_URL_NETLIFY>` (et non `null`).
+   Répéter pour `store-import`, `mcp-client`, `business-grow`, `vyora-payments`, et en `GET`
+   pour `reelora-owner-bootstrap` (attendu : `200` avec `access-control-allow-origin` renseigné,
+   pas `403 origin_not_allowed`).
+6. Dans le navigateur : inscription / connexion → lien reçu pointe vers la nouvelle URL ; page
+   *Intégrations* → état « non connectée » lisible (pas d'erreur réseau) ; *Business Grow* →
+   réponse de l'assistant ; *Studio* → devis vidéo affiché.
+7. `node scripts/verify-production.mjs --site <NOUVELLE_URL_NETLIFY>` → code 0.
+8. Workflow GitHub *Constat de production* vert sur le prochain push `main`.
+
+---
+
+## 8. Ce qui attend la future URL (récapitulatif)
+
+| Où | Quoi | Bloquant ? |
+| --- | --- | --- |
+| Netlify | `VITE_SITE_URL`, `VYORA_BUILD_ENABLED=true` | Oui (build + redirections) |
+| Supabase secrets | `VYORA_ALLOWED_ORIGINS`, `STORE_IMPORT_ALLOWED_ORIGINS`, `BUSINESS_GROW_ALLOWED_ORIGINS` (ajouter), `VYORA_PAYMENTS_ALLOWED_ORIGINS` (créer) | Oui (CORS : boutiques, import, MCP, propriétaire, paiements ; Business Grow seulement pour le transport direct) |
+| Supabase Auth | `site_url`, `uri_allow_list` | Oui (connexion par lien) |
+| GitHub | variable `VYORA_SITE_URL` | Non (constat uniquement) |
+| Dépôt | listes par défaut (§6, facultatif) | Non |
+
+## 9. Contraintes à ne pas oublier
+
+- **Ne pas supprimer** les branches `arena/0188834f-saas-ugc` et `arena/0820df15-saas-ugc` sur
+  GitHub : les chargeurs Edge en production téléchargent leurs bundles à des commits de ces branches
+  (`209748b`, `37884b8`, `e27e2f0`, `b1cc62c`). Un commit n'est garanti joignable que tant qu'une
+  référence le retient.
+- Le backend ne suit pas le dépôt automatiquement : toute modification d'une Edge Function doit
+  être déployée explicitement (procédure dans `scripts/build-edge-artifact.mjs`).
+- Aucune donnée n'est à migrer : les utilisateurs, ateliers, crédits et connexions restent dans le
+  même projet Supabase.

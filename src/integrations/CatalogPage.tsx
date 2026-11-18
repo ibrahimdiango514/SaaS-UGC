@@ -18,6 +18,10 @@ import {
 import { businessGrowApi, type BusinessIntegrationConnection } from '../business/api';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
+import { ConnectorConnectForm } from './ConnectorConnectForm';
+import { MesBoutiquesConnectees } from './MesBoutiquesConnectees';
+import { CustomApiConnectForm } from './CustomApiConnectForm';
+import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
 
 /**
@@ -431,6 +435,24 @@ export function IntegrationsCenter({
           </section>
         )}
 
+        {/*
+         * Vue d'ensemble des boutiques connectées, AVANT le catalogue.
+         *
+         * L'état d'une connexion vivait dans la fiche de son fournisseur :
+         * passé deux connecteurs, savoir laquelle demandait une action
+         * supposait d'ouvrir chaque fiche. Ce panneau ne remplace pas les
+         * fiches, il évite d'avoir à les parcourir.
+         */}
+        <div className="mb-5">
+          <MesBoutiquesConnectees
+            workspaceId={workspaceId}
+            onOpenConnector={(cle) => {
+              const entry = INTEGRATIONS.find((candidat) => candidat.id === cle);
+              if (entry) setSelection(entry);
+            }}
+          />
+        </div>
+
         {/* Recherche + filtres */}
         <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center">
           <div className="relative flex-1">
@@ -531,9 +553,12 @@ export function IntegrationsCenter({
           onClose={() => setSelection(null)}
           onRevoke={(compteCible) => setConfirmation(compteCible)}
           entrepriseActive={Boolean(workspaceId)}
+          workspaceId={workspaceId}
+          onChanged={setNotice}
           onRequest={() => void demander(selection)}
           onCancelRequest={() => void annuler(selection)}
           onDisconnect={() => void retirerAssociation(selection)}
+          onReload={() => void charger()}
         />
       )}
 
@@ -675,8 +700,8 @@ function Logo({ entry }: { entry: IntegrationEntry }) {
 }
 
 function FicheDetail({
-  entry, statut, compte, connection, busy, entrepriseActive,
-  onClose, onRevoke, onRequest, onCancelRequest, onDisconnect,
+  entry, statut, compte, connection, busy, entrepriseActive, workspaceId, onChanged,
+  onClose, onRevoke, onRequest, onCancelRequest, onDisconnect, onReload,
 }: {
   entry: IntegrationEntry;
   statut: IntegrationStatus | null;
@@ -685,11 +710,17 @@ function FicheDetail({
   busy: boolean;
   /** Sans entreprise active, une demande ne peut pas être rattachée. */
   entrepriseActive: boolean;
+  /** Entreprise active : la connexion à clé d'API y est rattachée. */
+  workspaceId: string | null;
+  /** Retour d'une connexion/déconnexion, affiché par l'écran hôte. */
+  onChanged: (message: { tone: 'success' | 'error'; text: string }) => void;
   onClose: () => void;
   onRevoke: (compte: ConnectedAccount) => void;
   onRequest: () => void;
   onCancelRequest: () => void;
   onDisconnect: () => void;
+  /** Relit l'état des connexions après un enregistrement réussi. */
+  onReload: () => void;
 }) {
   // Tant que l'état est inconnu, aucune action n'est proposée : on ne parie pas
   // sur ce que contient la base.
@@ -809,7 +840,52 @@ function FicheDetail({
             </div>
           ) : (
             <>
-              {connectable ? (
+              {entry.engine === 'custom-api' ? (
+                /*
+                 * Parcours propre à ce connecteur : il n'y a pas de clé à
+                 * demander mais une description à recueillir. Le composant
+                 * générique de clé ne conviendrait pas — et prétendre le
+                 * contraire aurait affiché un champ unique ne menant nulle
+                 * part.
+                 */
+                <CustomApiConnectForm
+                  workspaceId={workspaceId}
+                  onChanged={onChanged}
+                  onSaved={onReload}
+                />
+              ) : hasConnectFlow(entry.id) ? (
+                /*
+                 * Un seul composant pour tous les connecteurs à clé : ses
+                 * champs, son aide et ses limites viennent de
+                 * `connector-requirements.ts`, pas de ce fichier. Ajouter une
+                 * plateforme ne demande donc plus d'écrire un écran — ni de
+                 * modifier celui-ci.
+                 *
+                 * `hasConnectFlow` est le garde-fou : une fiche dont le
+                 * parcours n'est pas livré tombe dans la branche suivante et
+                 * n'affiche aucun champ de saisie.
+                 */
+                <>
+                  {/*
+                   * Une ligne de connexion peut exister SANS qu'aucune
+                   * autorisation n'ait été obtenue (statut
+                   * `authorization_missing`). Le formulaire ci-dessous permet
+                   * enfin de se connecter pour de vrai ; ce texte empêche de
+                   * lire le formulaire comme « c'est déjà branché ».
+                   */}
+                  {statut === 'authorization_missing' && (
+                    <div className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3.5 py-3 text-xs leading-relaxed text-amber-100">
+                      {expliquerIndisponibilite(statut, entry)}
+                    </div>
+                  )}
+                  <ConnectorConnectForm
+                    connectorKey={entry.id}
+                    workspaceId={workspaceId}
+                    connected={statut === 'connected'}
+                    onChanged={onChanged}
+                  />
+                </>
+              ) : connectable && entry.engine === 'api-key' ? (
                 <ConnectButton entry={entry} />
               ) : (
                 /*

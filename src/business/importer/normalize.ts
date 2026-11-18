@@ -39,10 +39,36 @@ export interface NormalizedProduct {
   imageUrl: string | null;
   categories: string[];
   variants: ProductVariant[];
+  /**
+   * Quantité disponible, quand la source la fournit.
+   *
+   * `null` signifie « inconnu », et non « zéro » : confondre les deux ferait
+   * afficher « en rupture » sur tout un catalogue dont la colonne stock est
+   * simplement absente. Un stock négatif est une anomalie : il est écarté avec
+   * un avertissement, pas ramené à zéro.
+   */
+  stock: number | null;
   /** Empreinte de déduplication — voir `productFingerprint`. */
   fingerprint: string;
   /** Provenance, pour l'audit et le message d'erreur. */
   source: { platform: StorePlatform | 'file'; reference: string };
+  /**
+   * Référence produit fournie par la source (SKU, `reference`, `model`).
+   *
+   * Sert au rapprochement avec le catalogue existant : une référence identique
+   * désigne le même produit, même si son nom a changé. `null` = la source n'en
+   * fournit pas, et on n'en invente pas.
+   */
+  sku?: string | null;
+  /**
+   * Identifiant du produit CHEZ la plateforme source (Shopify `handle`,
+   * PrestaShop `id`, OpenCart `product_id`).
+   *
+   * Conservé d'un import à l'autre dans `product_facts`, ce qui permet de
+   * retrouver un produit renommé. Volontairement distinct de `sku` : un
+   * marchand peut changer de référence sans changer de fiche.
+   */
+  platformId?: string | null;
   /**
    * Champs dont la valeur a été corrigée ou écartée. L'interface les affiche :
    * un import silencieusement « réparé » est un import qu'on ne peut pas auditer.
@@ -53,8 +79,20 @@ export interface NormalizedProduct {
 export interface ProductVariant {
   name: string;
   priceMinor: number | null;
+  /** Devise propre à la variante : `null` = celle du produit parent. */
+  currency: string | null;
   sku: string | null;
+  /**
+   * Quantité propre à la variante.
+   *
+   * Distincte du stock du produit parent, qui est la SOMME des variantes : le
+   * parent répond « combien en tout », la variante répond « combien en M ».
+   * `null` = inconnu, jamais zéro.
+   */
+  stock: number | null;
   available: boolean | null;
+  /** Nom du critère (« Taille », « Couleur »), quand la source le fournit. */
+  attributeName: string | null;
 }
 
 /** Limites hautes : elles protègent la mémoire et l'affichage. */
@@ -77,6 +115,33 @@ const ZERO_DECIMAL_CURRENCIES = new Set([
   'XOF', 'XAF', 'XPF', 'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'RWF', 'GNF', 'KMF', 'DJF', 'PYG', 'VUV',
 ]);
 
+/**
+ * Devises connues : celles que l'application sait formater et écrire.
+ *
+ * Une devise absente de cette liste n'est pas « exotique mais valable » : elle
+ * n'a pas d'exposant connu, donc un prix dans cette devise serait converti avec
+ * un facteur arbitraire. On retombe sur la devise par défaut **en le disant**,
+ * plutôt que d'inventer une conversion.
+ */
+export const KNOWN_CURRENCIES = new Set([
+  ...['XOF', 'XAF', 'XPF', 'JPY', 'KRW', 'VND', 'CLP', 'ISK', 'UGX', 'RWF', 'GNF', 'KMF', 'DJF', 'PYG', 'VUV'],
+  'EUR', 'USD', 'GBP', 'CHF', 'CAD', 'AUD', 'NZD', 'SEK', 'NOK', 'DKK',
+  'CNY', 'HKD', 'SGD', 'INR', 'BRL', 'MXN', 'ZAR', 'NGN', 'GHS', 'MAD', 'TND', 'DZD', 'EGP',
+  'AED', 'SAR', 'TRY', 'PLN', 'CZK', 'HUF', 'RON', 'BGN', 'ILS', 'THB', 'IDR', 'MYR', 'PHP', 'TWD',
+]);
+
+/** Ramène une devise reçue à une devise connue, sinon la devise par défaut. */
+export function normalizeCurrency(raw: unknown): { currency: string; warning?: string } {
+  const valeur = String(raw ?? '').trim().toUpperCase();
+  if (!valeur) return { currency: DEFAULT_CURRENCY };
+  // Certains fichiers mettent le symbole plutôt que le code.
+  const symboles: Record<string, string> = { '€': 'EUR', '$': 'USD', '£': 'GBP', '¥': 'JPY' };
+  const code = symboles[valeur] ?? valeur;
+  if (!/^[A-Z]{3}$/.test(code)) return { currency: DEFAULT_CURRENCY, warning: `devise « ${valeur} » inconnue, remplacée par ${DEFAULT_CURRENCY}` };
+  if (!KNOWN_CURRENCIES.has(code)) return { currency: DEFAULT_CURRENCY, warning: `devise « ${valeur} » non prise en charge, remplacée par ${DEFAULT_CURRENCY}` };
+  return { currency: code };
+}
+
 /** Nombre de décimales d'une devise. */
 export function currencyExponent(currency: string): number {
   return ZERO_DECIMAL_CURRENCIES.has(currency.toUpperCase()) ? 0 : 2;
@@ -97,7 +162,13 @@ export function parsePriceMinor(raw: unknown, currency: string): { minor: number
     if (!Number.isFinite(raw) || raw < 0) return { minor: null, warning: 'prix numérique invalide' };
     // Les API Shopify fournissent déjà des chaînes décimales ; un nombre reçu
     // ici est une valeur en unité principale.
-    return { minor: Math.round(raw * 10 ** exponent) };
+    //
+    // `Math.round` ne suffit pas : un tableur stocke 24.9 en binaire, et
+    // `24.9 * 100` vaut 2490.0000000000005. Sur une ligne isolée l'écart est
+    // négligeable, mais une multiplication répétée sur un catalogue entier
+    // finit par produire des centimes fantômes. On arrondit donc au centième
+    // d'unité mineure avant l'arrondi final.
+    return { minor: Math.round(Number((raw * 10 ** exponent).toFixed(6))) };
   }
 
   const texte = String(raw).trim();
@@ -157,6 +228,23 @@ export function parsePriceMinor(raw: unknown, currency: string): { minor: number
   const minor = valeur * 10 ** exponent + (exponent > 0 ? dec : arrondi);
   if (!Number.isSafeInteger(minor)) return { minor: null, warning: 'prix hors limites' };
   return { minor };
+}
+
+/**
+ * Nettoie une référence stable (SKU, identifiant de plateforme).
+ *
+ * Retourne `null` plutôt qu'une chaîne vide : une référence absente et une
+ * référence vide ne doivent pas produire des clés de rapprochement différentes.
+ * Les caractères de contrôle sont retirés (une référence issue d'un CSV peut
+ * contenir un saut de ligne, qui casserait la comparaison).
+ */
+export function cleanReference(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  const texte = String(raw)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim();
+  return texte === '' ? null : texte.slice(0, 120);
 }
 
 /** Inverse : unité mineure → chaîne décimale, pour l'affichage et l'écriture. */
@@ -264,6 +352,9 @@ export function buildProduct(input: {
   imageUrl?: unknown;
   categories?: unknown;
   variants?: ProductVariant[];
+  stock?: unknown;
+  sku?: unknown;
+  platformId?: unknown;
   source: NormalizedProduct['source'];
   warnings?: string[];
 }): NormalizedProduct | { error: string } {
@@ -272,6 +363,9 @@ export function buildProduct(input: {
 
   const currency = (input.currency ?? DEFAULT_CURRENCY).toUpperCase().slice(0, 3);
   const categories = normalizeCategories(input.categories);
+  const avertissements = [...(input.warnings ?? [])];
+  const stock = parseStock(input.stock);
+  if (stock.warning) avertissements.push(stock.warning);
 
   return {
     name,
@@ -282,10 +376,35 @@ export function buildProduct(input: {
     imageUrl: safeRemoteUrl(input.imageUrl),
     categories,
     variants: (input.variants ?? []).slice(0, LIMITS.variants),
+    stock: stock.value,
+    // Une référence est bornée et nettoyée : elle vient d'un fichier ou d'une
+    // API tierce, et servira de clé de comparaison.
+    sku: cleanReference(input.sku),
+    platformId: cleanReference(input.platformId),
     fingerprint: productFingerprint(name, categories),
     source: input.source,
-    warnings: input.warnings ?? [],
+    warnings: avertissements,
   };
+}
+
+/**
+ * Lit une quantité en stock.
+ *
+ * Trois issues, volontairement distinctes :
+ *   - valeur absente → `null` (inconnu), sans avertissement : une colonne stock
+ *     facultative n'est pas une anomalie ;
+ *   - valeur illisible ou négative → `null` **avec** un avertissement : la
+ *     donnée est fausse, et le taire ferait croire à un stock nul ;
+ *   - valeur valide → l'entier.
+ */
+export function parseStock(raw: unknown): { value: number | null; warning?: string } {
+  if (raw === null || raw === undefined || raw === '') return { value: null };
+  const texte = String(raw).trim().replace(/\s/g, '').replace(',', '.');
+  if (!/^-?\d+(\.\d+)?$/.test(texte)) return { value: null, warning: 'stock illisible, écarté' };
+  const valeur = Number(texte);
+  if (!Number.isFinite(valeur)) return { value: null, warning: 'stock illisible, écarté' };
+  if (valeur < 0) return { value: null, warning: 'stock négatif, écarté' };
+  return { value: Math.floor(valeur) };
 }
 
 /**

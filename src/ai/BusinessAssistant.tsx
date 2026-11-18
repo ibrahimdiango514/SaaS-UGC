@@ -367,6 +367,11 @@ export function BusinessAssistant({
 
         <div className="shrink-0 border-t border-white/[0.07] bg-ink/60 backdrop-blur-xl">
           <Composer
+            // Les fichiers sont téléversés sous l'entreprise active et
+            // rattachés à la conversation en cours. Sans entreprise, le
+            // composeur refuse explicitement plutôt que de perdre le fichier.
+            workspaceId={workspaceId}
+            conversationId={vue.activeId}
             onSend={(content, modeChoisi, attachments) => vue.send(content, modeChoisi, attachments)}
             sending={vue.sending || blocage !== null}
             mode={mode}

@@ -296,6 +296,31 @@ const store: BusinessGrowStore = {
       output_result?: Record<string, unknown>;
     };
   },
+  /**
+   * Droits Import & Connect : lus en base, jamais déduits d'un en-tête ou d'un
+   * champ de la requête. Une erreur SQL remonte (⇒ 503 côté handler), on ne
+   * renvoie donc jamais un « autorisé » par défaut.
+   */
+  async checkImportConnectAccess(userId: string) {
+    // `bg_import_access` renvoie UN SEUL `jsonb` : `select *` exposerait une
+    // colonne unique (la fonction elle-même), et `row.allowed` serait toujours
+    // indéfini — c'est-à-dire un refus pour tout le monde, abonnés compris.
+    // Le correctif est la colonne nommée, exactement comme `store-import`.
+    const [row] = await requiredSql()`
+      select saas_business.bg_import_access(${userId}::uuid, now()) as droits
+    `;
+    const droits = (row?.droits ?? {}) as Record<string, unknown>;
+    if (!row) return { allowed: false, reason: 'UNKNOWN' };
+    return {
+      allowed: droits.allowed === true,
+      reason: (droits.reason as string | undefined) ?? 'UNKNOWN',
+      // La fonction renvoie `status`, pas `subscription_status` : lire la
+      // mauvaise clé faisait afficher un motif vide au client.
+      status: (droits.status as string | null | undefined) ?? null,
+      planKey: (droits.plan_key as string | null | undefined) ?? null,
+      currentPeriodEnd: (droits.current_period_end as string | null | undefined) ?? null,
+    };
+  },
   async listIntegrationConnections(userId) {
     return asRows(await requiredSql()`select * from saas_business.bg_list_integration_connections(${userId}::uuid)`);
   },
@@ -699,4 +724,7 @@ Deno.serve(createBusinessGrowHandler({
   complete: (provider, config, messages, meta) => callProvider(provider, config, messages, fetch, undefined, meta),
   probe: probeProvider,
   discoverModels: listRemoteModels,
+  // Import & Connect : la même règle que `store-import`, une seule source en
+  // base (`saas_business.bg_import_access`). Aucun second système d'abonnement.
+  checkImportConnectAccess: (userId: string) => store.checkImportConnectAccess(userId),
 }));
