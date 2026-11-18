@@ -325,6 +325,32 @@ function edgeResponse(url, body) {
     // Appelé par SasPay uniquement (signature HMAC) : jamais par le navigateur.
     return { error: { code: 'WEBHOOK_SIGNATURE_INVALID', message: 'Signature de webhook invalide.' } };
   }
+  if (fn === 'meta-connect') {
+    // Aucune connexion Meta n'est simulée : la preview répond exactement ce que
+    // répond le serveur quand META_APP_ID / META_APP_SECRET manquent. Un état
+    // « connecté » ne peut donc jamais apparaître dans une capture.
+    const action = body && typeof body === 'object' ? body.action : undefined;
+    if (action === 'status') {
+      return {
+        data: {
+          configured: false,
+          configIds: { whatsapp: false, facebook: false, messenger: false, instagram: false },
+          connections: [],
+        },
+      };
+    }
+    return {
+      error: {
+        code: 'META_NOT_CONFIGURED',
+        message: 'L’application Meta n’est pas configurée côté serveur (META_APP_ID / META_APP_SECRET).',
+      },
+    };
+  }
+  if (fn === 'meta-webhook') {
+    // Appelé par Meta uniquement (signature X-Hub-Signature-256) : jamais par le
+    // navigateur. Même réponse qu'une signature absente en production.
+    return { error: { code: 'WEBHOOK_SIGNATURE_INVALID', message: 'Signature de webhook invalide.' } };
+  }
   // Ne jamais retomber sur un corps générique : cela fait passer une fonction
   // réellement absente pour une fonction saine.
   return { error: { code: 'UNKNOWN_FUNCTION', message: 'Fonction non simulée dans la preview : ' + fn } };

@@ -91,4 +91,16 @@ describe('parcours public', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Politique de confidentialité');
     expect(screen.getByText('Données collectées')).toBeTruthy();
   });
+
+  it('documente les intégrations Meta et expose l’ancre de suppression exigée par Meta', async () => {
+    window.history.pushState({}, '', '/confidentialite');
+    const { container } = render(<App />);
+    // Meta exige une « Data Deletion Instructions URL » : elle doit exister, et
+    // décrire la déconnexion réelle (jeton effacé + révocation chez Meta).
+    expect(screen.getByRole('heading', { level: 2, name: /Intégrations Meta/i })).toBeTruthy();
+    const suppression = container.querySelector('#suppression-des-donnees');
+    expect(suppression).toBeTruthy();
+    expect(suppression?.textContent).toMatch(/Déconnecter/);
+    expect(suppression?.textContent).toMatch(/révoquée chez Meta/);
+  });
 });

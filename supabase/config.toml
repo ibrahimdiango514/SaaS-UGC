@@ -72,3 +72,25 @@ verify_jwt = false
 # SasPay ; ne livre que par le règlement idempotent, après vérification.
 [functions.vyora-payments-reconcile]
 verify_jwt = false
+
+# Connexion Meta (WhatsApp Business, Facebook Pages, Messenger, Instagram
+# Business). Appelée par le navigateur avec le JWT VYORA : la fonction revérifie
+# elle-même le JWT auprès de GoTrue, l'abonnement Business Grow actif
+# (`bg_import_access`) et les droits sur l'entreprise (`bg_can_workspace`).
+# OAuth Meta : le GET /callback est une redirection du navigateur depuis
+# facebook.com. Le navigateur n'envoie aucun en-tête Authorization sur une
+# redirection : la passerelle rejetterait la requête avant le handler. Le
+# handler vérifie donc lui-même le JWT des actions POST (deps.getUserId) et
+# s'appuie sur `state` (usage unique, TTL court, lié à l'utilisateur et à
+# l'entreprise) pour le retour, exactement comme les autres endpoints sans JWT
+# de la plateforme.
+[functions.meta-connect]
+verify_jwt = false
+
+# Webhook Meta : Meta ne peut présenter aucun JWT Supabase. La protection
+# repose sur la signature `X-Hub-Signature-256` (HMAC-SHA256 de l'App Secret sur
+# le corps brut, comparaison à temps constant), sur `hub.verify_token` pour la
+# vérification d'abonnement, et sur la résolution en base de l'identifiant Meta
+# reçu : un WABA ou une page inconnus de VYORA ne créent aucune donnée.
+[functions.meta-webhook]
+verify_jwt = false

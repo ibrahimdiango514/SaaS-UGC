@@ -66,13 +66,20 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(6);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(8);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
     // Surveillance fournisseur : jeton Vault comparé à temps constant + en-tête
     // dédié, jamais un JWT utilisateur (le job pg_cron n'en a pas).
     expect(config).toMatch(/\[functions\.vyora-provider-health\][\s\S]*?verify_jwt\s*=\s*false/);
+    // Webhook Meta : signature X-Hub-Signature-256 (HMAC de l'App Secret sur le
+    // corps brut) + `hub.verify_token`, jamais un JWT utilisateur.
+    expect(config).toMatch(/\[functions\.meta-webhook\][\s\S]*?verify_jwt\s*=\s*false/);
+    // Retour OAuth Meta : redirection du navigateur, donc sans en-tête
+    // Authorization. Le handler authentifie lui-même les POST et s'appuie sur
+    // `state` pour le retour.
+    expect(config).toMatch(/\[functions\.meta-connect\][\s\S]*?verify_jwt\s*=\s*false/);
     const providerHealth = read('supabase/functions/vyora-provider-health/index.ts');
     expect(providerHealth).toContain("x-vyora-cron");
     expect(providerHealth).toContain('constantTimeEqual');

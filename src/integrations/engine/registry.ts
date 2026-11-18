@@ -4,7 +4,7 @@
  * ## Rôle
  *
  * Une seule table de vérité : quels fournisseurs possèdent réellement une
- * implémentation. Le catalogue frontend décrit 26 fournisseurs ; ce registre
+ * implémentation. Le catalogue frontend décrit 30 fournisseurs ; ce registre
  * dit lesquels fonctionnent. **Les deux ne doivent jamais être confondus.**
  *
  * ## Règle d'enregistrement
@@ -31,7 +31,7 @@ import { isConnectorAvailable } from './contract';
  * contrôlée plutôt que silencieuse.
  */
 export const CATALOG_CONNECTOR_KEYS: readonly string[] = [
-  'instagram', 'facebook', 'tiktok', 'youtube', 'linkedin', 'pinterest',
+  'instagram', 'facebook', 'whatsapp', 'messenger', 'tiktok', 'youtube', 'linkedin', 'pinterest',
   'shopify', 'woocommerce', 'prestashop', 'chariow', 'magento', 'opencart', 'wix',
   'bigcommerce', 'squarespace', 'ecwid',
   // « Autre plateforme » : le connecteur que l'utilisateur décrit lui-même.

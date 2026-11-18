@@ -1,5 +1,11 @@
 # Connecteur Meta (Facebook Pages / Instagram) — préparation
 
+> **Document historique (2026-11-14, avant l'application Meta).** Le connecteur est désormais
+> construit : la référence à jour est **`docs/meta-integrations-config.md`** (valeurs exactes à
+> déclarer, secrets, actions, webhooks, réserves). Ce qui suit reste utile pour le contexte des
+> règles de manipulation des secrets, mais les chemins de code cités ont changé : les fiches Meta
+> passent par `meta-connect` / `meta-webhook`, pas par `business-grow`.
+
 > État au 2026-11-14 : **aucune application Meta n'existe encore**. Ce document fixe ce qui est
 > prêt côté VYORA, ce qu'il reste à faire côté Meta for Developers, et les règles de manipulation
 > des secrets. Rien de ce qui suit n'active le connecteur : `facebook` et `instagram` restent

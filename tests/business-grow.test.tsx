@@ -887,10 +887,13 @@ describe('Business Grow', () => {
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
     expect(await screen.findByTestId('business-integrations')).toBeTruthy();
-    // Facebook exige une approbation du fournisseur.
-    await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'));
+    /*
+     * Facebook Pages a désormais un moteur (`meta-connect`) : sans compte relié,
+     * l'état est « Non connecté » — pas « Connecté », qui exigerait une
+     * autorisation Meta réellement échangée. La fiche annonce la revue Meta.
+     */
+    await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Non connecté'));
     const facebook = screen.getByTestId('integration-facebook').textContent ?? '';
-    expect(facebook).not.toContain('Non connecté');
     expect(facebook).not.toContain('Connecté');
     /*
      * Shopify et WooCommerce ont désormais un moteur : sans ligne de connexion,
@@ -925,23 +928,28 @@ describe('Business Grow', () => {
     });
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('integration-facebook');
-    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
-    // La demande se fait dans la fiche : la carte est un bouton, sans action
-    // imbriquée (un bouton dans un bouton serait invalide en HTML).
-    fireEvent.click(facebook);
-    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    /*
+     * Depuis la livraison Meta, Facebook Pages a un moteur : la demande
+     * d'activation n'est donc plus proposée sur cette fiche (elle servirait à
+     * tracer un besoin alors que la connexion est disponible). Le parcours
+     * réel est testé dans `meta-integration-ui.test.tsx`. On vérifie ICI que la
+     * règle n'a pas bougé ailleurs : TikTok, sans moteur, garde sa demande.
+     */
+    const tiktok = await screen.findByTestId('integration-tiktok');
+    await waitFor(() => expect(tiktok.textContent).toContain('Validation externe requise'));
+    fireEvent.click(tiktok);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche TikTok/i });
     fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
     expect(await screen.findByText(/Aucun service externe n’a été connecté/)).toBeTruthy();
-    expect(businessMocks.requestIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
+    expect(businessMocks.requestIntegration).toHaveBeenCalledWith('tiktok', 'workspace-1');
     expect(businessMocks.listIntegrations).toHaveBeenCalledWith('workspace-1');
     // La demande est un état réel, distinct d'une connexion.
-    await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Activation demandée'));
-    expect(screen.getByTestId('integration-facebook').textContent).not.toContain('Connecté)');
-    fireEvent.click(screen.getByTestId('integration-facebook'));
-    const fiche2 = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    await waitFor(() => expect(screen.getByTestId('integration-tiktok').textContent).toContain('Activation demandée'));
+    expect(screen.getByTestId('integration-tiktok').textContent).not.toContain('(Connecté)');
+    fireEvent.click(screen.getByTestId('integration-tiktok'));
+    const fiche2 = await screen.findByRole('dialog', { name: /Fiche TikTok/i });
     fireEvent.click(within(fiche2).getByRole('button', { name: 'Annuler la demande' }));
-    await waitFor(() => expect(businessMocks.cancelIntegration).toHaveBeenCalledWith('facebook', 'workspace-1'));
+    await waitFor(() => expect(businessMocks.cancelIntegration).toHaveBeenCalledWith('tiktok', 'workspace-1'));
   });
 
   it('affiche un état inconnu et bloque les actions quand la lecture échoue ou mélange les entreprises', async () => {
@@ -968,7 +976,7 @@ describe('Business Grow', () => {
     // Relecture de la carte par requête fraîche : le nœud précédent a pu être
     // remplacé par le changement d'état.
     await waitFor(() =>
-      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Non connecté'),
     );
   });
 
@@ -1003,7 +1011,7 @@ describe('Business Grow', () => {
     businessMocks.listIntegrations.mockResolvedValue({ connections: [] });
     fireEvent.click(within(bandeau).getByRole('button', { name: 'Revérifier' }));
     await waitFor(() =>
-      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Non connecté'),
     );
     expect(screen.queryByTestId('integrations-subscription-required')).toBeNull();
   });
@@ -1014,10 +1022,12 @@ describe('Business Grow', () => {
     );
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('integration-facebook');
-    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
-    fireEvent.click(facebook);
-    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    // TikTok reste sans moteur : c'est la fiche qui porte encore une demande
+    // d'activation réelle (Facebook, lui, se connecte par `meta-connect`).
+    const tiktok = await screen.findByTestId('integration-tiktok');
+    await waitFor(() => expect(tiktok.textContent).toContain('Validation externe requise'));
+    fireEvent.click(tiktok);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche TikTok/i });
     fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
     expect(await screen.findByText(/Opération refusée : abonnement Business Grow requis/)).toBeTruthy();
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
@@ -1030,27 +1040,33 @@ describe('Business Grow', () => {
     businessMocks.requestIntegration.mockRejectedValueOnce(new Error('Réponse perdue'));
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('integration-facebook');
-    await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
-    fireEvent.click(facebook);
-    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    const tiktok = await screen.findByTestId('integration-tiktok');
+    await waitFor(() => expect(tiktok.textContent).toContain('Validation externe requise'));
+    fireEvent.click(tiktok);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche TikTok/i });
     fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
     expect(await screen.findByText(/Opération non confirmée/)).toBeTruthy();
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
     // L'état est devenu inconnu : aucune action n'est réessayable avant relecture.
-    expect(screen.getByTestId('integration-facebook').textContent).toContain('État inconnu');
+    expect(screen.getByTestId('integration-tiktok').textContent).toContain('État inconnu');
     expect(within(fiche).queryByRole('button', { name: 'Demander l’activation' })).toBeNull();
     fireEvent.click(within(fiche).getByRole('button', { name: 'Retour' }));
     fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }));
     await waitFor(() =>
-      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+      expect(screen.getByTestId('integration-facebook').textContent).toContain('Non connecté'),
     );
     // La mutation n'a jamais été rejouée.
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
   });
 
   it('distingue la déconnexion locale d’une révocation chez le fournisseur', async () => {
-    let rows: BusinessIntegrationConnection[] = [{ id: 'active', workspace_id: 'workspace-1', connector_key: 'facebook', external_account_ref: 'compte-test', status: 'connected', updated_at: '2026-11-13' }];
+    /*
+     * Facebook a désormais son propre parcours (Meta) : sa déconnexion passe
+     * par `meta-connect`, qui révoque aussi l'autorisation distante. La règle
+     * ici vérifiée — « retirer la ligne locale ≠ révoquer chez le fournisseur » —
+     * est celle des connecteurs SANS révocation distante dans VYORA.
+     */
+    let rows: BusinessIntegrationConnection[] = [{ id: 'active', workspace_id: 'workspace-1', connector_key: 'woocommerce', external_account_ref: 'compte-test', status: 'connected', updated_at: '2026-11-13' }];
     businessMocks.listIntegrations.mockImplementation(async () => ({ connections: rows }));
     businessMocks.disconnectIntegration.mockImplementation(async (connectorKey) => {
       rows = [{ ...rows[0], external_account_ref: null, status: 'disconnected' }];
@@ -1058,18 +1074,18 @@ describe('Business Grow', () => {
     });
     render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
-    const facebook = await screen.findByTestId('integration-facebook');
+    const boutique = await screen.findByTestId('integration-woocommerce');
     // Une ligne `connected` sans compte OAuth vérifié : jamais « Connecté ».
-    await waitFor(() => expect(facebook.textContent).toContain('Autorisation manquante'));
-    fireEvent.click(facebook);
-    const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
+    await waitFor(() => expect(boutique.textContent).toContain('Autorisation manquante'));
+    fireEvent.click(boutique);
+    const fiche = await screen.findByRole('dialog', { name: /Fiche WooCommerce/i });
     fireEvent.click(within(fiche).getByRole('button', { name: 'Retirer l’association locale' }));
     expect(await screen.findByText(/Association locale retirée/)).toBeTruthy();
     // Le message précise que la révocation distante n'a pas eu lieu.
     expect(screen.getByText(/révoquez-la également auprès de celui-ci/i)).toBeTruthy();
-    expect(businessMocks.disconnectIntegration).toHaveBeenCalledWith('facebook', 'workspace-1');
+    expect(businessMocks.disconnectIntegration).toHaveBeenCalledWith('woocommerce', 'workspace-1');
     await waitFor(() =>
-      expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'),
+      expect(screen.getByTestId('integration-woocommerce').textContent).toContain('Non connecté'),
     );
   });
 
