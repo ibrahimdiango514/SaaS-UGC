@@ -69,14 +69,14 @@ const gt = globalThis.__edgePostgres;var Ce=["http://localhost:5173","http://loc
             ${i}::text,
             ${a}::text,
             ${null}::jsonb,
-            ${JSON.stringify(l)}::jsonb,
+            ${JSON.stringify(l)}::text::jsonb,
             ${d}::text
           )
         `,await c`
           select public.mcp_servers_set_permissions(
             ${n}::uuid,
             ${r}::uuid,
-            ${JSON.stringify(p)}::jsonb
+            ${JSON.stringify(p)}::text::jsonb
           )
         `})},async definirPermission({userId:n,serverId:r,outil:s,etat:o}){return t(async i=>{let a=await i`
           select tool_permissions from public.mcp_servers
@@ -88,7 +88,7 @@ const gt = globalThis.__edgePostgres;var Ce=["http://localhost:5173","http://loc
           select public.mcp_servers_set_permissions(
             ${n}::uuid,
             ${r}::uuid,
-            ${JSON.stringify(l)}::jsonb
+            ${JSON.stringify(l)}::text::jsonb
           )
         `,l})},async revoquer({userId:n,serverId:r}){return t(async s=>{let o=await s`
           select public.mcp_servers_revoke(

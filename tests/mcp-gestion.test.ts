@@ -360,3 +360,101 @@ describe('traduction des erreurs SQL', () => {
     expect(traduireErreurSql('server_not_found').status).toBe(404);
   });
 });
+
+/**
+ * Invariant de sérialisation JSONB.
+ *
+ * Trouvé en production : `/gestion/tester` renvoyait un 500 opaque. La cause
+ * n'était ni le DNS ni le réseau, mais le double encodage JSON — `::jsonb` sur
+ * une chaîne produite par `JSON.stringify` fait envoyer une CHAÎNE, refusée par
+ * la contrainte `mcp_servers_tools_array`. Ces tests rejouent la requête telle
+ * qu'elle est construite et vérifient ce que la base recevrait réellement.
+ */
+describe('gestion-serveur — les paramètres jsonb partent en texte', () => {
+  /** Enregistre chaque requête : fragments littéraux + valeurs liées. */
+  function sqlEspion(reponses: unknown[][]) {
+    const requetes: Array<{ sql: string; valeurs: unknown[] }> = [];
+    let index = 0;
+    const tag = Object.assign(
+      (fragments: TemplateStringsArray, ...valeurs: unknown[]) => {
+        requetes.push({ sql: fragments.join('?'), valeurs });
+        return Promise.resolve(reponses[index++] ?? []);
+      },
+      { end: () => Promise.resolve() },
+    );
+    return { sql: tag, requetes };
+  }
+
+  /**
+   * Indices des paramètres liés à un cast `::jsonb` direct avec une valeur non
+   * nulle. `?::jsonb` (et non `?::text::jsonb`) fait encoder la valeur une
+   * seconde fois par le pilote : c'est exactement le défaut observé.
+   */
+  function castsJsonbBrutsNonNuls(requete: { sql: string; valeurs: unknown[] }): number[] {
+    const fautifs: number[] = [];
+    const positions = [...requete.sql.matchAll(/\?/g)].map((m) => m.index ?? 0);
+    for (const [index, position] of positions.entries()) {
+      const suite = requete.sql.slice(position);
+      if (suite.startsWith('?::jsonb') && requete.valeurs[index] != null) fautifs.push(index);
+    }
+    return fautifs;
+  }
+
+  it('enregistrerDecouverte envoie tools comme un tableau JSON, jamais comme une chaîne', async () => {
+    // 1re requête : permissions existantes ; les suivantes : les deux appels.
+    const { sql, requetes } = sqlEspion([[{ tool_permissions: {} }], [], []]);
+    const { creerAccesGestion } = await import('../supabase/functions/mcp-client/gestion-serveur');
+    const acces = creerAccesGestion({ sql: (() => sql) as never });
+
+    await acces.enregistrerDecouverte({
+      userId: UUID,
+      serverId: UUID,
+      status: 'connected',
+      protocolVersion: '2025-06-18',
+      serverName: 'Microsoft Learn',
+      serverVersion: '1.0.0',
+      outils: [{ name: 'microsoft_docs_search', description: 'Recherche' }],
+      erreur: null,
+    });
+
+    const sonde = requetes.find((r) => r.sql.includes('mcp_servers_record_probe'));
+    expect(sonde).toBeDefined();
+    // Le cast doit être `::text::jsonb` : c'est lui qui empêche le double encodage.
+    expect(sonde!.sql).toContain('::text::jsonb');
+    expect(castsJsonbBrutsNonNuls(sonde!)).toEqual([]);
+
+    // La valeur liée est une chaîne, et son contenu redevient un TABLEAU.
+    const outils = sonde!.valeurs.find((v) => typeof v === 'string' && v.startsWith('[{'));
+    expect(typeof outils).toBe('string');
+    expect(Array.isArray(JSON.parse(outils as string))).toBe(true);
+  });
+
+  it('set_permissions envoie un objet JSON, jamais une chaîne encodée deux fois', async () => {
+    const { sql, requetes } = sqlEspion([[{ tool_permissions: {} }], [], []]);
+    const { creerAccesGestion } = await import('../supabase/functions/mcp-client/gestion-serveur');
+    const acces = creerAccesGestion({ sql: (() => sql) as never });
+
+    await acces.enregistrerDecouverte({
+      userId: UUID,
+      serverId: UUID,
+      status: 'connected',
+      protocolVersion: '2025-06-18',
+      serverName: 'X',
+      serverVersion: '1',
+      outils: [{ name: 'outil_a' }],
+      erreur: null,
+    });
+
+    for (const requete of requetes) {
+      // Aucune requête ne doit lier une valeur NON NULLE à un cast jsonb direct.
+      // (`null::jsonb` reste correct : NULL satisfait la contrainte.)
+      expect(castsJsonbBrutsNonNuls(requete)).toEqual([]);
+    }
+    const perms = requetes.find((r) => r.sql.includes('mcp_servers_set_permissions'));
+    expect(perms).toBeDefined();
+    const valeur = perms!.valeurs.find((v) => typeof v === 'string' && v.startsWith('{'));
+    expect(typeof valeur).toBe('string');
+    // `{"outil_a":{"etat":"pending"}}` — un objet, pas une chaîne.
+    expect(typeof JSON.parse(valeur as string)).toBe('object');
+  });
+});

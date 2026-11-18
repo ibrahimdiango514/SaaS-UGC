@@ -288,6 +288,17 @@ export function creerAccesGestion(options: { sql: () => SqlTag }): AccesGestion 
           outils,
           Array.isArray(existant) ? existant[0]?.tool_permissions : undefined,
         );
+        /*
+         * `::text::jsonb`, et non `::jsonb` : le paramètre doit être typé TEXT.
+         *
+         * Le pilote sérialise une valeur selon le type du paramètre. Avec un
+         * cast direct `::jsonb`, la chaîne produite par `JSON.stringify` est
+         * elle-même encodée en JSON : `tools` arrive en base comme la CHAÎNE
+         * `"[{...}]"`, et non comme un tableau. La contrainte
+         * `mcp_servers_tools_array` (jsonb_typeof = 'array') refuse alors
+         * l'écriture, et l'erreur remontait en 500 opaque. Avec `::text`, la
+         * chaîne part telle quelle et c'est PostgreSQL qui la parse.
+         */
 
         await sql`
           select public.mcp_servers_record_probe(
@@ -298,7 +309,7 @@ export function creerAccesGestion(options: { sql: () => SqlTag }): AccesGestion 
             ${serverName}::text,
             ${serverVersion}::text,
             ${null}::jsonb,
-            ${JSON.stringify(outils)}::jsonb,
+            ${JSON.stringify(outils)}::text::jsonb,
             ${erreur}::text
           )
         `;
@@ -308,7 +319,7 @@ export function creerAccesGestion(options: { sql: () => SqlTag }): AccesGestion 
           select public.mcp_servers_set_permissions(
             ${userId}::uuid,
             ${serverId}::uuid,
-            ${JSON.stringify(permissions)}::jsonb
+            ${JSON.stringify(permissions)}::text::jsonb
           )
         `;
       });
@@ -333,7 +344,7 @@ export function creerAccesGestion(options: { sql: () => SqlTag }): AccesGestion 
           select public.mcp_servers_set_permissions(
             ${userId}::uuid,
             ${serverId}::uuid,
-            ${JSON.stringify(fusion)}::jsonb
+            ${JSON.stringify(fusion)}::text::jsonb
           )
         `;
         return fusion;
