@@ -78,6 +78,14 @@ import {
   returnUrl,
 } from '../../../src/business/meta/oauth.ts';
 import { resolveCorsOrigin } from '../../../src/lib/origin-allowlist.ts';
+import {
+  describeTestFlow,
+  readTestFlowConfig,
+  refuseTestFlow,
+  testTokenSecretName,
+  verifyTestTarget,
+  type TestFlowConfig,
+} from '../../../src/business/meta/test-flow.ts';
 
 /* --------------------------------- Types --------------------------------- */
 
@@ -118,7 +126,20 @@ export interface PageRow {
 
 export interface MetaDeps {
   config: MetaConfig;
+  /**
+   * Configuration du parcours de test, lue depuis l'environnement serveur.
+   * Facultative : son absence ferme le parcours, elle ne l'ouvre pas.
+   */
+  testFlow?: TestFlowConfig;
   getUserId(authorization: string): Promise<string | null>;
+  /**
+   * L'utilisateur est-il l'administrateur propriétaire ?
+   *
+   * Décision prise en base (`saas_ugc.ugc_user_roles`, rôle `admin`) pour
+   * l'identifiant GoTrue **vérifié**. Jamais à partir d'un en-tête, d'une
+   * adresse e-mail transmise par le client, ni d'un paramètre de requête.
+   */
+  isAdmin(userId: string): Promise<boolean>;
   checkImportAccess(userId: string): Promise<{ allowed: boolean; reason: string; message: string }>;
   grantWorkspace(userId: string, workspaceId: string): Promise<{ canRead: boolean; canWrite: boolean }>;
 
@@ -274,6 +295,24 @@ export async function handleMetaConnect(
     const userId = await deps.getUserId(request.headers.get('authorization') ?? '');
     if (!userId) return json(failure('UNAUTHENTICATED', 'Session VYORA invalide ou expirée.'), 401);
 
+    /*
+     * Parcours de test : refus AVANT tout le reste.
+     *
+     * Ordre voulu. Si l'abonnement était vérifié d'abord, un client sans
+     * abonnement recevrait 402 et un client abonné 403 : deux réponses
+     * différentes qui lui apprendraient que cette action existe et qu'il lui
+     * manque « seulement » un droit. Ici, les deux reçoivent 404 — la même
+     * réponse que pour une action inexistante.
+     */
+    if (TEST_FLOW_ACTIONS.has(action)) {
+      const refus = refuseTestFlow({
+        userId,
+        isAdmin: await deps.isAdmin(userId),
+        config: deps.testFlow ?? readTestFlowConfig(() => ''),
+      });
+      if (refus) return json(failure(refus.code, refus.message), refus.status);
+    }
+
     const workspaceId = uuid(body.workspaceId);
     if (!workspaceId) return json(failure('INVALID_WORKSPACE', 'Entreprise requise.'), 400);
 
@@ -314,12 +353,29 @@ const ACTIONS = new Set([
   'messenger.send', 'messages.list', 'conversations.list',
   'facebook.publish', 'facebook.posts', 'facebook.post.delete', 'facebook.insights', 'facebook.comments', 'page.events',
   'instagram.account', 'instagram.publish', 'instagram.insights',
+  // Parcours de test (numéro Meta fourni à l'application), réservé à
+  // l'administrateur propriétaire. Voir `src/business/meta/test-flow.ts`.
+  'whatsapp.test.status', 'whatsapp.test.connect', 'whatsapp.test.disconnect',
+]);
+
+/**
+ * Actions du parcours de test : contrôles supplémentaires AVANT toute autre
+ * vérification, y compris l'abonnement.
+ *
+ * Pourquoi si tôt : un client non administrateur ne doit pas apprendre, par la
+ * forme de la réponse, que ce parcours existe. En placant le refus ici, il
+ * reçoit 404 — exactement ce qu'il recevrait pour une action inexistante — sans
+ * qu'on ait touché à la base ni révélé un abonnement manquant.
+ */
+const TEST_FLOW_ACTIONS = new Set([
+  'whatsapp.test.status', 'whatsapp.test.connect', 'whatsapp.test.disconnect',
 ]);
 
 const WRITE_ACTIONS = new Set([
   'start', 'finish-embedded', 'refresh', 'disconnect', 'pages.select',
   'whatsapp.send', 'whatsapp.template.create', 'whatsapp.template.delete',
   'messenger.send', 'facebook.publish', 'facebook.post.delete', 'instagram.publish',
+  'whatsapp.test.connect', 'whatsapp.test.disconnect',
 ]);
 
 interface Ctx {
@@ -358,6 +414,9 @@ async function dispatch(action: string, ctx: Ctx): Promise<unknown> {
     case 'facebook.insights': return facebookInsights(ctx);
     case 'facebook.comments': return facebookComments(ctx);
     case 'page.events': return pageEvents(ctx);
+    case 'whatsapp.test.status': return testStatus(ctx);
+    case 'whatsapp.test.connect': return testConnect(ctx);
+    case 'whatsapp.test.disconnect': return testDisconnect(ctx);
     case 'instagram.account': return instagramAccount(ctx);
     case 'instagram.publish': return instagramPublish(ctx);
     case 'instagram.insights': return instagramInsightsAction(ctx);
@@ -601,6 +660,170 @@ async function finishEmbedded(ctx: Ctx) {
 }
 
 /* --------------------------- status / verify ----------------------------- */
+
+/* -------------------------- parcours de test ------------------------------ */
+/*
+ * Ces trois actions n'existent que pour prouver la chaîne WhatsApp avec le
+ * numéro fourni par Meta à l'application. Le parcours client (Embedded Signup)
+ * reste inchangé : mêmes actions, mêmes contrôles, même fiche produit.
+ *
+ * Règle absolue : AUCUN identifiant Meta ne provient du corps de la requête.
+ * Le client envoie `action` et `workspaceId`, rien d'autre. Les identifiants
+ * viennent de `deps.testFlow`, c'est-à-dire de l'environnement serveur.
+ */
+
+/** Jeton du parcours de test : variable serveur, jamais transmise par le client. */
+function testToken(): string {
+  return (globalThis as unknown as { __metaTestToken?: string }).__metaTestToken ?? '';
+}
+
+async function testStatus(ctx: Ctx) {
+  const config = ctx.deps.testFlow ?? readTestFlowConfig(() => '');
+  const etat = describeTestFlow(config);
+  const connexion = await ctx.deps.connectionInternal(ctx.userId, ctx.workspaceId, 'whatsapp');
+  return {
+    // `describeTestFlow` ne contient aucun secret : uniquement des identifiants
+    // publics et un motif lisible.
+    testFlow: etat,
+    // La connexion réelle, telle que l'interface l'affiche déjà.
+    connection: connexion
+      ? {
+        status: connexion.status,
+        flow: connexion.metadata?.flow ?? null,
+        wabaId: connexion.metadata?.waba_id ?? null,
+        phoneNumberId: connexion.metadata?.phone_number_id ?? null,
+        displayPhoneNumber: connexion.metadata?.display_phone_number ?? null,
+        webhookSubscribed: connexion.metadata?.webhook_subscribed ?? null,
+        lastError: connexion.last_error ?? null,
+      }
+      : null,
+  };
+}
+
+/**
+ * Enregistre la connexion WhatsApp de test.
+ *
+ * ## Ce que cette action NE fait PAS
+ * Elle ne crée aucun abonnement, ne choisit aucune page, ne touche à aucune
+ * autre intégration. Elle écrit une seule ligne `meta_connections` pour le
+ * produit `whatsapp`, comme le parcours client — ce qui la fait apparaître dans
+ * la même fiche, et disparaître de la même façon à la déconnexion.
+ *
+ * ## Identifiants : serveur uniquement
+ * `config.wabaId` / `config.phoneNumberId` viennent de l'environnement. Le
+ * corps de la requête est ignoré, même s'il contient `wabaId`.
+ */
+async function testConnect(ctx: Ctx) {
+  const config = ctx.deps.testFlow ?? readTestFlowConfig(() => '');
+  const refus = refuseTestFlow({ userId: ctx.userId, isAdmin: true, config });
+  if (refus) throw new MetaConnectError(refus.code, refus.message, refus.status);
+
+  // Jeton fourni par l'opérateur (jeton de test Meta), stocké côté serveur.
+  const jeton = testToken();
+  if (!jeton) {
+    throw new MetaConnectError(
+      'TEST_FLOW_TOKEN_MISSING',
+      'Le jeton du parcours de test n’est pas configuré sur le serveur (META_TEST_ACCESS_TOKEN).',
+      503,
+    );
+  }
+
+  const verification = await verifyTestTarget(config, jeton, graphDeps(ctx.deps));
+  if (!verification.ok) {
+    // Aucune écriture : la connexion n'est créée que si Meta a confirmé que ce
+    // numéro appartient bien à ce compte WhatsApp.
+    throw new MetaConnectError(
+      'TEST_FLOW_TARGET_INVALID',
+      verification.error ?? 'Le numéro de test déclaré n’a pas pu être vérifié auprès de Meta.',
+      409,
+    );
+  }
+
+  const tokenRef = testTokenSecretName(ctx.userId, ctx.workspaceId);
+  await ctx.deps.storeSecret(tokenRef, jeton);
+
+  await ctx.deps.connectionUpsert({
+    user_id: ctx.userId,
+    workspace_id: ctx.workspaceId,
+    product: 'whatsapp',
+    status: 'connected',
+    external_account_id: config.wabaId,
+    display_name: verification.verifiedName ?? verification.wabaName ?? null,
+    /*
+     * Permissions accordées : vides, volontairement. Ce jeton n'a pas été obtenu
+     * par un échange OAuth, donc on n'affirme pas de permissions. Les écrire
+     * ferait croire à une autorisation utilisateur qui n'existe pas.
+     */
+    granted_scopes: [],
+    token_ref: tokenRef,
+    token_expires_at: null,
+    metadata: {
+      flow: 'test-number',
+      test_flow: true,
+      waba_id: config.wabaId,
+      waba_name: verification.wabaName,
+      phone_number_id: config.phoneNumberId,
+      display_phone_number: verification.displayPhoneNumber ?? config.displayPhoneNumber,
+      verified_name: verification.verifiedName,
+      quality_rating: verification.qualityRating,
+      code_verification_status: verification.codeVerificationStatus,
+      webhook_subscribed: verification.webhookSubscribed,
+      // Le jeton de test Meta expire en 24 h : on le dit, sans inventer de date.
+      permanent_token: false,
+      registered: true,
+      register_skipped_already_cloud_api: true,
+      missing_scopes: [],
+    },
+  });
+
+  return {
+    connected: true,
+    // Aucun jeton dans la réponse : uniquement des identifiants publics.
+    wabaId: config.wabaId,
+    phoneNumberId: config.phoneNumberId,
+    displayPhoneNumber: verification.displayPhoneNumber ?? config.displayPhoneNumber,
+    webhookSubscribed: verification.webhookSubscribed,
+    warning: verification.webhookSubscribed
+      ? null
+      : 'Le compte WhatsApp n’est pas abonné aux webhooks : aucun message ne sera reçu tant que ce point n’est pas réglé.',
+    connections: await ctx.deps.connectionsList(ctx.userId, ctx.workspaceId, 'whatsapp'),
+  };
+}
+
+/**
+ * Retire la connexion de test.
+ *
+ * Le jeton est effacé de Vault et la ligne supprimée : la fiche revient à
+ * « non connecté ». Le parcours client n'est pas affecté — si une connexion
+ * Embedded Signup existait, elle serait remplacée ; c'est le même produit, une
+ * seule fiche, et `disconnect` fait déjà cela pour les deux.
+ */
+async function testDisconnect(ctx: Ctx) {
+  const connexion = await ctx.deps.connectionInternal(ctx.userId, ctx.workspaceId, 'whatsapp');
+  const estTest = connexion?.metadata?.test_flow === true;
+  if (connexion && !estTest) {
+    /*
+     * Garde-fou : si la connexion active vient d'Embedded Signup, cette action
+     * refuse. Sinon un administrateur pourrait supprimer par erreur une vraie
+     * connexion client en croyant nettoyer son test.
+     */
+    throw new MetaConnectError(
+      'TEST_FLOW_NOT_ACTIVE',
+      'La connexion active provient du parcours client : utilisez « Déconnecter », qui révoque aussi les droits chez Meta.',
+      409,
+    );
+  }
+  const refs = new Set<string>([testTokenSecretName(ctx.userId, ctx.workspaceId), pinSecretName(ctx.userId, ctx.workspaceId)]);
+  if (connexion?.token_ref) refs.add(connexion.token_ref);
+  if (connexion) await ctx.deps.connectionDelete(ctx.userId, ctx.workspaceId, 'whatsapp');
+  for (const ref of refs) await ctx.deps.deleteSecret(ref);
+  try {
+    await ctx.deps.disconnectIntegration(ctx.userId, ctx.workspaceId, 'whatsapp');
+  } catch {
+    // Trace socle : son absence n'empêche pas la déconnexion réelle.
+  }
+  return { disconnected: true, connections: await ctx.deps.connectionsList(ctx.userId, ctx.workspaceId, 'whatsapp') };
+}
 
 async function status(ctx: Ctx) {
   const product = text(ctx.body.product, 20);

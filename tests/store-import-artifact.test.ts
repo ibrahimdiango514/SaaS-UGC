@@ -198,6 +198,34 @@ describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nom
     ).toBe(true);
   });
 
+  it('le bundle Meta contient le parcours de test ET ses gardes', () => {
+    /*
+     * Un bundle est minifié : les noms de fonctions internes disparaissent
+     * (`refuseTestFlow` n'y figure pas), donc un test qui chercherait des
+     * symboles échouerait à tort. Ce qui survit, et ce qui compte, ce sont les
+     * CHAÎNES : les noms d'action (protocole navigateur ↔ serveur) et les codes
+     * d'erreur (observables par l'appelant).
+     *
+     * Ce contrôle empêche une régression silencieuse précise : régénérer
+     * l'artefact depuis une source où la garde aurait été retirée produirait un
+     * bundle qui déploie un parcours de test sans protection. Ici, on vérifie
+     * que la protection EST dans ce qui sera exécuté.
+     */
+    if (nomFonction !== 'meta-connect') return;
+    const { source } = buildArtifact('meta-connect');
+    for (const marqueur of [
+      'whatsapp.test.status',
+      'whatsapp.test.connect',
+      'whatsapp.test.disconnect',
+      'TEST_FLOW_UNAVAILABLE',
+      'TEST_FLOW_DISABLED',
+      'TEST_FLOW_NOT_CONFIGURED',
+      'meta_is_admin',
+    ]) {
+      expect(source, `${marqueur} absent du bundle déployé`).toContain(marqueur);
+    }
+  });
+
   it('ne réintroduit pas l’ancien chargement depuis la base', () => {
     // Garde-fou explicite : une future génération ne doit pas ramener le
     // mécanisme « artefact en base », absent de la production.

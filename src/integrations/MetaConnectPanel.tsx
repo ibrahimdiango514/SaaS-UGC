@@ -41,6 +41,7 @@ import {
   type MetaProduct,
 } from './meta/api';
 import { MetaOperationsPanel } from './MetaOperationsPanel';
+import { MetaTestFlowPanel } from './MetaTestFlowPanel';
 
 /* ------------------------------ SDK Meta (JS) ------------------------------ */
 
@@ -467,6 +468,18 @@ export function MetaConnectPanel({ product, workspaceId, onChanged, onConnected 
         <p className="flex items-start gap-1.5 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-xs leading-relaxed text-rose-100">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {erreur}
         </p>
+      )}
+
+      {product === 'whatsapp' && (
+        <MetaTestFlowPanel
+          workspaceId={workspaceId}
+          onChanged={(etat) => {
+            onChanged?.(etat);
+            // La fiche parente relit son état : la connexion de test est la
+            // même ligne `whatsapp`, l'affichage doit suivre au même endroit.
+            if (etat.tone === 'success') void relire();
+          }}
+        />
       )}
 
       <div className="flex flex-wrap gap-2">
