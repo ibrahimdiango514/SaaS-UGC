@@ -191,8 +191,21 @@ describe('composeMessageBody — contenu réellement transmis', () => {
     const body = composeMessageBody('Voici', 'standard', [
       { name: 'photo.png', storagePath: null, sizeBytes: 2048, mimeType: 'image/png' },
     ]);
-    expect(body).toContain('contenu non extrait');
+    expect(body).toContain('contenu non transmis');
     expect(body).toContain('photo.png');
+  });
+
+  it('interdit explicitement au modèle de prétendre avoir lu un fichier muet', () => {
+    // Sans cette consigne, un modèle peut répondre « j’ai bien analysé la
+    // vidéo » alors qu’il n’a reçu qu’un nom de fichier. C’est précisément le
+    // mensonge que le système doit empêcher.
+    const body = composeMessageBody('Analyse ça', 'standard', [
+      { name: 'demo.mp4', storagePath: 'w/demo.mp4', sizeBytes: 5_000_000, mimeType: 'video/mp4',
+        note: 'Vidéo enregistrée. Aucun modèle de texte ne peut la lire.' },
+    ]);
+    expect(body).toContain('demo.mp4');
+    expect(body).toContain('Aucun modèle de texte ne peut la lire');
+    expect(body).toContain('ne prétends pas avoir lu');
   });
 });
 

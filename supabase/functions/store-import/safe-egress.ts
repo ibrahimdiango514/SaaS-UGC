@@ -32,7 +32,7 @@ import {
   type UrlRejection,
 } from '../../../src/business/importer/url-guard.ts';
 import type { FetchLike, StoreProbe } from '../../../src/business/importer/sources.ts';
-import { httpGetPinned, type PinnedSocket } from './pinned-fetch.ts';
+import { EN_TETES_TRANSMIS_EXPORTES, httpGetPinned, type PinnedSocket } from './pinned-fetch.ts';
 
 /** Nombre maximal de redirections examinées. */
 export const MAX_REDIRECTS = 3;
@@ -55,7 +55,18 @@ export interface EgressError {
   message: string;
 }
 
-export type EgressResult<T> = { ok: true; value: T } | { ok: false; error: EgressError };
+export type EgressResult<T> =
+  | { ok: true; value: T }
+  | {
+    ok: false;
+    error: EgressError;
+    /**
+     * Statut HTTP reçu, quand l'échec vient d'une réponse et non du réseau.
+     * Permet à l'appelant de distinguer 401 (clé refusée) de 502 (boutique en
+     * panne), ce que le seul `code` ne dit pas.
+     */
+    httpStatus?: number;
+  };
 
 /** Résolveur DNS : renvoie toutes les adresses du nom (IPv4 et IPv6). */
 export type ResolveHost = (hostname: string) => Promise<string[]>;
@@ -76,6 +87,32 @@ export interface EgressDeps {
 
 function erreur(code: EgressErrorCode, message: string): EgressError {
   return { code, message };
+}
+
+/**
+ * En-têtes que `buildRequest` pose lui-même à partir de valeurs calculées.
+ *
+ * `buildRequest` écrit toujours `Accept: <options.accept>` puis recopie les
+ * en-têtes supplémentaires de la liste blanche. Depuis que `accept` et
+ * `content-type` figurent dans cette liste (nécessaire au transport MCP), un
+ * appelant qui les passe produirait une **seconde** ligne : `Accept` envoyé
+ * deux fois. C'était le cas de la sonde de `store-connect`, qui pose
+ * `accept: application/json`.
+ *
+ * `content-type` N'est PAS retiré : il n'est pas écrit en double (`buildRequest`
+ * ne l'ajoute que s'il est absent), et sa valeur doit rester contrôlée par
+ * `buildRequest`. Le retirer ici ferait perdre le POST JSON-RPC.
+ */
+function sansEntetesRecalcules(
+  entetes: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!entetes) return entetes;
+  const propre: Record<string, string> = {};
+  for (const [nom, valeur] of Object.entries(entetes)) {
+    if (nom.toLowerCase() === 'accept') continue;
+    propre[nom] = valeur;
+  }
+  return Object.keys(propre).length > 0 ? propre : undefined;
 }
 
 function fromRejection(reason: UrlRejection): EgressError {
@@ -126,10 +163,70 @@ interface PageResult {
  */
 export async function safeGet(
   input: string | URL,
-  options: { accept: string; maxBytes: number },
+  options: { accept: string; maxBytes: number; headers?: Record<string, string> },
+  deps: EgressDeps,
+): Promise<EgressResult<PageResult>> {
+  return saufRequete(input, { ...options, method: 'get' }, deps);
+}
+
+/**
+ * `POST` HTTPS sûr, pour les serveurs MCP (`Streamable HTTP`).
+ *
+ * Le corps est celui d'un appel JSON-RPC : petit, borné, et jamais construit à
+ * partir d'une entrée non validée sans passer par `JSON.stringify`.
+ *
+ * ## Ce qui NE change pas par rapport à `safeGet`
+ *
+ * Tout. Même validation d'URL, même résolution, même contrôle de TOUTES les
+ * adresses à CHAQUE saut, même épinglage de l'IP, même refus de suivre une
+ * redirection en emportant les en-têtes. Un serveur MCP hostile est un hôte
+ * hostile comme un autre : rien n'est assoupli parce qu'on parle MCP.
+ *
+ * ## Ce qui change
+ *
+ * Le corps est RENVOYÉ tel quel en cas de redirection ? Non : une redirection
+ * sur un `POST` est traitée comme un échec (`protocol_error`). Suivre un 307 en
+ * rejouant le corps enverrait l'appel — donc parfois une écriture — à une
+ * destination choisie par le serveur distant. Un serveur MCP digne de ce nom
+ * ne redirige pas ses endpoints.
+ */
+export async function safePost(
+  input: string | URL,
+  options: {
+    accept: string;
+    maxBytes: number;
+    headers?: Record<string, string>;
+    body: string;
+  },
+  deps: EgressDeps,
+): Promise<EgressResult<PageResult>> {
+  return saufRequete(input, { ...options, method: 'post' }, deps);
+}
+
+async function saufRequete(
+  input: string | URL,
+  options: {
+    accept: string;
+    maxBytes: number;
+    headers?: Record<string, string>;
+    method: 'get' | 'post';
+    body?: string;
+  },
   deps: EgressDeps,
 ): Promise<EgressResult<PageResult>> {
   let courant = typeof input === 'string' ? input : input.toString();
+
+  /*
+   * Portée de l'autorisation : l'hôte EXACT demandé par l'appelant.
+   *
+   * Une clé d'API ne doit jamais suivre une redirection : un 302 vers un autre
+   * domaine est le moyen le plus simple de la faire sortir. On note donc l'hôte
+   * de la première requête et on ne joint l'en-tête que si l'hôte courant lui
+   * est identique — un changement d'hôte (ou de casse, ou de sous-domaine)
+   * suffit à l'écarter.
+   */
+  const premier = parseStoreUrl(courant);
+  const hoteAutorisation = premier.ok ? premier.url.hostname : null;
 
   for (let saut = 0; saut <= MAX_REDIRECTS; saut++) {
     // 1) Validation syntaxique (schéma, port, hôte littéral interdit).
@@ -154,11 +251,35 @@ export async function safeGet(
       try {
         const reponse = await httpGetPinned(
           { ip, hostname: url.hostname, path: `${url.pathname}${url.search}` },
-          { accept: options.accept, maxBytes: options.maxBytes, timeoutMs: deps.timeoutMs, connect: deps.connect },
+          {
+            accept: options.accept,
+            maxBytes: options.maxBytes,
+            timeoutMs: deps.timeoutMs,
+            connect: deps.connect,
+            method: options.method,
+            body: options.body,
+            // Transmis à `buildRequest`, qui n'accepte qu'une liste blanche.
+            headers: hoteAutorisation !== null && url.hostname === hoteAutorisation
+              ? sansEntetesRecalcules(options.headers)
+              : undefined,
+          },
         );
 
         // 4) Redirection éventuelle : revalidée au tour suivant, jamais suivie ici.
         if (reponse.status >= 300 && reponse.status < 400) {
+          /*
+           * Un `POST` n'est jamais redirigé, quelle que soit la forme du 3xx.
+           * Rejouer le corps vers une destination décidée par le serveur
+           * distant enverrait un appel d'outil là où il ne doit pas aller ; un
+           * serveur MCP légitime n'a aucune raison de rediriger son endpoint.
+           */
+          if (options.method === 'post') {
+            return {
+              ok: false,
+              error: erreur('protocol_error', 'Le serveur MCP a redirigé la requête : refusé.'),
+              httpStatus: reponse.status,
+            };
+          }
           const location = reponse.headers['location'];
           if (!location) {
             return { ok: false, error: erreur('protocol_error', 'Redirection sans destination.') };
@@ -178,11 +299,21 @@ export async function safeGet(
           break;
         }
 
-        if (reponse.status === 404) {
-          return { ok: false, error: erreur('unreachable', 'Ressource introuvable sur cette boutique.') };
-        }
+        /*
+         * Un statut d'erreur est rendu à l'appelant, pas transformé ici.
+         *
+         * `safeGet` ne sait pas ce qui était demandé : une page d'accueil en
+         * 404 (probeStore essaie des racines candidates, dont `/fr/`, et
+         * enchaîne sur la suivante) n'a pas le même sens qu'un 401 sur l'API
+         * (clé refusée). Traduire ici en « injoignable » effaçait cette
+         * distinction : une clé révoquée devenait une panne réseau de 502.
+         */
         if (reponse.status < 200 || reponse.status >= 300) {
-          return { ok: false, error: erreur('unreachable', `La boutique a répondu ${reponse.status}.`) };
+          return {
+            ok: false,
+            error: erreur('unreachable', `La boutique a répondu ${reponse.status}.`),
+            httpStatus: reponse.status,
+          };
         }
 
         deps.onConnected?.(ip, url.hostname);
@@ -243,10 +374,34 @@ export function pinnedFetchLike(deps: EgressDeps, defaults: { accept: string; ma
     }
     const entetes = new Headers(init?.headers ?? {});
     const accept = entetes.get('accept') ?? defaults.accept;
+    /*
+     * Seuls les en-têtes d'AUTHENTIFICATION sont transmis, et seulement ceux de
+     * la liste blanche de `buildRequest`. Tout le reste (`accept`, `user-agent`,
+     * `host`…) est réécrit plus bas par le constructeur de requête à partir de
+     * valeurs calculées : un appelant ne peut ni les choisir ni les fausser.
+     *
+     * `authorization` suffisait à PrestaShop et Chariow ; un connecteur
+     * générique doit pouvoir utiliser `X-Api-Key` ou `X-Shopify-Access-Token`,
+     * qui sont les pratiques réelles des API de catalogue. La liste est la même
+     * que celle de `custom-api-guard.ts` côté application — un test le vérifie.
+     */
+    const entetesTransmis: Record<string, string> = {};
+    for (const nom of EN_TETES_TRANSMIS_EXPORTES) {
+      const valeur = entetes.get(nom);
+      if (valeur) entetesTransmis[nom] = valeur;
+    }
     // Un délai propre à l'appel est respecté s'il est fourni (AbortSignal).
-    const resultat = await safeGet(input, { accept, maxBytes: defaults.maxBytes }, deps);
+    const resultat = await safeGet(
+      input,
+      {
+        accept,
+        maxBytes: defaults.maxBytes,
+        headers: Object.keys(entetesTransmis).length > 0 ? entetesTransmis : undefined,
+      },
+      deps,
+    );
     if (!resultat.ok) {
-      throw new PinnedNetworkError(resultat.error.code, resultat.error.message);
+      throw new PinnedNetworkError(resultat.error.code, resultat.error.message, resultat.httpStatus);
     }
     const { value } = resultat;
     const headers = new Headers();
@@ -259,11 +414,14 @@ export function pinnedFetchLike(deps: EgressDeps, defaults: { accept: string; ma
 /** Erreur réseau portant un code, pour que `sources.ts` la classe correctement. */
 export class PinnedNetworkError extends Error {
   readonly code: EgressErrorCode;
+  /** Statut HTTP observé, s'il y en a un. Absent = la requête n'est pas partie. */
+  readonly status?: number;
 
-  constructor(code: EgressErrorCode, message: string) {
+  constructor(code: EgressErrorCode, message: string, status?: number) {
     super(message);
     this.name = 'PinnedNetworkError';
     this.code = code;
+    if (status !== undefined) this.status = status;
   }
 }
 

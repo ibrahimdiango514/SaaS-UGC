@@ -986,12 +986,23 @@ function buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl = "", med
     if (required.includes("image_url") && !imageUrl) throw new Error("IMAGE_MISSING");
     if (imageUrl) body.image_url = imageUrl;
   }
+  const imageUrls = (media.imageUrls ?? []).filter((url) => url.length > 0);
+  for (const key of ["images_list", "image_urls", "reference_images"]) {
+    if (!fields.includes(key)) continue;
+    const liste = imageUrls.length > 0 ? imageUrls : imageUrl ? [imageUrl] : [];
+    if (required.includes(key) && liste.length === 0) throw new Error("IMAGE_MISSING");
+    if (liste.length > 0) body[key] = liste;
+  }
   const videoUrl = media.videoUrl ?? "";
   const audioUrl = media.audioUrl ?? "";
-  for (const key of ["video_url", "input_video"]) {
+  for (const key of ["video_url", "input_video", "reference_video_url"]) {
     if (!fields.includes(key)) continue;
     if (required.includes(key) && !videoUrl) throw new Error("VIDEO_MISSING");
     if (videoUrl) body[key] = videoUrl;
+  }
+  if (fields.includes("reference_videos")) {
+    if (required.includes("reference_videos") && !videoUrl) throw new Error("VIDEO_MISSING");
+    if (videoUrl) body.reference_videos = [videoUrl];
   }
   if (fields.includes("audio_url")) {
     if (required.includes("audio_url") && !audioUrl) throw new Error("AUDIO_MISSING");
@@ -1005,6 +1016,11 @@ function buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl = "", med
   if (fields.includes("last_image")) {
     if (required.includes("last_image") && !lastImageUrl) throw new Error("LAST_IMAGE_MISSING");
     if (lastImageUrl) body.last_image = lastImageUrl;
+  }
+  for (const key of ["end_image_url", "last_image_url"]) {
+    if (!fields.includes(key)) continue;
+    if (required.includes(key) && !lastImageUrl) throw new Error("LAST_IMAGE_MISSING");
+    if (lastImageUrl) body[key] = lastImageUrl;
   }
   const schema = paramSchemaFromRow(model);
   const params = obj(payload.params);
@@ -1558,7 +1574,14 @@ async function actionStart(jobId, userId) {
   let lastImageUrl = acceptsLastImage ? str(payload.last_image_url, 2e3) : "";
   const lastImagePath = acceptsLastImage ? workspaceImagePath(payload.last_image_storage_path, workspaceId) : "";
   if (!lastImageUrl && lastImagePath) lastImageUrl = await signStoragePath(lastImagePath) ?? "";
-  const acceptsVideo = modelFields.some((f) => f === "video_url" || f === "input_video");
+  const imageListField = ["images_list", "image_urls", "reference_images"].find((field) => modelFields.includes(field)) ?? "";
+  const extraImagePaths = imageListField ? asArray(payload.image_storage_paths).map((raw) => workspaceImagePath(raw, workspaceId)).filter((path) => path.length > 0) : [];
+  const extraImageUrls = [];
+  for (const path of extraImagePaths.slice(0, 8)) {
+    const signed = await signStoragePath(path);
+    if (signed) extraImageUrls.push(signed);
+  }
+  const acceptsVideo = modelFields.some((f) => f === "video_url" || f === "input_video" || f === "reference_video_url" || f === "reference_videos");
   const acceptsAudio = modelFields.includes("audio_url");
   let videoUrl = acceptsVideo ? str(payload.video_url, 2e3) : "";
   const videoPath = acceptsVideo ? workspaceImagePath(payload.video_storage_path, workspaceId) : "";
@@ -1568,7 +1591,11 @@ async function actionStart(jobId, userId) {
   if (!audioUrl && audioPath) audioUrl = await signStoragePath(audioPath) ?? "";
   let submitBody;
   try {
-    submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, { videoUrl, audioUrl });
+    submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, {
+      videoUrl,
+      audioUrl,
+      imageUrls: extraImageUrls
+    });
   } catch (e) {
     const code = e instanceof Error ? e.message.split(":")[0] : "INVALID_INPUT";
     return await failJob(jobId, userId, code, e instanceof Error ? e.message : String(e));

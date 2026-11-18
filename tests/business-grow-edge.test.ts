@@ -66,6 +66,18 @@ function fixture() {
     }),
     providerOrder: () => ['groq', 'gemini'],
     complete: vi.fn(async () => ({ content: 'Réponse de test.', inputTokens: 10, outputTokens: 12 })),
+    // Les actions de connexion de boutique exigent un abonnement Business
+    // Ground. La fixture accorde l'accès par défaut : les tests d'intégration
+    // portent sur l'isolation, pas sur l'abonnement — celui-ci a son propre
+    // fichier (`import-connect-subscription.test.ts`). Les tests dédiés au
+    // refus remplacent cette dépendance.
+    checkImportConnectAccess: vi.fn(async () => ({
+      allowed: true,
+      reason: 'OK',
+      status: 'active',
+      planKey: 'business',
+      currentPeriodEnd: '2027-01-01T00:00:00.000Z',
+    })),
   };
   const setConfig = (provider: 'groq' | 'gemini', config: ProviderConfig | null) => {
     if (provider === 'groq') groqConfig = config; else geminiConfig = config;
@@ -1301,5 +1313,153 @@ describe('Business Agent Phase 3 · API cloisonnée et consentement', () => {
     expect(prompt).toContain('invoice_overdue');
     for (const secret of ['Awa secrète', 'secret@example.test', 'FAC-PRIVÉE', 'Client secret', 'instruction secrète']) expect(prompt).not.toContain(secret);
     expect(store.getMemory).not.toHaveBeenCalled();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Import & Connect — abonnement Business Grow requis                       */
+/* -------------------------------------------------------------------------- */
+
+describe('Business Grow — Import & Connect exige un abonnement actif', () => {
+  /**
+   * Ces tests portent sur la DEUXIÈME surface d'Import & Connect : les
+   * connexions de boutique passent par `business-grow` (`integrations.*`), pas
+   * par `store-import`. Une garde posée seulement sur l'import produits
+   * laisserait le chemin le plus sensible ouvert.
+   */
+  const workspace = '11111111-1111-4111-8111-111111111111';
+
+  /**
+   * Connecteurs de boutique réellement enregistrés aujourd'hui.
+   * `prestashop` et `opencart` sont au programme (Phase C/D) mais ne sont pas
+   * encore des connecteurs acceptés : les annoncer ici reviendrait à tester
+   * une fonctionnalité qui n'existe pas. Le test dédié plus bas documente
+   * explicitement cet état.
+   */
+  const boutiques = ['shopify', 'woocommerce'];
+
+  type Access = { allowed: boolean; reason?: string; status?: string | null };
+
+  /** Fixture dont on pilote l'état d'abonnement. */
+  function withAccess(access: Access) {
+    const base = fixture();
+    base.store.getWorkspaceProtocol = vi.fn(async () => 'business-workspace-v3');
+    base.dependencies.checkImportConnectAccess = vi.fn(async () => ({
+      status: null, planKey: null, currentPeriodEnd: null, ...access,
+    })) as never;
+    for (const action of ['list', 'request', 'cancel', 'disconnect'] as const) {
+      if (action === 'list') {
+        base.store.listScopedIntegrationConnections = vi.fn(async () => []);
+      } else {
+        const nom = `${{ request: 'request', cancel: 'cancel', disconnect: 'disconnect' }[action]}ScopedIntegrationConnection` as
+          'requestScopedIntegrationConnection' | 'cancelScopedIntegrationRequest' | 'disconnectScopedIntegrationConnection';
+        base.store[nom] = vi.fn(async () => (action === 'request' ? 'pending' : true)) as never;
+      }
+    }
+    return { ...base, handler: createBusinessGrowHandler(base.dependencies) };
+  }
+
+  it('refuse chaque opération de connexion de boutique sans abonnement', async () => {
+    const { handler } = withAccess({ allowed: false, reason: 'NO_SUBSCRIPTION', status: null });
+    const liste = await handler(request({ action: 'v3.integrations.list', workspaceId: workspace }));
+    expect(liste.status).toBe(403);
+    for (const connectorKey of boutiques) {
+      for (const action of ['request', 'cancel', 'disconnect']) {
+        const res = await handler(request({ action: `v3.integrations.${action}`, workspaceId: workspace, connectorKey }));
+        expect([action, connectorKey, res.status]).toEqual([action, connectorKey, 403]);
+        expect(await res.json()).toMatchObject({ error: { code: 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED' } });
+      }
+    }
+  });
+
+  it('explique le refus sans divulguer si des boutiques sont déjà connectées', async () => {
+    const { handler, store } = withAccess({ allowed: false, reason: 'SUBSCRIPTION_EXPIRED', status: 'active' });
+    store.listScopedIntegrationConnections = vi.fn(async () => [{ connector_key: 'woocommerce', status: 'connected' }]);
+    const res = await handler(request({ action: 'v3.integrations.list', workspaceId: workspace }));
+    const payload = await res.json() as { error: Record<string, unknown> };
+    expect(res.status).toBe(403);
+    expect(payload.error).toMatchObject({
+      code: 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
+      reason: 'SUBSCRIPTION_EXPIRED',
+    });
+    // Ni la liste, ni le nombre, ni la plateforme ne filtrent.
+    expect(JSON.stringify(payload)).not.toContain('woocommerce');
+    expect(JSON.stringify(payload)).not.toContain('connector_key');
+    expect(store.listScopedIntegrationConnections).not.toHaveBeenCalled();
+  });
+
+  it('n’enregistre aucune demande quand l’abonnement ne couvre pas l’instant', async () => {
+    const { handler, store } = withAccess({ allowed: false, reason: 'SUBSCRIPTION_EXPIRED' });
+    await handler(request({ action: 'v3.integrations.request', workspaceId: workspace, connectorKey: 'woocommerce' }));
+    // L'expiration en cours de session : c'est le serveur qui la constate, la
+    // demande n'a jamais atteint la base.
+    expect(store.requestScopedIntegrationConnection).not.toHaveBeenCalled();
+  });
+
+  it('refuse l’appel direct à l’API sans passer par l’interface', async () => {
+    const { handler } = withAccess({ allowed: false, reason: 'NO_SUBSCRIPTION' });
+    // Aucun champ « subscription » n'est lu : même en le fournissant, refus.
+    const res = await handler(request({
+      action: 'v3.integrations.request',
+      workspaceId: workspace,
+      connectorKey: 'shopify',
+      subscription: 'active',
+      is_subscriber: true,
+      allowed: true,
+    }));
+    expect(res.status).toBe(403);
+  });
+
+  it('échoue fermé si le contrôle d’abonnement est absent ou en panne', async () => {
+    const absent = fixture();
+    delete (absent.dependencies as { checkImportConnectAccess?: unknown }).checkImportConnectAccess;
+    const sansDependance = createBusinessGrowHandler(absent.dependencies);
+    const panne = fixture();
+    panne.dependencies.checkImportConnectAccess = vi.fn(async () => { throw new Error('db down'); }) as never;
+    const enPanne = createBusinessGrowHandler(panne.dependencies);
+
+    for (const handler of [sansDependance, enPanne]) {
+      const res = await handler(request({ action: 'v3.integrations.list', workspaceId: workspace }));
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ error: { code: 'IMPORT_ACCESS_UNAVAILABLE' } });
+    }
+  });
+
+  it('laisse passer un abonné payé et actif', async () => {
+    const { handler, store } = withAccess({ allowed: true, reason: 'OK', status: 'active' });
+    expect((await handler(request({ action: 'v3.integrations.list', workspaceId: workspace }))).status).toBe(200);
+    expect((await handler(request({ action: 'v3.integrations.request', workspaceId: workspace, connectorKey: 'woocommerce' }))).status).toBe(200);
+    expect(store.requestScopedIntegrationConnection).toHaveBeenCalledWith(userA, workspace, 'woocommerce');
+  });
+
+  it('ne restreint pas les connecteurs sociaux, hors périmètre du module', async () => {
+    const { handler, store, dependencies } = withAccess({ allowed: false, reason: 'NO_SUBSCRIPTION' });
+    // `facebook` relève du catalogue Business Grow historique : on ne casse pas
+    // une fonctionnalité existante en la soumettant à un abonnement qu'elle
+    // n'a jamais exigé.
+    const res = await handler(request({ action: 'v3.integrations.request', workspaceId: workspace, connectorKey: 'facebook' }));
+    expect(res.status).toBe(200);
+    expect(store.requestScopedIntegrationConnection).toHaveBeenCalledWith(userA, workspace, 'facebook');
+    expect(dependencies.checkImportConnectAccess).not.toHaveBeenCalled();
+  });
+
+  it('n’utilise que l’identité du jeton, jamais celle du corps', async () => {
+    const { handler, dependencies } = withAccess({ allowed: true, reason: 'OK' });
+    await handler(request({ action: 'v3.integrations.list', workspaceId: workspace, user_id: userB }));
+    // Une seule identité vérifiée : celle de GoTrue.
+    expect(dependencies.checkImportConnectAccess).toHaveBeenCalledWith(userA);
+    expect(dependencies.checkImportConnectAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('n’accepte pas encore PrestaShop ni OpenCart comme connecteurs (état réel)', async () => {
+    const { handler } = withAccess({ allowed: true, reason: 'OK', status: 'active' });
+    // Documente l'état attendu tant que la Phase C/D n'a pas livré ces
+    // connecteurs : un abonné reçoit « connecteur inconnu », pas un succès
+    // fictif. Ce test doit être remplacé quand ils seront enregistrés.
+    for (const connectorKey of ['prestashop', 'opencart']) {
+      const res = await handler(request({ action: 'v3.integrations.request', workspaceId: workspace, connectorKey }));
+      expect([connectorKey, res.status]).toEqual([connectorKey, 400]);
+      expect(await res.json()).toMatchObject({ error: { code: 'INVALID_CONNECTOR' } });
+    }
   });
 });

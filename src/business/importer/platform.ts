@@ -36,6 +36,7 @@ export type StorePlatform =
   | 'bigcommerce'
   | 'squarespace'
   | 'ecwid'
+  | 'chariow'
   | 'unknown';
 
 export const PLATFORM_LABELS: Record<StorePlatform, string> = {
@@ -48,6 +49,7 @@ export const PLATFORM_LABELS: Record<StorePlatform, string> = {
   bigcommerce: 'BigCommerce',
   squarespace: 'Squarespace',
   ecwid: 'Ecwid',
+  chariow: 'Chariow',
   unknown: 'Plateforme non identifiée',
 };
 
@@ -115,6 +117,17 @@ function hasAny(html: string, needles: string[]): boolean {
  * « shopify » vaut 1 (un article de blog peut le mentionner).
  */
 const RULES: Rule[] = [
+  // --- Chariow ---
+  // Plateforme d'hébergement de boutiques de produits numériques. Aucun
+  // catalogue public : le seul chemin de lecture est son API authentifiée.
+  // Les indices sont sans ambiguïté — Chariow signe ses vitrines et sert ses
+  // assets depuis sa propre infrastructure.
+  { platform: 'chariow', weight: 5, label: 'domaine *.mychariow.online', test: (_fp, host) => host.endsWith('.mychariow.online') },
+  { platform: 'chariow', weight: 4, label: 'mention « Powered by Chariow »', test: (fp) => /powered by\s*<?[^>]*>?\s*chariow/i.test(fp.html) || hasAny(fp.html, ['chariow.com']) },
+  { platform: 'chariow', weight: 3, label: 'assets cdn.axazara.com', test: (fp) => hasAny(fp.html, ['cdn.axazara.com']) },
+  { platform: 'chariow', weight: 2, label: 'portail de commandes app.ateliat.com', test: (fp) => hasAny(fp.html, ['app.ateliat.com']) },
+  { platform: 'chariow', weight: 1, label: 'mention « chariow »', test: (fp) => hasAny(fp.html, ['chariow']) },
+
   // --- Shopify ---
   { platform: 'shopify', weight: 5, label: 'domaine *.myshopify.com', test: (_fp, host) => host.endsWith('.myshopify.com') },
   { platform: 'shopify', weight: 4, label: 'en-tête x-shopid', test: (fp) => Boolean(header(fp, 'x-shopid')) },
@@ -175,6 +188,11 @@ export function accessFor(platform: StorePlatform): CatalogAccess {
       return 'html-only';
     case 'prestashop':
       return 'html-only';
+    case 'chariow':
+      // Chariow n'expose AUCUN catalogue public : ni `/products.json`, ni flux,
+      // et son `sitemap.xml` ne liste que des pages statiques. Le seul accès est
+      // `GET https://api.chariow.com/v1/products` avec une clé `sk_live_…`.
+      return 'api-authorized';
     case 'opencart':
     case 'wix':
     case 'squarespace':

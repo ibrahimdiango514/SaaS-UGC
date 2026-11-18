@@ -132,6 +132,17 @@ function fixture(overrides: Partial<StoreImportDependencies> = {}, options: {
   const adresses = options.adresses ?? { 'boutique.example': ['203.0.113.10'] };
 
   const dependencies: StoreImportDependencies = {
+    // Par défaut, l'utilisateur de test dispose d'un abonnement Business
+    // Ground valide : les tests existants portent sur l'import, pas sur
+    // l'abonnement. Les tests d'abonnement surchargent cette dépendance.
+    checkImportAccess: vi.fn(async () => ({
+      allowed: true,
+      reason: 'OK',
+      message: 'Abonnement Business Grow actif.',
+      status: 'active',
+      planKey: 'essentiel',
+      currentPeriodEnd: null,
+    })),
     getUserId: async (authorization) => (authorization === `Bearer ${userA}` ? userA : authorization === `Bearer ${userB}` ? userB : null),
     grantWorkspace: vi.fn(async (userId: string, workspaceId: string) => {
       granted.push({ userId, workspaceId });

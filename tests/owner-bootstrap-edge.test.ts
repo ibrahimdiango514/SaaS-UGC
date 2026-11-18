@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createOwnerBootstrapHandler } from '../supabase/functions/reelora-owner-bootstrap/index';
+import { createOwnerBootstrapHandler, isOriginAllowed, parseAllowedOrigins } from '../supabase/functions/reelora-owner-bootstrap/index';
 
 const OWNER_ID = 'c49beb02-c606-4a38-ac92-85566571abc1';
 const config = {
@@ -123,5 +123,51 @@ describe('reelora-owner-bootstrap Edge Function', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: { code: 'admin_already_initialized' } });
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Origines : défauts + secret `VYORA_ALLOWED_ORIGINS` (migration Netlify 2026-11-18).
+ *
+ * Avant, la liste était figée dans le code : sur tout nouveau domaine, la page
+ * « Propriétaire » recevait `403 origin_not_allowed` sans aucun réglage possible.
+ */
+describe('reelora-owner-bootstrap — origines configurables', () => {
+  const status = (handler: ReturnType<typeof createOwnerBootstrapHandler>, origin: string) =>
+    handler(new Request('https://edge.test/reelora-owner-bootstrap', { method: 'GET', headers: { origin } }));
+
+  it('sans secret : accepte les défauts (ancien domaine, localhost) et refuse le reste en 403', async () => {
+    const handler = createOwnerBootstrapHandler(
+      { ...config, allowedOrigins: parseAllowedOrigins(undefined) },
+      mockFetch(() => jsonResponse(true)),
+    );
+    expect((await status(handler, 'https://vyora-ugc.netlify.app')).status).toBe(200);
+    expect((await status(handler, 'http://localhost:5173')).status).toBe(200);
+    const refus = await status(handler, 'https://nouveau-site.example');
+    expect(refus.status).toBe(403);
+    expect(await refus.json()).toEqual({ error: { code: 'origin_not_allowed', message: 'Origine non autorisée.' } });
+    expect(refus.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('le secret ajoute le nouveau domaine (exact ou joker) sans retirer les défauts', async () => {
+    const handler = createOwnerBootstrapHandler(
+      { ...config, allowedOrigins: parseAllowedOrigins(' https://nouveau-site.example/ , https://deploy-preview-*--nouveau.netlify.app ') },
+      mockFetch(() => jsonResponse(true)),
+    );
+    const nouveau = await status(handler, 'https://nouveau-site.example');
+    expect(nouveau.status).toBe(200);
+    expect(nouveau.headers.get('access-control-allow-origin')).toBe('https://nouveau-site.example');
+    expect(nouveau.headers.get('vary')).toBe('Origin');
+    expect((await status(handler, 'https://deploy-preview-12--nouveau.netlify.app')).status).toBe(200);
+    expect((await status(handler, 'https://vyora-ugc.netlify.app')).status).toBe(200);
+    // Le joker ne couvre qu'un segment d'hôte : pas de sous-domaine arbitraire.
+    expect((await status(handler, 'https://evil.example')).status).toBe(403);
+    expect((await status(handler, 'https://a.b--nouveau.netlify.app')).status).toBe(403);
+  });
+
+  it('isOriginAllowed : une origine vide ou un motif approchant ne passent jamais', () => {
+    expect(isOriginAllowed('', ['https://a.example'])).toBe(false);
+    expect(isOriginAllowed('https://a.example.evil', ['https://a.example'])).toBe(false);
+    expect(isOriginAllowed('https://aXexample', ['https://a.example'])).toBe(false);
   });
 });
