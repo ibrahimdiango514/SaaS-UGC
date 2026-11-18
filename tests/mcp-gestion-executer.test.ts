@@ -233,12 +233,19 @@ function requete(route: string, corps: unknown, authorization: string | null = '
 const identiteA = async (auth: string) => (auth === 'Bearer jwt-valide' ? { userId: USER_A } : null);
 const identiteB = async (auth: string) => (auth === 'Bearer jwt-b' ? { userId: USER_B } : null);
 
-let journal: ReturnType<typeof vi.fn>;
+/**
+ * Journal capturé sous forme de simples paires : on veut comparer le CONTENU
+ * écrit, pas vérifier qu'une fonction mock a été appelée.
+ */
+let journalAppels: Array<[string, Record<string, unknown>]> = [];
+const journaler = (message: string, details: Record<string, unknown>) => {
+  journalAppels.push([message, details]);
+};
 
 beforeEach(() => {
   methodesRecues.length = 0;
   outilsAppeles.length = 0;
-  journal = vi.fn();
+  journalAppels = [];
 });
 
 async function executer(
@@ -252,7 +259,7 @@ async function executer(
     {
       originesSupplementaires: null,
       identite: options.identite ?? identiteA,
-      journal,
+      journal: journaler,
     },
   );
   const texte = await reponse.text();
@@ -289,7 +296,7 @@ describe('exécution réelle d’un outil autorisé', () => {
 
   it('le journal ne contient ni secret ni arguments', async () => {
     await executer({ serverId: SERVER_A, outil: 'list_products', arguments: { motDePasse: 'hunter2' } });
-    const trace = JSON.stringify(journal.mock.calls);
+    const trace = JSON.stringify(journalAppels);
     expect(trace).not.toContain(JETON);
     expect(trace).not.toContain('hunter2');
     // Il journalise bien l'opération elle-même.
@@ -374,7 +381,7 @@ describe('refus AVANT tout appel réseau', () => {
   it('sans jeton : 401, zéro lecture en base et zéro appel', async () => {
     const d = deps();
     const reponse = await traiterRequeteGestion(requete('executer', { serverId: SERVER_A, outil: 'list_products' }, null), () => d, {
-      originesSupplementaires: null, identite: async () => null, journal,
+      originesSupplementaires: null, identite: async () => null, journal: journaler,
     });
     expect(reponse.status).toBe(401);
     expect(d.appels.lireConnexion).not.toHaveBeenCalled();

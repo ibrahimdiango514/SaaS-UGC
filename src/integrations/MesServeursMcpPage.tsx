@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   Loader2,
   Lock,
+  Play,
   Plug,
   Plus,
   RefreshCw,
@@ -40,13 +41,16 @@ import {
   creerServeur,
   definirPermission,
   etatPermission,
+  executerOutil,
   LIBELLES_AUTH,
   LIBELLES_ETAT,
   listerServeurs,
   revoquerServeur,
   testerConnexion,
+  texteDuContenu,
   ErreurGestion,
   type ModeAuth,
+  type ResultatExecution,
   type ServeurMcp,
 } from '../mcp/serveurs';
 
@@ -78,6 +82,12 @@ export function MesServeursMcpPage() {
   const [creationOuverte, setCreationOuverte] = useState(false);
   const [aRevoquer, setARevoquer] = useState<ServeurMcp | null>(null);
   const [enCours, setEnCours] = useState<string>('');
+  /** Outil en cours de préparation d'exécution : `{ serveur, outil }`. */
+  const [aExecuter, setAExecuter] = useState<{ serveur: ServeurMcp; outil: string } | null>(null);
+  const [argsTexte, setArgsTexte] = useState('{}');
+  const [resultat, setResultat] = useState<ResultatExecution | null>(null);
+  const [erreurExecution, setErreurExecution] = useState<string | null>(null);
+  const [executionEnCours, setExecutionEnCours] = useState(false);
 
   const charger = useCallback(async () => {
     setChargement(true);
@@ -174,6 +184,63 @@ export function MesServeursMcpPage() {
       await rafraichir();
     }
   }, [aRevoquer, rafraichir]);
+
+  /**
+   * Ouvre la préparation d'un appel. On remet les arguments à zéro : réutiliser
+   * ceux de l'appel précédent risquerait d'envoyer une valeur qu'on n'a pas
+   * relue.
+   */
+  const ouvrirExecution = useCallback((serveur: ServeurMcp, outil: string) => {
+    setAExecuter({ serveur, outil });
+    setArgsTexte('{}');
+    setResultat(null);
+    setErreurExecution(null);
+  }, []);
+
+  const fermerExecution = useCallback(() => {
+    setAExecuter(null);
+    setResultat(null);
+    setErreurExecution(null);
+    setArgsTexte('{}');
+  }, []);
+
+  /**
+   * Lance réellement l'appel.
+   *
+   * Aucune confirmation d'écriture n'est transmise : la fonctionnalité est en
+   * lecture seule côté serveur, et cette interface ne prétend pas le contraire.
+   * Les arguments sont validés ici (JSON objet) pour éviter un aller-retour
+   * inutile, mais le serveur revalide de toute façon.
+   */
+  const lancerExecution = useCallback(async () => {
+    if (!aExecuter) return;
+    let args: Record<string, unknown>;
+    try {
+      const brut = argsTexte.trim() === '' ? {} : JSON.parse(argsTexte);
+      if (typeof brut !== 'object' || brut === null || Array.isArray(brut)) {
+        setErreurExecution('Les arguments doivent être un objet JSON, par exemple { "query": "…" }.');
+        return;
+      }
+      args = brut as Record<string, unknown>;
+    } catch {
+      setErreurExecution('Les arguments ne sont pas un JSON valide.');
+      return;
+    }
+
+    setExecutionEnCours(true);
+    setErreurExecution(null);
+    setResultat(null);
+    try {
+      const r = await executerOutil(aExecuter.serveur.id, aExecuter.outil, args);
+      setResultat(r);
+    } catch (erreur) {
+      setErreurExecution(
+        erreur instanceof ErreurGestion ? erreur.message : 'L’outil n’a pas pu être exécuté.',
+      );
+    } finally {
+      setExecutionEnCours(false);
+    }
+  }, [aExecuter, argsTexte]);
 
   const actifs = (serveurs ?? []).filter((s) => !s.revokedAt);
   const revoques = (serveurs ?? []).filter((s) => s.revokedAt);
@@ -322,7 +389,15 @@ export function MesServeursMcpPage() {
                                     <p className="truncate text-[11px] text-slate-500">{outil.description}</p>
                                   )}
                                 </div>
-                                <div className="flex shrink-0 items-center gap-1.5">
+                                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                                  {/* Le classement vient du serveur, jamais du navigateur. */}
+                                  {outil.lecture === false ? (
+                                    <span className="text-[11px] text-slate-500" title="Les écritures ne sont pas activées.">
+                                      écriture · désactivée
+                                    </span>
+                                  ) : outil.lecture === true ? (
+                                    <span className="text-[11px] text-slate-500">lecture</span>
+                                  ) : null}
                                   {valeur === 'allowed' && (
                                     <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300">
                                       <Check className="h-3 w-3" /> autorisé
@@ -350,6 +425,23 @@ export function MesServeursMcpPage() {
                                   >
                                     Refuser
                                   </Button>
+                                  {/*
+                                    * « Exécuter » n'apparaît que si les DEUX
+                                    * conditions sont réunies : outil de lecture
+                                    * (classement du serveur) et permission
+                                    * `allowed`. Sur une écriture, aucun bouton :
+                                    * la proposer laisserait croire qu'un clic
+                                    * peut l'activer, alors que le serveur la
+                                    * refuse toujours.
+                                    */}
+                                  {outil.lecture === true && valeur === 'allowed' && (
+                                    <Button
+                                      onClick={() => ouvrirExecution(serveur, outil.name)}
+                                      disabled={enAttente || executionEnCours}
+                                    >
+                                      <Play className="mr-1.5 h-3.5 w-3.5" /> Exécuter
+                                    </Button>
+                                  )}
                                 </div>
                               </li>
                             );
@@ -379,6 +471,67 @@ export function MesServeursMcpPage() {
           await rafraichir();
         }}
       />
+
+      <Modal
+        open={Boolean(aExecuter)}
+        onClose={fermerExecution}
+        title={aExecuter ? `Exécuter « ${aExecuter.outil} »` : 'Exécuter un outil'}
+        description="VYORA vérifie l’autorisation en base, puis appelle réellement le serveur distant."
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={fermerExecution}>Fermer</Button>
+            <Button onClick={() => void lancerExecution()} disabled={executionEnCours}>
+              {executionEnCours ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Play className="mr-1.5 h-4 w-4" />}
+              Lancer l’appel
+            </Button>
+          </div>
+        )}
+      >
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="mcp-args" className="mb-1 block text-xs font-medium text-slate-300">
+              Arguments (JSON)
+            </label>
+            <textarea
+              id="mcp-args"
+              value={argsTexte}
+              onChange={(evenement) => setArgsTexte(evenement.target.value)}
+              spellCheck={false}
+              rows={4}
+              className="w-full resize-y rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-sky-400/50"
+            />
+            <p className="mt-1 text-[11px] text-slate-500">
+              Objet JSON transmis tel quel à l’outil. VYORA n’y ajoute rien.
+            </p>
+          </div>
+
+          {erreurExecution && (
+            <div role="alert" className="flex items-start gap-2 rounded-lg border border-rose-400/30 bg-rose-400/[0.07] px-3 py-2 text-xs text-rose-100">
+              <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1">{erreurExecution}</span>
+            </div>
+          )}
+
+          {resultat && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-medium text-slate-200">Résultat</span>
+                {resultat.isError ? (
+                  <Badge tone="rose">le serveur signale une erreur</Badge>
+                ) : (
+                  <Badge tone="emerald">reçu</Badge>
+                )}
+              </div>
+              <pre
+                data-testid="resultat-execution"
+                className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-white/[0.08] bg-slate-950/70 p-3 text-[11px] leading-relaxed text-slate-200"
+              >
+                {texteDuContenu(resultat.contenu)}
+              </pre>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       <Modal
         open={Boolean(aRevoquer)}

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   testerConnexion: vi.fn(),
   definirPermission: vi.fn(),
   revoquerServeur: vi.fn(),
+  executerOutil: vi.fn(),
   getWorkspaces: vi.fn(),
 }));
 
@@ -32,6 +33,7 @@ vi.mock('../src/mcp/serveurs', async () => {
     testerConnexion: mocks.testerConnexion,
     definirPermission: mocks.definirPermission,
     revoquerServeur: mocks.revoquerServeur,
+    executerOutil: mocks.executerOutil,
   };
 });
 
@@ -74,6 +76,12 @@ beforeEach(() => {
   });
   mocks.definirPermission.mockResolvedValue({ list_products: 'allowed' });
   mocks.revoquerServeur.mockResolvedValue(undefined);
+  mocks.executerOutil.mockResolvedValue({
+    ok: true,
+    outil: 'list_products',
+    isError: false,
+    contenu: [{ type: 'text', text: 'alpha, beta, gamma' }],
+  });
 });
 
 afterEach(() => {
@@ -254,5 +262,110 @@ describe('aucun secret dans le rendu', () => {
     expect(texte).not.toContain('vault.secrets');
     // On affiche l'existence du secret, jamais sa valeur.
     expect(screen.getByText('secret en Vault')).toBeTruthy();
+  });
+});
+
+/**
+ * Parcours d'exécution — le dernier maillon de la chaîne.
+ *
+ * Ces tests vérifient ce que l'écran OFFRE et ce qu'il n'offre pas : un bouton
+ * « Exécuter » sur une écriture serait un mensonge, puisque le serveur la refuse
+ * toujours.
+ */
+describe('exécution d’un outil autorisé', () => {
+  const outilLecture = { name: 'list_products', description: 'Liste les produits.', lecture: true };
+  const outilEcriture = { name: 'delete_product', description: 'Supprime un produit.', lecture: false };
+
+  it('propose « Exécuter » seulement si l’outil est une lecture ET autorisé', async () => {
+    mocks.listerServeurs.mockResolvedValue([
+      serveur({
+        outils: [outilLecture, outilEcriture],
+        toolPermissions: { list_products: 'allowed', delete_product: 'allowed' },
+      }),
+    ]);
+    await rendre();
+
+    // Une seule occurrence : l'écriture, pourtant `allowed`, n'en a pas.
+    expect(screen.getAllByRole('button', { name: /exécuter/i })).toHaveLength(1);
+    // L'écriture est annoncée comme désactivée, pas comme disponible.
+    expect(screen.getByText(/écriture · désactivée/i)).toBeTruthy();
+  });
+
+  it('n’offre rien pour un outil en attente (pending)', async () => {
+    mocks.listerServeurs.mockResolvedValue([
+      serveur({ outils: [outilLecture], toolPermissions: { list_products: 'pending' } }),
+    ]);
+    await rendre();
+    expect(screen.queryByRole('button', { name: /exécuter/i })).toBeNull();
+  });
+
+  it('exécute réellement et affiche le résultat reçu du serveur', async () => {
+    mocks.listerServeurs.mockResolvedValue([
+      serveur({ outils: [outilLecture], toolPermissions: { list_products: 'allowed' } }),
+    ]);
+    await rendre();
+
+    fireEvent.click(screen.getByRole('button', { name: /exécuter/i }));
+    const zone = await screen.findByLabelText(/arguments/i);
+    fireEvent.change(zone, { target: { value: '{"limit":3}' } });
+    fireEvent.click(screen.getByRole('button', { name: /lancer l’appel/i }));
+
+    await waitFor(() => expect(mocks.executerOutil).toHaveBeenCalledWith(
+      '33333333-3333-3333-3333-333333333333',
+      'list_products',
+      { limit: 3 },
+    ));
+    const resultat = await screen.findByTestId('resultat-execution');
+    expect(resultat.textContent).toContain('alpha, beta, gamma');
+  });
+
+  it('affiche l’erreur du serveur sans faire croire à un succès', async () => {
+    const { ErreurGestion } = await vi.importActual<typeof import('../src/mcp/serveurs')>(
+      '../src/mcp/serveurs',
+    );
+    mocks.executerOutil.mockRejectedValue(
+      new ErreurGestion('L’outil « list_products » n’est pas autorisé pour cette connexion.', 'outil_non_autorise', 403),
+    );
+    mocks.listerServeurs.mockResolvedValue([
+      serveur({ outils: [outilLecture], toolPermissions: { list_products: 'allowed' } }),
+    ]);
+    await rendre();
+
+    fireEvent.click(screen.getByRole('button', { name: /exécuter/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /lancer l’appel/i }));
+
+    const alerte = await screen.findByRole('alert');
+    expect(alerte.textContent).toMatch(/n’est pas autorisé/i);
+    expect(screen.queryByTestId('resultat-execution')).toBeNull();
+  });
+
+  it('refuse des arguments qui ne sont pas un objet JSON, sans appeler le serveur', async () => {
+    mocks.listerServeurs.mockResolvedValue([
+      serveur({ outils: [outilLecture], toolPermissions: { list_products: 'allowed' } }),
+    ]);
+    await rendre();
+
+    fireEvent.click(screen.getByRole('button', { name: /exécuter/i }));
+    fireEvent.change(await screen.findByLabelText(/arguments/i), { target: { value: '[1,2,3]' } });
+    fireEvent.click(screen.getByRole('button', { name: /lancer l’appel/i }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/objet JSON/i));
+    expect(mocks.executerOutil).not.toHaveBeenCalled();
+  });
+
+  it('n’affiche jamais de secret après l’enregistrement', async () => {
+    mocks.listerServeurs.mockResolvedValue([
+      serveur({ outils: [outilLecture], toolPermissions: { list_products: 'allowed' } }),
+    ]);
+    const { container } = render(
+      await import('../src/integrations/MesServeursMcpPage').then((m) => <m.MesServeursMcpPage />),
+    );
+    await waitFor(() => expect(mocks.listerServeurs).toHaveBeenCalled());
+    const texte = container.textContent ?? '';
+    // « Jeton Bearer » est un LIBELLÉ de mode : on ne cherche donc pas le mot
+    // « Bearer », mais une valeur d'identifiant (hex long, jeton, clé).
+    expect(texte).not.toMatch(/sb_secret|service_role/);
+    expect(texte).not.toMatch(/[A-Za-z0-9_-]{32,}/);
+    expect(texte).not.toMatch(/Bearer\s+[A-Za-z0-9._-]{16,}/);
   });
 });

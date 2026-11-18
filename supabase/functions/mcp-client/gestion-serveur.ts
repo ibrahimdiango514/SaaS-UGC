@@ -33,6 +33,7 @@ import {
 import { entetesAuthentification, testerConnexion, type ServeurExterne } from './external.ts';
 import type { EgressDeps } from '../store-import/safe-egress.ts';
 import type { DependancesP5 } from './execution.ts';
+import { classerOutil } from './client.ts';
 
 /* -------------------------------------------------------------------------- */
 /* 1. Types publics — aucun secret                                              */
@@ -515,7 +516,19 @@ export function versJson(serveur: ServeurGere): Record<string, unknown> {
     protocolVersion: serveur.protocolVersion,
     serverName: serveur.serverName,
     serverVersion: serveur.serverVersion,
-    outils: serveur.outils,
+    /*
+     * `lecture` est calculé ICI, avec la même règle que la porte d'exécution.
+     *
+     * Sans cela, l'interface devrait deviner elle-même ce qui est exécutable —
+     * et une règle dupliquée dans le navigateur finirait par diverger de celle
+     * qui décide réellement. Le serveur dit ce qu'il acceptera ; le navigateur
+     * se contente de l'afficher.
+     */
+    outils: serveur.outils.map((o) => ({
+      name: o.name,
+      ...(o.description ? { description: o.description } : {}),
+      lecture: classerOutil(o.name, o.description ?? '').lecture,
+    })),
     toolPermissions: serveur.toolPermissions,
     dernierTestAt: serveur.dernierTestAt,
     derniereErreur: serveur.derniereErreur,

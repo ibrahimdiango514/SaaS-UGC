@@ -48,7 +48,12 @@ export interface ServeurMcp {
   protocolVersion: string | null;
   serverName: string | null;
   serverVersion: string | null;
-  outils: { name: string; description?: string }[];
+  /**
+   * `lecture` est calculé par le SERVEUR (même règle que la porte d'exécution).
+   * Facultatif parce qu'une réponse ancienne peut ne pas le porter : dans ce
+   * cas l'écran n'affiche pas de bouton « Exécuter » plutôt que de deviner.
+   */
+  outils: { name: string; description?: string; lecture?: boolean }[];
   toolPermissions: Record<string, unknown>;
   dernierTestAt: string | null;
   derniereErreur: string | null;
@@ -63,7 +68,12 @@ export interface ResultatTest {
   protocole?: string;
   serverName?: string;
   serverVersion?: string;
-  outils: { name: string; description?: string }[];
+  /**
+   * `lecture` est calculé par le SERVEUR (même règle que la porte d'exécution).
+   * Facultatif parce qu'une réponse ancienne peut ne pas le porter : dans ce
+   * cas l'écran n'affiche pas de bouton « Exécuter » plutôt que de deviner.
+   */
+  outils: { name: string; description?: string; lecture?: boolean }[];
   codes?: string[];
 }
 
@@ -169,6 +179,55 @@ export async function definirPermission(
     etat,
   });
   return r?.toolPermissions ?? {};
+}
+
+export interface ResultatExecution {
+  ok: boolean;
+  outil: string;
+  /** `true` si le SERVEUR distant a signalé une erreur dans son résultat. */
+  isError: boolean;
+  /**
+   * Charge utile brute du serveur distant, telle quelle. On ne la transforme
+   * pas ici : c'est la donnée de l'utilisateur, pas la nôtre.
+   */
+  contenu: unknown;
+}
+
+/**
+ * Exécute un outil réellement, sur le serveur distant.
+ *
+ * Aucune autorisation n'est envoyée : le serveur relit la permission en base et
+ * refuse avant tout appel réseau. Cette fonction ne peut donc pas élargir un
+ * droit, seulement demander une exécution déjà permise.
+ */
+export async function executerOutil(
+  serverId: string,
+  outil: string,
+  args: Record<string, unknown> = {},
+): Promise<ResultatExecution> {
+  return appeler<ResultatExecution>('executer', { serverId, outil, arguments: args });
+}
+
+/**
+ * Extrait le texte affichable d'une réponse `tools/call`.
+ *
+ * MCP renvoie une liste de blocs `{ type, text }`. On n'affiche que le texte —
+ * pas de HTML, pas de rendu de balisage — et on plafonne la taille pour ne pas
+ * figer l'écran avec une réponse de plusieurs mégaoctets.
+ */
+export function texteDuContenu(contenu: unknown, max = 4_000): string {
+  const blocs = Array.isArray(contenu) ? contenu : [];
+  const morceaux = blocs
+    .map((bloc) => {
+      if (typeof bloc === 'string') return bloc;
+      if (bloc && typeof bloc === 'object' && typeof (bloc as { text?: unknown }).text === 'string') {
+        return (bloc as { text: string }).text;
+      }
+      return '';
+    })
+    .filter(Boolean);
+  const texte = morceaux.length > 0 ? morceaux.join('\n\n') : JSON.stringify(contenu ?? null, null, 2);
+  return texte.length > max ? `${texte.slice(0, max)}\n… (tronqué)` : texte;
 }
 
 /** Révoque : le secret est détruit côté serveur, la ligne reste (historique). */
