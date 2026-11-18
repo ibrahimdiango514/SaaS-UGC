@@ -26,6 +26,8 @@ import { PromptBar, initialFormState, type GenerationFormState } from './compone
 import { StudioTopBar } from './components/StudioTopBar';
 import { TrackingPanel } from './components/PreviewStage';
 import { trackingState } from './tracking';
+import { mediaPayload, referenceSupport, type ReferencePlan } from './references';
+import { ProjectReferences } from './ProjectReferences';
 import {
   MODE_LABELS, modeFromModel, paramLabel, type ParamValue,
 } from './model';
@@ -80,7 +82,7 @@ export default function GenerationStudio() {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const { workspaceId, quota, refreshQuota } = useAuth();
+  const { workspaceId, quota, refreshQuota, user } = useAuth();
   const [search] = useSearchParams();
   const handedOffBrief = extractUgcHandoffBriefFromLocationState(location.state);
 
@@ -126,6 +128,9 @@ export default function GenerationStudio() {
   /** Code fournisseur expliquant un devis en attente (ex. PROMPT_REQUIRED). */
   const [quotePendingCode, setQuotePendingCode] = useState<string | null>(null);
   const [reference, setReference] = useState<SignedReference | null>(null);
+  // Références du projet (images/vidéos persistées dans `vyora_files`) et leur
+  // répartition calculée pour le modèle sélectionné. `null` = aucune référence.
+  const [projectPlan, setProjectPlan] = useState<ReferencePlan | null>(null);
   // Projet demandé par le chemin d'arrivée : Business Grow (brief transféré) ou ?projet=.
   const [projectId, setProjectId] = useState(search.get('projet') ?? handedOffBrief?.projectId ?? '');
   const [projectModal, setProjectModal] = useState(false);
@@ -583,6 +588,13 @@ export default function GenerationStudio() {
         referencePayload.last_image_storage_path = lastPath;
         referencePayload.last_image_url = await signedStorageUrl(lastPath, 86400);
       }
+      // Références du projet transmises UNIQUEMENT pour les champs que le
+      // modèle déclare. Les URL signées ne sont pas envoyées : le serveur les
+      // régénère depuis les chemins (elles expireraient avant la fin du job).
+      if (projectPlan) {
+        const support = referenceSupport(model.input_fields);
+        Object.assign(referencePayload, mediaPayload(projectPlan, support));
+      }
       const prompt = form.prompt.trim();
       const payload = {
         ui_version: 'reelora-video-studio-v2-catalog',
@@ -846,6 +858,19 @@ export default function GenerationStudio() {
               <p className="mt-2 text-[10px] text-slate-600">Les options affichées correspondent aux paramètres disponibles pour ce modèle.</p>
             </div>
           </details>
+        </div>
+      )}
+
+      {projectId && workspaceId && (
+        <div className="mt-4 panel p-4">
+          <ProjectReferences
+            workspaceId={workspaceId}
+            projectId={projectId}
+            modelInputFields={model?.input_fields ?? []}
+            modelLabel={model?.display_name ?? model?.model_id}
+            currentUserId={user?.id ?? null}
+            onPlanChange={setProjectPlan}
+          />
         </div>
       )}
 

@@ -35,6 +35,15 @@ export interface AiAttachment {
   mimeType: string;
   /** Texte extrait côté navigateur, pour les formats lisibles. */
   excerpt?: string;
+  /**
+   * Ce que le modèle peut réellement faire de ce fichier, en une phrase.
+   *
+   * Renseigné par `files/intoAssistant`. Il est transmis AU MODÈLE (pour qu'il
+   * ne prétende pas avoir lu une vidéo) et affiché à l'utilisateur.
+   */
+  note?: string;
+  /** Identifiant en base, une fois le fichier téléversé et enregistré. */
+  fileId?: string;
 }
 
 const HISTORY_KEY = 'vyora.ai.history.v1';
@@ -133,8 +142,15 @@ export function composeMessageBody(content: string, mode: AiMode, attachments: A
   }
   if (muettes.length > 0) {
     parts.push(
-      '--- Fichiers joints (contenu non extrait) ---',
-      ...muettes.map((a) => `- ${a.name} (${a.mimeType}, ${Math.round(a.sizeBytes / 1024)} Ko)`),
+      '--- Fichiers joints (contenu non transmis) ---',
+      ...muettes.map((a) => {
+        // La raison est donnée au modèle : sans elle, il pourrait affirmer
+        // avoir « analysé la vidéo » alors qu'il n'a reçu qu'un nom de fichier.
+        const motif = a.note ? ` — ${a.note}` : '';
+        return `- ${a.name} (${a.mimeType}, ${Math.round(a.sizeBytes / 1024)} Ko)${motif}`;
+      }),
+      'Consigne : ne prétends pas avoir lu le contenu de ces fichiers. Dis '
+        + 'explicitement ce qui manque et propose comment procéder autrement.',
     );
   }
 

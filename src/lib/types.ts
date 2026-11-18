@@ -190,6 +190,28 @@ export interface Product {
   updated_at: string;
 }
 
+/**
+ * Variante d'un produit (`ugc_product_variants`).
+ *
+ * Une variante appartient toujours à SON produit parent : elle n'existe pas
+ * comme produit indépendant. `price_amount = null` signifie « même prix que le
+ * parent », jamais « gratuit ».
+ */
+export interface ProductVariant {
+  id: string;
+  product_id: string;
+  attribute_name: string | null;
+  attribute_value: string;
+  sku: string | null;
+  price_amount: number | null;
+  price_currency: string | null;
+  stock: number | null;
+  available: boolean | null;
+  /** `false` = retirée de la vente, mais conservée (stock, référence). */
+  active: boolean;
+  position: number;
+}
+
 export interface ServiceCatalogItem {
   service_key: string;
   display_name: string;

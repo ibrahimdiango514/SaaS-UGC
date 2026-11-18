@@ -1,55 +1,70 @@
-// store-import — chargeur de production (seule source déployée).
-// Généré par scripts/build-edge-artifact.mjs : ne pas éditer.
+// store-import — chargeur épinglé sur un commit du dépôt public.
 //
-// Le code métier (bundle esbuild) est lu dans
-// public._edge_function_artifact par nom + SHA-256, puis vérifié avant exécution :
-// un artefact absent ou modifié n'est jamais exécuté.
+// Le code métier est le bundle du dépôt, lu à un commit PRÉCIS (jamais `main`
+// ni une branche mouvante) : une URL contenant un SHA de commit ne peut pas
+// changer de contenu, et la taille + l'empreinte SHA-256 sont vérifiées avant
+// toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
+// JAMAIS exécuté.
+//
+// Épinglé sur store-import.js (113856 caractères).
+//
+// Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
-const ARTIFACT_NAME = "store-import";
-const ARTIFACT_SHA256 = "d002522d643d8b72ff5bbafe918f86c9ce1ff386d44bdf72eea67f05ad4c4fb5";
-const ARTIFACT_CHARS = 36292;
+const REPO = "ibrahimdiango514/SaaS-UGC";
+const COMMIT = "209748b77c91fda348ca86c19fcc5fa68e3fc19e";
+const PATH = "supabase/functions/_artifacts/store-import.js";
+const ARTIFACT_SHA256 = "43288f8986825e28f20edaba608d13998a1c5f1d78f3af074368a4af0dfb0eb8";
+const ARTIFACT_CHARS = 113856;
 
-async function readArtifact(): Promise<string> {
-  const base = Deno.env.get("SUPABASE_URL") ?? "";
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!base || !key) throw new Error("runtime_env_missing");
-  const url = base + "/rest/v1/_edge_function_artifact?select=source&name=eq." + ARTIFACT_NAME +
-    "&sha256=eq." + ARTIFACT_SHA256;
-  const res = await fetch(url, {
-    headers: { apikey: key, Authorization: "Bearer " + key },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error("artifact_read_failed:" + res.status);
-  const rows = (await res.json()) as Array<{ source?: unknown }>;
-  const source = rows[0]?.source;
-  if (typeof source !== "string") throw new Error("artifact_missing");
-  if (source.length !== ARTIFACT_CHARS) throw new Error("artifact_size_mismatch:" + source.length);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
-  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  if (hex !== ARTIFACT_SHA256) throw new Error("artifact_digest_mismatch");
-  return source;
+// Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
+// porte sur le fichier tel qu'il est committé.
+async function charger(): Promise<string> {
+  const urls = [
+    "https://raw.githubusercontent.com/" + REPO + "/" + COMMIT + "/" + PATH,
+    "https://api.github.com/repos/" + REPO + "/contents/" + PATH + "?ref=" + COMMIT,
+  ];
+  const echecs: string[] = [];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, {
+        headers: url.startsWith("https://api.github.com/")
+          ? { accept: "application/vnd.github.raw+json" }
+          : {},
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) { echecs.push("http_" + res.status); continue; }
+      const source = await res.text();
+      if (source.length !== ARTIFACT_CHARS) { echecs.push("taille_" + source.length); continue; }
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+      const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+      if (hex !== ARTIFACT_SHA256) { echecs.push("empreinte_" + hex.slice(0, 8)); continue; }
+      return source;
+    } catch (error) {
+      echecs.push(error instanceof Error ? error.name : "reseau");
+    }
+  }
+  throw new Error(echecs.join(","));
 }
 
 let CODE = "";
 let failure = "";
-// Trois essais : une lecture ratée à froid ne doit pas figer l'instance en panne.
-for (let attempt = 1; attempt <= 3 && !CODE; attempt++) {
+// Trois tentatives : une lecture ratée à froid ne doit pas figer l'instance.
+for (let essai = 1; essai <= 3 && !CODE; essai++) {
   try {
-    CODE = await readArtifact();
+    CODE = await charger();
     failure = "";
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
-    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    if (essai < 3) await new Promise((r) => setTimeout(r, 400 * essai));
   }
 }
 
 if (CODE) {
-  // Le bundle s'exécute hors module : il reçoit postgres ici, avant exécution.
   (globalThis as { __edgePostgres?: typeof postgres }).__edgePostgres = postgres;
   new Function(CODE)();
 } else {
-  // Panne explicite et lisible, au lieu d'un 500 opaque pris pour une absence de backend.
+  // Panne explicite et lisible, jamais un accès ouvert ni un 500 opaque.
   console.error("store-import artifact load failed: " + failure);
   const headers = {
     "Content-Type": "application/json",
@@ -60,7 +75,7 @@ if (CODE) {
   const body = JSON.stringify({
     error: {
       code: "STORE_IMPORT_ARTIFACT_UNAVAILABLE",
-      message: "Le service store-import n'a pas pu charger son code (" + failure + ").",
+      message: "Le service d'import n'a pas pu démarrer son code (artifact_load_failed). Réessayez dans un instant.",
     },
   });
   Deno.serve((request: Request) =>

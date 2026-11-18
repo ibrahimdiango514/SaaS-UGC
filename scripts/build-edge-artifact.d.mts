@@ -37,10 +37,16 @@ export declare function bundleEdgeFunction(
 /** Compile puis renvoie l'artefact complet (bundle + empreinte). */
 export declare function buildArtifact(name: string, root?: string): EdgeArtifact;
 
-/** Rend le chargeur court qui reconstruit le bundle déployé. */
+/**
+ * Rend le chargeur réellement déployé : « GitHub épinglé ».
+ *
+ * `commit` doit être un SHA complet (40 hexadécimaux). Une branche mouvante est
+ * refusée, car son contenu changerait sous une empreinte figée.
+ */
 export declare function renderLoader(
   name: string,
   artifact: { sha256: string; chars: number },
+  commit: string,
 ): string;
 
 /** Rend le SQL (ou le texte) qui publie l'artefact. */

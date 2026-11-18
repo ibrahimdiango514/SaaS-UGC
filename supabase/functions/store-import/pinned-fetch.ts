@@ -133,21 +133,133 @@ export async function connectPinnedTls(ip: string, hostname: string, port = 443)
   }
 }
 
-/** Construit la requête HTTP/1.1. Aucun secret n'y est jamais placé. */
-export function buildRequest(hostname: string, path: string, accept: string): string {
+/**
+ * En-têtes qu'un appelant peut faire passer par la sortie épinglée.
+ *
+ * ## Pourquoi une liste, et pas « tous »
+ *
+ * `buildRequest` écrit le message HTTP/1.1 à la main. Un nom d'en-tête non
+ * maîtrisé (ou une valeur contenant un saut de ligne) permettrait d'injecter
+ * des lignes supplémentaires dans ce message. La liste garantit que seuls des
+ * en-têtes choisis, et contrôlés, peuvent en sortir.
+ *
+ * ## Pourquoi elle s'est élargie
+ *
+ * Elle ne contenait que `authorization`, ce qui suffisait à PrestaShop et à
+ * Chariow. Un connecteur générique doit pouvoir s'authentifier comme les API
+ * réelles le demandent : `X-Api-Key`, `X-Shopify-Access-Token`… Ces noms sont
+ * exactement ceux de la politique côté application
+ * (`ALLOWED_AUTH_HEADERS` dans `custom-api-guard.ts`), et ce n'est pas une
+ * coïncidence : les deux listes doivent rester alignées. Un test le vérifie.
+ *
+ * ## Ce qui reste interdit
+ *
+ * `host`, `content-length`, `transfer-encoding`, `connection`… ne sont pas
+ * dans la liste, et `buildRequest` les écrit lui-même à partir de valeurs
+ * calculées. Aucun appelant ne peut les influencer.
+ */
+const EN_TETES_TRANSMIS = [
+  'authorization',
+  'x-api-key',
+  'api-key',
+  'apikey',
+  'x-auth-token',
+  'x-shopify-access-token',
+  'x-restli-protocol-version',
+  /*
+   * En-têtes du protocole MCP (client sortant). Ajoutés un par un, jamais par
+   * préfixe : `mcp-*` en joker laisserait passer `mcp-session-id` sur un hôte
+   * tiers, et une session volée suffit à reprendre une conversation.
+   *
+   * `content-type` est indispensable pour un `POST` JSON-RPC ; il est vérifié
+   * séparément dans `buildRequest`, qui n'accepte que `application/json`.
+   */
+  'content-type',
+  'accept',
+  'mcp-session-id',
+  'mcp-protocol-version',
+  'last-event-id',
+] as const;
+
+/** En-têtes qu'un appelant peut faire passer par la sortie épinglée. */
+export const EN_TETES_TRANSMIS_EXPORTES: readonly string[] = EN_TETES_TRANSMIS;
+
+export function buildRequest(
+  hostname: string,
+  path: string,
+  accept: string,
+  extraHeaders: Record<string, string> = {},
+  /** Méthode HTTP. `GET` par défaut : le comportement d'origine ne change pas. */
+  methode: 'GET' | 'POST' = 'GET',
+  /** Corps éventuel (JSON-RPC). Jamais transmis pour un `GET`. */
+  corps?: string,
+): string {
   // Le chemin ne peut pas contenir d'espace ni de retour à la ligne : une URL
   // parsée par `URL` encode déjà ces caractères, et on refuse le reste.
   if (/[\r\n]/.test(path)) throw new PinnedFetchFailure('protocol_error', 'Chemin de requête invalide.');
+  // Les en-têtes supplémentaires viennent de l'appelant (clé d'API d'une
+  // boutique). Deux règles : liste blanche stricte, et aucune valeur ne peut
+  // contenir un saut de ligne — c'est ce qui empêche une clé de sortir du
+  // message HTTP en injectant des en-têtes supplémentaires.
+  const lignes: string[] = [];
+  // On parcourt les en-têtes REÇUS et on les filtre, plutôt que de parcourir la
+  // liste blanche : un appelant peut ainsi n'envoyer qu'un sous-ensemble, et
+  // l'ordre qu'il choisit est conservé (certaines API y sont sensibles).
+  for (const [nomBrut, valeur] of Object.entries(extraHeaders)) {
+    const nom = nomBrut.toLowerCase();
+    if (!(EN_TETES_TRANSMIS as readonly string[]).includes(nom)) continue;
+    if (typeof valeur !== 'string' || valeur.length === 0) continue;
+    // Une valeur contenant un saut de ligne sortirait du message HTTP et
+    // ajouterait des en-têtes arbitraires. C'est LE contrôle qui empêche une
+    // clé de se transformer en injection.
+    if (/[\r\n]/.test(valeur)) throw new PinnedFetchFailure('protocol_error', 'En-tête de requête invalide.');
+    // Casse canonique : « Authorization », « X-Api-Key »… Un nom d'en-tête est
+    // insensible à la casse, mais un serveur strict peut comparer la chaîne.
+    const nomCanonique = nom === 'authorization'
+      ? 'Authorization'
+      : nom.split('-').map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('-');
+    lignes.push(`${nomCanonique}: ${valeur}`);
+  }
+
+  /*
+   * `content-type` est le seul en-tête dont la VALEUR est contrôlée : un
+   * serveur MCP reçoit du JSON-RPC, jamais du formulaire ni du multipart. La
+   * laisser libre permettrait de faire passer une requête d'un autre type à
+   * travers notre sortie épinglée.
+   */
+  const indexType = lignes.findIndex((l) => l.toLowerCase().startsWith('content-type:'));
+  if (indexType !== -1) {
+    const valeur = lignes[indexType].slice(lignes[indexType].indexOf(':') + 1).trim();
+    if (!/^application\/json(;\s*charset=utf-8)?$/i.test(valeur)) {
+      throw new PinnedFetchFailure('protocol_error', 'Type de contenu non autorisé en sortie.');
+    }
+  }
+
+  const methodeFinale: 'GET' | 'POST' = methode === 'POST' ? 'POST' : 'GET';
+  const corpsFinal = methodeFinale === 'POST' ? (corps ?? '') : '';
+
+  if (methodeFinale === 'POST') {
+    // Un corps sans `content-length` est refusé par la plupart des serveurs, et
+    // un `transfer-encoding: chunked` demanderait une réécriture du socket.
+    // On n'accepte donc que le mode simple, avec la longueur en OCTETS (pas en
+    // caractères : un accent UTF-8 fait deux octets).
+    if (!lignes.some((l) => l.toLowerCase().startsWith('content-type:'))) {
+      lignes.push('Content-Type: application/json');
+    }
+    lignes.push(`Content-Length: ${new TextEncoder().encode(corpsFinal).byteLength}`);
+  }
+
   return [
-    `GET ${path || '/'} HTTP/1.1`,
+    `${methodeFinale} ${path || '/'} HTTP/1.1`,
     `Host: ${hostname}`,
     'User-Agent: VYORA-CatalogImporter/1.0 (+https://vyora.app)',
     `Accept: ${accept}`,
     'Accept-Language: fr,en;q=0.8',
     'Accept-Encoding: identity',
+    ...lignes,
     'Connection: close',
     '',
-    '',
+    corpsFinal,
   ].join('\r\n');
 }
 
@@ -269,6 +381,11 @@ export async function httpGetPinned(
     timeoutMs?: number;
     /** Injectable pour les tests : remplace la connexion TLS réelle. */
     connect?: (ip: string, hostname: string) => Promise<PinnedSocket>;
+    /** En-têtes transmis à la boutique (liste blanche : `authorization`). */
+    headers?: Record<string, string>;
+    /* `post` explicite : la valeur par défaut reste `get`. */
+    method?: 'get' | 'post';
+    body?: string;
   },
 ): Promise<PinnedResponse> {
   const timeoutMs = options.timeoutMs ?? PINNED_TIMEOUT_MS;
@@ -288,7 +405,16 @@ export async function httpGetPinned(
     };
     controller.signal.addEventListener('abort', abandon, { once: true });
 
-    await socket.write(new TextEncoder().encode(buildRequest(target.hostname, target.path, options.accept)));
+    await socket.write(new TextEncoder().encode(
+      buildRequest(
+        target.hostname,
+        target.path,
+        options.accept,
+        options.headers,
+        options.method === 'post' ? 'POST' : 'GET',
+        options.body,
+      ),
+    ));
     // Plafond de lecture majoré : en-têtes + corps chunked (qui ajoute des
     // métadonnées) restent sous maxBytes + MAX_HEADER_BYTES.
     const brut = await readBounded(socket, options.maxBytes + MAX_HEADER_BYTES);

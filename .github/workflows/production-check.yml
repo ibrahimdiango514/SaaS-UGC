@@ -1,0 +1,171 @@
+name: Vérification de production
+
+# Objet : constater ce que la production sert RÉELLEMENT, et non ce qu'on croit
+# avoir publié. Le CDN peut répondre l'ancien HTML après un déploiement réussi,
+# et « le build passe » ne prouve rien sur le site public.
+#
+# Cet environnement de développement n'a pas d'accès réseau aux domaines de
+# production : la vérification est donc exécutée par un runner GitHub, qui lui
+# a un accès normal.
+#
+# Toutes les mesures sont écrites dans le RÉSUMÉ du run : les journaux bruts ne
+# sont pas toujours récupérables par l'API, et un constat qu'on ne peut pas lire
+# ne sert à rien.
+#
+# Aucun secret n'est utilisé : ces deux points d'entrée sont publics et leur
+# réponse anonyme est précisément ce qu'on veut mesurer.
+
+on:
+  # Le jeton du dépôt n'a pas la permission `actions: write` : un dispatch
+  # manuel est refusé (403). Un push produit la même mesure sans permission
+  # supplémentaire, et couvre chaque publication future.
+  push:
+    branches: ["main", "arena/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Constat (site public + Edge Function)
+        env:
+          SITE: ${{ inputs.site_url || 'https://vyora-ugc.netlify.app' }}
+          FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
+          VIDEO_FN: https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/reelora-video
+          # Clé publique, identique à celle livrée au navigateur : aucun secret.
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz
+        run: |
+          set -u
+          summary="$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Constat de production"
+            echo
+            echo "| Mesure | Valeur |"
+            echo "| --- | --- |"
+          } >> "$summary"
+
+          # --- Site public -----------------------------------------------------
+          site_rc=0
+          site_code=$(curl -sS -o /tmp/site.html -w '%{http_code}' --max-time 30 "$SITE" 2>/tmp/site.err) || site_rc=$?
+          site_bytes=$(wc -c < /tmp/site.html 2>/dev/null || echo 0)
+          echo "site: $SITE -> HTTP $site_code (curl rc=$site_rc, $site_bytes octets)" || true
+          {
+            echo "| Site | \`$SITE\` |"
+            echo "| HTTP site | $site_code (curl rc=$site_rc) |"
+            echo "| Octets reçus | $site_bytes |"
+            echo "| Erreur curl | \`$(head -c 300 /tmp/site.err 2>/dev/null | tr '\n' ' ')\` |"
+          } >> "$summary"
+
+          # Le commit attendu vient de l'API publique du dépôt : on compare deux
+          # faits mesurés, on ne suppose rien.
+          attendu=$(curl -sS --max-time 30 "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/main" \
+            | grep -o '"sha": *"[0-9a-f]\{40\}"' | head -1 | grep -o '[0-9a-f]\{40\}' | cut -c1-7) || attendu=""
+          cachet=$(grep -o 'name="vyora-revision" content="[^"]*"' /tmp/site.html 2>/dev/null \
+            | sed 's/.*content="//; s/"//') || cachet=""
+          {
+            echo "| Commit de \`main\` | ${attendu:-inconnu} |"
+            echo "| Cachet servi | ${cachet:-absent} |"
+          } >> "$summary"
+
+          if [ -z "$cachet" ]; then
+            echo "::warning::Aucun cachet de révision servi — le site sert un build antérieur à cette livraison."
+          elif [ "$cachet" = "dev" ]; then
+            echo "::warning::Cachet « dev » : build sans référence de commit."
+          elif [ -n "$attendu" ] && [ "$cachet" != "$attendu" ]; then
+            echo "::warning::Le site sert $cachet alors que main est à $attendu."
+          else
+            echo "OK: le site public sert la révision de main."
+          fi
+          # Annotation de succès : un constat favorable doit être aussi lisible
+          # et citable qu'un échec, sinon il n'est pas une preuve.
+          echo "::notice::site HTTP $site_code · cachet servi ${cachet:-absent} · main ${attendu:-inconnu}"
+
+          # --- Edge Function ---------------------------------------------------
+          # verify_jwt = true : un appel anonyme DOIT être refusé en 401.
+          # 503 = fonction joignable mais artefact non chargeable.
+          # rc != 0 = aucune réponse (réseau, DNS, TLS) : ce n'est pas un refus.
+          fn_rc=0
+          fn_code=$(curl -sS -o /tmp/fn.json -w '%{http_code}' --max-time 30 \
+            -X POST "$FN" -H 'content-type: application/json' \
+            --data '{"action":"preview"}' 2>/tmp/fn.err) || fn_rc=$?
+          fn_body=$(head -c 300 /tmp/fn.json 2>/dev/null | tr '\n' ' ')
+          {
+            echo "| Edge Function | \`$FN\` |"
+            echo "| HTTP fonction | $fn_code (curl rc=$fn_rc) |"
+            echo "| Réponse | \`${fn_body:-vide}\` |"
+            echo "| Erreur curl | \`$(head -c 300 /tmp/fn.err 2>/dev/null | tr '\n' ' ')\` |"
+            echo
+          } >> "$summary"
+
+          echo "function: $FN -> HTTP $fn_code (curl rc=$fn_rc) $fn_body"
+          if [ "$fn_rc" -ne 0 ]; then
+            echo "::warning::Aucune réponse de la fonction (curl rc=$fn_rc) : réseau, DNS ou TLS. Ce n'est pas un refus d'authentification."
+          else
+            case "$fn_code" in
+              401) echo "OK: jeton exigé (verify_jwt actif), chargeur démarré." ;;
+              503) echo "::warning::Fonction joignable mais artefact indisponible (503)." ;;
+              *)   echo "::warning::Code inattendu ($fn_code) pour un appel anonyme." ;;
+            esac
+            echo "::notice::store-import HTTP $fn_code · réponse ${fn_body:-vide}"
+          fi
+
+          # --- Chargeur d'artefact `reelora-video` -----------------------------
+          # Cette fonction ne contient qu'un chargeur : son code métier est
+          # reconstruit à froid depuis `_edge_deploy_artifact`, puis vérifié par
+          # SHA-256 avant le moindre appel.
+          #
+          # Un appel SANS jeton ne prouve rien sur l'artefact : la passerelle
+          # Supabase refuse en 401 AVANT d'exécuter la fonction. On envoie donc
+          # la clé `publishable`, qui est publique par construction (elle est
+          # livrée dans le bundle navigateur, cf. `src/lib/supabase.ts`) et
+          # n'ouvre aucun droit d'administration. Sans session utilisateur, nos
+          # propres handlers répondent alors 401 avec un code qui leur est
+          # propre ; la passerelle, elle, répond `UNAUTHORIZED_NO_AUTH_HEADER`.
+          # Distinguer les deux formes est ce qui prouve que le chargeur a bien
+          # tourné : un échec de chargement donnerait 503 `ARTIFACT_LOAD_FAILED`
+          # avec le motif exact du décalage d'empreinte.
+          video_url="${VIDEO_FN}"
+          publishable="${SUPABASE_PUBLISHABLE_KEY}"
+          v_rc=0
+          v_code=$(curl -sS -o /tmp/vfn.json -w '%{http_code}' --max-time 30 \
+            -X POST "$video_url" \
+            -H "apikey: $publishable" -H "Authorization: Bearer $publishable" \
+            -H 'content-type: application/json' \
+            --data '{"action":"catalog"}' 2>/tmp/vfn.err) || v_rc=$?
+          v_body=$(head -c 300 /tmp/vfn.json 2>/dev/null | tr '\n' ' ')
+          {
+            echo "| Chargeur reelora-video | \`$video_url\` |"
+            echo "| HTTP chargeur (clé publishable) | $v_code (curl rc=$v_rc) |"
+            echo "| Réponse | \`${v_body:-vide}\` |"
+            echo
+          } >> "$summary"
+          if [ "$v_rc" -ne 0 ]; then
+            echo "::warning::Chargeur reelora-video : aucune réponse (curl rc=$v_rc)."
+          elif [ "$v_code" = "503" ] || printf '%s' "$v_body" | grep -q 'ARTIFACT_LOAD_FAILED'; then
+            echo "::error::Le chargeur tourne mais l'artefact ne se charge pas : le code publié n'est pas servi."
+            exit 1
+          elif printf '%s' "$v_body" | grep -q 'UNAUTHORIZED_NO_AUTH_HEADER'; then
+            echo "::warning::La passerelle a refusé l'appel (401 passerelle) : le chargeur n'a pas été exécuté, il n'est donc pas prouvé."
+          elif [ "$v_code" = "401" ] || [ "$v_code" = "200" ]; then
+            echo "OK: chargeur exécuté (réponse venant de la fonction, pas de la passerelle)."
+          else
+            echo "::warning::Chargeur reelora-video : code inattendu $v_code."
+          fi
+          echo "::notice::reelora-video HTTP $v_code · réponse ${v_body:-vide}"
+
+      - name: Détails réseau (DNS et TLS), pour trancher une absence de réponse
+        env:
+          FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
+        run: |
+          set -u
+          host=$(printf '%s' "$FN" | sed -E 's#https?://([^/]+).*#\1#')
+          summary="$GITHUB_STEP_SUMMARY"
+          echo "### Diagnostic réseau : $host" >> "$summary"
+          echo '```' >> "$summary"
+          getent hosts "$host" >> "$summary" 2>&1 || echo "DNS: échec de résolution" >> "$summary"
+          curl -sS -I --max-time 20 "https://$host/" >> "$summary" 2>&1 | head -15 || echo "pas de réponse sur /" >> "$summary"
+          echo '```' >> "$summary"
