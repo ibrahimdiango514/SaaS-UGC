@@ -218,15 +218,37 @@ export function MetaConnectPanel({ product, workspaceId, onChanged, onConnected 
   };
 
   /**
-   * Écoute `message` du SDK : Meta pousse `WA_EMBEDDED_SIGNUP` avec le WABA et
-   * le numéro. On ne fait que mémoriser ces identifiants ; ils ne sont crus
-   * qu'après vérification serveur.
+   * Écoute `message` du SDK : Meta pousse `WA_EMBEDDED_SIGNUP` avec le compte
+   * WhatsApp et le numéro. On ne fait que mémoriser ces identifiants ; ils ne
+   * sont crus qu'après vérification serveur.
+   *
+   * ## Deux formes à accepter, pas une
+   *
+   * Depuis Embedded Signup **v5**, l'objet de session ne contient plus
+   * `waba_id` : il expose `messaging_account_ids` (un TABLEAU) et
+   * `is_on_biz_app`. En v4 et avant, c'était un `waba_id` scalaire. Un
+   * écouteur qui ne lit que `waba_id` reçoit donc une chaîne vide en v5 et le
+   * parcours échoue à tous les coups, avec « Meta n'a pas transmis le compte
+   * WhatsApp Business ».
+   *
+   * On accepte les deux formes. Le serveur revalide de toute façon que le
+   * jeton voit bien ce compte et ce numéro : accepter deux écritures ne
+   * relâche aucun contrôle.
    */
   useEffect(() => {
     if (product !== 'whatsapp') return undefined;
     const ecoute = (event: MessageEvent) => {
       if (!/facebook\.com$/.test(new URL(event.origin).hostname || '')) return;
-      let donnees: { type?: string; event?: string; data?: { waba_id?: string; phone_number_id?: string } } | null = null;
+      let donnees: {
+        type?: string;
+        event?: string;
+        data?: {
+          waba_id?: string;
+          messaging_account_ids?: string[];
+          is_on_biz_app?: boolean;
+          phone_number_id?: string;
+        };
+      } | null = null;
       try {
         donnees = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
       } catch {
@@ -234,9 +256,14 @@ export function MetaConnectPanel({ product, workspaceId, onChanged, onConnected 
       }
       if (donnees?.type !== 'WA_EMBEDDED_SIGNUP') return;
       if (donnees.event === 'FINISH' || donnees.event === 'FINISH_ONLY_WABA' || donnees.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING') {
+        // v5 d'abord (tableau), v4 et antérieurs ensuite (scalaire).
+        const idsV5 = Array.isArray(donnees.data?.messaging_account_ids)
+          ? donnees.data?.messaging_account_ids.filter((v) => typeof v === 'string' && v.length > 0)
+          : [];
+        const waba = idsV5[0] ?? (typeof donnees.data?.waba_id === 'string' ? donnees.data.waba_id : '');
         contexte.current = {
           state: contexte.current?.state ?? '',
-          wabaId: String(donnees.data?.waba_id ?? ''),
+          wabaId: waba,
           phoneNumberId: String(donnees.data?.phone_number_id ?? ''),
         };
       }

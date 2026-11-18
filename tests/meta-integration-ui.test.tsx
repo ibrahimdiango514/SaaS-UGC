@@ -308,3 +308,100 @@ describe('retour du parcours Meta', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
+
+/**
+ * Parcours Embedded Signup — forme du message de session.
+ *
+ * ## Pourquoi ces tests existent
+ *
+ * Le listener `WA_EMBEDDED_SIGNUP` lisait uniquement `data.waba_id`. Or depuis
+ * Embedded Signup **v5** (celui que le code demande explicitement via
+ * `extras.version`), Meta n'envoie plus `waba_id` : il envoie
+ * `messaging_account_ids`, un TABLEAU. Résultat : `wabaId` restait vide, et la
+ * connexion WhatsApp échouait systématiquement avec « Meta n'a pas transmis le
+ * compte WhatsApp Business » — un message qui accuse l'utilisateur d'un défaut
+ * du code.
+ *
+ * Aucun test ne couvrait ce chemin, donc rien ne l'a signalé. Ces tests le
+ * couvrent maintenant, dans les deux formes.
+ */
+describe('Embedded Signup — lecture du message de session (v5 et v4)', () => {
+  const montrerFicheWhatsApp = async () => {
+    // Connexion WhatsApp configurée mais pas encore connectée : le bouton est actif.
+    metaMocks.status.mockResolvedValue({
+      configured: true,
+      configIds: { whatsapp: true, facebook: false, messenger: false, instagram: false },
+      connections: [],
+    });
+    monter();
+    return ouvrirFiche('whatsapp', /Fiche WhatsApp Business/);
+  };
+
+  const lancerEtRecevoir = async (charge: unknown) => {
+    // Le SDK est simulé : `FB.login` appelle le callback avec un code, et on
+    // émet le message de session que Meta posterait.
+    const fini = vi.fn(async () => ({ connected: true, connections: [connexionWhatsApp] }));
+    const api = await import('../src/integrations/meta/api');
+    (api as unknown as { finishEmbeddedSignup: unknown }).finishEmbeddedSignup = fini;
+
+    metaMocks.start.mockResolvedValue({
+      mode: 'embedded-signup',
+      appId: '1692282959171281',
+      configId: '1234567890',
+      state: 's'.repeat(43),
+      graphVersion: 'v26.0',
+      embeddedSignupVersion: 'v5',
+      scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+    });
+
+    (window as unknown as { FB: unknown }).FB = {
+      init: vi.fn(),
+      login: (cb: (r: unknown) => void) => {
+        // Le message de session arrive AVANT le callback du SDK.
+        window.dispatchEvent(new MessageEvent('message', {
+          origin: 'https://www.facebook.com',
+          data: JSON.stringify(charge),
+        }));
+        cb({ authResponse: { code: 'code-abc' } });
+      },
+    };
+
+    const fiche = await montrerFicheWhatsApp();
+    await waitFor(() => expect(within(fiche).getByTestId('meta-panel-whatsapp')).toBeTruthy());
+    fireEvent.click(await within(fiche).findByRole('button', { name: /Connecter WhatsApp/i }));
+    await waitFor(() => expect(fini).toHaveBeenCalled());
+    return fini;
+  };
+
+  it('accepte la forme v5 (messaging_account_ids)', async () => {
+    const fini = await lancerEtRecevoir({
+      type: 'WA_EMBEDDED_SIGNUP',
+      event: 'FINISH',
+      data: {
+        phone_number_id: '106540352242922',
+        is_on_biz_app: false,
+        messaging_account_ids: ['102290129340398'],
+        primary_waac_ids: [],
+      },
+    });
+    expect(fini).toHaveBeenCalledWith(
+      WORKSPACE,
+      expect.objectContaining({
+        wabaId: '102290129340398',
+        phoneNumberId: '106540352242922',
+      }),
+    );
+  });
+
+  it('accepte encore la forme v4 (waba_id scalaire)', async () => {
+    const fini = await lancerEtRecevoir({
+      type: 'WA_EMBEDDED_SIGNUP',
+      event: 'FINISH',
+      data: { waba_id: '102290129340398', phone_number_id: '106540352242922' },
+    });
+    expect(fini).toHaveBeenCalledWith(
+      WORKSPACE,
+      expect.objectContaining({ wabaId: '102290129340398' }),
+    );
+  });
+});
