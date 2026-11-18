@@ -6,16 +6,16 @@
 // toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
 // JAMAIS exécuté.
 //
-// Épinglé sur mcp-client.js (68979 caractères).
+// Épinglé sur mcp-client.js (72698 caractères).
 //
 // Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "467598436eb20df71243348a776785e36cae7228";
+const COMMIT = "7763f4ba1ba821df1507c5644d325b461f9a7a99";
 const PATH = "supabase/functions/_artifacts/mcp-client.js";
-const ARTIFACT_SHA256 = "c4c830a762fee42ded88b7bee3527e8b693180176bf0f8a29e8f3f93b6397520";
-const ARTIFACT_CHARS = 68979;
+const ARTIFACT_SHA256 = "73506e7b962d216bc946fba8bc9028547a148ea2682b4681cf07d7149d16e4d3";
+const ARTIFACT_CHARS = 72698;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
 // porte sur le fichier tel qu'il est committé.
