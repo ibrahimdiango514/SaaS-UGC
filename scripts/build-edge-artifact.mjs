@@ -75,6 +75,29 @@ export const FUNCTIONS = {
     artifact: 'supabase/functions/_artifacts/mcp-client.js',
     usesPostgres: true,
   },
+  // Connexion des comptes Meta (Facebook Page, WhatsApp Business, Messenger,
+  // Instagram). `index.ts` importe trois modules situés HORS de
+  // `supabase/functions/` : `./handler.ts` (local), et surtout
+  // `../../../src/business/meta/*.ts` + `../../../src/lib/origin-allowlist.ts`.
+  // Un déploiement de la source seule ne transporte pas ces fichiers : le
+  // gestionnaire échouerait au démarrage. D'où le bundle, comme pour
+  // `store-connect`. `index.ts` n'exporte rien et appelle `runtime.serve` en fin
+  // de module : il est donc exécutable par `new Function`.
+  'meta-connect': {
+    entry: 'supabase/functions/meta-connect/index.ts',
+    loader: 'supabase/functions/meta-connect/loader.ts',
+    artifact: 'supabase/functions/_artifacts/meta-connect.js',
+    usesPostgres: true,
+  },
+  // Réception des notifications Meta (vérification GET + POST signés HMAC).
+  // Même besoin d'import hors `supabase/functions/`, même remède. Cette fonction
+  // ÉCRIT en base (événements, messages, statuts) : `usesPostgres` est vrai.
+  'meta-webhook': {
+    entry: 'supabase/functions/meta-webhook/index.ts',
+    loader: 'supabase/functions/meta-webhook/loader.ts',
+    artifact: 'supabase/functions/_artifacts/meta-webhook.js',
+    usesPostgres: true,
+  },
 };
 
 // esbuild peut placer l'import en fin de ligne, après d'autres instructions :

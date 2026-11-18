@@ -4,6 +4,7 @@ import {
   parseWebhook,
   timingSafeEqual,
   verificationChallenge,
+  verificationDiagnostic,
   verifySignature,
   type NormalizedEvent,
 } from '../src/business/meta/webhook';
@@ -357,5 +358,54 @@ describe('parseWebhook — normalisation', () => {
     expect(parseWebhook({ object: 'inconnu', entry: [] })).toEqual([]);
     const inconnu = parseWebhook({ object: 'page', entry: [{ id: 'P', changes: [{ field: 'inconnu', value: {} }] }] });
     expect(inconnu[0].kind).toBe('unknown');
+  });
+});
+
+
+/**
+ * Diagnostic de poignée de main.
+ *
+ * Meta n'affiche qu'un message générique quand l'abonnement webhook échoue.
+ * Ces tests garantissent que le serveur distingue les causes SANS jamais
+ * renvoyer ni journaliser la valeur attendue du jeton.
+ */
+describe('meta-webhook — diagnostic de la poignée de main', () => {
+  it('distingue les quatre causes de refus, sans révéler le jeton attendu', () => {
+    const attendu = 'jeton-secret-attendu-123456';
+    const params = (mode: string | null, token: string | null, challenge: string | null) => {
+      const p = new URLSearchParams();
+      if (mode !== null) p.set('hub.mode', mode);
+      if (token !== null) p.set('hub.verify_token', token);
+      if (challenge !== null) p.set('hub.challenge', challenge);
+      return p;
+    };
+    expect(verificationDiagnostic(params('subscribe', attendu, '42'), attendu)).toBe('OK');
+    expect(verificationDiagnostic(params('subscribe', attendu, '42'), '')).toBe('TOKEN_NOT_CONFIGURED');
+    expect(verificationDiagnostic(params('unsubscribe', attendu, '42'), attendu)).toBe('MODE_INVALID');
+    expect(verificationDiagnostic(params('subscribe', attendu, null), attendu)).toBe('CHALLENGE_MISSING');
+    expect(verificationDiagnostic(params('subscribe', 'mauvais', '42'), attendu)).toBe('TOKEN_MISMATCH');
+
+    // Aucun diagnostic ne contient la valeur du jeton : on ne renvoie qu'un code.
+    for (const motif of ['TOKEN_NOT_CONFIGURED', 'MODE_INVALID', 'CHALLENGE_MISSING', 'TOKEN_MISMATCH']) {
+      expect(motif).not.toContain(attendu);
+    }
+  });
+
+  it('une requête GET refusée répond 403 avec le motif, jamais le jeton', async () => {
+    const deps = depsAvec({ verifyToken: 'attendu-abcdef' });
+    const url = 'https://exemple.test/meta-webhook?hub.mode=subscribe&hub.verify_token=faux&hub.challenge=99';
+    const reponse = await handleMetaWebhook(new Request(url, { method: 'GET' }), deps);
+    expect(reponse.status).toBe(403);
+    const texte = await reponse.text();
+    expect(texte).toContain('TOKEN_MISMATCH');
+    expect(texte).not.toContain('attendu-abcdef');
+  });
+
+  it('sans jeton configuré, la réponse est 503 et le dit', async () => {
+    const deps = depsAvec({ verifyToken: '' });
+    const url = 'https://exemple.test/meta-webhook?hub.mode=subscribe&hub.verify_token=x&hub.challenge=99';
+    const reponse = await handleMetaWebhook(new Request(url, { method: 'GET' }), deps);
+    expect(reponse.status).toBe(503);
+    expect(await reponse.text()).toContain('TOKEN_NOT_CONFIGURED');
   });
 });

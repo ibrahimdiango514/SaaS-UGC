@@ -151,6 +151,29 @@ export function verificationChallenge(
   return { ok: true, challenge };
 }
 
+/**
+ * Diagnostic de la poignée de main d'abonnement.
+ *
+ * Meta ne montre à l'utilisateur qu'un message générique (« URL couldn't be
+ * validated ») : sans cette distinction, un secret absent et un jeton erroné
+ * sont indiscernables depuis la console. La valeur SECRÈTE n'est jamais
+ * renvoyée — seulement un code et un booléen.
+ */
+export type VerificationDiagnostic =
+  | 'OK'
+  | 'TOKEN_NOT_CONFIGURED'
+  | 'MODE_INVALID'
+  | 'CHALLENGE_MISSING'
+  | 'TOKEN_MISMATCH';
+
+export function verificationDiagnostic(query: URLSearchParams, verifyToken: string): VerificationDiagnostic {
+  if (!verifyToken) return 'TOKEN_NOT_CONFIGURED';
+  if (query.get('hub.mode') !== 'subscribe') return 'MODE_INVALID';
+  if (!(query.get('hub.challenge') ?? '')) return 'CHALLENGE_MISSING';
+  if (!timingSafeEqual(query.get('hub.verify_token') ?? '', verifyToken)) return 'TOKEN_MISMATCH';
+  return 'OK';
+}
+
 function dateFromUnix(value: unknown): Date {
   const n = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
   if (!Number.isFinite(n)) return new Date();

@@ -29,6 +29,7 @@
 import {
   parseWebhook,
   verificationChallenge,
+  verificationDiagnostic,
   verifySignature,
   type NormalizedEvent,
 } from '../../../src/business/meta/webhook.ts';
@@ -165,11 +166,21 @@ export async function handleMetaWebhook(
   const url = new URL(request.url);
 
   if (request.method === 'GET') {
+    /*
+     * Diagnostic sans valeur secrète : Meta n'affiche qu'un message générique
+     * quand la poignée de main échoue (« URL couldn't be validated »), ce qui
+     * rend « jeton absent » et « jeton différent » indiscernables depuis la
+     * console Meta. Le motif renvoyé est un CODE, jamais le jeton attendu.
+     */
     if (!deps.verifyToken) {
-      return new Response('webhook non configuré', { status: 503 });
+      deps.log?.('meta-webhook: vérification refusée', { reason: 'TOKEN_NOT_CONFIGURED' });
+      return new Response('webhook non configuré (TOKEN_NOT_CONFIGURED)', { status: 503 });
     }
     const verification = verificationChallenge(url.searchParams, deps.verifyToken);
-    if (!verification.ok) return new Response('forbidden', { status: 403 });
+    if (!verification.ok) {
+      deps.log?.('meta-webhook: vérification refusée', { reason: verificationDiagnostic(url.searchParams, deps.verifyToken) });
+      return new Response(`vérification refusée (${verificationDiagnostic(url.searchParams, deps.verifyToken)})`, { status: 403 });
+    }
     return new Response(verification.challenge, { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } });
   }
 
