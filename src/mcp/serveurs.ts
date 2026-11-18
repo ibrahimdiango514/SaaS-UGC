@@ -20,7 +20,7 @@
  * base. Ce module ne fait qu'afficher et demander ; il ne peut pas élargir une
  * autorisation, et une permission accordée ici ne suffit jamais à elle seule.
  */
-import { supabase } from '../lib/supabase';
+import { supabase, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '../lib/supabase';
 
 /** Réponse d'erreur des routes de gestion, telle que le serveur la produit. */
 export class ErreurGestion extends Error {
@@ -115,10 +115,16 @@ export interface ResultatTest {
   codes?: string[];
 }
 
-/** Base des routes de gestion : `/functions/v1/mcp-client/gestion`. */
-function urlGestion(route: string): string {
-  const base = (import.meta.env.VITE_SUPABASE_URL as string | undefined);
-  return `${base ?? ''}/functions/v1/mcp-client/gestion/${route}`;
+/**
+ * Base des routes de gestion : `<projet Supabase>/functions/v1/mcp-client/gestion`.
+ *
+ * `SUPABASE_URL` porte le repli public du projet : sans lui, un build où
+ * `VITE_SUPABASE_URL` manque produisait une URL *relative*, servie par
+ * l'hébergeur du front (page HTML 200, pas de JSON) — la liste paraissait
+ * vide et la création « réussissait » sans que le backend soit jamais appelé.
+ */
+export function urlGestion(route: string): string {
+  return `${SUPABASE_URL}/functions/v1/mcp-client/gestion/${route}`;
 }
 
 /**
@@ -143,8 +149,7 @@ async function appeler<T>(route: string, corps: unknown): Promise<T> {
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${jeton}`,
-        apikey: (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)
-          ?? 'sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz',
+        apikey: SUPABASE_PUBLISHABLE_KEY,
       },
       body: JSON.stringify(corps ?? {}),
     });

@@ -12,10 +12,10 @@
  * ou à la rotation, et l'appelant doit l'afficher puis l'oublier. Aucun
  * `localStorage`, aucun état global, aucun journal.
  */
-import { supabase } from '../lib/supabase';
+import { supabase, SUPABASE_URL } from '../lib/supabase';
 
-/** URL publique du serveur MCP, servie par la fonction Edge déployée. */
-export const MCP_SERVER_URL = `${import.meta.env.VITE_SUPABASE_URL ?? ''}/functions/v1/vyora-mcp`;
+/** URL publique du serveur MCP, servie par la fonction Edge déployée (repli public inclus). */
+export const MCP_SERVER_URL = `${SUPABASE_URL}/functions/v1/vyora-mcp`;
 
 /** Type de client, utilisé pour l'affichage et les instructions d'installation. */
 export type TypeClient = 'claude' | 'cursor' | 'vscode' | 'generic' | 'autre';
