@@ -51,8 +51,11 @@ par des variables d'environnement ou des réglages de la console.
    | Functions directory | *(aucune ; les Edge Functions Netlify sont dans `netlify/edge-functions`, déclarées par `netlify.toml`)* |
    | Node | `22` (`NODE_VERSION` dans `netlify.toml`) |
 
-3. **Avant le premier déploiement**, renseigner les variables d'environnement (§3). Sans
-   `VYORA_BUILD_ENABLED=true`, le premier build est annulé par la garde : c'est voulu.
+3. **Avant le premier déploiement**, renseigner les variables d'environnement (§3). Netlify lance
+   un premier build automatiquement à la fin de l'import : si les variables ne sont pas encore
+   saisies, ce build est annulé par la garde (aucun crédit consommé) — relancer ensuite par
+   *Deploys → Trigger deploy → Deploy site* (un déclenchement manuel n'évalue pas la garde) ou par
+   un push sur `main`.
 4. Désactiver les Deploy Previews et les branch deploys (*Site configuration → Build & deploy →
    Continuous deployment → Deploy contexts*) : la garde les annule de toute façon (`$BRANCH` ≠
    `main`), mais autant ne pas les déclencher.
@@ -73,6 +76,10 @@ Toutes sont **publiques** (compilées dans le bundle ou lues par le build). Aucu
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz` | Clé publiable (publique, livrée au navigateur). |
 | `VITE_SITE_URL` | `<NOUVELLE_URL_NETLIFY>` sans `/` final | Adresse de retour après connexion / lien magique. Si absente, le code se replie sur `window.location.origin` ; la renseigner évite toute ambiguïté. |
 
+Laisser la portée par défaut (*All scopes*, ou au minimum *Builds*) : la garde et Vite lisent ces
+variables pendant le build. `VITE_SUPABASE_URL` et `VITE_SUPABASE_PUBLISHABLE_KEY` ont les mêmes
+valeurs par défaut dans le code (`src/lib/supabase.ts`) : les renseigner rend la configuration
+explicite, leur absence ne casse pas le build.
 Facultatif : `NPM_FLAGS` et `NODE_VERSION` sont déjà dans `netlify.toml`.
 **Ne jamais** y mettre `SUPABASE_SERVICE_ROLE_KEY`, une clé `sb_secret_*`, ni un secret serveur.
 
@@ -89,19 +96,20 @@ l'ancien site sert encore des utilisateurs. Toute modification de secret redéma
 
 | Secret | Fonctions qui le lisent | Action |
 | --- | --- | --- |
-| `VYORA_ALLOWED_ORIGINS` | `store-connect`, `mcp-client`, (repli de `store-import`) | Ajouter `<NOUVELLE_URL_NETLIFY>` |
-| `STORE_IMPORT_ALLOWED_ORIGINS` | `store-import` | Ajouter `<NOUVELLE_URL_NETLIFY>` |
-| `BUSINESS_GROW_ALLOWED_ORIGINS` | `business-grow` | Ajouter `<NOUVELLE_URL_NETLIFY>` |
-| `VYORA_PAYMENTS_ALLOWED_ORIGINS` | `vyora-payments`, `vyora-payments-reconcile`, `vyora-saspay-webhook` | **Créer** (n'existe pas aujourd'hui) avec `<NOUVELLE_URL_NETLIFY>` exacte. La liste codée n'accepte que l'ancien domaine et ses aperçus ; aucun joker n'est admis car l'origine sert aussi à construire l'adresse de retour après paiement. |
+| `VYORA_ALLOWED_ORIGINS` | `store-connect` (v13), `mcp-client` (v13), `reelora-owner-bootstrap` (v9, page « Propriétaire ») | Ajouter `<NOUVELLE_URL_NETLIFY>`. Sans cela : `access-control-allow-origin: null` (boutiques, MCP) et `403 origin_not_allowed` (propriétaire). |
+| `STORE_IMPORT_ALLOWED_ORIGINS` | `store-import` (v22) — lit uniquement ce secret | Ajouter `<NOUVELLE_URL_NETLIFY>` |
+| `BUSINESS_GROW_ALLOWED_ORIGINS` | `business-grow` (v33) | Ajouter `<NOUVELLE_URL_NETLIFY>`. Sur Netlify, le navigateur passe d'abord par le relais `/api/business-grow` (serveur → serveur, sans origine) : Business Grow fonctionne même avant cet ajout ; le secret couvre le transport direct de repli (`403 ORIGIN_NOT_ALLOWED` sinon). |
+| `VYORA_PAYMENTS_ALLOWED_ORIGINS` | `vyora-payments`, `vyora-payments-reconcile`, `vyora-saspay-webhook` (bundle `vyora-saspay`) | **Créer** (n'existe pas aujourd'hui) avec `<NOUVELLE_URL_NETLIFY>` exacte. La liste codée n'accepte que l'ancien domaine et ses aperçus ; aucun joker n'est admis car l'origine sert aussi à construire l'adresse de retour après paiement. Sans cela : `403 ORIGIN_NOT_ALLOWED` à l'achat de crédits. |
 
 Valeur actuelle de `VYORA_ALLOWED_ORIGINS` = `STORE_IMPORT_ALLOWED_ORIGINS` (publique, mesurée) :
 `https://vyora-ugc.netlify.app,https://deploy-preview-*--vyora-ugc.netlify.app,https://vyora.pages.dev,https://*.vyora.pages.dev`
 → nouvelle valeur : la même + `,<NOUVELLE_URL_NETLIFY>`.
 
-Fonctions **sans** liste d'origines (répondent `*`, rien à faire) : `reelora-video`,
-`reelora-video-worker`, `reelora-ai`, `reelora-health`, `video-quote`, `vyora-ai`,
-`vyora-ai-providers`, `vyora-mcp`, `vyora-provider-health`, `vyora-oauth`, `vyora-bg-seed`,
-`reelora-owner-bootstrap`.
+Fonctions **sans** liste d'origines (répondent `*`, rien à faire ; vérifié dans la source de
+chaque fonction le 2026-11-18) : `reelora-video`, `reelora-video-worker`, `reelora-ai`,
+`reelora-health`, `video-quote`, `vyora-ai`, `vyora-ai-providers`, `vyora-mcp`,
+`vyora-provider-health`, `vyora-oauth` (source : branche `arena/vyora-mcp-connecteurs`, bundle
+`4a3f6206…`). `vyora-bg-seed` n'est pas appelée par le navigateur.
 
 Secrets serveur existants (28, inchangés, **noms seulement**) : `SUPABASE_*` (7, injectés),
 `MUAPI_API_KEY`, `BUSINESS_GROW_{GROQ,GEMINI}_API_KEY`, `BUSINESS_GROW_{GROQ,GEMINI}_MODEL`,
@@ -123,8 +131,9 @@ Console Supabase → *Authentication → URL Configuration*.
 | Redirect URLs (`uri_allow_list`) | ancien domaine, aperçus `deploy-preview-*--vyora-ugc.netlify.app`, `vyora.pages.dev`, `localhost` | **Ajouter** `<NOUVELLE_URL_NETLIFY>` et `<NOUVELLE_URL_NETLIFY>/**` ; conserver le reste pendant la transition |
 
 Attention : la mise à jour de la liste **remplace** la liste entière — recopier les entrées
-existantes puis ajouter la nouvelle. Le frontend envoie `emailRedirectTo` = `VITE_SITE_URL`
-(repli : origine courante) ; si la nouvelle URL n'est pas dans la liste, GoTrue redirige vers le
+existantes puis ajouter la nouvelle. Le frontend envoie `emailRedirectTo` =
+`VITE_SITE_URL/auth/callback` (inscription, mot de passe oublié) et
+`VITE_SITE_URL/proprietaire/confirmation` (premier administrateur) — repli : origine courante ; si la nouvelle URL n'est pas dans la liste, GoTrue redirige vers le
 `Site URL` et la connexion par lien échoue silencieusement.
 
 Fournisseurs OAuth tiers (Google, Facebook, etc.) : aucun n'est activé dans GoTrue aujourd'hui
@@ -162,7 +171,9 @@ Ne cocher que ce qui a été mesuré.
    → `401` JSON (jeton exigé), **pas** `404` ni `502`.
 5. CORS : `curl -si https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-connect -X POST -H "origin: <NOUVELLE_URL_NETLIFY>" -H "apikey: <clé publiable>" -H "authorization: Bearer <clé publiable>" -H 'content-type: application/json' -d '{"action":"status"}'`
    → `401` avec `access-control-allow-origin: <NOUVELLE_URL_NETLIFY>` (et non `null`).
-   Répéter pour `store-import`, `mcp-client`, `business-grow`, `vyora-payments`.
+   Répéter pour `store-import`, `mcp-client`, `business-grow`, `vyora-payments`, et en `GET`
+   pour `reelora-owner-bootstrap` (attendu : `200` avec `access-control-allow-origin` renseigné,
+   pas `403 origin_not_allowed`).
 6. Dans le navigateur : inscription / connexion → lien reçu pointe vers la nouvelle URL ; page
    *Intégrations* → état « non connectée » lisible (pas d'erreur réseau) ; *Business Grow* →
    réponse de l'assistant ; *Studio* → devis vidéo affiché.
@@ -176,7 +187,7 @@ Ne cocher que ce qui a été mesuré.
 | Où | Quoi | Bloquant ? |
 | --- | --- | --- |
 | Netlify | `VITE_SITE_URL`, `VYORA_BUILD_ENABLED=true` | Oui (build + redirections) |
-| Supabase secrets | `VYORA_ALLOWED_ORIGINS`, `STORE_IMPORT_ALLOWED_ORIGINS`, `BUSINESS_GROW_ALLOWED_ORIGINS` (ajouter), `VYORA_PAYMENTS_ALLOWED_ORIGINS` (créer) | Oui (CORS : boutiques, import, MCP, Business Grow, paiements) |
+| Supabase secrets | `VYORA_ALLOWED_ORIGINS`, `STORE_IMPORT_ALLOWED_ORIGINS`, `BUSINESS_GROW_ALLOWED_ORIGINS` (ajouter), `VYORA_PAYMENTS_ALLOWED_ORIGINS` (créer) | Oui (CORS : boutiques, import, MCP, propriétaire, paiements ; Business Grow seulement pour le transport direct) |
 | Supabase Auth | `site_url`, `uri_allow_list` | Oui (connexion par lien) |
 | GitHub | variable `VYORA_SITE_URL` | Non (constat uniquement) |
 | Dépôt | listes par défaut (§6, facultatif) | Non |
