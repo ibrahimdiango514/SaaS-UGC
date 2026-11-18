@@ -34,15 +34,18 @@ const NOUVEAU_SITE_NAME = epingle?.[2];
 const SITE_ID_PROD = 'fc88d197-fe0b-47c7-a6e3-fba44eeccda9';
 const SITE_NAME_PROD = 'vyora-saas-ugc';
 const ANCIEN_SITE_NAME = 'vyora-ugc';
-/** L'identifiant réel de l'ancien site est inconnu : tout identifiant ≠ épinglé doit être refusé. */
-const ANCIEN_SITE_ID = '0b7d3a6e-1c2f-4e5a-9d8b-7f6e5d4c3b2a';
+/**
+ * UUID DE TEST, bien formé mais fictif : l'identifiant réel de l'ancien site (`vyora-ugc`) n'est pas
+ * connu. La garde n'a pas de liste noire d'identifiants : tout identifiant ≠ épinglé doit être refusé.
+ */
+const SITE_ID_TEST_INCONNU = '0b7d3a6e-1c2f-4e5a-9d8b-7f6e5d4c3b2a';
 
 type Env = Record<string, string>;
 const nouveauSite = (extra: Env = {}): Env => ({
   SITE_ID: NOUVEAU_SITE_ID!, SITE_NAME: NOUVEAU_SITE_NAME!, VYORA_BUILD_ENABLED: 'true', BRANCH: 'main', HEAD: 'main', ...extra,
 });
 const ancienSite = (extra: Env = {}): Env => ({
-  SITE_ID: ANCIEN_SITE_ID, SITE_NAME: ANCIEN_SITE_NAME, VYORA_BUILD_ENABLED: 'true', BRANCH: 'main', HEAD: 'main', ...extra,
+  SITE_ID: SITE_ID_TEST_INCONNU, SITE_NAME: ANCIEN_SITE_NAME, VYORA_BUILD_ENABLED: 'true', BRANCH: 'main', HEAD: 'main', ...extra,
 });
 /** Retire des variables de l'environnement (variable non déclarée sur le site). */
 const sans = (env: Env, ...cles: string[]): Env => Object.fromEntries(Object.entries(env).filter(([k]) => !cles.includes(k)));
@@ -129,12 +132,12 @@ describe('Scénarios exigés — les deux rideaux ensemble', () => {
   });
 
   it('mauvais Site ID → publication bloquée (autre UUID, casse, préfixe, troncature, absent)', () => {
-    for (const SITE_ID of [ANCIEN_SITE_ID, SITE_ID_PROD.toUpperCase(), `${SITE_ID_PROD}0`, SITE_ID_PROD.slice(0, 35), '']) {
+    for (const SITE_ID of [SITE_ID_TEST_INCONNU, SITE_ID_PROD.toUpperCase(), `${SITE_ID_PROD}0`, SITE_ID_PROD.slice(0, 35), '']) {
       expect(publicationAutorisee(nouveauSite({ SITE_ID })), `SITE_ID=${JSON.stringify(SITE_ID)}`).toBe(false);
       expect(ignoreAnnule(nouveauSite({ SITE_ID }))).toBe(true);
     }
     expect(publicationAutorisee(sans(nouveauSite(), 'SITE_ID'))).toBe(false);
-    expect(garde(nouveauSite({ SITE_ID: ANCIEN_SITE_ID })).sortie).toContain(`ce site (${ANCIEN_SITE_ID}) n'est pas le site de production autorisé`);
+    expect(garde(nouveauSite({ SITE_ID: SITE_ID_TEST_INCONNU })).sortie).toContain(`ce site (${SITE_ID_TEST_INCONNU}) n'est pas le site de production autorisé`);
   });
 
   it("ancienne identité du site → publication bloquée (nom vyora-ugc, même avec le bon ID ; autre ID, même renommé)", () => {
@@ -184,8 +187,8 @@ describe('Rideau 2 — scripts/netlify-build-guard.sh, détails', () => {
   });
 
   it("n'autorise jamais une autre identité que celle passée en arguments (pas de liste implicite)", () => {
-    expect(garde(ancienSite({ SITE_NAME: 'renomme' }), ANCIEN_SITE_ID, 'renomme').refuse).toBe(false);
-    expect(garde(nouveauSite(), ANCIEN_SITE_ID, NOUVEAU_SITE_NAME!).refuse).toBe(true);
+    expect(garde(ancienSite({ SITE_NAME: 'renomme' }), SITE_ID_TEST_INCONNU, 'renomme').refuse).toBe(false);
+    expect(garde(nouveauSite(), SITE_ID_TEST_INCONNU, NOUVEAU_SITE_NAME!).refuse).toBe(true);
     expect(garde(nouveauSite(), NOUVEAU_SITE_ID!, 'renomme').refuse).toBe(true);
   });
 });

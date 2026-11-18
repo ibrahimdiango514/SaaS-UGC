@@ -28,15 +28,17 @@ par des variables d'environnement ou des réglages de la console.
 - Garde en place : `ignore = '[ "$SITE_ID" != "fc88d197-…" ] || [ "$VYORA_BUILD_ENABLED" != "true" ] || [ "$BRANCH" != "main" ]'`.
 - Constat Netlify : initialisation et build terminés, **déploiement ignoré** ; le Site ID réel du
   nouveau site est bien `fc88d197-fe0b-47c7-a6e3-fba44eeccda9`.
-- Cause : à l'étape `ignore`, la variable `SITE_ID` n'est pas exposée (ou pas encore) ; vide, la
-  comparaison `!=` est toujours vraie → code 0 → build annulé. Indice concordant : la garde
-  précédente `[ "$SITE_NAME" = "vyora-ugc" ]` (#25, #26) n'avait jamais bloqué le nouveau site, pourtant
-  nommé `vyora-ugc` à l'époque — `SITE_NAME` n'était pas visible non plus.
-- Correction (PR #28) : identité du site tranchée dans la commande de build, journalisation des
-  valeurs reçues (`garde ignore: …` puis `GARDE NETLIFY — …`). **Le journal obtenu ensuite (§0ter)
-  a montré que `SITE_ID` était bien exposé et que la vraie cause était l'absence de
-  `VYORA_BUILD_ENABLED`** ; la comparaison stricte de `SITE_ID` et `SITE_NAME` a donc été rétablie
-  dans `ignore`.
+- Hypothèse émise sur le moment (sans journal) : `SITE_ID` non exposé à l'étape `ignore`, et
+  `SITE_NAME` pas davantage. **Cette hypothèse est fausse** : le journal de `ca410d5` (§0ter) montre
+  `SITE_ID` et `SITE_NAME` tous deux présents et corrects à cette étape.
+- Cause réelle, établie a posteriori : la variable **`VYORA_BUILD_ENABLED` n'avait jamais été déclarée
+  sur le nouveau site**. La condition `[ "$VYORA_BUILD_ENABLED" != "true" ]` était donc vraie → code 0
+  → build annulé. Le déploiement de `14a61ec` a été ignoré pour la même raison que celui de `ca410d5`.
+- Correction (PR #28, fondée sur l'hypothèse fausse) : identité du site tranchée dans la commande de
+  build, tolérance de `SITE_ID` absent dans `ignore`, journalisation des valeurs reçues
+  (`garde ignore: …` puis `GARDE NETLIFY — …`). Cette journalisation a produit la preuve de §0ter ;
+  la tolérance a été retirée (PR #29) et la comparaison stricte de `SITE_ID` **et** `SITE_NAME`
+  rétablie dans `ignore`.
 
 ## 0ter. Incident du 2026-11-18 (suite) — déploiement de `ca410d5` ignoré : variable absente
 
@@ -52,8 +54,8 @@ par des variables d'environnement ou des réglages de la console.
   `ignore` renvoie 0 (annule) et le script renvoie 1 (« VYORA_BUILD_ENABLED doit valoir exactement
   « true » »). Aucune anomalie de code.
 - Enseignement : ce journal prouve que Netlify **expose bien `SITE_ID` et `SITE_NAME` à l'étape
-  `ignore`** — l'hypothèse de §0bis (« `SITE_ID` absent à cette étape ») est réfutée ; l'incident
-  `14a61ec` s'expliquait déjà par la variable manquante. La garde exige donc désormais, aux deux
+  `ignore`** — l'hypothèse de §0bis (« `SITE_ID` et `SITE_NAME` absents à cette étape ») est
+  réfutée ; l'incident `14a61ec` s'expliquait déjà par la variable manquante. La garde exige donc désormais, aux deux
   rideaux, l'identité positive complète (ID **et** nom) en plus de l'opt-in et de la branche.
 - Remède (sans toucher au code) : déclarer la variable (§3), puis **pousser sur `main`** — pas de
   déploiement manuel.
