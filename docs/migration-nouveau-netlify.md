@@ -19,7 +19,7 @@ par des variables d'environnement ou des réglages de la console.
 | Relais Netlify Edge (`netlify/edge-functions/*.js`) | Ciblent `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/...` : correct, le backend ne change pas. |
 | Liste d'origines par défaut (`src/lib/origin-allowlist.ts`) | Contient l'ancien domaine et les aperçus ; la nouvelle origine se déclare par secret (voir §4) — aucune redéploiement d'Edge Function n'est nécessaire pour l'ajouter. |
 | Outils de constat (`.github/workflows/production-check.yml`, `scripts/verify-production.mjs`) | Paramétrés : variable de dépôt `VYORA_SITE_URL` / variable d'environnement `VYORA_SITE_URL` / option `--site`. L'ancien domaine n'est qu'un repli. |
-| Garde de build `netlify.toml` | **Deux rideaux**, testés par `tests/business-grow-deployment-guard.test.ts` (28 cas, vrai `sh`). Site autorisé : **Site ID `fc88d197-fe0b-47c7-a6e3-fba44eeccda9`** (`https://vyora-saas-ugc.netlify.app`). (1) `ignore` — avant toute installation — annule si `VYORA_BUILD_ENABLED≠true`, si la branche n'est pas `main`, si le nom est celui de l'ancien site (`vyora-ugc`) ou si un `SITE_ID` **présent** diffère de l'identifiant autorisé ; `SITE_ID` absent n'annule pas (Netlify ne l'expose pas de façon fiable à cette étape : c'est ce qui a fait ignorer le déploiement de `14a61ec`). (2) `scripts/netlify-build-guard.sh`, en tête de la commande de build, exige `SITE_ID` et le compare strictement, refuse le nom `vyora-ugc`, `main` seulement, opt-in obligatoire ; tout refus est journalisé avec les valeurs reçues et fait échouer le build avant `npm ci` (aucun déploiement). |
+| Garde de build `netlify.toml` | **Deux rideaux**, testés par `tests/business-grow-deployment-guard.test.ts` (vrai `sh`). Site autorisé : **Site ID `fc88d197-fe0b-47c7-a6e3-fba44eeccda9`, nom `vyora-saas-ugc`** (`https://vyora-saas-ugc.netlify.app`). Les deux rideaux exigent les **quatre** mêmes conditions : `BRANCH=main` **et** `SITE_ID` = identifiant autorisé **et** `SITE_NAME=vyora-saas-ugc` **et** `VYORA_BUILD_ENABLED=true` ; le nom de l'ancien site (`vyora-ugc`) est en plus refusé explicitement. (1) `ignore` — avant toute installation — journalise les valeurs reçues puis annule (code 0) dès qu'une condition manque (variable absente = refus). (2) `scripts/netlify-build-guard.sh <id> <nom>`, en tête de la commande de build, revérifie les quatre conditions et fait échouer le build avant `npm ci` avec un message de refus explicite (aucun déploiement). |
 
 ---
 
@@ -32,16 +32,39 @@ par des variables d'environnement ou des réglages de la console.
   comparaison `!=` est toujours vraie → code 0 → build annulé. Indice concordant : la garde
   précédente `[ "$SITE_NAME" = "vyora-ugc" ]` (#25, #26) n'avait jamais bloqué le nouveau site, pourtant
   nommé `vyora-ugc` à l'époque — `SITE_NAME` n'était pas visible non plus.
-- Correction : identité du site tranchée dans la commande de build (variables documentées là),
-  `ignore` n'annulant sur `SITE_ID` que si la variable est présente. Le journal Netlify montre
-  désormais les valeurs reçues (`garde ignore: …` puis `GARDE NETLIFY — …`).
+- Correction (PR #28) : identité du site tranchée dans la commande de build, journalisation des
+  valeurs reçues (`garde ignore: …` puis `GARDE NETLIFY — …`). **Le journal obtenu ensuite (§0ter)
+  a montré que `SITE_ID` était bien exposé et que la vraie cause était l'absence de
+  `VYORA_BUILD_ENABLED`** ; la comparaison stricte de `SITE_ID` et `SITE_NAME` a donc été rétablie
+  dans `ignore`.
+
+## 0ter. Incident du 2026-11-18 (suite) — déploiement de `ca410d5` ignoré : variable absente
+
+- Journal Netlify du nouveau site, étape `ignore` :
+  `garde ignore: BRANCH=main VYORA_BUILD_ENABLED=absent SITE_ID=fc88d197-fe0b-47c7-a6e3-fba44eeccda9 SITE_NAME=vyora-saas-ugc`.
+- Constat : « Building: Complete / Deployment: Ignored » et le message **« Canceled build due to no
+  content change »**. Ce libellé est le texte générique que Netlify affiche pour **toute** annulation
+  par la commande `ignore` (code 0), quelle qu'en soit la raison ; il n'a aucun rapport avec le contenu
+  du commit et ne signifie pas que la garde a comparé des fichiers. Le rideau 2 n'a pas tourné : la
+  commande de build n'est jamais lancée quand `ignore` annule.
+- Cause : la variable **`VYORA_BUILD_ENABLED` n'est pas déclarée sur le nouveau site** (§3). La garde,
+  fermée par défaut, a donc fait exactement ce qu'elle doit : rejouée localement avec ces valeurs,
+  `ignore` renvoie 0 (annule) et le script renvoie 1 (« VYORA_BUILD_ENABLED doit valoir exactement
+  « true » »). Aucune anomalie de code.
+- Enseignement : ce journal prouve que Netlify **expose bien `SITE_ID` et `SITE_NAME` à l'étape
+  `ignore`** — l'hypothèse de §0bis (« `SITE_ID` absent à cette étape ») est réfutée ; l'incident
+  `14a61ec` s'expliquait déjà par la variable manquante. La garde exige donc désormais, aux deux
+  rideaux, l'identité positive complète (ID **et** nom) en plus de l'opt-in et de la branche.
+- Remède (sans toucher au code) : déclarer la variable (§3), puis **pousser sur `main`** — pas de
+  déploiement manuel.
 
 ## 1. Avant de commencer — l'ancien compte
 
 - **Ne déclencher aucun build sur l'ancien site `vyora-ugc`** (24 crédits restants).
 - La garde de build de `main` refuse tout build déclenché par Git sur l'ancien site :
-  rideau 1 (`ignore`) l'annule dès que son nom `vyora-ugc` ou un `SITE_ID` différent est visible
-  (code 0 → « build cancelled », aucun crédit consommé) ; sinon rideau 2
+  rideau 1 (`ignore`) l'annule dès qu'une des quatre conditions manque — nom `vyora-ugc`, `SITE_ID`
+  ou `SITE_NAME` différents de l'identité autorisée, branche ≠ `main`, opt-in absent
+  (code 0 → « Canceled build due to no content change », aucun crédit consommé) ; sinon rideau 2
   (`scripts/netlify-build-guard.sh`) fait échouer le build en quelques secondes, avant `npm ci`,
   en écrivant dans le journal `SITE_ID`, `SITE_NAME`, `BRANCH` et `VYORA_BUILD_ENABLED` reçus.
   Le nouveau site a été renommé `vyora-saas-ugc` (2026-11-18) : les deux noms diffèrent de nouveau,
@@ -71,9 +94,9 @@ par des variables d'environnement ou des réglages de la console.
 
 3. **Avant le premier déploiement**, renseigner les variables d'environnement (§3). Netlify lance
    un premier build automatiquement à la fin de l'import : si les variables ne sont pas encore
-   saisies, ce build est annulé par la garde (aucun crédit consommé) — relancer ensuite par
-   *Deploys → Trigger deploy → Deploy site* (un déclenchement manuel n'évalue pas la garde) ou par
-   un push sur `main`.
+   saisies, ce build est annulé par la garde (aucun crédit consommé, message « Canceled build due to
+   no content change ») — relancer ensuite par un push sur `main`. Éviter *Trigger deploy* : un
+   déclenchement manuel saute le rideau 1 (le rideau 2 reste actif) et n'est pas la procédure retenue.
 4. Désactiver les Deploy Previews et les branch deploys (*Site configuration → Build & deploy →
    Continuous deployment → Deploy contexts*) : la garde les annule de toute façon (`$BRANCH` ≠
    `main`), mais autant ne pas les déclencher.
@@ -89,7 +112,7 @@ Toutes sont **publiques** (compilées dans le bundle ou lues par le build). Aucu
 
 | Variable | Valeur | Rôle |
 | --- | --- | --- |
-| `VYORA_BUILD_ENABLED` | `true` (exactement, minuscules) | Autorise la garde de `netlify.toml` à construire ce site. Toute autre valeur = build annulé. |
+| `VYORA_BUILD_ENABLED` | `true` (exactement, minuscules, sans espace ni guillemets) | Opt-in de la garde de `netlify.toml`. **Absente** (cas de `ca410d5`) ou toute autre valeur (`false`, `TRUE`, `1`) = build annulé. |
 | `VITE_SUPABASE_URL` | `https://xbuuhfwobrafcbgtdgjx.supabase.co` | Projet Supabase (inchangé). |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz` | Clé publiable (publique, livrée au navigateur). |
 | `VITE_SITE_URL` | `<NOUVELLE_URL_NETLIFY>` sans `/` final | Adresse de retour après connexion / lien magique. Si absente, le code se replie sur `window.location.origin` ; la renseigner évite toute ambiguïté. |
@@ -101,7 +124,19 @@ explicite, leur absence ne casse pas le build.
 Facultatif : `NPM_FLAGS` et `NODE_VERSION` sont déjà dans `netlify.toml`.
 **Ne jamais** y mettre `SUPABASE_SERVICE_ROLE_KEY`, une clé `sb_secret_*`, ni un secret serveur.
 
-Après saisie : *Deploys → Trigger deploy → Deploy site* (premier build), ou pousser sur `main`.
+### Procédure exacte pour `VYORA_BUILD_ENABLED` (site `vyora-saas-ugc`)
+
+1. Netlify → site **vyora-saas-ugc** → **Site configuration** → **Environment variables**.
+2. **Add a variable** → *Add a single variable*.
+3. **Key** : `VYORA_BUILD_ENABLED` — **Value** : `true` (exactement, minuscules).
+4. **Scopes** : laisser *All scopes* (ou au minimum *Builds*). **Deploy contexts** : *All deploy
+   contexts*, ou au minimum *Production* — la garde ne construit de toute façon que `main`.
+5. **Create variable**, puis vérifier dans la liste que la clé apparaît bien avec la valeur `true`.
+6. Déclencher la publication **par un push sur `main`** (fusion d'une PR validée). Le prochain journal
+   doit montrer `garde ignore: … VYORA_BUILD_ENABLED=true …`, `garde ignore: build autorise`, puis
+   `GARDE NETLIFY — build autorisé : site fc88d197-… (vyora-saas-ugc), branche main.` suivi de `npm ci`.
+   Pas de *Trigger deploy* manuel.
+
 
 ---
 

@@ -2,31 +2,35 @@
   # ---------------------------------------------------------------------------
   # GARDE DE BUILD À DEUX RIDEAUX (2026-11-18, nouveau compte Netlify)
   #
-  # Site de production autorisé : Site ID fc88d197-fe0b-47c7-a6e3-fba44eeccda9
-  # (https://vyora-saas-ugc.netlify.app). Ancien site : nom « vyora-ugc »,
-  # ancien compte — jamais déployé, quel que soit son identifiant.
+  # Site de production autorisé — les QUATRE conditions sont exigées :
+  #   BRANCH              = main
+  #   SITE_ID             = fc88d197-fe0b-47c7-a6e3-fba44eeccda9
+  #   SITE_NAME           = vyora-saas-ugc   (https://vyora-saas-ugc.netlify.app)
+  #   VYORA_BUILD_ENABLED = true             (variable à déclarer sur le site)
+  # L'ancien site (nom « vyora-ugc », ancien compte) est refusé explicitement,
+  # en plus de l'être par l'identité positive ci-dessus.
   #
-  # Rideau 1 — `ignore` (ci-dessous) : évalué AVANT toute installation, code 0
-  # = build annulé sans coût. Il n'est pas prouvé que Netlify expose SITE_ID /
-  # SITE_NAME à cette étape : le déploiement de 14a61ec a été ignoré alors que
-  # le site est le bon, et la garde précédente par SITE_NAME n'avait jamais
-  # bloqué un site pourtant nommé vyora-ugc. Ce rideau ne tranche donc l'identité
-  # que si la variable est PRÉSENTE ; sinon il laisse passer vers le rideau 2.
-  # Il garde ce qu'il voit sûrement : la branche et l'opt-in explicite.
+  # Preuve de terrain (journal du déploiement ca410d5) : Netlify expose bien
+  # BRANCH, SITE_ID et SITE_NAME à l'étape `ignore` ; VYORA_BUILD_ENABLED était
+  # « absent » sur le nouveau site → annulation attendue, affichée par Netlify
+  # « Canceled build due to no content change » (libellé générique de toute
+  # annulation par `ignore`, sans rapport avec le contenu).
   #
-  # Rideau 2 — `scripts/netlify-build-guard.sh`, en tête de la commande de
-  # build, dans l'environnement complet où SITE_ID et SITE_NAME sont documentés :
-  # refus (code 1, donc pas de déploiement) si l'identifiant n'est pas celui du
-  # site autorisé, si le nom est celui de l'ancien site, si la branche n'est pas
-  # main ou si l'opt-in manque. Les valeurs reçues sont écrites dans le journal.
+  # Rideau 1 — `ignore` : évalué AVANT toute installation ; code 0 = annulé sans
+  # coût. Journalise les valeurs reçues puis n'autorise (code 1) que si les quatre
+  # conditions sont vraies. Variable absente = refus (fermé par défaut).
+  # Rideau 2 — `scripts/netlify-build-guard.sh` en tête de la commande de build :
+  # mêmes quatre conditions, revérifiées dans l'environnement complet, message de
+  # refus explicite, échec avant `npm ci` (aucun déploiement). Un « Trigger
+  # deploy » manuel contourne le rideau 1 mais pas le rideau 2.
   #
-  # Changer de site = modifier l'identifiant aux DEUX endroits, par PR ; les
-  # tests (tests/business-grow-deployment-guard.test.ts) vérifient qu'ils sont
-  # identiques. Voir docs/migration-nouveau-netlify.md.
+  # Changer de site = modifier identifiant ET nom aux DEUX endroits, par PR ; les
+  # tests (tests/business-grow-deployment-guard.test.ts) vérifient la cohérence.
+  # Procédure de la variable : docs/migration-nouveau-netlify.md §3.
   # ---------------------------------------------------------------------------
-  command = "sh scripts/netlify-build-guard.sh fc88d197-fe0b-47c7-a6e3-fba44eeccda9 && npm ci && npm run build"
+  command = "sh scripts/netlify-build-guard.sh fc88d197-fe0b-47c7-a6e3-fba44eeccda9 vyora-saas-ugc && npm ci && npm run build"
   publish = "dist"
-  ignore = 'echo "garde ignore: BRANCH=${BRANCH:-absent} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-absent} SITE_ID=${SITE_ID:-absent} SITE_NAME=${SITE_NAME:-absent}"; [ "$VYORA_BUILD_ENABLED" != "true" ] || [ "$BRANCH" != "main" ] || [ "$SITE_NAME" = "vyora-ugc" ] || { [ -n "$SITE_ID" ] && [ "$SITE_ID" != "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ]; }'
+  ignore = 'echo "garde ignore: BRANCH=${BRANCH:-absent} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-absent} SITE_ID=${SITE_ID:-absent} SITE_NAME=${SITE_NAME:-absent}"; if [ "$SITE_NAME" != "vyora-ugc" ] && [ "$VYORA_BUILD_ENABLED" = "true" ] && [ "$BRANCH" = "main" ] && [ "$SITE_ID" = "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ] && [ "$SITE_NAME" = "vyora-saas-ugc" ]; then echo "garde ignore: build autorise"; exit 1; else echo "garde ignore: build annule (conditions non reunies)"; exit 0; fi'
 
 [build.environment]
   NODE_VERSION = "22"
