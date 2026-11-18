@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Activity, Bot, Coins, Cpu, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
+import { Activity, Bot, Brain, Coins, Cpu, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Modal, Banner, LoadingState, ErrorState, EmptyState, Tabs, StatCard } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { asAppError } from '../lib/errors';
@@ -8,6 +8,7 @@ import ProviderBudgetSettings from './admin/ProviderBudgetSettings';
 import ProviderBalanceCard from './admin/ProviderBalanceCard';
 import AiCoreControl from './admin/AiCoreControl';
 import CreditManager from './admin/CreditManager';
+import BusinessGrowSubscriptionManager from './admin/BusinessGrowSubscriptionManager';
 import SasPayPanel from './admin/SasPayPanel';
 import {
   GrowthActivitySection, KpiSection, ModelsSection, ProvidersSection, RevenueSection, StudioActivitySection, money,
@@ -44,6 +45,7 @@ export default function Admin() {
   const [busy, setBusy] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [creditsModal, setCreditsModal] = useState<AdminUser | null>(null);
+  const [businessGrowModal, setBusinessGrowModal] = useState<AdminUser | null>(null);
   const [promoCode, setPromoCode] = useState('');
   const [promoCredits, setPromoCredits] = useState(25);
   const [promoMax, setPromoMax] = useState(100);
@@ -318,6 +320,9 @@ export default function Admin() {
                   <td><Badge tone={u.roles.includes('admin') ? 'success' : 'neutral'}>{u.roles.includes('admin') ? 'admin' : 'user'}</Badge></td>
                   <td><div className="flex flex-wrap gap-1">
                     <Button size="sm" variant="outline" icon={<Coins size={12} />} onClick={() => setCreditsModal(u)}>Crédits</Button>
+                    {!u.roles.includes('admin') && (
+                      <Button size="sm" variant="outline" icon={<Brain size={12} />} onClick={() => setBusinessGrowModal(u)} title="Attribution manuelle d’une formule Business Grow (journalisée)">Business Grow</Button>
+                    )}
                     <Button size="sm" variant="ghost" loading={busy === `role-${u.id}`} onClick={() => void run(`role-${u.id}`, () => adminSetRole(u.id, u.roles.includes('admin') ? 'user' : 'admin'), 'Rôle modifié.')}>{u.roles.includes('admin') ? 'Retirer admin' : 'Promouvoir'}</Button>
                     <Button size="sm" variant="ghost" loading={busy === `status-${u.id}`} onClick={() => void run(`status-${u.id}`, () => adminSetAccountStatus(u.id, u.subscription_status === 'suspended' ? 'active' : 'suspended'), 'Statut modifié.')}>{u.subscription_status === 'suspended' ? 'Réactiver' : 'Suspendre'}</Button>
                   </div></td>
@@ -483,6 +488,12 @@ export default function Admin() {
       <CreditManager
         user={creditsModal ? { id: creditsModal.id, email: creditsModal.email } : null}
         onClose={() => setCreditsModal(null)}
+        onApplied={() => { void load(); }}
+      />
+
+      <BusinessGrowSubscriptionManager
+        user={businessGrowModal ? { id: businessGrowModal.id, email: businessGrowModal.email } : null}
+        onClose={() => setBusinessGrowModal(null)}
         onApplied={() => { void load(); }}
       />
 

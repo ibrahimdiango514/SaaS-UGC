@@ -254,9 +254,38 @@ export class NoVerifiedProviderRouteError extends Error {
   }
 }
 
+/**
+ * Droits d'accès au module Import & Connect, établis côté serveur.
+ * `allowed` ne doit être vrai que si l'abonnement Business Grow est payé,
+ * actif et en cours — la règle elle-même vit en base
+ * (`saas_business.bg_import_access`), pas ici.
+ */
+export interface ImportConnectAccess {
+  allowed: boolean;
+  reason?: string;
+  status?: string | null;
+  planKey?: string | null;
+  currentPeriodEnd?: string | null;
+}
+
 export interface BusinessGrowDependencies {
   store: BusinessGrowStore;
   getUserId: (authorization: string) => Promise<string | null>;
+  /**
+   * Contrôle d'accès du module Import & Connect, **obligatoire** pour les
+   * actions qui connectent une boutique ou lisent son historique.
+   *
+   * Pourquoi dans `business-grow` et pas ailleurs : c'est cette fonction qui
+   * porte réellement les demandes de connexion (`integrations.request`) et la
+   * liste des connexions. Une garde posée seulement sur l'import produits
+   * laisserait le chemin le plus sensible — l'accès aux API d'une boutique —
+   * grand ouvert.
+   *
+   * Absente ou en panne ⇒ refus (fail-closed). Un doute ne doit jamais
+   * ouvrir un module réservé aux abonnés.
+   */
+  checkImportConnectAccess?: (userId: string) => Promise<ImportConnectAccess>;
+
   allowedOrigins: string[];
   /**
    * Fournisseurs servables, résolus à l'exécution (registre + secrets).
@@ -331,8 +360,10 @@ function response(
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-function failure(code: string, message: string) {
-  return { error: { code, message } };
+function failure(code: string, message: string, details?: Record<string, unknown>) {
+  // Les détails sont ajoutés à la racine de l'erreur pour que l'interface
+  // puisse expliquer un refus sans le deviner (motif, statut, fin de période).
+  return { error: { code, message, ...(details ?? {}) } };
 }
 
 function string(value: unknown, maxLength: number): string {
@@ -346,6 +377,41 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 const INTEGRATION_CONNECTOR_KEYS = new Set(['facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce']);
+
+/**
+ * Actions réservées aux abonnés Business Grow : tout ce qui touche à une
+ * connexion de boutique (demande, annulation, déconnexion) et la lecture des
+ * connexions existantes — l'historique et les clés d'API sont dans ce
+ * périmètre.
+ *
+ * Les connectors sociaux (`facebook`, `instagram`, `youtube`, `tiktok`) sont
+ * historiquement dans le catalogue Business Grow et restent hors périmètre :
+ * élargir la garde les casserait sans raison. Ce sont les connecteurs de
+ * boutique qui sont visés.
+ */
+const IMPORT_CONNECT_ACTIONS = new Set<BusinessAction>([
+  'integrations.list',
+  'integrations.request',
+  'integrations.cancel',
+  'integrations.disconnect',
+]);
+
+/** Connecteurs de boutique — les seuls que la garde Import & Connect concerne. */
+const STORE_CONNECTOR_KEYS = new Set(['shopify', 'woocommerce', 'prestashop', 'opencart']);
+
+/**
+ * Cette action touche-t-elle à une connexion de boutique ?
+ * `integrations.list` est inclus : la liste révèle les boutiques connectées.
+ */
+function requiresImportConnectAccess(action: BusinessAction, connectorKey: string | null): boolean {
+  if (!IMPORT_CONNECT_ACTIONS.has(action)) return false;
+  // Pour les actions qui visent un connecteur précis, seuls les connecteurs de
+  // boutique sont concernés. Pour `integrations.list`, il n'y a pas de
+  // connecteur : la garde s'applique (on ne divulgue pas l'existence de
+  // connexions marchandes à un non-abonné).
+  if (action === 'integrations.list') return true;
+  return connectorKey !== null && STORE_CONNECTOR_KEYS.has(connectorKey);
+}
 
 function integrationConnectorKey(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -478,6 +544,55 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
     const rawAction = string(body.action, 60);
     const versionedWorkspaceAction = rawAction.startsWith('v3.');
     const action = (versionedWorkspaceAction ? rawAction.slice(3) : rawAction) as BusinessAction;
+
+    // -----------------------------------------------------------------------
+    // Import & Connect — accès réservé aux abonnés Business Grow.
+    //
+    // Placé AVANT la résolution du périmètre d'entreprise et AVANT toute
+    // lecture ou mutation : un non-abonné n'apprend rien sur les connexions
+    // existantes (ni leur nombre, ni leur plateforme), et ne peut pas
+    // enregistrer de demande.
+    //
+    // La décision ne dépend d'aucune valeur envoyée par le client : seul
+    // `userId`, établi par GoTrue, est utilisé.
+    // -----------------------------------------------------------------------
+    if (requiresImportConnectAccess(action, integrationConnectorKey(body.connectorKey))) {
+      if (typeof dependencies.checkImportConnectAccess !== 'function') {
+        return response(
+          failure('IMPORT_ACCESS_UNAVAILABLE', 'La vérification de l’abonnement est indisponible.'),
+          503, origin, dependencies.allowedOrigins,
+        );
+      }
+      let access: ImportConnectAccess;
+      try {
+        access = await dependencies.checkImportConnectAccess(userId);
+      } catch {
+        // Panne de vérification : on refuse plutôt que d'ouvrir.
+        return response(
+          failure('IMPORT_ACCESS_UNAVAILABLE', 'La vérification de l’abonnement est indisponible.'),
+          503, origin, dependencies.allowedOrigins,
+        );
+      }
+      if (access?.allowed !== true) {
+        // Le motif est transmis pour que l'interface explique ce qui manque
+        // (souscription, renouvellement, régularisation) au lieu d'un refus
+        // muet. Pour la liste, on ne dit pas si des connexions existent.
+        return response(
+          failure(
+            'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
+            'Import & Connect est réservé aux abonnés Business Grow actifs.',
+            {
+              reason: access?.reason ?? 'UNKNOWN',
+              subscription_status: access?.status ?? null,
+              plan_key: access?.planKey ?? null,
+              current_period_end: access?.currentPeriodEnd ?? null,
+            },
+          ),
+          403, origin, dependencies.allowedOrigins,
+        );
+      }
+    }
+
     try {
       let scopedWorkspace: string | null = null;
       if (versionedWorkspaceAction) {

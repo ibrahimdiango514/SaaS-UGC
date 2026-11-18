@@ -3,6 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { writeFileSync, mkdirSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+// Le nombre de fournisseurs est lu du catalogue : la capture ne doit pas
+// annoncer un total que le composant ne rend pas.
+import { INTEGRATIONS } from '../src/integrations/catalog';
 
 /**
  * Preuve de rendu — catalogue d'intégrations unifié.
@@ -114,7 +117,13 @@ describe('preuve de rendu du catalogue unifié', () => {
     for (const id of ['tiktok', 'instagram', 'microsoft365']) {
       expect(screen.getByTestId(`integration-${id}`).textContent).toContain('Validation externe requise');
     }
-    expect(screen.getByTestId('integration-woocommerce').textContent).toContain('Configuration requise');
+    /*
+     * Depuis la phase E, WooCommerce a un moteur : sans ligne de connexion, son
+     * état est « Non connecté » — et non plus « Configuration requise ». Le
+     * second libellé reste vérifié sur OpenCart, qui n'a réellement aucun moteur.
+     */
+    expect(screen.getByTestId('integration-woocommerce').textContent).toContain('Non connecté');
+    expect(screen.getByTestId('integration-opencart').textContent).toContain('Configuration requise');
     // Le compte réel est listé dans « Vos connexions actives ».
     expect(screen.getByText(/Vos connexions actives/i)).toBeTruthy();
 
@@ -141,7 +150,7 @@ describe('preuve de rendu du catalogue unifié', () => {
 <body>
 <div class="wrap">
   <p class="capture-title">VYORA · Business Grow → Intégrations</p>
-  <p class="capture-sub">Catalogue unique de 26 fournisseurs, statuts dérivés du serveur. Capture produite depuis le composant réel.</p>
+  <p class="capture-sub">Catalogue unique de ${INTEGRATIONS.length} fournisseurs, statuts dérivés du serveur. Capture produite depuis le composant réel.</p>
   <span class="capture-banner">Même composant que /app/connect</span>
   ${container.innerHTML}
 </div>

@@ -34,23 +34,57 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import esbuild from 'esbuild';
+import { renderGithubLoader, verifierChargeur } from './edge-github-loader.mjs';
 
 const POSTGRES = 'npm:postgres@3.4.5';
 const ARTIFACT_TABLE = '_edge_function_artifact';
 
 /** Fonctions gérées par ce générateur (entrée + chargeur déployé). */
+/**
+ * Fonctions gérées par ce générateur.
+ *
+ * `loader` est le fichier réellement déployé. Il porte le mécanisme
+ * « GitHub épinglé » depuis la Phase A : le dépôt doit décrire ce qui tourne,
+ * pas un ancien modèle d'artefact en base qui n'existe plus en production.
+ * `bootstrap` est conservé comme trace du chargeur historique, mais n'est plus
+ * généré : il n'est pas déployé.
+ */
 export const FUNCTIONS = {
   'store-import': {
     entry: 'supabase/functions/store-import/index.ts',
     loader: 'supabase/functions/store-import/loader.ts',
+    artifact: 'supabase/functions/_artifacts/store-import.js',
+    usesPostgres: true,
+  },
+  // Connexion d'une boutique à clé d'API (PrestaShop). Même mécanisme
+  // d'artefact épinglé que `store-import` : le code livré est celui du dépôt, à
+  // un commit précis, vérifié par taille et empreinte avant exécution.
+  'store-connect': {
+    entry: 'supabase/functions/store-connect/index.ts',
+    loader: 'supabase/functions/store-connect/loader.ts',
+    artifact: 'supabase/functions/_artifacts/store-connect.js',
+    usesPostgres: true,
+  },
+  // Porte d'exécution des outils MCP externes. Même mécanisme : le code livré
+  // est celui du dépôt, à un commit précis, vérifié par taille et empreinte.
+  // Aucun autre réglage n'est nécessaire — `index.ts` n'exporte rien, ce qui
+  // le rend exécutable par `new Function`.
+  'mcp-client': {
+    entry: 'supabase/functions/mcp-client/index.ts',
+    loader: 'supabase/functions/mcp-client/loader.ts',
+    artifact: 'supabase/functions/_artifacts/mcp-client.js',
     usesPostgres: true,
   },
 };
 
 // esbuild peut placer l'import en fin de ligne, après d'autres instructions :
 // le motif n'est donc pas ancré en début de ligne.
-const IMPORT_SIMPLE = new RegExp(`import\\s+(\\w+)\\s+from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
-const IMPORT_NAMED = new RegExp(`import\\s*\\{\\s*default\\s+as\\s+(\\w+)\\s*\\}\\s*from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
+// Le nom de liaison peut contenir `$` : esbuild renomme en `$r`, `$a`… quand un
+// export du module d'entrée occupe déjà le nom court. Ne pas restreindre à `\w`,
+// sous peine de laisser une instruction `import` dans le bundle (erreur levée
+// plus bas, sans indiquer la vraie cause).
+const IMPORT_SIMPLE = new RegExp(`import\\s+([\\w$]+)\\s+from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
+const IMPORT_NAMED = new RegExp(`import\\s*\\{\\s*default\\s+as\\s+([\\w$]+)\\s*\\}\\s*from\\s*(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\2;?`, 'g');
 const IMPORT_BARE = new RegExp(`(["'])${POSTGRES.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`, 'g');
 
 /** Bundle ES2022 exécutable par `new Function`, sans aucune instruction import. */
@@ -104,89 +138,31 @@ export function buildArtifact(name, root = process.cwd()) {
 }
 
 /**
- * Chargeur déployé.
+ * Chargeur déployé — délègue au générateur partagé.
  *
- * Volontairement court (le canal altère les corps longs) et sans logique métier :
- * il lit, vérifie, exécute. Une lecture ratée ne doit pas figer l'instance, d'où
- * trois essais. En cas d'échec, la réponse est un JSON lisible, pas un 500 opaque.
+ * L'implémentation vit dans `scripts/edge-github-loader.mjs` pour que
+ * `business-grow` et `store-import` ne puissent plus diverger : c'est
+ * exactement la divergence qui avait fait perdre la garde d'abonnement dans
+ * le bundle committé.
  */
-export function renderLoader(name, { sha256, chars }) {
+export function renderLoader(name, { sha256, chars }, commit) {
   const config = FUNCTIONS[name];
-  const pgImport = config.usesPostgres ? 'import postgres from "npm:postgres@3.4.5";\n' : '';
-  const pgInject = config.usesPostgres
-    ? '  // Le bundle s\'exécute hors module : il reçoit postgres ici, avant exécution.\n  (globalThis as { __edgePostgres?: typeof postgres }).__edgePostgres = postgres;\n'
-    : '';
-  return [
-    `// ${name} — chargeur de production (seule source déployée).`,
-    '// Généré par scripts/build-edge-artifact.mjs : ne pas éditer.',
-    '//',
-    '// Le code métier (bundle esbuild) est lu dans',
-    `// public.${ARTIFACT_TABLE} par nom + SHA-256, puis vérifié avant exécution :`,
-    "// un artefact absent ou modifié n'est jamais exécuté.",
-    pgImport + '',
-    `const ARTIFACT_NAME = "${name}";`,
-    `const ARTIFACT_SHA256 = "${sha256}";`,
-    `const ARTIFACT_CHARS = ${chars};`,
-    '',
-    'async function readArtifact(): Promise<string> {',
-    '  const base = Deno.env.get("SUPABASE_URL") ?? "";',
-    '  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";',
-    '  if (!base || !key) throw new Error("runtime_env_missing");',
-    `  const url = base + "/rest/v1/${ARTIFACT_TABLE}?select=source&name=eq." + ARTIFACT_NAME +`,
-    '    "&sha256=eq." + ARTIFACT_SHA256;',
-    '  const res = await fetch(url, {',
-    '    headers: { apikey: key, Authorization: "Bearer " + key },',
-    '    signal: AbortSignal.timeout(15000),',
-    '  });',
-    '  if (!res.ok) throw new Error("artifact_read_failed:" + res.status);',
-    '  const rows = (await res.json()) as Array<{ source?: unknown }>;',
-    '  const source = rows[0]?.source;',
-    '  if (typeof source !== "string") throw new Error("artifact_missing");',
-    '  if (source.length !== ARTIFACT_CHARS) throw new Error("artifact_size_mismatch:" + source.length);',
-    '  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));',
-    '  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");',
-    '  if (hex !== ARTIFACT_SHA256) throw new Error("artifact_digest_mismatch");',
-    '  return source;',
-    '}',
-    '',
-    'let CODE = "";',
-    'let failure = "";',
-    "// Trois essais : une lecture ratée à froid ne doit pas figer l'instance en panne.",
-    'for (let attempt = 1; attempt <= 3 && !CODE; attempt++) {',
-    '  try {',
-    '    CODE = await readArtifact();',
-    '    failure = "";',
-    '  } catch (error) {',
-    '    failure = error instanceof Error ? error.message : String(error);',
-    '    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 400 * attempt));',
-    '  }',
-    '}',
-    '',
-    'if (CODE) {',
-    pgInject + '  new Function(CODE)();',
-    '} else {',
-    '  // Panne explicite et lisible, au lieu d\'un 500 opaque pris pour une absence de backend.',
-    `  console.error("${name} artifact load failed: " + failure);`,
-    '  const headers = {',
-    '    "Content-Type": "application/json",',
-    '    "Access-Control-Allow-Origin": "*",',
-    '    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",',
-    '    "Access-Control-Allow-Methods": "POST, OPTIONS",',
-    '  };',
-    '  const body = JSON.stringify({',
-    '    error: {',
-    `      code: "${name.toUpperCase().replace(/-/g, '_')}_ARTIFACT_UNAVAILABLE",`,
-    `      message: "Le service ${name} n'a pas pu charger son code (" + failure + ").",`,
-    '    },',
-    '  });',
-    '  Deno.serve((request: Request) =>',
-    '    request.method === "OPTIONS"',
-    '      ? new Response("ok", { headers })',
-    '      : new Response(body, { status: 503, headers })',
-    '  );',
-    '}',
-    '',
-  ].join('\n');
+  if (!config.artifact) {
+    throw new Error(`chemin d'artefact inconnu pour ${name}`);
+  }
+  const code = renderGithubLoader({
+    fonction: name,
+    path: config.artifact,
+    sha256,
+    chars,
+    commit,
+    chargeur: config.usesPostgres ? '__edgePostgres' : undefined,
+  });
+  const problemes = verifierChargeur(code);
+  if (problemes.length) {
+    throw new Error(`chargeur ${name} non conforme : ${problemes.join(', ')}`);
+  }
+  return code;
 }
 
 /** SQL d'insertion de l'artefact, sans secret et sans donnée utilisateur. */
@@ -210,12 +186,24 @@ if (name && !process.argv.includes('--import-only')) {
   }
   const built = buildArtifact(name);
   const loaderPath = join(process.cwd(), FUNCTIONS[name].loader);
-  const code = renderLoader(name, built);
+  const commit = (process.env.EDGE_PIN_COMMIT || '').trim().toLowerCase();
+  const code = renderLoader(name, built, commit || '0'.repeat(40));
   if (process.argv.includes('--print')) {
     console.log(JSON.stringify({ name, sha256: built.sha256, chars: built.chars, loaderChars: code.length }));
-  } else if (process.argv.includes('--sql')) {
+    process.exit(0);
+  }
+  if (process.argv.includes('--sql')) {
+    // Conservé pour l'historique : n'est plus le mode de déploiement.
     console.log(artifactSql(name, built));
-  } else if (process.argv.includes('--check')) {
+    process.exit(0);
+  }
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    // Sans commit épinglé, le chargeur généré pointerait sur une URL invalide.
+    // On refuse plutôt que d'écrire un fichier inutilisable.
+    console.error('EDGE_PIN_COMMIT doit être un SHA de commit complet (40 hexadécimaux).');
+    process.exit(1);
+  }
+  if (process.argv.includes('--check')) {
     const current = existsSync(loaderPath) ? readFileSync(loaderPath, 'utf8') : '';
     if (current !== code) {
       console.error(`chargeur désynchronisé : ${FUNCTIONS[name].loader}`);
@@ -223,7 +211,14 @@ if (name && !process.argv.includes('--import-only')) {
     }
     console.log(`chargeur à jour (${name}, ${built.chars} caractères de bundle)`);
   } else {
+    // Le chargeur télécharge l'artefact depuis le commit épinglé : si le fichier
+    // n'est pas écrit ET committé, la production charge un ancien bundle, ou
+    // échoue sur une empreinte qui ne correspond plus. Écrire le chargeur sans
+    // l'artefact produisait exactement cette dérive silencieuse.
+    const artifactPath = join(process.cwd(), FUNCTIONS[name].artifact);
+    writeFileSync(artifactPath, built.source, 'utf8');
     writeFileSync(loaderPath, code, 'utf8');
-    console.log(`écrit ${FUNCTIONS[name].loader} — sha256 ${built.sha256}, ${built.chars} caractères`);
+    console.log(`écrit ${FUNCTIONS[name].artifact} — sha256 ${built.sha256}, ${built.chars} caractères`);
+    console.log(`écrit ${FUNCTIONS[name].loader} — épinglé sur le commit ${commit}`);
   }
 }

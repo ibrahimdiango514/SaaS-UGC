@@ -25,7 +25,7 @@
  *     `sanitizeFormula` — car le fichier peut être réouvert dans un tableur.
  */
 import type { NormalizedProduct } from './normalize.ts';
-import { buildProduct, parsePriceMinor, DEFAULT_CURRENCY } from './normalize.ts';
+import { buildProduct, parsePriceMinor, normalizeCurrency, DEFAULT_CURRENCY } from './normalize.ts';
 import type { StorePlatform } from './platform.ts';
 
 /** Taille maximale acceptée pour un fichier, en octets (8 Mio). */
@@ -131,6 +131,16 @@ const COLONNES: Record<string, string[]> = {
   image: ['image', 'image_url', 'photo', 'images', 'image src', 'picture'],
   categories: ['category', 'categories', 'categorie', 'catégorie', 'collection', 'catégories'],
   sku: ['sku', 'reference', 'référence', 'ref'],
+  /**
+   * Identifiant du produit chez la plateforme source. Distinct de `sku` : un
+   * export PrestaShop fournit `id`, un export Shopify un `handle`. Sans cette
+   * colonne, un produit renommé serait recréé au lieur d'être mis à jour.
+   */
+  platformId: ['id', 'product_id', 'platform_id', 'source_id', 'handle', 'external_id'],
+  stock: ['stock', 'quantite', 'quantité', 'qty', 'quantity', 'inventory', 'available'],
+  variantName: ['variant_name', 'variant', 'variante', "nom de la variante"],
+  variantOption: ['variant_option', 'option', 'taille', 'size', 'couleur', 'color', 'pointure'],
+  parentSku: ['parent_sku', 'parent', 'sku parent', 'parent reference'],
 };
 
 function matchColumn(header: string): string | null {
@@ -170,10 +180,24 @@ export function importDelimited(raw: string, options: { separator?: string; plat
     });
     if (!entry.name) return;
 
-    const currency = (entry.currency || DEFAULT_CURRENCY).toUpperCase();
+    // Devise : une devise inconnue n'est pas convertie au hasard, elle est
+    // ramenée à la devise par défaut en le signalant.
+    const devise = normalizeCurrency(entry.currency);
+    const currency = devise.currency;
     const prix = parsePriceMinor(entry.price, currency);
     const localWarnings: string[] = [];
+    if (devise.warning) localWarnings.push(`${devise.warning} pour « ${entry.name} »`);
     if (prix.warning) localWarnings.push(`${prix.warning} pour « ${entry.name} »`);
+
+    // Une ligne de variante porte une option (taille, couleur…) : c'est la même
+    // fiche produit que les autres lignes qui partagent son nom (ou son SKU
+    // parent). Sans ce regroupement, trois tailles deviennent trois produits
+    // homonymes dont deux sont écartés comme « doublons ».
+    // Priorité à l'OPTION (« S », « 43 ») : `variant_name` porte souvent le nom
+    // du critère (« Taille », « Pointure »), qui identifie la variante sans la
+    // distinguer. Sans cette priorité, trois tailles portent le même libellé.
+    const optionVariante = (entry.variantOption || entry.variantName || '').trim();
+    const nomGroupe = (entry.parentSku || entry.name).trim().toLowerCase();
 
     const produit = buildProduct({
       name: entry.name,
@@ -183,11 +207,23 @@ export function importDelimited(raw: string, options: { separator?: string; plat
       productUrl: entry.url,
       imageUrl: entry.image,
       categories: entry.categories,
+      stock: entry.stock,
+      // La référence du produit est celle de sa ligne principale. Pour une
+      // ligne de variante, le SKU appartient à la VARIANTE : il ne doit pas
+      // devenir la référence du produit, sinon deux tailles du même produit
+      // produiraient deux clés de rapprochement différentes.
+      sku: optionVariante ? undefined : entry.sku,
+      platformId: optionVariante ? undefined : entry.platformId,
       source: { platform: options.platform ?? 'file', reference: options.reference ?? 'fichier' },
       warnings: localWarnings,
     });
     if ('error' in produit) {
       erreurs.push(`Ligne ${index + 2} : ${produit.error}.`);
+      return;
+    }
+
+    if (optionVariante) {
+      ajouterVariante(produits, nomGroupe, produit, optionVariante, entry.sku, entry.variantName);
       return;
     }
     produits.push(produit);
@@ -197,6 +233,52 @@ export function importDelimited(raw: string, options: { separator?: string; plat
     return { ok: false, format: 'csv', errors: errors_ou(erreurs, 'Aucune ligne valide n’a été trouvée.') };
   }
   return { ok: true, format: 'csv', products: produits, warnings: [...warnings, ...erreurs.slice(0, 5)], truncated: lignes.length - 1 > MAX_ROWS };
+}
+
+/**
+ * Ajoute une ligne de variante à la fiche qu'elle complète.
+ *
+ * La fiche principale est la première ligne du groupe. Sa quantité devient la
+ * somme des variantes : c'est ce qui est réellement en stock, et l'afficher
+ * comme un stock indépendant induirait en erreur.
+ */
+function ajouterVariante(
+  produits: NormalizedProduct[],
+  nomGroupe: string,
+  produit: NormalizedProduct,
+  option: string,
+  sku: string | undefined,
+  attribut?: string,
+): void {
+  const normaliser = (v: string) => v.trim().toLowerCase();
+  const existante = produits.find((p) => normaliser(p.name) === nomGroupe && p.variants.length > 0)
+    ?? produits.find((p) => normaliser(p.name) === normaliser(produit.name) && p.variants.length > 0);
+  // La quantité est conservée PAR VARIANTE, et non seulement additionnée sur
+  // le parent : c'est elle qu'on écrit dans `ugc_product_variants`. Sans elle,
+  // l'aperçu afficherait « S: 12 » et la base ne saurait pas combien il reste
+  // en S.
+  const variante = {
+    name: option.slice(0, 120),
+    priceMinor: produit.priceMinor,
+    currency: produit.currency ?? null,
+    sku: (sku ?? '').trim().slice(0, 120) || null,
+    stock: produit.stock,
+    available: produit.stock === null ? null : produit.stock > 0,
+    attributeName: (attribut ?? '').trim().slice(0, 60) || null,
+  };
+  if (existante) {
+    existante.variants.push(variante);
+    existante.stock = existante.stock === null && produit.stock === null
+      ? null
+      : (existante.stock ?? 0) + (produit.stock ?? 0);
+    for (const avertissement of produit.warnings) {
+      if (!existante.warnings.includes(avertissement)) existante.warnings.push(avertissement);
+    }
+    return;
+  }
+  // Première ligne du groupe : elle devient la fiche, sa quantité est celle de
+  // la variante — une fiche sans variante n'aurait pas de sens.
+  produits.push({ ...produit, variants: [variante] });
 }
 
 function errors_ou(liste: string[], defaut: string): string[] {
@@ -356,6 +438,24 @@ async function readZipEntry(bytes: Uint8Array, wantedNames: string[]): Promise<U
 }
 
 /**
+ * Convertit une référence de cellule (`B7`) en index de colonne (1).
+ *
+ * ## Pourquoi c'est indispensable
+ * Une ligne XLSX n'émet une balise `<c>` que pour les cellules **non vides**.
+ * Une ligne dont la description est vide arrive donc avec un `<c>` de moins :
+ * lu séquentiellement, le prix prend la place de la description, l'image celle
+ * des catégories, et le produit est créé avec un prix nul et une URL pour
+ * catégorie. C'est un défaut silencieux — les montants sont faux sans qu'aucune
+ * erreur ne soit levée.
+ */
+export function columnIndex(reference: string): number {
+  const lettres = /^([A-Z]+)/i.exec(reference.trim())?.[1]?.toUpperCase() ?? '';
+  let index = 0;
+  for (const caractere of lettres) index = index * 26 + (caractere.charCodeAt(0) - 64);
+  return index - 1;
+}
+
+/**
  * Extrait la valeur d'affichage d'une cellule de feuille XLSX.
  *
  * Trois cas, tous nécessaires avec de vrais classeurs :
@@ -436,10 +536,23 @@ export async function importXlsx(
   const lignes: string[][] = [];
   for (const ligneXml of xml.match(/<row[^>]*>([\s\S]*?)<\/row>/gi) ?? []) {
     if (lignes.length > MAX_ROWS) break;
+    // Chaque cellule est placée à SA colonne, déduite de sa référence (`r="C4"`),
+    // et non à la suite : une cellule vide n'émet pas de balise, et un
+    // placement séquentiel décalerait tout ce qui suit.
     const cellules: string[] = [];
-    for (const celluleXml of ligneXml.match(/<c[^>]*>[\s\S]*?<\/c>/gi) ?? []) {
-      cellules.push(cellText(celluleXml, shared));
+    let sequentiel = 0;
+    // Une cellule vide peut être AUTO-FERMANTE (`<c r="B6" t="inlineStr" />`) :
+    // sans ce cas, la balise n'est pas reconnue et la colonne disparaît, ce qui
+    // décale toutes les suivantes. C'est exactement le défaut observé.
+    for (const celluleXml of ligneXml.match(/<c[^>]*\/>|<c[^>]*>[\s\S]*?<\/c>/gi) ?? []) {
+      const reference = /\br="([A-Z]+\d+)"/i.exec(celluleXml)?.[1];
+      const index = reference ? columnIndex(reference) : sequentiel;
+      sequentiel = index + 1;
+      while (cellules.length < index) cellules.push('');
+      cellules[index] = cellText(celluleXml, shared);
     }
+    // Les colonnes vides de fin sont retirées : elles ne portent rien.
+    while (cellules.length > 0 && cellules[cellules.length - 1] === '') cellules.pop();
     if (cellules.some((c) => c.trim() !== '')) lignes.push(cellules);
   }
 

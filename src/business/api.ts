@@ -199,10 +199,41 @@ export class BusinessGrowApiError extends Error {
     message: string,
     readonly code: string,
     readonly status?: number,
+    /**
+     * Détails structurés renvoyés par le serveur (clés de `error` autres que
+     * `code` et `message`), tels quels.
+     * Exemple : pour `BUSINESS_GROW_SUBSCRIPTION_REQUIRED`, le motif précis
+     * (`reason`), le statut et la fin de période de l'abonnement. L'interface
+     * s'en sert pour expliquer ce qui manque ; elle ne décide rien avec.
+     */
+    readonly details: Readonly<Record<string, unknown>> | null = null,
   ) {
     super(message);
     this.name = 'BusinessGrowApiError';
   }
+}
+
+/**
+ * Motif d'un refus d'abonnement Business Grow transporté par l'erreur, ou
+ * `null` si l'erreur n'est pas un refus d'abonnement.
+ */
+export function subscriptionRefusalOf(error: unknown): {
+  reason: string;
+  status: string | null;
+  planKey: string | null;
+  currentPeriodEnd: string | null;
+  message: string;
+} | null {
+  if (!(error instanceof BusinessGrowApiError) || error.code !== 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED') return null;
+  const d = error.details ?? {};
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+  return {
+    reason: str(d.reason) ?? 'UNKNOWN',
+    status: str(d.subscription_status),
+    planKey: str(d.plan_key),
+    currentPeriodEnd: str(d.current_period_end),
+    message: error.message,
+  };
 }
 
 const RELAY_PATH = '/api/business-grow';
@@ -435,6 +466,9 @@ function parseResponse<T>(payload: unknown, status: number): T {
       typeof detail.message === 'string' ? detail.message : 'La demande Business Grow a échoué.',
       typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED',
       status,
+      // Le serveur place les détails à la racine de `error` (à côté de `code`
+      // et `message`) : on les transmet sans les interpréter.
+      Object.fromEntries(Object.entries(detail).filter(([key]) => key !== 'code' && key !== 'message')),
     );
   }
   if (!('data' in response)) {
