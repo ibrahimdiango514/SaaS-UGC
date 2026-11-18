@@ -20,7 +20,7 @@ import { SUBSCRIPTION_PATH, accessGuidance, type ImportAccessReason } from '../b
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Card, cn } from '../components/ui';
 import { ConnectorConnectForm } from './ConnectorConnectForm';
-import { MesBoutiquesConnectees } from './MesBoutiquesConnectees';
+import { MesBoutiquesConnectees, type BoutiquesAccess } from './MesBoutiquesConnectees';
 import { CustomApiConnectForm } from './CustomApiConnectForm';
 import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
@@ -168,40 +168,56 @@ export function IntegrationsCenter({
       setConnections(null);
       setLoadError(null);
     }
-    const [demandesRes, comptesRes, journalRes] = await Promise.allSettled([
-      listActivationRequests(workspaceId, businessGrowApi),
+    /*
+     * 1) Les demandes d'activation d'abord, SEULES. Le serveur refuse cette
+     *    lecture sans abonnement Business Grow actif : c'est la vérification
+     *    d'abonnement elle-même. Tant qu'elle n'a pas réussi, aucune autre
+     *    source n'est interrogée — ni comptes OAuth, ni journal, ni boutiques
+     *    (voir `MesBoutiquesConnectees`). Lancer ces lectures « au cas où »
+     *    produisait des requêtes inutiles et des erreurs réseau contradictoires
+     *    avec le message « l'état n'est pas lu sans abonnement ».
+     */
+    let demandes: BusinessIntegrationConnection[];
+    try {
+      demandes = await listActivationRequests(workspaceId, businessGrowApi);
+    } catch (cause) {
+      setConnections(null);
+      setAccounts([]);
+      setAudit([]);
+      setOauthError(null);
+      // Un refus d'abonnement n'est pas une panne : il est affiché comme tel,
+      // avec le motif précis du serveur, et sans message d'erreur générique.
+      const refus = subscriptionRefusalOf(cause);
+      setSubscriptionRefusal(refus);
+      setLoadError(refus ? null : cause instanceof Error ? cause.message : 'Lecture impossible.');
+      return;
+    }
+
+    setSubscriptionRefusal(null);
+    /*
+     * Isolation par entreprise : le serveur filtre déjà sur `p_user_id` et
+     * `p_workspace_id`, mais une ligne portant un autre `workspace_id` en
+     * réponse signalerait un mélange. On refuse alors tout l'état au lieu de
+     * l'afficher partiellement — fail-closed.
+     */
+    const melange = demandes.some((r) => r.workspace_id && workspaceId && r.workspace_id !== workspaceId);
+    if (melange) {
+      setConnections(null);
+      setLoadError('Réponse invalide pour cette entreprise : lecture refusée.');
+    } else {
+      setConnections(demandes);
+      setLoadError(null);
+    }
+
+    /*
+     * 2) Abonnement vérifié : les autres sources sont lues, à part. Leur panne
+     *    ne doit pas invalider les demandes d'activation, qui sont une autre
+     *    source — mais aucune ne fait supposer un « Connecté ».
+     */
+    const [comptesRes, journalRes] = await Promise.allSettled([
       listConnectedAccounts(),
       listAudit(30),
     ]);
-
-    if (demandesRes.status === 'fulfilled') {
-      setSubscriptionRefusal(null);
-      const recues = demandesRes.value;
-      /*
-       * Isolation par entreprise : le serveur filtre déjà sur `p_user_id` et
-       * `p_workspace_id`, mais une ligne portant un autre `workspace_id` en
-       * réponse signalerait un mélange. On refuse alors tout l'état au lieu de
-       * l'afficher partiellement — fail-closed.
-       */
-      const melange = recues.some((r) => r.workspace_id && workspaceId && r.workspace_id !== workspaceId);
-      if (melange) {
-        setConnections(null);
-        setLoadError('Réponse invalide pour cette entreprise : lecture refusée.');
-      } else {
-        setConnections(recues);
-        setLoadError(null);
-      }
-    } else {
-      setConnections(null);
-      // Un refus d'abonnement n'est pas une panne : il est affiché comme tel,
-      // avec le motif précis du serveur, et sans message d'erreur générique.
-      const refus = subscriptionRefusalOf(demandesRes.reason);
-      setSubscriptionRefusal(refus);
-      setLoadError(
-        refus ? null : demandesRes.reason instanceof Error ? demandesRes.reason.message : 'Lecture impossible.',
-      );
-    }
-
     if (comptesRes.status === 'fulfilled') {
       setAccounts(comptesRes.value);
       setOauthError(null);
@@ -370,6 +386,29 @@ export function IntegrationsCenter({
       unknown: false,
     })
     : null;
+  /*
+   * Accès aux boutiques, déduit de ce que le serveur a RÉPONDU :
+   * - la lecture des intégrations a réussi → l'abonnement est actif (le
+   *   serveur la refuse sinon) → les boutiques sont lues ;
+   * - refus d'abonnement → verrouillé, aucune requête vers `store-connect` ;
+   * - lecture en cours ou en échec → aucune requête non plus, et aucune
+   *   conclusion.
+   */
+  const accesBoutiques: BoutiquesAccess = guidanceAbonnement
+    ? {
+      kind: 'locked',
+      title: guidanceAbonnement.title,
+      detail: guidanceAbonnement.detail,
+      showSubscribe: guidanceAbonnement.showSubscribe,
+    }
+    : connections !== null
+      ? { kind: 'active' }
+      : {
+        kind: 'pending',
+        message: loadError
+          ? 'Lecture des intégrations en échec : les boutiques ne sont pas interrogées tant qu’une relecture n’a pas réussi.'
+          : undefined,
+      };
 
   return (
     <div className={embedded ? 'bg-transparent' : 'vy-ambient min-h-[100dvh] bg-ink'}>
@@ -447,7 +486,8 @@ export function IntegrationsCenter({
               <p className="font-medium">{guidanceAbonnement.title}</p>
               <p className="mt-0.5 opacity-80">{guidanceAbonnement.detail}</p>
               <p className="mt-1 opacity-60">
-                Le catalogue reste consultable. L’état de vos connexions n’est pas lu tant que l’abonnement n’est pas actif : aucune connexion n’est supposée.
+                Connexions verrouillées : le catalogue reste consultable, mais aucune requête n’est émise vers vos
+                boutiques ni vos comptes tant que l’abonnement Business Grow n’est pas actif. Aucune connexion n’est supposée.
               </p>
               {guidanceAbonnement.showSubscribe && (
                 <Link
@@ -544,6 +584,7 @@ export function IntegrationsCenter({
         <div className="mb-5">
           <MesBoutiquesConnectees
             workspaceId={workspaceId}
+            access={accesBoutiques}
             onOpenConnector={(cle) => {
               const entry = INTEGRATIONS.find((candidat) => candidat.id === cle);
               if (entry) setSelection(entry);
