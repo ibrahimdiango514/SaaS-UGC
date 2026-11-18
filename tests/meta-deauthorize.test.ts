@@ -132,3 +132,31 @@ describe('dataDeletionResponse — la forme exigée par Meta', () => {
     expect(r.url).not.toContain('218471000222');
   });
 });
+
+/**
+ * Garde : l'URL renvoyée à Meta doit mener à une page réelle qui explique la
+ * procédure de suppression.
+ *
+ * Meta exige que la réponse contienne « une URL où la personne peut suivre
+ * l'état de sa demande » et une « explication lisible ». Si l'ancre disparaît de
+ * la page légale, la réponse pointerait vers une page qui ne dit rien de la
+ * suppression — un lien mort, et un manquement aux Platform Terms. Ce test relie
+ * les deux fichiers pour qu'ils ne puissent pas diverger en silence.
+ */
+describe('dataDeletionResponse — le lien mène à une page réelle', () => {
+  it('l’ancre de suivi existe dans la page légale', async () => {
+    const { readFileSync } = await import('node:fs');
+    const page = readFileSync('src/pages/Legal.tsx', 'utf8');
+    const reponse = dataDeletionResponse('https://vyora.test', '218471', new Date(1700000000000));
+    const ancre = reponse.url.split('#')[1];
+    expect(ancre).toBeTruthy();
+    expect(page, `ancre #${ancre} absente de src/pages/Legal.tsx`).toContain(`id: '${ancre}'`);
+  });
+
+  it('la page est bien routée sur /confidentialite', async () => {
+    const { readFileSync } = await import('node:fs');
+    const app = readFileSync('src/App.tsx', 'utf8');
+    const chemin = new URL(dataDeletionResponse('https://vyora.test', '218471', new Date(0)).url).pathname;
+    expect(app).toContain(`path="${chemin}"`);
+  });
+});
