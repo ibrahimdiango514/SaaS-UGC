@@ -24,8 +24,8 @@
  * l'affiche tel quel : il n'existe aucun mode dégradé qui ferait semblant.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ExternalLink, Loader2, MessageSquare, Plug, RefreshCw, Send, Unplug } from 'lucide-react';
-import { Button, Input } from '../components/ui';
+import { AlertTriangle, Check, ExternalLink, Loader2, Plug, RefreshCw, Unplug } from 'lucide-react';
+import { Button } from '../components/ui';
 import { asAppError } from '../lib/errors';
 import {
   disconnectMeta,
@@ -40,6 +40,7 @@ import {
   type MetaPageOption,
   type MetaProduct,
 } from './meta/api';
+import { MetaOperationsPanel } from './MetaOperationsPanel';
 
 /* ------------------------------ SDK Meta (JS) ------------------------------ */
 
@@ -131,8 +132,6 @@ export function MetaConnectPanel({ product, workspaceId, onChanged, onConnected 
   const [erreur, setErreur] = useState<string | null>(null);
   const [pages, setPages] = useState<MetaPageOption[] | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
-  const [destinataire, setDestinataire] = useState('');
-  const [texte, setTexte] = useState('');
   const contexte = useRef<{ state: string; wabaId: string; phoneNumberId: string } | null>(null);
 
   const label = LIBELLES_PRODUIT[product];
@@ -365,30 +364,6 @@ export function MetaConnectPanel({ product, workspaceId, onChanged, onConnected 
     }
   };
 
-  const envoyer = async () => {
-    if (!workspaceId) return;
-    setBusy('send');
-    setErreur(null);
-    try {
-      if (product === 'whatsapp') {
-        await import('./meta/api').then((api) => api.sendWhatsApp(workspaceId, { to: destinataire, text: texte }));
-      } else if (product === 'messenger' && connexion?.pages[0]) {
-        const api = await import('./meta/api');
-        await api.sendMessenger(workspaceId, { pageId: connexion.pages[0].page_id, recipientId: destinataire, text: texte });
-      } else {
-        throw new Error('Aucune page Messenger sélectionnée.');
-      }
-      onChanged({ tone: 'success', text: 'Message accepté par Meta.' });
-      setTexte('');
-    } catch (e) {
-      const err = asAppError(e);
-      setErreur(err.message);
-      onChanged({ tone: 'error', text: err.message });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   /* --------------------------------- Rendu -------------------------------- */
 
   const etat = connexion ? ETATS[connexion.status] ?? ETATS.error : null;
@@ -560,35 +535,18 @@ export function MetaConnectPanel({ product, workspaceId, onChanged, onConnected 
         </div>
       )}
 
-      {connexion?.status === 'connected' && (product === 'whatsapp' || product === 'messenger') && (
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-          <p className="flex items-center gap-1.5 text-xs font-medium text-slate-200">
-            <MessageSquare size={12} /> Envoyer un message de test réel
-          </p>
-          <p className="mt-0.5 text-[0.7rem] text-slate-400">
-            {product === 'whatsapp'
-              ? 'WhatsApp n’accepte un texte libre que dans les 24 h suivant un message du contact ; hors de cette fenêtre, utilisez un modèle approuvé.'
-              : 'Messenger applique la même fenêtre de 24 h.'}
-          </p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <Input
-              value={destinataire}
-              onChange={(e) => setDestinataire(e.target.value)}
-              placeholder={product === 'whatsapp' ? 'Numéro international (ex. 22370000000)' : 'Identifiant du destinataire (PSID)'}
-            />
-            <Input value={texte} onChange={(e) => setTexte(e.target.value)} placeholder="Message" />
-          </div>
-          <Button
-            size="sm"
-            className="mt-2"
-            disabled={busy !== null || !destinataire.trim() || !texte.trim()}
-            loading={busy === 'send'}
-            onClick={() => { void envoyer(); }}
-            icon={<Send size={12} />}
-          >
-            Envoyer
-          </Button>
-        </div>
+      {/*
+        Exploitation réelle de la connexion : publication, commentaires,
+        statistiques, boîte de réception, modèles, Instagram. Les données
+        viennent de Meta, jamais d'un jeu de démonstration.
+      */}
+      {connexion?.status === 'connected' && workspaceId && (
+        <MetaOperationsPanel
+          product={product}
+          workspaceId={workspaceId}
+          connexion={connexion}
+          onChanged={onChanged}
+        />
       )}
 
       {connexion && product !== 'whatsapp' && connexion.pages.length === 0 && !pages && (

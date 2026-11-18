@@ -126,6 +126,24 @@ jamais du serveur ; le navigateur ne reçoit que des états et des URL publiques
 
 ---
 
+## 4 bis. Ce que l'écran permet de faire une fois connecté
+
+Chaque fiche expose les actions du produit, toutes branchées sur Meta — **aucun jeu de
+démonstration, aucun compteur local** :
+
+| Fiche | Écran |
+| --- | --- |
+| Facebook Pages | Publier (texte + lien), lister les publications réelles, lire les commentaires d'une publication, supprimer une publication (avec confirmation), lire les statistiques, lire les événements reçus par webhook |
+| Messenger | Boîte de réception (dernier message par contact), fil de conversation, réponse envoyée par `messenger.send` |
+| WhatsApp Business | Boîte de réception WhatsApp, modèles approuvés (`whatsapp.templates`) et envoi de modèle (`whatsapp.send`), le tout avec la règle des 24 h rappelée |
+| Instagram Business | Compte professionnel relié (`instagram.account`), statistiques (`instagram.insights`), publication d'un média HTTPS (`instagram.publish`) |
+
+Règles d'affichage tenues par les tests : une liste vide affiche « aucun … renvoyé par Meta » ;
+un refus du serveur est affiché **tel quel** ; un texte de réponse refusé n'est **pas** effacé ;
+le bouton d'envoi d'un modèle reste bloqué tant que le modèle n'est pas `APPROVED` ou que le
+destinataire manque ; une page non sélectionnée **désactive** la publication au lieu de la
+tenter.
+
 ## 5. Webhooks : signature, idempotence, résolution
 
 `meta-webhook` (Edge, `verify_jwt = false`) :
