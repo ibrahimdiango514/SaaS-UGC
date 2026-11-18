@@ -19,18 +19,34 @@ par des variables d'environnement ou des réglages de la console.
 | Relais Netlify Edge (`netlify/edge-functions/*.js`) | Ciblent `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/...` : correct, le backend ne change pas. |
 | Liste d'origines par défaut (`src/lib/origin-allowlist.ts`) | Contient l'ancien domaine et les aperçus ; la nouvelle origine se déclare par secret (voir §4) — aucune redéploiement d'Edge Function n'est nécessaire pour l'ajouter. |
 | Outils de constat (`.github/workflows/production-check.yml`, `scripts/verify-production.mjs`) | Paramétrés : variable de dépôt `VYORA_SITE_URL` / variable d'environnement `VYORA_SITE_URL` / option `--site`. L'ancien domaine n'est qu'un repli. |
-| Garde de build `netlify.toml` | Testée par `tests/business-grow-deployment-guard.test.ts` (12 cas, `sh -c` réel) : le nouveau site porte le **même nom** `vyora-ugc` que l'ancien, la garde est donc épinglée sur le **Site ID** `fc88d197-fe0b-47c7-a6e3-fba44eeccda9` (variable Netlify `SITE_ID`). Seul ce site, déclarant `VYORA_BUILD_ENABLED=true`, construit — et seulement `main`. Tout autre site (dont l'ancien, homonyme) obtient « build cancelled » sans consommer de crédit. |
+| Garde de build `netlify.toml` | **Deux rideaux**, testés par `tests/business-grow-deployment-guard.test.ts` (28 cas, vrai `sh`). Site autorisé : **Site ID `fc88d197-fe0b-47c7-a6e3-fba44eeccda9`** (`https://vyora-saas-ugc.netlify.app`). (1) `ignore` — avant toute installation — annule si `VYORA_BUILD_ENABLED≠true`, si la branche n'est pas `main`, si le nom est celui de l'ancien site (`vyora-ugc`) ou si un `SITE_ID` **présent** diffère de l'identifiant autorisé ; `SITE_ID` absent n'annule pas (Netlify ne l'expose pas de façon fiable à cette étape : c'est ce qui a fait ignorer le déploiement de `14a61ec`). (2) `scripts/netlify-build-guard.sh`, en tête de la commande de build, exige `SITE_ID` et le compare strictement, refuse le nom `vyora-ugc`, `main` seulement, opt-in obligatoire ; tout refus est journalisé avec les valeurs reçues et fait échouer le build avant `npm ci` (aucun déploiement). |
 
 ---
+
+## 0bis. Incident du 2026-11-18 — déploiement de `14a61ec` ignoré
+
+- Garde en place : `ignore = '[ "$SITE_ID" != "fc88d197-…" ] || [ "$VYORA_BUILD_ENABLED" != "true" ] || [ "$BRANCH" != "main" ]'`.
+- Constat Netlify : initialisation et build terminés, **déploiement ignoré** ; le Site ID réel du
+  nouveau site est bien `fc88d197-fe0b-47c7-a6e3-fba44eeccda9`.
+- Cause : à l'étape `ignore`, la variable `SITE_ID` n'est pas exposée (ou pas encore) ; vide, la
+  comparaison `!=` est toujours vraie → code 0 → build annulé. Indice concordant : la garde
+  précédente `[ "$SITE_NAME" = "vyora-ugc" ]` (#25, #26) n'avait jamais bloqué le nouveau site, pourtant
+  nommé `vyora-ugc` à l'époque — `SITE_NAME` n'était pas visible non plus.
+- Correction : identité du site tranchée dans la commande de build (variables documentées là),
+  `ignore` n'annulant sur `SITE_ID` que si la variable est présente. Le journal Netlify montre
+  désormais les valeurs reçues (`garde ignore: …` puis `GARDE NETLIFY — …`).
 
 ## 1. Avant de commencer — l'ancien compte
 
 - **Ne déclencher aucun build sur l'ancien site `vyora-ugc`** (24 crédits restants).
-- La garde de build de `main` annule désormais tout build déclenché par Git sur ce site
-  (`[ "$SITE_ID" != "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ]` → code 0 → « build cancelled »,
-  aucun crédit consommé). Le nom `vyora-ugc` ne suffit plus à distinguer les deux sites : le
-  nouveau porte le même ; c'est l'identifiant qui tranche.
-  Un bouton **Trigger deploy** manuel ignore cette garde : ne pas l'utiliser.
+- La garde de build de `main` refuse tout build déclenché par Git sur l'ancien site :
+  rideau 1 (`ignore`) l'annule dès que son nom `vyora-ugc` ou un `SITE_ID` différent est visible
+  (code 0 → « build cancelled », aucun crédit consommé) ; sinon rideau 2
+  (`scripts/netlify-build-guard.sh`) fait échouer le build en quelques secondes, avant `npm ci`,
+  en écrivant dans le journal `SITE_ID`, `SITE_NAME`, `BRANCH` et `VYORA_BUILD_ENABLED` reçus.
+  Le nouveau site a été renommé `vyora-saas-ugc` (2026-11-18) : les deux noms diffèrent de nouveau,
+  et l'identifiant reste la preuve principale.
+  Un bouton **Trigger deploy** manuel ignore le rideau 1 mais **pas** le rideau 2.
 - Si l'ancien site doit être détaché du dépôt : *Site configuration → Build & deploy → Continuous
   deployment → Manage repository → Unlink*. Facultatif ; la garde suffit.
 - Ne pas supprimer l'ancien site tant que la nouvelle URL n'a pas été ajoutée partout (§4 à §6) :

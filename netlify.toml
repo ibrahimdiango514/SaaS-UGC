@@ -1,32 +1,32 @@
 [build]
-  command = "npm ci && npm run build"
-  publish = "dist"
   # ---------------------------------------------------------------------------
-  # GARDE DE BUILD (2026-11-18, révisée 2026-11-22 : nouveau compte Netlify)
+  # GARDE DE BUILD À DEUX RIDEAUX (2026-11-18, nouveau compte Netlify)
   #
-  # Convention Netlify : si cette commande renvoie 0, le build est ANNULÉ avant
-  # toute installation ; tout autre code = build normal. Elle n'est évaluée que
-  # pour les builds déclenchés par Git ; un « Trigger deploy » manuel l'ignore.
+  # Site de production autorisé : Site ID fc88d197-fe0b-47c7-a6e3-fba44eeccda9
+  # (https://vyora-saas-ugc.netlify.app). Ancien site : nom « vyora-ugc »,
+  # ancien compte — jamais déployé, quel que soit son identifiant.
   #
-  # Pourquoi l'identifiant et non le nom : l'ancien site et le nouveau portent
-  # le MÊME nom `vyora-ugc` (même URL https://vyora-ugc.netlify.app). Une garde
-  # par `$SITE_NAME` bloquait donc aussi le nouveau site. `$SITE_ID` (API ID,
-  # UUID attribué à la création, visible dans Site configuration → General →
-  # Site details) est le seul identifiant que deux sites ne partagent jamais.
+  # Rideau 1 — `ignore` (ci-dessous) : évalué AVANT toute installation, code 0
+  # = build annulé sans coût. Il n'est pas prouvé que Netlify expose SITE_ID /
+  # SITE_NAME à cette étape : le déploiement de 14a61ec a été ignoré alors que
+  # le site est le bon, et la garde précédente par SITE_NAME n'avait jamais
+  # bloqué un site pourtant nommé vyora-ugc. Ce rideau ne tranche donc l'identité
+  # que si la variable est PRÉSENTE ; sinon il laisse passer vers le rideau 2.
+  # Il garde ce qu'il voit sûrement : la branche et l'opt-in explicite.
   #
-  # Trois conditions, dans l'ordre ; la première vraie annule le build :
-  #   1. `$SITE_ID` ≠ identifiant du NOUVEAU site (compte Netlify actuel) :
-  #      l'ancien site (supprimé, autre identifiant), tout site recréé ou relié
-  #      par erreur au dépôt est coupé ici, quelle que soit la branche. Changer
-  #      de site = mettre à jour cette valeur dans une PR, jamais à la volée.
-  #   2. `$VYORA_BUILD_ENABLED` ≠ « true » : le site doit en plus déclarer
-  #      explicitement cette variable (Site configuration → Environment
-  #      variables). Deux preuves indépendantes valent mieux qu'une.
-  #   3. `$BRANCH` ≠ « main » : aucune branche de travail, aucun Deploy Preview.
-  #      `main` est la seule source déployée en production.
+  # Rideau 2 — `scripts/netlify-build-guard.sh`, en tête de la commande de
+  # build, dans l'environnement complet où SITE_ID et SITE_NAME sont documentés :
+  # refus (code 1, donc pas de déploiement) si l'identifiant n'est pas celui du
+  # site autorisé, si le nom est celui de l'ancien site, si la branche n'est pas
+  # main ou si l'opt-in manque. Les valeurs reçues sont écrites dans le journal.
   #
-  # Voir docs/migration-nouveau-netlify.md pour la procédure complète.
-  ignore = '[ "$SITE_ID" != "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ] || [ "$VYORA_BUILD_ENABLED" != "true" ] || [ "$BRANCH" != "main" ]'
+  # Changer de site = modifier l'identifiant aux DEUX endroits, par PR ; les
+  # tests (tests/business-grow-deployment-guard.test.ts) vérifient qu'ils sont
+  # identiques. Voir docs/migration-nouveau-netlify.md.
+  # ---------------------------------------------------------------------------
+  command = "sh scripts/netlify-build-guard.sh fc88d197-fe0b-47c7-a6e3-fba44eeccda9 && npm ci && npm run build"
+  publish = "dist"
+  ignore = 'echo "garde ignore: BRANCH=${BRANCH:-absent} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-absent} SITE_ID=${SITE_ID:-absent} SITE_NAME=${SITE_NAME:-absent}"; [ "$VYORA_BUILD_ENABLED" != "true" ] || [ "$BRANCH" != "main" ] || [ "$SITE_NAME" = "vyora-ugc" ] || { [ -n "$SITE_ID" ] && [ "$SITE_ID" != "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ]; }'
 
 [build.environment]
   NODE_VERSION = "22"
