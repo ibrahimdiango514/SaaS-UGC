@@ -1,0 +1,201 @@
+/**
+ * VYORA — serveurs MCP SORTANTS, vu de l'application.
+ *
+ * ## Sortant ≠ entrant
+ *
+ * `src/mcp/api.ts` gère le MCP **entrant** : VYORA est le serveur, l'utilisateur
+ * connecte Claude ou Cursor. Ce module-ci fait l'inverse : l'utilisateur
+ * connecte SES serveurs MCP distants, et VYORA les appelle.
+ *
+ * ## Ce module ne voit jamais un secret
+ *
+ * Il en **envoie** un, une fois, à la création. Il n'en reçoit jamais : la
+ * réponse ne contient qu'un booléen `aSecret`. Aucun `localStorage`, aucun état
+ * global, aucun journal — le secret est remis à l'appelant qui le passe
+ * directement au réseau puis l'oublie.
+ *
+ * ## Toute la décision est côté serveur
+ *
+ * Les permissions sont vérifiées à chaque appel par `execution.ts`, qui relit la
+ * base. Ce module ne fait qu'afficher et demander ; il ne peut pas élargir une
+ * autorisation, et une permission accordée ici ne suffit jamais à elle seule.
+ */
+import { supabase } from '../lib/supabase';
+
+/** Réponse d'erreur des routes de gestion, telle que le serveur la produit. */
+export class ErreurGestion extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = 'ErreurGestion';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type ModeAuth = 'none' | 'bearer' | 'api_key' | 'oauth';
+
+export interface ServeurMcp {
+  id: string;
+  workspaceId: string;
+  nom: string;
+  url: string;
+  authKind: ModeAuth | string;
+  /** Vrai si un secret existe. Sa valeur n'est jamais transmise. */
+  aSecret: boolean;
+  status: string;
+  protocolVersion: string | null;
+  serverName: string | null;
+  serverVersion: string | null;
+  outils: { name: string; description?: string }[];
+  toolPermissions: Record<string, unknown>;
+  dernierTestAt: string | null;
+  derniereErreur: string | null;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface ResultatTest {
+  ok: boolean;
+  etat: string;
+  message: string;
+  protocole?: string;
+  serverName?: string;
+  serverVersion?: string;
+  outils: { name: string; description?: string }[];
+  codes?: string[];
+}
+
+/** Base des routes de gestion : `/functions/v1/mcp-client/gestion`. */
+function urlGestion(route: string): string {
+  const base = (import.meta.env.VITE_SUPABASE_URL as string | undefined);
+  return `${base ?? ''}/functions/v1/mcp-client/gestion/${route}`;
+}
+
+/**
+ * Appel brut, avec la session courante.
+ *
+ * `supabase.functions.invoke` ne sait pas viser un sous-chemin : on passe donc
+ * par `fetch` avec le jeton de session. Le jeton est celui de GoTrue, et le
+ * serveur le revérifie auprès de GoTrue — il ne fait pas confiance à sa
+ * présence.
+ */
+async function appeler<T>(route: string, corps: unknown): Promise<T> {
+  const { data: session } = await supabase.auth.getSession();
+  const jeton = session.session?.access_token;
+  if (!jeton) {
+    throw new ErreurGestion('Vous devez être connecté.', 'non_authentifie', 401);
+  }
+
+  let reponse: Response;
+  try {
+    reponse = await fetch(urlGestion(route), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${jeton}`,
+        apikey: (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)
+          ?? 'sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz',
+      },
+      body: JSON.stringify(corps ?? {}),
+    });
+  } catch {
+    throw new ErreurGestion(
+      'Impossible de joindre le service. Vérifiez votre connexion.',
+      'reseau',
+      0,
+    );
+  }
+
+  let charge: unknown = null;
+  try {
+    charge = await reponse.json();
+  } catch {
+    /* corps non JSON : on retombe sur le statut seul */
+  }
+  const obj = (charge ?? {}) as Record<string, unknown>;
+
+  if (!reponse.ok) {
+    const message = typeof obj.message === 'string'
+      ? obj.message
+      : 'Le service a refusé la demande.';
+    const code = typeof obj.error === 'string' ? obj.error : 'erreur';
+    throw new ErreurGestion(message, code, reponse.status);
+  }
+  return charge as T;
+}
+
+/** Liste les serveurs de l'utilisateur connecté. */
+export async function listerServeurs(): Promise<ServeurMcp[]> {
+  const r = await appeler<{ serveurs?: ServeurMcp[] }>('lister', {});
+  return Array.isArray(r?.serveurs) ? r.serveurs : [];
+}
+
+export interface CreationServeur {
+  workspaceId: string;
+  nom: string;
+  url: string;
+  authKind: ModeAuth;
+  /** Transmis une fois, puis oublié. Jamais renvoyé par le serveur. */
+  secret?: string;
+  oauthClientId?: string;
+  authorizationServer?: string;
+}
+
+/** Crée un serveur. Le secret part dans Vault côté serveur ; il ne revient pas. */
+export async function creerServeur(entree: CreationServeur): Promise<{ serverId: string; serveur: ServeurMcp | null }> {
+  const r = await appeler<{ serverId: string; serveur: ServeurMcp | null }>('creer', entree);
+  return { serverId: r.serverId, serveur: r.serveur ?? null };
+}
+
+/**
+ * Teste réellement une connexion : `initialize` + `tools/list` par la sortie
+ * réseau épinglée. N'exécute aucun outil.
+ */
+export async function testerConnexion(serverId: string): Promise<ResultatTest> {
+  return appeler<ResultatTest>('tester', { serverId });
+}
+
+/** Accorde ou refuse un outil. `pending` n'est pas acceptable en entrée. */
+export async function definirPermission(
+  serverId: string,
+  outil: string,
+  etat: 'allowed' | 'denied',
+): Promise<Record<string, unknown>> {
+  const r = await appeler<{ toolPermissions?: Record<string, unknown> }>('permissions', {
+    serverId,
+    outil,
+    etat,
+  });
+  return r?.toolPermissions ?? {};
+}
+
+/** Révoque : le secret est détruit côté serveur, la ligne reste (historique). */
+export async function revoquerServeur(serverId: string): Promise<void> {
+  await appeler<{ ok: boolean }>('revoquer', { serverId });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Présentation                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export const LIBELLES_AUTH: Record<string, string> = {
+  none: 'Aucune',
+  bearer: 'Jeton Bearer',
+  api_key: 'Clé d’API',
+  oauth: 'OAuth',
+};
+
+export const LIBELLES_ETAT: Record<string, { libelle: string; ton: 'ok' | 'attention' | 'erreur' | 'neutre' }> = {
+  connected: { libelle: 'Connecté', ton: 'ok' },
+  auth_required: { libelle: 'Authentification refusée', ton: 'attention' },
+  error: { libelle: 'Erreur', ton: 'erreur' },
+  unknown: { libelle: 'Jamais testé', ton: 'neutre' },
+  revoked: { libelle: 'Révoqué', ton: 'erreur' },
+};
+
+/** État lisible d'une permission. `pending` = jamais accordé. */
+export function etatPermission(valeur: unknown): 'allowed' | 'denied' | 'pending' {
+  return valeur === 'allowed' || valeur === 'denied' ? valeur : 'pending';
+}

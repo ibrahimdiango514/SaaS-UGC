@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   BookOpen, Check, ChevronLeft, ChevronRight, Compass, Image as ImageIcon, MessageSquarePlus,
   MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plug, Search, Settings, Sparkles,
-  Trash2, TrendingUp, User, X,
+  Server, Trash2, TrendingUp, User, X,
 } from 'lucide-react';
 import type { AiConversation } from './api';
 import { cn } from '../components/ui';
@@ -195,6 +195,7 @@ export function Sidebar({
           <RailLink to="/app/bibliotheque" icon={<BookOpen size={16} />} label="Bibliothèque" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/connect" icon={<Plug size={16} />} label="Intégrations" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/connexions-ia" icon={<Sparkles size={16} />} label="MCP et connexions IA" collapsed={collapsed} onClick={onCloseMobile} />
+          <RailLink to="/app/mes-serveurs-mcp" icon={<Server size={16} />} label="Mes serveurs MCP" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/ai/explorer" icon={<Compass size={16} />} label="Explorer" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/business" icon={<TrendingUp size={16} />} label="Espace Business" collapsed={collapsed} onClick={onCloseMobile} />
         </nav>
