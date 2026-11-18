@@ -807,7 +807,7 @@ function buildMuapiBody(
   prompt: string,
   imageUrl: string,
   lastImageUrl = "",
-  media: { videoUrl?: string; audioUrl?: string } = {},
+  media: { videoUrl?: string; audioUrl?: string; imageUrls?: string[] } = {},
 ): Json {
   const fields = asArray(model.input_fields);
   const required = asArray(model.required_fields);
@@ -817,14 +817,29 @@ function buildMuapiBody(
     if (required.includes("image_url") && !imageUrl) throw new Error("IMAGE_MISSING");
     if (imageUrl) body.image_url = imageUrl;
   }
+  // Plusieurs images de référence : envoyées SEULEMENT si le modèle déclare le
+  // champ correspondant. Une liste vide n'est jamais envoyée (le fournisseur
+  // interpréterait `[]` comme une entrée invalide).
+  const imageUrls = (media.imageUrls ?? []).filter((url) => url.length > 0);
+  for (const key of ["images_list", "image_urls", "reference_images"]) {
+    if (!fields.includes(key)) continue;
+    const liste = imageUrls.length > 0 ? imageUrls : (imageUrl ? [imageUrl] : []);
+    if (required.includes(key) && liste.length === 0) throw new Error("IMAGE_MISSING");
+    if (liste.length > 0) body[key] = liste;
+  }
   // Sources média importées par l'utilisateur : envoyées UNIQUEMENT si le
   // modèle les déclare. Aucune valeur inventée, aucun média de démonstration.
   const videoUrl = media.videoUrl ?? "";
   const audioUrl = media.audioUrl ?? "";
-  for (const key of ["video_url", "input_video"]) {
+  for (const key of ["video_url", "input_video", "reference_video_url"]) {
     if (!fields.includes(key)) continue;
     if (required.includes(key) && !videoUrl) throw new Error("VIDEO_MISSING");
     if (videoUrl) body[key] = videoUrl;
+  }
+  // `reference_videos` reçoit une liste, comme `images_list`.
+  if (fields.includes("reference_videos")) {
+    if (required.includes("reference_videos") && !videoUrl) throw new Error("VIDEO_MISSING");
+    if (videoUrl) body.reference_videos = [videoUrl];
   }
   if (fields.includes("audio_url")) {
     if (required.includes("audio_url") && !audioUrl) throw new Error("AUDIO_MISSING");
@@ -840,6 +855,11 @@ function buildMuapiBody(
   if (fields.includes("last_image")) {
     if (required.includes("last_image") && !lastImageUrl) throw new Error("LAST_IMAGE_MISSING");
     if (lastImageUrl) body.last_image = lastImageUrl;
+  }
+  for (const key of ["end_image_url", "last_image_url"]) {
+    if (!fields.includes(key)) continue;
+    if (required.includes(key) && !lastImageUrl) throw new Error("LAST_IMAGE_MISSING");
+    if (lastImageUrl) body[key] = lastImageUrl;
   }
   const schema = paramSchemaFromRow(model);
   const params = obj(payload.params);
@@ -1442,9 +1462,26 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
   const lastImagePath = acceptsLastImage ? workspaceImagePath(payload.last_image_storage_path, workspaceId) : "";
   if (!lastImageUrl && lastImagePath) lastImageUrl = (await signStoragePath(lastImagePath)) ?? "";
 
+  // Références multiples : le catalogue déclare, pour chaque modèle, s'il
+  // accepte plusieurs images (`images_list`, `image_urls`, `reference_images`)
+  // ou une vidéo de référence. On ne signe et n'envoie que ce qui est déclaré.
+  const imageListField = ["images_list", "image_urls", "reference_images"]
+    .find((field) => modelFields.includes(field)) ?? "";
+  const extraImagePaths = imageListField
+    ? asArray(payload.image_storage_paths)
+        .map((raw) => workspaceImagePath(raw, workspaceId))
+        .filter((path) => path.length > 0)
+    : [];
+  const extraImageUrls: string[] = [];
+  for (const path of extraImagePaths.slice(0, 8)) {
+    const signed = await signStoragePath(path);
+    if (signed) extraImageUrls.push(signed);
+  }
+
   // Sources vidéo / audio importées par l'utilisateur (Video→Video, Audio→Video).
   // Le chemin Storage est vérifié dans le workspace de la tâche, puis signé.
-  const acceptsVideo = modelFields.some((f) => f === "video_url" || f === "input_video");
+  const acceptsVideo = modelFields.some((f) => f === "video_url" || f === "input_video"
+    || f === "reference_video_url" || f === "reference_videos");
   const acceptsAudio = modelFields.includes("audio_url");
   let videoUrl = acceptsVideo ? str(payload.video_url, 2000) : "";
   const videoPath = acceptsVideo ? workspaceImagePath(payload.video_storage_path, workspaceId) : "";
@@ -1455,7 +1492,9 @@ async function actionStart(jobId: string, userId: string): Promise<Response> {
 
   let submitBody: Json;
   try {
-    submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, { videoUrl, audioUrl });
+    submitBody = buildMuapiBody(model, payload, prompt, imageUrl, lastImageUrl, {
+      videoUrl, audioUrl, imageUrls: extraImageUrls,
+    });
   }
   catch (e) {
     const code = e instanceof Error ? e.message.split(":")[0] : "INVALID_INPUT";

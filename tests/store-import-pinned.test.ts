@@ -407,7 +407,16 @@ describe('pinnedFetchLike — réutiliser la logique existante sans la dupliquer
     await expect(
       fetchImpl('https://boutique.example/', { headers: { authorization: 'Bearer secret-interne' } }),
     ).rejects.toBeInstanceOf(PinnedNetworkError);
-    // Le jeton n'est jamais transmis : la requête sortante ne le contient pas.
-    expect(ecrits.join('\n')).not.toContain('secret-interne');
+    /*
+     * L'en-tête est transmis au seul hôte demandé — c'est ce qui permet à une
+     * API authentifiée (PrestaShop Webservice) de répondre — et il ne suit
+     * JAMAIS la redirection vers `autre.example`.
+     */
+    const versBoutique = ecrits.filter((t) => t.includes('Host: boutique.example'));
+    const versAutre = ecrits.filter((t) => t.includes('Host: autre.example'));
+    expect(versBoutique.some((t) => t.includes('secret-interne'))).toBe(true);
+    expect(versAutre.length).toBeGreaterThan(0);
+    expect(versAutre.join('\n')).not.toContain('secret-interne');
+    expect(versAutre.join('\n')).not.toContain('Authorization');
   });
 });

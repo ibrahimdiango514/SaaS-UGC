@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Bot, BookOpen, Boxes, Brain, CheckSquare, Clapperboard, Coins, CreditCard,
-  Film, FolderKanban, History, LayoutDashboard, LifeBuoy, Megaphone,
+  Film, FolderKanban, HardDrive, History, LayoutDashboard, LifeBuoy, Megaphone,
   MessageSquare, Package, Plug, Radar, Scissors, Settings, Shield,
   ShoppingCart, SlidersHorizontal, Sparkles, Truck, Users, Wallet, Wand2, Workflow,
 } from 'lucide-react';
@@ -169,6 +169,13 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
         description: 'Créations enregistrées et fichiers privés',
         icon: Sparkles,
         keywords: ['bibliotheque', 'fichiers', 'creations', 'saved'],
+      },
+      {
+        to: '/app/fichiers',
+        label: 'Fichiers et médias',
+        description: 'Importer, prévisualiser, rattacher, supprimer',
+        icon: HardDrive,
+        keywords: ['fichiers', 'medias', 'upload', 'import', 'documents', 'images', 'videos'],
       },
     ],
   },
