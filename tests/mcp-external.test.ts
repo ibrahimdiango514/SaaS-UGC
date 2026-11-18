@@ -118,11 +118,13 @@ describe('deciderAppel — fail-closed', () => {
     expect(decider('list_products', { etat: 'allowed' }).permis).toBe(true);
   });
 
-  it('refuse une écriture autorisée mais non confirmée', () => {
+  it('refuse une écriture dont l’autorisation n’est pas persistée', () => {
+    // `deciderAppel` ne connaît pas la confirmation ponctuelle : il ne peut
+    // donc pas renvoyer « à confirmer ». Ce cas-là appartient à `execution.ts`.
     const d = decider('delete_product', { etat: 'allowed' });
     expect(d.permis).toBe(false);
     if (!d.permis) {
-      expect(d.code).toBe('ecriture_non_confirmee');
+      expect(d.code).toBe('ecriture_desactivee');
       expect(d.motif).toContain('delete');
     }
   });
@@ -134,7 +136,18 @@ describe('deciderAppel — fail-closed', () => {
   it('traite un nom inconnu comme une écriture', () => {
     const d = decider('do_something', { etat: 'allowed' });
     expect(d.permis).toBe(false);
-    if (!d.permis) expect(d.code).toBe('ecriture_non_confirmee');
+    if (!d.permis) expect(d.code).toBe('ecriture_desactivee');
+  });
+
+  it('écriture sans autorisation persistée : « désactivée », pas « à confirmer »', () => {
+    // Le message doit dire la vérité : aucune confirmation ne peut suffire,
+    // puisque la migration P2 ne porte aucune colonne d'autorisation d'écriture.
+    const d = decider('delete_product', { etat: 'allowed' });
+    expect(d.permis).toBe(false);
+    if (!d.permis) {
+      expect(d.code).toBe('ecriture_desactivee');
+      expect(d.motif).toContain('lecture seule');
+    }
   });
 
   it('refuse un outil jamais découvert', () => {

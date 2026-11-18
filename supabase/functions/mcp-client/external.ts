@@ -308,11 +308,25 @@ export function deciderAppel(entree: {
   }
   const classement = classerOutil(entree.outil, entree.description ?? '');
   if (!classement.lecture && entree.permission.ecritureAutorisee !== true) {
+    /*
+     * Un seul refus ici, et il dit la vérité.
+     *
+     * Cette fonction ne reçoit PAS la confirmation ponctuelle de l'appel : elle
+     * ne peut donc pas savoir si l'utilisateur a confirmé. Annoncer
+     * « confirmation requise » y serait structurellement faux — et l'était :
+     * la migration P2 ne porte aucune colonne d'autorisation d'écriture, donc
+     * aucune confirmation ne peut jamais débloquer l'appel. L'utilisateur
+     * chercherait un bouton qui n'existe pas.
+     *
+     * Le cas « autorisation en base mais confirmation absente » est traité plus
+     * loin, dans `execution.ts`, qui EST le seul endroit où la confirmation de
+     * l'appel est connue : il renvoie alors `ecriture_non_confirmee`.
+     */
     return {
       permis: false,
-      motif: `L’outil « ${entree.outil} » peut modifier des données (${classement.raison}) : `
-        + 'confirmation explicite requise.',
-      code: 'ecriture_non_confirmee',
+      motif: `L’outil « ${entree.outil} » peut modifier des données (${classement.raison}). `
+        + 'Les écritures ne sont pas activées sur cette connexion : lecture seule.',
+      code: 'ecriture_desactivee',
     };
   }
   return { permis: true };

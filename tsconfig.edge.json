@@ -45,6 +45,7 @@
     "supabase/functions/mcp-client/external.ts",
     "supabase/functions/mcp-client/execution.ts",
     "supabase/functions/mcp-client/route.ts",
+    "supabase/functions/mcp-client/http.ts",
     "supabase/functions/mcp-client/accueil.ts",
     "supabase/functions/mcp-client/index.ts"
   ]

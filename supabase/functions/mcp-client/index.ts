@@ -29,9 +29,8 @@
  * - Autoriser une écriture : aucune autorisation d'écriture n'existe en base.
  */
 import postgres from 'npm:postgres@3.4.5';
-import { traiterAppelOutil, validerCorps } from './route.ts';
+import { traiterRequete } from './http.ts';
 import { creerAccesReel, type SqlTag } from './accueil.ts';
-import { resolveCorsOrigin } from '../../../src/lib/origin-allowlist.ts';
 import type { EgressDeps } from '../store-import/safe-egress.ts';
 import { PinnedFetchFailure } from '../store-import/pinned-fetch.ts';
 import type { DependancesP5 } from './execution.ts';
@@ -45,11 +44,13 @@ const SUPABASE_URL = env('SUPABASE_URL');
 const ANON_KEY = env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY');
 const DATABASE_URL = env('MCP_CLIENT_DATABASE_URL') || env('SUPABASE_DB_URL');
 
-const ALLOWED_ORIGINS = env('VYORA_ALLOWED_ORIGINS')
-  .split(',').map((o) => o.trim()).filter(Boolean);
-
-/** Plafond de corps, aligné avec celui annoncé par `route.ts`. */
-const MAX_CORPS = 256 * 1024;
+/*
+ * Origines SUPPLÉMENTAIRES uniquement : les valeurs par défaut du dépôt
+ * (`src/lib/origin-allowlist.ts`) s'appliquent toujours. La version
+ * précédente ne lisait que cette variable, absente du projet, et renvoyait
+ * donc `access-control-allow-origin: null` à toutes les requêtes.
+ */
+const ORIGINES_SUPPLEMENTAIRES = env('VYORA_ALLOWED_ORIGINS');
 
 /* -------------------------------------------------------------------------- */
 /* Dépendances réseau réelles                                                   */
@@ -172,85 +173,17 @@ function dependances(): DependancesP5 {
 /* HTTP                                                                         */
 /* -------------------------------------------------------------------------- */
 
-export function construireReponse(
-  status: number,
-  corps: unknown,
-  cors: Record<string, string>,
-): Response {
-  return new Response(JSON.stringify(corps), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8', ...cors },
-  });
-}
-
-export async function handleMcpClient(
-  request: Request,
-  deps: () => DependancesP5,
-  options: { allowedOrigins: string[]; identite: (auth: string) => Promise<{ userId: string } | null> },
-): Promise<Response> {
-  const cors = {
-    'access-control-allow-origin': resolveCorsOrigin(options.allowedOrigins, request.headers.get('origin')),
-    'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
-    'access-control-allow-methods': 'POST, OPTIONS',
-    vary: 'origin',
-  };
-
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: cors });
-  if (request.method !== 'POST') {
-    return construireReponse(405, { error: 'methode_non_autorisee' }, cors);
-  }
-
-  // Le plafond est vérifié sur l'en-tête déclaré ET sur le corps lu : un
-  // en-tête peut mentir, la taille réelle non.
-  const annonce = Number(request.headers.get('content-length') ?? '0');
-  if (Number.isFinite(annonce) && annonce > MAX_CORPS) {
-    return construireReponse(413, { error: 'corps_trop_volumineux' }, cors);
-  }
-
-  let corps: unknown;
-  try {
-    const texte = await request.text();
-    if (texte.length > MAX_CORPS) {
-      return construireReponse(413, { error: 'corps_trop_volumineux' }, cors);
-    }
-    corps = texte ? JSON.parse(texte) : null;
-  } catch {
-    return construireReponse(400, { error: 'corps_illisible' }, cors);
-  }
-
-  const identite = await options.identite(request.headers.get('authorization') ?? '');
-  if (!identite) {
-    return construireReponse(401, {
-      error: 'authentification_requise',
-      message: 'Jeton absent ou invalide.',
-    }, cors);
-  }
-
-  const validation = validerCorps(corps);
-  const resultat = await traiterAppelOutil({ identite, corps }, deps());
-
-  // Journal minimal : identifiants, outil, statut. Jamais d'arguments ni de
-  // secret. La validation peut échouer ; on journalise alors ce qui est connu.
-  const details: Record<string, unknown> = {
-    userId: identite.userId,
-    serverId: validation.ok ? validation.demande.serverId : null,
-    outil: validation.ok ? validation.demande.outil : null,
-    status: resultat.status,
-    code: typeof resultat.body.error === 'string' ? resultat.body.error : undefined,
-  };
-  if (resultat.status >= 400) {
-    console.error('[mcp-client] appel refusé', details);
-  }
-
-  return construireReponse(resultat.status, resultat.body, cors);
-}
-
+/*
+ * Toute la logique HTTP vit dans `http.ts`, qui est testé. Ce fichier ne garde
+ * que le branchement réel : c'est le seul endroit qui dépend du runtime Deno et
+ * de `npm:postgres`, donc le seul qui ne peut pas être exercé par Vitest.
+ */
 const depsSingleton = () => dependances();
 
 if (runtimeDeno?.serve) {
   runtimeDeno.serve((request: Request) =>
-    handleMcpClient(request, depsSingleton, {
-      allowedOrigins: ALLOWED_ORIGINS,
+    traiterRequete(request, depsSingleton, {
+      originesSupplementaires: ORIGINES_SUPPLEMENTAIRES,
       identite: identiteDepuisJwt,
     }),
   );

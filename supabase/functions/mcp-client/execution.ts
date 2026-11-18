@@ -155,6 +155,7 @@ export type RefusP5 =
   | 'secret_manquant'
   | 'outil_inconnu'
   | 'outil_non_autorise'
+  | 'ecriture_desactivee'
   | 'ecriture_non_confirmee';
 
 export interface ResultatPorte {
@@ -308,6 +309,7 @@ export function statutHttp(refus: string): number {
     case 'secret_manquant':
       return 409;
     case 'outil_non_autorise':
+    case 'ecriture_desactivee':
     case 'ecriture_non_confirmee':
       return 403;
     case 'authentification':

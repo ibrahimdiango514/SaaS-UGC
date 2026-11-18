@@ -219,8 +219,8 @@ describe('P5 — refus AVANT le réseau (vrai serveur MCP, compteur côté serve
     );
     expect(r.ok).toBe(false);
     // `deciderAppel` refuse : la confirmation ponctuelle ne remplace pas
-    // l'autorisation persistée.
-    expect(r.code).toBe('ecriture_non_confirmee');
+    // l'autorisation persistée. Le code le dit explicitement.
+    expect(r.code).toBe('ecriture_desactivee');
     expect(etat.appelsRecus).toEqual([]);
   });
 
