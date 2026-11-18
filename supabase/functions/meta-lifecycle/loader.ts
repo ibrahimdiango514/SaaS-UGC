@@ -6,16 +6,16 @@
 // toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
 // JAMAIS exécuté.
 //
-// Épinglé sur meta-lifecycle.js (4466 caractères).
+// Épinglé sur meta-lifecycle.js (6038 caractères).
 //
 // Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "77df1f6446f2d8ccae47d60cd5544b2f0c6d10b2";
+const COMMIT = "0000000000000000000000000000000000000000";
 const PATH = "supabase/functions/_artifacts/meta-lifecycle.js";
-const ARTIFACT_SHA256 = "e5299e7d9bd73a71fcaa7b7318ea49ea9cd242403af280c70c2b54176b95bac0";
-const ARTIFACT_CHARS = 4466;
+const ARTIFACT_SHA256 = "5394f1c8eece218e300ee38a9c37f3d53dce531810b3f57a65057657c4f8c9c1";
+const ARTIFACT_CHARS = 6038;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
 // porte sur le fichier tel qu'il est committé.

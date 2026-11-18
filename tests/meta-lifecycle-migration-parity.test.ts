@@ -75,7 +75,7 @@ describe('parité migrations ↔ Edge Functions Meta', () => {
     for (const attendu of [
       'meta_revoke_user_connections',
       'meta_delete_user_data',
-      'meta_deletion_record',
+      'meta_deletion_status',
     ]) {
       expect(definies.has(attendu), `${attendu} absente des migrations`).toBe(true);
     }
@@ -86,7 +86,10 @@ describe('parité migrations ↔ Edge Functions Meta', () => {
       .filter((f) => f.endsWith('.sql'))
       .map((f) => readFileSync(join(MIGRATIONS, f), 'utf8'))
       .join('\n');
-    for (const nom of ['meta_revoke_user_connections', 'meta_delete_user_data', 'meta_deletion_record']) {
+    // `meta_deletion_status` est volontairement ABSENTE de cette boucle : elle
+    // doit être exécutable par `anon` (page de suivi publique). Elle est vérifiée
+    // juste après.
+    for (const nom of ['meta_revoke_user_connections', 'meta_delete_user_data']) {
       // Une RPC security definer accessible au client contournerait la RLS :
       // n'importe quel utilisateur connecté pourrait effacer les données d'un autre.
       const revocation = new RegExp(
@@ -95,6 +98,24 @@ describe('parité migrations ↔ Edge Functions Meta', () => {
       );
       expect(revocation.test(sql), `${nom} doit être révoquée pour public/anon/authenticated`).toBe(true);
     }
+  });
+
+  it('la lecture publique ne rend QUE des champs non identifiants', () => {
+    const sql = readFileSync(
+      join(MIGRATIONS, '20261126100000_meta_lifecycle_callbacks.sql'),
+      'utf8',
+    );
+    const corps = sql.slice(
+      sql.indexOf('function saas_business.meta_deletion_status'),
+      sql.indexOf('revoke all on function saas_business.meta_revoke_user_connections'),
+    );
+    // La page de suivi est publique : si cette fonction renvoyait l'identifiant
+    // Meta ou un nom, n'importe qui muni d'un code lirait des données de compte.
+    expect(corps).not.toContain("'meta_user_id'");
+    expect(corps).not.toContain('meta_user_id,');
+    expect(corps).toContain("'status'");
+    // Et elle est bien ouverte à anon, sinon la page publique échouerait.
+    expect(sql).toMatch(/grant execute on function saas_business\.meta_deletion_status\(text\) to anon/);
   });
 
   it('le journal de suppression est protégé par RLS', () => {

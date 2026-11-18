@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import { ProtectedRoute, AdminRoute } from './components/Routes';
 import Landing from './pages/Landing';
 import Legal from './pages/Legal';
+import DeletionStatusPage from './pages/DeletionStatus';
 import NotFound from './pages/NotFound';
 
 const Login = lazy(() => import('./pages/Login'));
@@ -64,6 +65,10 @@ export default function App() {
                 <Route path="/mot-de-passe-oublie" element={<ForgotPassword />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
                 <Route path="/confidentialite" element={<Legal kind="confidentialite" />} />
+                {/* Page PUBLIQUE de suivi d'une demande de suppression Meta.
+                    Meta exige une URL consultable sans authentification : elle
+                    doit donc rester HORS du bloc <ProtectedRoute>. */}
+                <Route path="/confidentialite/suivi" element={<DeletionStatusPage />} />
                 <Route path="/conditions" element={<Legal kind="conditions" />} />
 
                 <Route element={<ProtectedRoute />}>

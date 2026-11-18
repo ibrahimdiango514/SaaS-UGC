@@ -110,53 +110,82 @@ describe('parseSignedRequest — la signature décide', () => {
   });
 });
 
-describe('dataDeletionResponse — la forme exigée par Meta', () => {
-  it('renvoie les deux champs obligatoires', () => {
-    const r = dataDeletionResponse('https://vyora-saas-ugc.netlify.app', '218471000222', new Date(1700000000000));
-    // Meta exige exactement `url` et `confirmation_code`.
+describe('dataDeletionResponse — le contrat exact de Meta', () => {
+  const CODE = 'vyora-0123456789abcdef0123456789abcdef';
+
+  it('renvoie EXACTEMENT url et confirmation_code', () => {
+    const r = dataDeletionResponse('https://vyora-saas-ugc.netlify.app', CODE);
+    // Meta exige ces deux clés, et rien d'autre : un champ supplémentaire
+    // n'apporte rien et un champ manquant fait échouer le rappel.
     expect(Object.keys(r).sort()).toEqual(['confirmation_code', 'url']);
-    expect(r.url).toBe('https://vyora-saas-ugc.netlify.app/confidentialite#suppression-des-donnees');
-    expect(r.confirmation_code).toMatch(/^vyora-/);
+    expect(r.confirmation_code).toBe(CODE);
   });
 
-  it('produit un code différent selon l’utilisateur et l’instant', () => {
-    const a = dataDeletionResponse('https://x.test', '218471000222', new Date(1700000000000));
-    const b = dataDeletionResponse('https://x.test', '218471000333', new Date(1700000000000));
-    const c = dataDeletionResponse('https://x.test', '218471000222', new Date(1700000009999));
-    expect(a.confirmation_code).not.toBe(b.confirmation_code);
-    expect(a.confirmation_code).not.toBe(c.confirmation_code);
+  it('reporte le code enregistré, sans le recalculer', () => {
+    // Le pire défaut possible : renvoyer un code différent de celui stocké, ce
+    // qui ferait afficher « demande inconnue » à la personne dont on vient de
+    // supprimer les données.
+    const autre = 'vyora-fedcba9876543210fedcba9876543210';
+    expect(dataDeletionResponse('https://x.test', autre).confirmation_code).toBe(autre);
   });
 
-  it('ne met jamais le jeton ni l’identifiant complet dans l’URL', () => {
-    const r = dataDeletionResponse('https://x.test', '218471000222', new Date(1700000000000));
-    expect(r.url).not.toContain('218471000222');
+  it('pointe vers une page de suivi qui transporte le code', () => {
+    const r = dataDeletionResponse('https://x.test', CODE);
+    const url = new URL(r.url);
+    expect(url.pathname).toBe('/confidentialite/suivi');
+    expect(url.searchParams.get('code')).toBe(CODE);
+  });
+
+  it('ne met ni jeton ni identifiant Meta complet dans l’URL', () => {
+    const r = dataDeletionResponse('https://x.test', CODE);
+    // Le préfixe garde 6 caractères pour le support, jamais l'ASID entier.
+    expect(r.url).not.toMatch(/Bearer|access_token/);
+    expect(r.url.split('?')[0]).not.toContain(CODE.replace('vyora-', ''));
+  });
+
+  it('encode un code contenant des caractères réservés', () => {
+    // Défense en profondeur : même si le format changeait, l'URL resterait valide.
+    const r = dataDeletionResponse('https://x.test', 'a b&c=d');
+    expect(new URL(r.url).searchParams.get('code')).toBe('a b&c=d');
+  });
+
+  it('supporte une URL d’application avec barre oblique finale', () => {
+    const r = dataDeletionResponse('https://x.test/', CODE);
+    expect(r.url.startsWith('https://x.test/confidentialite/suivi')).toBe(true);
   });
 });
 
 /**
- * Garde : l'URL renvoyée à Meta doit mener à une page réelle qui explique la
- * procédure de suppression.
+ * Garde : la page de suivi doit rester PUBLIQUE et ROUTÉE.
  *
- * Meta exige que la réponse contienne « une URL où la personne peut suivre
- * l'état de sa demande » et une « explication lisible ». Si l'ancre disparaît de
- * la page légale, la réponse pointerait vers une page qui ne dit rien de la
- * suppression — un lien mort, et un manquement aux Platform Terms. Ce test relie
- * les deux fichiers pour qu'ils ne puissent pas diverger en silence.
+ * Meta exige une URL consultable sans authentification. Si quelqu'un déplaçait
+ * cette route sous `<ProtectedRoute>`, la page deviendrait inaccessible à la
+ * personne qui arrive depuis Facebook — sans aucun signal, puisque le code
+ * compilerait toujours. Ce test relie la route du code à sa déclaration.
  */
-describe('dataDeletionResponse — le lien mène à une page réelle', () => {
-  it('l’ancre de suivi existe dans la page légale', async () => {
-    const { readFileSync } = await import('node:fs');
-    const page = readFileSync('src/pages/Legal.tsx', 'utf8');
-    const reponse = dataDeletionResponse('https://vyora.test', '218471', new Date(1700000000000));
-    const ancre = reponse.url.split('#')[1];
-    expect(ancre).toBeTruthy();
-    expect(page, `ancre #${ancre} absente de src/pages/Legal.tsx`).toContain(`id: '${ancre}'`);
-  });
-
-  it('la page est bien routée sur /confidentialite', async () => {
+describe('page de suivi — publique et routée', () => {
+  it('la route correspond exactement à celle produite par dataDeletionResponse', async () => {
     const { readFileSync } = await import('node:fs');
     const app = readFileSync('src/App.tsx', 'utf8');
-    const chemin = new URL(dataDeletionResponse('https://vyora.test', '218471', new Date(0)).url).pathname;
+    const chemin = new URL(dataDeletionResponse('https://x.test', 'c').url).pathname;
     expect(app).toContain(`path="${chemin}"`);
+  });
+
+  it('elle est déclarée AVANT le bloc protégé', async () => {
+    const { readFileSync } = await import('node:fs');
+    const app = readFileSync('src/App.tsx', 'utf8');
+    const indexRoute = app.indexOf('path="/confidentialite/suivi"');
+    const indexProtege = app.indexOf('<ProtectedRoute />');
+    expect(indexRoute).toBeGreaterThan(-1);
+    // Une route déclarée sous <ProtectedRoute /> exigerait une session.
+    expect(indexRoute).toBeLessThan(indexProtege);
+  });
+
+  it('la page légale renvoie vers le suivi', async () => {
+    const { readFileSync } = await import('node:fs');
+    const legal = readFileSync('src/pages/Legal.tsx', 'utf8');
+    expect(legal).toContain('page de suivi');
+    // L'ancre historique reste valide : les liens déjà publiés ne cassent pas.
+    expect(legal).toContain("id: 'suppression-des-donnees'");
   });
 });

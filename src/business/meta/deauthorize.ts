@@ -123,15 +123,26 @@ export interface DataDeletionResponse {
 /**
  * Construit la réponse de suppression de données.
  *
- * Meta impose ces deux champs : une URL où la personne suit l'état de sa
- * demande, et un code de confirmation. Le code est dérivé de l'identifiant et
- * de l'instant, donc stable pour une même demande et non devinable.
+ * Meta impose exactement ces deux champs, et rien d'autre :
+ *   - `url` : une page PUBLIQUE où la personne suit l'état de sa demande ;
+ *   - `confirmation_code` : un code de confirmation.
+ *
+ * ## Pourquoi le code vient en paramètre
+ * Il est calculé et enregistré par la base, dans la même transaction que la
+ * suppression. Le recalculer ici produirait un code différent de celui stocké :
+ * la page de suivi répondrait « demande inconnue » à la personne même dont on
+ * vient de supprimer les données — le pire résultat possible.
+ *
+ * ## Pourquoi une page dédiée
+ * `/confidentialite` explique la procédure mais ne connaît aucune demande. Meta
+ * exige de pouvoir suivre l'ÉTAT d'une demande précise. On pointe donc vers
+ * `/confidentialite/suivi?code=…`, qui interroge la route publique
+ * `deletion-status`.
  */
-export function dataDeletionResponse(appUrl: string, userId: string, now: Date): DataDeletionResponse {
+export function dataDeletionResponse(appUrl: string, confirmationCode: string): DataDeletionResponse {
   const base = appUrl.replace(/\/+$/, '');
-  const code = `vyora-${userId.slice(-6)}-${now.getTime().toString(36)}`;
   return {
-    url: `${base}/confidentialite#suppression-des-donnees`,
-    confirmation_code: code,
+    url: `${base}/confidentialite/suivi?code=${encodeURIComponent(confirmationCode)}`,
+    confirmation_code: confirmationCode,
   };
 }

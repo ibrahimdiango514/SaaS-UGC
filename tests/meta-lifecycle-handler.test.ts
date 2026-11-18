@@ -1,21 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { extractSignedRequest, handleMetaLifecycle, type LifecycleDeps } from '../supabase/functions/meta-lifecycle/handler.ts';
+import { extractSignedRequest, handleMetaLifecycle, type DeletionStatus, type LifecycleDeps } from '../supabase/functions/meta-lifecycle/handler.ts';
 
 /**
- * Rappels de cycle de vie Meta : routage et échec fermé.
+ * Rappels de cycle de vie Meta : contrat, idempotence, échec fermé.
  *
  * ## Ce que ces tests protègent
  * 1. **La signature est la seule barrière.** Ces routes sont publiques, sans
  *    JWT. Un POST non signé ne doit RIEN écrire.
- * 2. **Les deux routes ne sont pas interchangeables.** `/deauthorize` révoque
+ * 2. **Les deux rappels ne sont pas interchangeables.** `/deauthorize` révoque
  *    les autorisations d'utilisateur ; `/data-deletion` efface tout. Confondre
  *    les deux coupe une messagerie WhatsApp en production ou conserve des
  *    données qu'on devait supprimer.
- * 3. **La réponse de suppression a la forme exigée par Meta**, sinon le rappel
- *    est désactivé et l'application peut être suspendue.
+ * 3. **La réponse de suppression a la forme exacte exigée par Meta**, et le code
+ *    qu'elle contient est celui réellement enregistré.
+ * 4. **Une requête répétée n'échoue pas et ne vise jamais un autre utilisateur.**
+ * 5. **Une panne de base ne produit pas un 200 mensonger.**
  */
 
 const SECRET = 'SECRET_DE_TEST_JAMAIS_EXPOSE';
+const CODE = 'vyora-0123456789abcdef0123456789abcdef';
 
 function b64url(octets: Uint8Array): string {
   let binaire = '';
@@ -44,17 +47,32 @@ function depsEspionnes(overrides: Partial<LifecycleDeps> = {}) {
     appSecret: SECRET,
     appUrl: 'https://vyora.test',
     now: () => new Date(1700000000000),
-    revokeUserConnections: vi.fn(async () => ({ removed: 2, tokenRefs: ['ref-page-1', 'ref-user-1'] })),
-    deleteUserData: vi.fn(async () => ({ connectionsRemoved: 3, tokenRefs: ['ref-a', 'ref-b'] })),
-    recordDeletionRequest: vi.fn(async () => {}),
-    deleteSecrets: vi.fn(async () => 2),
+    revokeUserConnections: vi.fn(async () => ({ removed: 2 })),
+    deleteUserData: vi.fn(async () => ({ confirmationCode: CODE, connectionsRemoved: 3 })),
+    readDeletionStatus: vi.fn(async (): Promise<DeletionStatus | null> => ({
+      status: 'completed',
+      requestedAt: '2026-11-14T10:00:00.000Z',
+      completedAt: '2026-11-14T10:00:01.000Z',
+      hasFailure: false,
+    })),
     log: vi.fn(),
     ...overrides,
   } satisfies LifecycleDeps;
 }
 
+/** Corps de formulaire tel que Meta le poste. */
 function corps(signed: string): string {
   return `signed_request=${encodeURIComponent(signed)}`;
+}
+
+/** Requête de rappel signée valide. */
+async function rappel(route: string, userId = '218471000222') {
+  return {
+    method: 'POST',
+    route,
+    contentType: 'application/x-www-form-urlencoded',
+    rawBody: corps(await signer({ algorithm: 'HMAC-SHA256', user_id: userId })),
+  };
 }
 
 describe('extractSignedRequest', () => {
@@ -77,7 +95,10 @@ describe('extractSignedRequest', () => {
   });
 });
 
-describe('handleMetaLifecycle — la signature commande', () => {
+/* ------------------------------------------------------------------------- */
+/* 1. Signature absente / invalide → rien n'est écrit                          */
+/* ------------------------------------------------------------------------- */
+describe('signature absente ou invalide', () => {
   it('REFUSE un POST non signé sans rien écrire', async () => {
     const deps = depsEspionnes();
     const r = await handleMetaLifecycle(
@@ -85,10 +106,8 @@ describe('handleMetaLifecycle — la signature commande', () => {
       deps,
     );
     expect(r.status).toBe(401);
-    // Le point capital : aucune suppression n'a été tentée.
     expect(deps.deleteUserData).not.toHaveBeenCalled();
     expect(deps.revokeUserConnections).not.toHaveBeenCalled();
-    expect(deps.deleteSecrets).not.toHaveBeenCalled();
   });
 
   it('REFUSE une signature faite avec un autre secret', async () => {
@@ -102,17 +121,30 @@ describe('handleMetaLifecycle — la signature commande', () => {
     expect(deps.revokeUserConnections).not.toHaveBeenCalled();
   });
 
+  it('refuse un App Secret vide — jamais de validation « par défaut »', async () => {
+    // Secret serveur non posé : la fonction doit refuser, pas accepter tout.
+    const deps = depsEspionnes({ appSecret: '' });
+    // On signe avec un secret QUELCONQUE non vide : HMAC n'accepte pas de clé
+    // vide, et le handler doit de toute façon rejeter faute de secret configuré.
+    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '42' }, 'PEU_IMPORTE');
+    const r = await handleMetaLifecycle(
+      { method: 'POST', route: 'data-deletion', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
+      deps,
+    );
+    expect(r.status).toBe(401);
+    expect(deps.deleteUserData).not.toHaveBeenCalled();
+  });
+
   it('ne dit pas POURQUOI la signature a échoué', async () => {
     const deps = depsEspionnes();
     const r = await handleMetaLifecycle(
       { method: 'POST', route: 'deauthorize', contentType: 'application/x-www-form-urlencoded', rawBody: 'signed_request=a.b' },
       deps,
     );
-    // Un message précis aiderait un attaquant à distinguer les causes.
     expect(JSON.stringify(r.body)).not.toContain('SIGNATURE_INVALID');
   });
 
-  it('refuse les méthodes autres que POST', async () => {
+  it('refuse les méthodes autres que POST sur les rappels', async () => {
     const deps = depsEspionnes();
     const r = await handleMetaLifecycle(
       { method: 'GET', route: 'deauthorize', contentType: '', rawBody: '' },
@@ -123,100 +155,330 @@ describe('handleMetaLifecycle — la signature commande', () => {
 
   it('refuse une route inconnue même correctement signée', async () => {
     const deps = depsEspionnes();
-    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '42' });
-    const r = await handleMetaLifecycle(
-      { method: 'POST', route: 'autre', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
-      deps,
-    );
+    const r = await handleMetaLifecycle(await rappel('autre'), deps);
     expect(r.status).toBe(404);
     expect(deps.deleteUserData).not.toHaveBeenCalled();
   });
 });
 
-describe('handleMetaLifecycle — deauthorize', () => {
-  it('révoque les connexions et efface les secrets', async () => {
+/* ------------------------------------------------------------------------- */
+/* 2. Contrat de réponse de data-deletion                                     */
+/* ------------------------------------------------------------------------- */
+describe('data-deletion — contrat Meta', () => {
+  it('renvoie un JSON avec EXACTEMENT url et confirmation_code', async () => {
     const deps = depsEspionnes();
-    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '42' });
-    const r = await handleMetaLifecycle(
-      { method: 'POST', route: 'deauthorize', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
-      deps,
-    );
+    const r = await handleMetaLifecycle(await rappel('data-deletion'), deps);
     expect(r.status).toBe(200);
-    expect(deps.revokeUserConnections).toHaveBeenCalledWith('42');
-    // Les références de page ET le jeton utilisateur doivent être effacés.
-    expect(deps.deleteSecrets).toHaveBeenCalledWith(['ref-page-1', 'ref-user-1']);
-    // Une déautorisation n'efface PAS toutes les données : ce serait excessif.
-    expect(deps.deleteUserData).not.toHaveBeenCalled();
+    const corpsReponse = r.body as { url: string; confirmation_code: string };
+    expect(Object.keys(corpsReponse).sort()).toEqual(['confirmation_code', 'url']);
+    expect(corpsReponse.confirmation_code).toBe(CODE);
+    expect(r.headers['content-type']).toContain('application/json');
   });
 
-  it('répond 200 même quand aucune connexion ne correspond', async () => {
-    // Cas légitime : la personne a retiré VYORA sans jamais l'avoir connectée.
-    const deps = depsEspionnes({ revokeUserConnections: vi.fn(async () => ({ removed: 0, tokenRefs: [] })) });
-    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '999' });
-    const r = await handleMetaLifecycle(
-      { method: 'POST', route: 'deauthorize', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
-      deps,
-    );
-    expect(r.status).toBe(200);
+  it('l’URL renvoyée contient le code réellement enregistré', async () => {
+    const deps = depsEspionnes();
+    const r = await handleMetaLifecycle(await rappel('data-deletion'), deps);
+    const { url, confirmation_code } = r.body as { url: string; confirmation_code: string };
+    // Un code recalculé ne correspondrait pas à la ligne en base : la page de
+    // suivi répondrait « demande inconnue ».
+    expect(new URL(url).searchParams.get('code')).toBe(confirmation_code);
+  });
+
+  it('ne renvoie jamais de jeton ni d’identifiant Meta dans la réponse', async () => {
+    const deps = depsEspionnes();
+    const r = await handleMetaLifecycle(await rappel('data-deletion', '218471000222'), deps);
+    const texte = JSON.stringify(r.body);
+    expect(texte).not.toContain('218471000222');
+    expect(texte).not.toContain(SECRET);
   });
 });
 
-describe('handleMetaLifecycle — data-deletion', () => {
-  it('efface tout et renvoie la forme exacte exigée par Meta', async () => {
-    const deps = depsEspionnes();
-    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '218471000222' });
-    const r = await handleMetaLifecycle(
-      { method: 'POST', route: 'data-deletion', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
-      deps,
-    );
-    expect(r.status).toBe(200);
-    expect(deps.deleteUserData).toHaveBeenCalledWith('218471000222');
-    expect(deps.deleteSecrets).toHaveBeenCalledWith(['ref-a', 'ref-b']);
-
-    const corpsReponse = r.body as { url: string; confirmation_code: string };
-    // Meta exige ces deux clés, exactement.
-    expect(Object.keys(corpsReponse).sort()).toEqual(['confirmation_code', 'url']);
-    expect(corpsReponse.url).toContain('https://vyora.test');
-    expect(corpsReponse.confirmation_code).toBeTruthy();
-  });
-
-  it('journalise la demande pour permettre le suivi', async () => {
-    const deps = depsEspionnes();
-    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '42' });
-    await handleMetaLifecycle(
-      { method: 'POST', route: 'data-deletion', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
-      deps,
-    );
-    expect(deps.recordDeletionRequest).toHaveBeenCalledWith('42', expect.any(String), 3);
-  });
-
-  it('répond quand même si le journal échoue — la suppression est déjà faite', async () => {
+/* ------------------------------------------------------------------------- */
+/* 3. Idempotence et utilisateur inconnu                                      */
+/* ------------------------------------------------------------------------- */
+describe('idempotence et utilisateur inconnu', () => {
+  it('une seconde réception réussit et produite une réponse valide', async () => {
+    // Simule la 2ᵉ réception : plus rien à supprimer, l'appel ne doit pas lever.
     const deps = depsEspionnes({
-      recordDeletionRequest: vi.fn(async () => { throw new Error('base indisponible'); }),
+      deleteUserData: vi.fn(async () => ({ confirmationCode: 'vyora-000222-ffffffffffffffffffffffffffffffff', connectionsRemoved: 0 })),
     });
-    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '42' });
-    const r = await handleMetaLifecycle(
-      { method: 'POST', route: 'data-deletion', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
-      deps,
-    );
-    // Meta n'a aucun moyen de rejouer : échouer ici désactiverait le rappel.
-    expect(r.status).toBe(200);
-    expect((r.body as { url: string }).url).toBeTruthy();
+    const premiere = await handleMetaLifecycle(await rappel('data-deletion'), deps);
+    const seconde = await handleMetaLifecycle(await rappel('data-deletion'), deps);
+    expect(premiere.status).toBe(200);
+    expect(seconde.status).toBe(200);
+    // Deux réceptions = deux appels, mais aucune erreur.
+    expect(deps.deleteUserData).toHaveBeenCalledTimes(2);
   });
 
-  it('ne journalise jamais d’identifiant Meta ni de jeton', async () => {
+  it('un identifiant inconnu ne touche rien et répond 200', async () => {
+    const deps = depsEspionnes({
+      deleteUserData: vi.fn(async () => ({ confirmationCode: CODE, connectionsRemoved: 0 })),
+    });
+    const r = await handleMetaLifecycle(await rappel('data-deletion', '999999'), deps);
+    expect(r.status).toBe(200);
+    // La personne n'était pas cliente : ce n'est pas une erreur.
+    expect((r.body as { confirmation_code: string }).confirmation_code).toBe(CODE);
+  });
+
+  it('transmet l’identifiant de la signature, jamais un identifiant du corps', async () => {
+    const deps = depsEspionnes();
+    // Le corps contient un AUTRE identifiant : il ne doit pas être utilisé.
+    const signed = await signer({ algorithm: 'HMAC-SHA256', user_id: '111' });
+    await handleMetaLifecycle(
+      { method: 'POST', route: 'data-deletion', contentType: 'application/x-www-form-urlencoded', rawBody: `user_id=222&${corps(signed)}` },
+      deps,
+    );
+    expect(deps.deleteUserData).toHaveBeenCalledWith('111');
+    expect(deps.deleteUserData).not.toHaveBeenCalledWith('222');
+  });
+
+  it('deauthorize répété ne supprime plus rien mais ne casse pas', async () => {
+    const deps = depsEspionnes({ revokeUserConnections: vi.fn(async () => ({ removed: 0 })) });
+    const r1 = await handleMetaLifecycle(await rappel('deauthorize'), deps);
+    const r2 = await handleMetaLifecycle(await rappel('deauthorize'), deps);
+    expect([r1.status, r2.status]).toEqual([200, 200]);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* 4. Erreur de base de données                                               */
+/* ------------------------------------------------------------------------- */
+describe('erreur de base de données', () => {
+  it('data-deletion renvoie 500, pas un 200 mensonger', async () => {
+    const deps = depsEspionnes({
+      deleteUserData: vi.fn(async () => { throw new Error('connexion perdue'); }),
+    });
+    const r = await handleMetaLifecycle(await rappel('data-deletion'), deps);
+    // 200 ferait croire à Meta que la suppression a eu lieu : elle cesserait de
+    // réessayer, et les données resteraient en place.
+    expect(r.status).toBe(500);
+    expect(r.body).not.toHaveProperty('confirmation_code');
+  });
+
+  it('deauthorize renvoie 500 pour que Meta puisse réessayer', async () => {
+    const deps = depsEspionnes({
+      revokeUserConnections: vi.fn(async () => { throw new Error('timeout'); }),
+    });
+    const r = await handleMetaLifecycle(await rappel('deauthorize'), deps);
+    // Un 200 laisserait l'utilisateur « déconnecté chez Meta mais connecté chez
+    // VYORA » : c'est précisément le défaut que ce module corrige.
+    expect(r.status).toBe(500);
+  });
+
+  it('ne journalise jamais d’identifiant Meta ni de jeton, même en échec', async () => {
     const journal: string[] = [];
     const deps = depsEspionnes({
       log: (message, details) => { journal.push(`${message} ${JSON.stringify(details)}`); },
+      deleteUserData: vi.fn(async () => { throw new Error('panne'); }),
     });
-    const bon = await signer({ algorithm: 'HMAC-SHA256', user_id: '218471000222' });
-    await handleMetaLifecycle(
-      { method: 'POST', route: 'data-deletion', contentType: 'application/x-www-form-urlencoded', rawBody: corps(bon) },
-      deps,
-    );
+    await handleMetaLifecycle(await rappel('data-deletion', '218471000222'), deps);
     const trace = journal.join('\n');
     expect(trace).not.toContain('218471000222');
     expect(trace).not.toContain(SECRET);
-    expect(trace).not.toContain('ref-a');
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* 5. Page publique de suivi                                                  */
+/* ------------------------------------------------------------------------- */
+describe('deletion-status — page publique de suivi', () => {
+  it('renvoie l’état pour un code valide, sans identifiant', async () => {
+    const deps = depsEspionnes();
+    const r = await handleMetaLifecycle(
+      { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: CODE } },
+      deps,
+    );
+    expect(r.status).toBe(200);
+    const corps = r.body as DeletionStatus;
+    expect(corps.status).toBe('completed');
+    // Aucun champ ne doit permettre de remonter au client.
+    expect(Object.keys(corps).sort()).toEqual(['completedAt', 'hasFailure', 'requestedAt', 'status']);
+  });
+
+  it('n’est pas mise en cache : le code est dans l’URL', async () => {
+    const deps = depsEspionnes();
+    const r = await handleMetaLifecycle(
+      { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: CODE } },
+      deps,
+    );
+    expect(r.headers['cache-control']).toBe('no-store');
+  });
+
+  it('REFUSE un code contenant un identifiant Meta en clair', async () => {
+    /*
+     * Défaut réellement constaté en base avant correction : le code était
+     * `vyora-<6 derniers de l'ASID>-<aléa>`, donc un identifiant Meta en clair
+     * dans une URL publique. On verrouille ici le format : plus aucun fragment
+     * d'identifiant ne doit être accepté.
+     */
+    const deps = depsEspionnes();
+    for (const fuite of [
+      'vyora-WABA_1-9f4a3edfe43c41e18a60c9eea29f7cf9',
+      'vyora-218471-9f4a3edfe43c41e18a60c9eea29f7cf9',
+    ]) {
+      const r = await handleMetaLifecycle(
+        { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: fuite } },
+        deps,
+      );
+      expect(r.status, fuite).toBe(400);
+    }
+    expect(deps.readDeletionStatus).not.toHaveBeenCalled();
+  });
+
+  it('refuse un code mal formé SANS interroger la base', async () => {
+    const deps = depsEspionnes();
+    for (const mauvais of ['', 'abc', 'vyora-', 'vyora-123-short', "1' or '1'='1"]) {
+      const r = await handleMetaLifecycle(
+        { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: mauvais } },
+        deps,
+      );
+      expect(r.status, mauvais).toBe(400);
+    }
+    // La page est publique et sonder la base à chaque chaîne serait un vecteur
+    // d'épuisement de connexions.
+    expect(deps.readDeletionStatus).not.toHaveBeenCalled();
+  });
+
+  it('renvoie 404 pour un code valide mais inconnu', async () => {
+    const deps = depsEspionnes({ readDeletionStatus: vi.fn(async () => null) });
+    const r = await handleMetaLifecycle(
+      { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: CODE } },
+      deps,
+    );
+    expect(r.status).toBe(404);
+  });
+
+  it('expose l’état « en attente » distinctement', async () => {
+    const deps = depsEspionnes({
+      readDeletionStatus: vi.fn(async () => ({
+        status: 'pending' as const,
+        requestedAt: '2026-11-14T10:00:00.000Z',
+        completedAt: null,
+        hasFailure: false,
+      })),
+    });
+    const r = await handleMetaLifecycle(
+      { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: CODE } },
+      deps,
+    );
+    expect((r.body as DeletionStatus).status).toBe('pending');
+    expect((r.body as DeletionStatus).completedAt).toBeNull();
+  });
+
+  it('expose « aucune donnée à supprimer » distinctement', async () => {
+    const deps = depsEspionnes({
+      readDeletionStatus: vi.fn(async () => ({
+        status: 'no_data' as const,
+        requestedAt: '2026-11-14T10:00:00.000Z',
+        completedAt: null,
+        hasFailure: false,
+      })),
+    });
+    const r = await handleMetaLifecycle(
+      { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: CODE } },
+      deps,
+    );
+    expect((r.body as DeletionStatus).status).toBe('no_data');
+  });
+
+  it('refuse POST sur la route de suivi', async () => {
+    const deps = depsEspionnes();
+    const r = await handleMetaLifecycle(
+      { method: 'POST', route: 'deletion-status', contentType: '', rawBody: '', query: { code: CODE } },
+      deps,
+    );
+    expect(r.status).toBe(405);
+  });
+
+  it('remonte une erreur d’accès base sans faire croire à une absence', async () => {
+    const deps = depsEspionnes({
+      readDeletionStatus: vi.fn(async () => { throw new Error('base indisponible'); }),
+    });
+    // Le handler ne doit pas transformer une panne en 404 : la personne
+    // conclurait que sa demande n'existe pas.
+    await expect(handleMetaLifecycle(
+      { method: 'GET', route: 'deletion-status', contentType: '', rawBody: '', query: { code: CODE } },
+      deps,
+    )).rejects.toThrow('base indisponible');
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* 6. deauthorize ne touche que Facebook / Instagram / Messenger              */
+/* ------------------------------------------------------------------------- */
+describe('deauthorize — périmètre des produits', () => {
+  it('appelle la révocation, pas la suppression de données', async () => {
+    const deps = depsEspionnes();
+    const r = await handleMetaLifecycle(await rappel('deauthorize'), deps);
+    expect(r.status).toBe(200);
+    expect(deps.revokeUserConnections).toHaveBeenCalledWith('218471000222');
+    // Une déautorisation n'efface PAS les contenus : ce serait excessif, et cela
+    // ferait perdre les messages d'une conversation en cours.
+    expect(deps.deleteUserData).not.toHaveBeenCalled();
+  });
+
+  it('la révocation est bien restreinte aux produits non-WhatsApp', async () => {
+    /*
+     * Vérification statique du SQL : le contrat « ne pas couper WhatsApp » vit
+     * dans la migration, pas dans le handler. Sans cette garde, un futur
+     * remaniement du SQL pourrait supprimer la clause sans qu'aucun test JS ne
+     * bronche.
+     */
+    const { readFileSync } = await import('node:fs');
+    const sql = readFileSync('supabase/migrations/20261126100000_meta_lifecycle_callbacks.sql', 'utf8');
+    const corpsFonction = sql.slice(
+      sql.indexOf('function saas_business.meta_revoke_user_connections'),
+      sql.indexOf('function saas_business.meta_delete_user_data'),
+    );
+    expect(corpsFonction).toContain("in ('facebook', 'messenger', 'instagram')");
+    // WhatsApp ne doit apparaître dans AUCUNE clause de suppression de cette
+    // fonction — ni en filtre positif, ni comme produit ciblé.
+    const suppressions = corpsFonction.split('\n').filter((l) => /^\s*delete\s+from/i.test(l));
+    expect(suppressions.length).toBeGreaterThan(0);
+    expect(corpsFonction).not.toMatch(/product\s*=\s*'whatsapp'/);
+  });
+
+  it('la suppression de données, elle, n’exclut aucun produit', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sql = readFileSync('supabase/migrations/20261126100000_meta_lifecycle_callbacks.sql', 'utf8');
+    const corpsFonction = sql.slice(
+      sql.indexOf('function saas_business.meta_delete_user_data'),
+      sql.indexOf('function saas_business.meta_deletion_status'),
+    );
+    // Une demande de suppression doit tout effacer, WhatsApp compris.
+    expect(corpsFonction).not.toMatch(/product\s*in\s*\(\s*'facebook'/);
+    expect(corpsFonction).toContain('delete from saas_business.meta_connections');
+    expect(corpsFonction).toContain('delete from saas_business.meta_messages');
+    expect(corpsFonction).toContain('delete from vault.secrets');
+  });
+
+  it('la suppression ne se rattache jamais au workspace', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sql = readFileSync('supabase/migrations/20261126100000_meta_lifecycle_callbacks.sql', 'utf8');
+    const corpsFonction = sql.slice(
+      sql.indexOf('function saas_business.meta_delete_user_data'),
+      sql.indexOf('function saas_business.meta_deletion_status'),
+    );
+    // `workspace_id` peut réunir plusieurs clients : l'utiliser comme critère
+    // de suppression détruirait les données d'un tiers.
+    const instructionsDelete = corpsFonction
+      .split(';')
+      .filter((bloc) => /delete\s+from/i.test(bloc));
+    for (const bloc of instructionsDelete) {
+      expect(bloc, `suppression rattachée au workspace : ${bloc.slice(0, 120)}`).not.toMatch(/workspace_id\s*=/);
+    }
+  });
+
+  it('la suppression et l’enregistrement sont dans la même fonction (atomicité)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sql = readFileSync('supabase/migrations/20261126100000_meta_lifecycle_callbacks.sql', 'utf8');
+    const corpsFonction = sql.slice(
+      sql.indexOf('function saas_business.meta_delete_user_data'),
+      sql.indexOf('function saas_business.meta_deletion_status'),
+    );
+    // Un échec de l'enregistrement doit annuler la suppression, sinon on peut
+    // détruire des données sans pouvoir prouver l'état de la demande.
+    expect(corpsFonction).toContain('insert into saas_business.meta_deletion_requests');
+    expect(corpsFonction).toContain('delete from saas_business.meta_connections');
   });
 });

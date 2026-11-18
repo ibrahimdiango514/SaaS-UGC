@@ -59,6 +59,18 @@ Champs d'abonnement souscrits par le code (`src/business/meta/products.ts`,
 | --- | --- |
 | Deauthorize Callback URL | `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/meta-lifecycle/deauthorize` |
 | Data Deletion Request URL | `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/meta-lifecycle/data-deletion` |
+| Page de suivi des suppressions | `https://vyora-saas-ugc.netlify.app/confidentialite/suivi?code=…` |
+
+La page de suivi est **publique** (aucune authentification) : c'est ce que Meta
+exige. Elle ne reçoit qu'un état et des dates — jamais un identifiant Meta, un
+nom, une adresse ou un jeton. Elle est alimentée par la route
+`…/functions/v1/meta-lifecycle/deletion-status?code=…`, qui refuse tout code
+mal formé avant d'interroger la base.
+
+`data-deletion` renvoie exactement `{ url, confirmation_code }`. Le code qu'il
+renvoie est celui **réellement enregistré en base**, dans la même transaction
+que la suppression : l'URL de suivi ne peut donc pas pointer vers une demande
+inexistante.
 
 **Source** : `supabase/functions/meta-lifecycle/index.ts` — la route est le
 dernier segment du chemin (`chemin.split('/').filter(Boolean).pop()`), comparée
@@ -199,6 +211,7 @@ Dans l'ordre, car chaque étape conditionne la suivante :
 | Révocation du jeton système WhatsApp | **impossible** | Meta n'expose aucune API de révocation pour un jeton système. La déconnexion VYORA efface le secret de Vault : le jeton devient inutilisable. |
 | Renouvellement du jeton système WhatsApp | inutile | Le jeton Embedded Signup est permanent par construction (`refresh` le reconnaît et ne tente rien). |
 | Rafraîchissement du jeton utilisateur 60 j | **non implémenté** | Un jeton long Facebook ne se rafraîchit pas indéfiniment sans interaction : au-delà de `data_access_expires_at` (60 j), le client doit reconnecter. L'échéance est stockée et affichée ; la reconnexion est un clic. |
+| Suivi public d'une demande de suppression | **implémenté** | Page `/confidentialite/suivi?code=…`, états `pending` / `completed` / `no_data`, réponse `{ url, confirmation_code }` conforme. |
 | Publication de modèles de messages WhatsApp | non implémenté | Seul le webhook `message_template_status_update` est traité (statut des modèles existants). La création de modèles se fait pour l'instant dans WhatsApp Manager. |
 | API de conversation Instagram | partiel | Lecture des commentaires par média (`listPostComments`). Envoi de réponses Instagram non implémenté : nécessiterait `instagram_manage_comments` et un parcours dédié. |
 

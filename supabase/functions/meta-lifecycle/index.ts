@@ -2,34 +2,45 @@
  * Point d'entrée déployé de l'Edge Function `meta-lifecycle`.
  *
  * ## Ce que fait cette fonction
- * Deux rappels exigés par Meta, tous deux en POST sur une URL publique :
+ * Trois routes :
  *
- *   - `/deauthorize` : la personne a retiré VYORA depuis Facebook. On efface ses
- *     connexions et les fournisseurs d'identité associés.
- *   - `/data-deletion` : la personne demande la suppression de ses données. On
- *     efface tout et on renvoie l'URL de suivi + le code de confirmation exigés.
+ *   - `/deauthorize`     : la personne a retiré VYORA depuis Facebook. On efface
+ *                          ses connexions Pages / Instagram / Messenger.
+ *   - `/data-deletion`   : la personne demande la suppression de ses données.
+ *                          On efface tout et on renvoie l'URL de suivi + le code.
+ *   - `/deletion-status` : page PUBLIQUE de suivi, `?code=…`.
  *
  * ## Pourquoi ces routes sont sur la même fonction
- * Elles partagent exactement les mêmes dépendances (App Secret, base, Vault) et
- * surtout le même contrôle d'entrée. Les séparer dupliquerait la vérification
+ * Les deux rappels partagent exactement les mêmes dépendances (App Secret, base)
+ * et surtout le même contrôle d'entrée. Les séparer dupliquerait la vérification
  * de signature — la partie qu'il ne faut surtout pas dupliquer, car une copie
  * divergente est une porte ouverte.
  *
  * ## Sécurité
- * Aucun JWT Supabase (Meta n'en a pas). L'authentification repose intégralement
- * sur `signed_request` : HMAC-SHA256(App Secret, payload), comparaison à temps
- * constant. Sans signature valide → 401, aucune écriture.
+ * Aucun JWT Supabase (Meta n'en a pas). L'authentification des deux rappels
+ * repose intégralement sur `signed_request` : HMAC-SHA256(App Secret, payload),
+ * comparaison à temps constant. Sans signature valide → 401, aucune écriture.
  *
- * Toute la logique testable est dans `handler.ts`.
+ * La route de suivi est publique par obligation (Meta exige une URL consultable
+ * sans authentification) et ne renvoie qu'un état et des dates — jamais un
+ * identifiant Meta, un nom, une adresse ou un jeton.
  */
 import postgres from 'npm:postgres@3.4.5';
-import { handleMetaLifecycle, type LifecycleDeps } from './handler.ts';
+import { handleMetaLifecycle, type DeletionStatus, type LifecycleDeps } from './handler.ts';
+import { buildAllowedOrigins, resolveCorsOrigin } from '../../../src/lib/origin-allowlist.ts';
 
 const env = (name: string): string =>
   (globalThis as unknown as { Deno?: { env?: { get(k: string): string | undefined } } })
     .Deno?.env?.get(name) ?? '';
 
 const DATABASE_URL = env('META_LIFECYCLE_DATABASE_URL') || env('SUPABASE_DB_URL');
+/*
+ * Même construction que `meta-connect` : les origines par défaut de la
+ * plateforme (application publiée, aperçus Netlify, environnements e2b) plus
+ * d'éventuels ajouts par `VYORA_ALLOWED_ORIGINS`. Redéfinir une liste locale
+ * ferait diverger les deux fonctions au premier changement de domaine.
+ */
+const ALLOWED_ORIGINS = buildAllowedOrigins(env('VYORA_ALLOWED_ORIGINS'));
 
 function requiredSql() {
   if (!DATABASE_URL) throw new Error('SUPABASE_DB_URL absent : la fonction ne peut pas joindre la base.');
@@ -47,29 +58,6 @@ async function withDb<T>(fn: (db: ReturnType<typeof requiredSql>) => Promise<T>)
 
 type Sql = ReturnType<typeof requiredSql>;
 
-/**
- * Efface les secrets Vault référencés.
- *
- * Un échec n'est pas bloquant : la ligne en base est déjà supprimée, donc le
- * secret n'est plus référencé et n'ouvre plus aucun accès. On le signale dans
- * le journal pour qu'il puisse être purgé, sans faire échouer la réponse à Meta
- * (qui n'a aucun moyen de rejouer une demande utilisateur).
- */
-async function deleteSecrets(refs: string[]): Promise<number> {
-  let supprimes = 0;
-  for (const ref of new Set(refs.filter(Boolean))) {
-    try {
-      await withDb(async (db: Sql) => {
-        await db`delete from vault.secrets where name = ${ref}`;
-      });
-      supprimes += 1;
-    } catch {
-      // Le secret restera orphelin mais inutilisable : aucune référence en base.
-    }
-  }
-  return supprimes;
-}
-
 const deps: LifecycleDeps = {
   appSecret: env('META_APP_SECRET'),
   appUrl: env('VYORA_APP_URL') || 'https://vyora-saas-ugc.netlify.app',
@@ -77,29 +65,47 @@ const deps: LifecycleDeps = {
 
   async revokeUserConnections(metaUserId) {
     return withDb(async (db: Sql) => {
-      const [ligne] = await db<{ r: { removed?: number; token_refs?: string[] } }[]>`
+      const [ligne] = await db<{ r: { removed?: number } }[]>`
         select saas_business.meta_revoke_user_connections(${metaUserId}) as r`;
-      const r = ligne?.r ?? {};
-      return { removed: Number(r.removed ?? 0), tokenRefs: r.token_refs ?? [] };
+      return { removed: Number(ligne?.r?.removed ?? 0) };
     });
   },
 
+  /*
+   * Un SEUL appel : la base supprime et enregistre la demande dans la même
+   * transaction, puis renvoie le code qu'elle a réellement calculé. Si l'appel
+   * échoue, rien n'est supprimé — on ne peut pas se retrouver avec des données
+   * détruites et aucune preuve vérifiable.
+   */
   async deleteUserData(metaUserId) {
     return withDb(async (db: Sql) => {
-      const [ligne] = await db<{ r: { connections_removed?: number; token_refs?: string[] } }[]>`
+      const [ligne] = await db<{ r: { confirmation_code?: string; connections_removed?: number } }[]>`
         select saas_business.meta_delete_user_data(${metaUserId}) as r`;
       const r = ligne?.r ?? {};
-      return { connectionsRemoved: Number(r.connections_removed ?? 0), tokenRefs: r.token_refs ?? [] };
+      if (typeof r.confirmation_code !== 'string' || !r.confirmation_code) {
+        // Sans code, la page de suivi serait inutilisable : on échoue plutôt que
+        // de renvoyer une réponse incomplète à Meta.
+        throw new Error('suppression effectuée sans code de confirmation');
+      }
+      return {
+        confirmationCode: r.confirmation_code,
+        connectionsRemoved: Number(r.connections_removed ?? 0),
+      };
     });
   },
 
-  async recordDeletionRequest(metaUserId, confirmationCode, connectionsRemoved) {
-    await withDb(async (db: Sql) => {
-      await db`select saas_business.meta_deletion_record(${metaUserId}, ${confirmationCode}, ${connectionsRemoved})`;
-    });
+  async readDeletionStatus(confirmationCode): Promise<DeletionStatus | null> {
+    const [ligne] = await withDb(async (db: Sql) => db<{ r: DeletionStatus | null }[]>`
+      select saas_business.meta_deletion_status(${confirmationCode}) as r`);
+    const r = ligne?.r ?? null;
+    if (!r || !r.status) return null;
+    return {
+      status: r.status,
+      requestedAt: r.requestedAt ?? null,
+      completedAt: r.completedAt ?? null,
+      hasFailure: r.hasFailure === true,
+    };
   },
-
-  deleteSecrets,
 
   log(message, details) {
     // Aucune donnée personnelle : ni identifiant Meta, ni jeton, ni code.
@@ -108,14 +114,34 @@ const deps: LifecycleDeps = {
 };
 
 Deno.serve(async (requete) => {
-  const chemin = new URL(requete.url).pathname;
-  return handleMetaLifecycle({
+  const url = new URL(requete.url);
+  const origine = requete.headers.get('origin');
+
+  const reponse = await handleMetaLifecycle({
     method: requete.method,
     // Route en fin de chemin : `/functions/v1/meta-lifecycle/deauthorize`.
-    route: chemin.split('/').filter(Boolean).pop() ?? '',
+    route: url.pathname.split('/').filter(Boolean).pop() ?? '',
     contentType: requete.headers.get('content-type') ?? '',
     // Corps BRUT indispensable : la signature porte sur les octets exacts.
     rawBody: await requete.text(),
-    deps,
+    query: { code: url.searchParams.get('code') ?? '' },
+  }, deps);
+
+  /*
+   * CORS : la page de suivi est servie par l'application Netlify et appelle
+   * cette fonction depuis le navigateur. Sans en-tête, le navigateur bloque la
+   * lecture de la réponse et la page afficherait une erreur alors que la demande
+   * est parfaitement enregistrée.
+   *
+   * `resolveCorsOrigin` renvoie `null` pour une origine inconnue : la lecture
+   * reste alors impossible depuis une page tierce.
+   */
+  return new Response(JSON.stringify(reponse.body), {
+    status: reponse.status,
+    headers: {
+      ...reponse.headers,
+      'access-control-allow-origin': resolveCorsOrigin(ALLOWED_ORIGINS, origine),
+      'vary': 'origin',
+    },
   });
 });
