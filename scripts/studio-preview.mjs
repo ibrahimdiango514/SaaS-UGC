@@ -351,6 +351,13 @@ function edgeResponse(url, body) {
     // navigateur. Même réponse qu'une signature absente en production.
     return { error: { code: 'WEBHOOK_SIGNATURE_INVALID', message: 'Signature de webhook invalide.' } };
   }
+  if (fn === 'meta-lifecycle') {
+    // Rappels `deauthorize` / `data-deletion` : eux aussi postés par Meta, jamais
+    // par le navigateur. On répond exactement ce que renvoie la production pour
+    // un `signed_request` absent — sans jamais laisser croire que la route
+    // fonctionnerait sans signature.
+    return { error: { code: 'SIGNATURE_INVALID', message: 'Signature invalide.' } };
+  }
   // Ne jamais retomber sur un corps générique : cela fait passer une fonction
   // réellement absente pour une fonction saine.
   return { error: { code: 'UNKNOWN_FUNCTION', message: 'Fonction non simulée dans la preview : ' + fn } };

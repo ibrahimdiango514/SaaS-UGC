@@ -98,6 +98,19 @@ export const FUNCTIONS = {
     artifact: 'supabase/functions/_artifacts/meta-webhook.js',
     usesPostgres: true,
   },
+  /*
+   * `meta-lifecycle` reçoit les rappels `deauthorize` et `data-deletion` de
+   * Meta. Elle est déployée par le même mécanisme que les autres fonctions
+   * Meta (chargeur épinglé sur un commit) : sans cette entrée, elle serait la
+   * seule fonction Meta à dépendre d'un import relatif, et tomberait en
+   * `BOOT_ERROR` au premier déploiement.
+   */
+  'meta-lifecycle': {
+    entry: 'supabase/functions/meta-lifecycle/index.ts',
+    loader: 'supabase/functions/meta-lifecycle/loader.ts',
+    artifact: 'supabase/functions/_artifacts/meta-lifecycle.js',
+    usesPostgres: true,
+  },
 };
 
 // esbuild peut placer l'import en fin de ligne, après d'autres instructions :

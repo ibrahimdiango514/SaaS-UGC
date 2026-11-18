@@ -20,9 +20,12 @@ import { readFileSync, statSync } from 'node:fs';
 const SCRIPT = readFileSync('scripts/deploy-meta-functions.sh', 'utf8');
 
 describe('script de déploiement Meta — confinement', () => {
-  it('ne déploie QUE les deux fonctions Meta', () => {
+  it('ne déploie QUE les fonctions Meta', () => {
     const deploiees = [...SCRIPT.matchAll(/supabase functions deploy (\S+)/g)].map((m) => m[1]);
-    expect(deploiees).toEqual(['meta-connect', 'meta-webhook']);
+    // Liste blanche exhaustive : toute fonction ajoutée ici doit être Meta.
+    // C'est la garantie que ce script ne redéploie pas du code hors périmètre.
+    expect(deploiees).toEqual(['meta-connect', 'meta-webhook', 'meta-lifecycle']);
+    for (const f of deploiees) expect(f).toMatch(/^meta-/);
   });
 
   it('ne touche à aucune autre fonction du projet', () => {
@@ -92,9 +95,15 @@ describe('script de déploiement Meta — confinement', () => {
     expect(SCRIPT).toContain('gh api');
   });
 
-  it('fixe verify_jwt = false sur les deux, et le justifie', () => {
-    const sansJwt = [...SCRIPT.matchAll(/--no-verify-jwt/g)];
-    expect(sansJwt).toHaveLength(2);
+  it('fixe verify_jwt = false sur chacune, et le justifie', () => {
+    // Meta ne peut présenter aucun JWT Supabase : chaque déploiement doit donc
+    // désactiver la vérification de la passerelle, sinon Meta reçoit un 401.
+    const deploiements = [...SCRIPT.matchAll(/supabase functions deploy (\S+)([\s\S]*?)(?=supabase functions deploy|$)/g)];
+    expect(deploiements).toHaveLength(3);
+    for (const [, nom, bloc] of deploiements) {
+      expect(bloc, `${nom} doit être déployée avec --no-verify-jwt`).toContain('--no-verify-jwt');
+      expect(bloc, `${nom} doit déployer le chargeur`).toContain('--entrypoint loader.ts');
+    }
     expect(SCRIPT).toMatch(/Meta ne peut présenter aucun JWT|verify_jwt/);
   });
 

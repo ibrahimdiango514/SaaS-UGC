@@ -66,7 +66,7 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(8);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(10);
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-health\][\s\S]*?verify_jwt\s*=\s*false/);
     expect(config).toMatch(/\[functions\.reelora-owner-bootstrap\][\s\S]*?verify_jwt\s*=\s*false/);
@@ -80,6 +80,14 @@ describe('configuration des Edge Functions', () => {
     // Authorization. Le handler authentifie lui-même les POST et s'appuie sur
     // `state` pour le retour.
     expect(config).toMatch(/\[functions\.meta-connect\][\s\S]*?verify_jwt\s*=\s*false/);
+    // Rappels de cycle de vie Meta (déautorisation, suppression de données) :
+    // postés par Meta, donc sans JWT. La barrière est la signature HMAC-SHA256
+    // du `signed_request` (App Secret sur la charge utile, comparaison à temps
+    // constant) — sans signature valide, la fonction répond 401 sans rien écrire.
+    expect(config).toMatch(/\[functions\.meta-lifecycle\][\s\S]*?verify_jwt\s*=\s*false/);
+    const lifecycle = read('supabase/functions/meta-lifecycle/handler.ts');
+    expect(lifecycle).toContain('parseSignedRequest');
+    expect(lifecycle).toContain('status: 401');
     const providerHealth = read('supabase/functions/vyora-provider-health/index.ts');
     expect(providerHealth).toContain("x-vyora-cron");
     expect(providerHealth).toContain('constantTimeEqual');

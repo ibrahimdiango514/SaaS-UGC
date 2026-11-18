@@ -94,3 +94,17 @@ verify_jwt = false
 # reçu : un WABA ou une page inconnus de VYORA ne créent aucune donnée.
 [functions.meta-webhook]
 verify_jwt = false
+
+# Rappels de cycle de vie Meta (dé-autorisation et suppression de données).
+#
+# Meta poste ici un `signed_request` (POST `application/x-www-form-urlencoded`),
+# sans aucun JWT Supabase : `verify_jwt = false` est donc obligatoire, sinon la
+# passerelle rejette l'appel avant le handler.
+#
+# La sécurité ne repose donc PAS sur un jeton mais sur la signature HMAC-SHA256
+# de l'App Secret sur la charge utile (voir src/business/meta/deauthorize.ts) :
+# sans signature valide, la requête est refusée en 401 et aucune donnée n'est
+# touchée. C'est le seul contrôle possible ici — et il suffit, car il prouve que
+# l'appel vient de Meta.
+[functions.meta-lifecycle]
+verify_jwt = false

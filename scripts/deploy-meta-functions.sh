@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# VYORA — déploiement CONTRÔLÉ des deux Edge Functions Meta.
+# VYORA — déploiement CONTRÔLÉ des Edge Functions Meta.
 #
 # ## Pourquoi un script séparé
 # `scripts/deploy-edge-functions.sh` déploie cinq fonctions Reelora d'un coup.
 # L'exécuter pour Meta redéploierait du code hors périmètre. Ce script-ci ne
-# touche QUE `meta-connect` et `meta-webhook`, et refuse de continuer si l'un
-# des contrôles échoue.
+# touche QUE les trois fonctions Meta, et refuse de continuer si l'un des
+# contrôles échoue.
 #
 # ## Ce qui change en production (et rien d'autre)
 #   1. création de la fonction `meta-connect`   (verify_jwt = false)
 #   2. création de la fonction `meta-webhook`   (verify_jwt = false)
-#   3. AUCUNE autre fonction, AUCUNE migration, AUCUN secret, AUCUNE table.
+#   3. création de la fonction `meta-lifecycle` (verify_jwt = false)
+#      → rappels `deauthorize` et `data-deletion` exigés par Meta
+#   4. AUCUNE autre fonction, AUCUNE migration, AUCUN secret, AUCUNE table.
 #
 # ## Ce qui est déployé
 # Le CHARGEUR (`loader.ts`, 3 412 caractères), pas `index.ts` : ses imports vers
@@ -39,14 +41,14 @@ echo "Mode   : $([ "$APPLIQUER" = 1 ] && echo 'DÉPLOIEMENT RÉEL' || echo 'cont
 echo
 
 # 1. Parité chargeur ↔ dépôt. Échoue si un artefact a bougé sans réépingle.
-for f in meta-connect meta-webhook; do
+for f in meta-connect meta-webhook meta-lifecycle; do
   node scripts/build-edge-artifact.mjs "$f" --check
 done
 
 # 2. Le commit épinglé doit être JOIGNABLE, pas seulement présent en local.
 #    Le chargeur s'exécute sur la plateforme Supabase et lit GitHub : un commit
 #    existant uniquement dans ce clone produit un 503 à froid.
-for f in meta-connect meta-webhook; do
+for f in meta-connect meta-webhook meta-lifecycle; do
   COMMIT="$(grep -o 'const COMMIT = "[0-9a-f]\{40\}"' "supabase/functions/$f/loader.ts" | grep -o '[0-9a-f]\{40\}')"
   CHEMIN="$(grep -o 'const PATH = "[^"]*"' "supabase/functions/$f/loader.ts" | cut -d'"' -f2)"
   echo -n "$f : artefact joignable au commit ${COMMIT:0:8}… "
@@ -91,6 +93,8 @@ echo "Déploiement des chargeurs (jamais index.ts)…"
 supabase functions deploy meta-connect \
   --project-ref "$PROJECT_REF" --no-verify-jwt --entrypoint loader.ts
 supabase functions deploy meta-webhook \
+  --project-ref "$PROJECT_REF" --no-verify-jwt --entrypoint loader.ts
+supabase functions deploy meta-lifecycle \
   --project-ref "$PROJECT_REF" --no-verify-jwt --entrypoint loader.ts
 
 echo
