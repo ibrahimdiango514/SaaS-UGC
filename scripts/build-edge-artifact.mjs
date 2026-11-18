@@ -65,6 +65,16 @@ export const FUNCTIONS = {
     artifact: 'supabase/functions/_artifacts/store-connect.js',
     usesPostgres: true,
   },
+  // Porte d'exécution des outils MCP externes. Même mécanisme : le code livré
+  // est celui du dépôt, à un commit précis, vérifié par taille et empreinte.
+  // Aucun autre réglage n'est nécessaire — `index.ts` n'exporte rien, ce qui
+  // le rend exécutable par `new Function`.
+  'mcp-client': {
+    entry: 'supabase/functions/mcp-client/index.ts',
+    loader: 'supabase/functions/mcp-client/loader.ts',
+    artifact: 'supabase/functions/_artifacts/mcp-client.js',
+    usesPostgres: true,
+  },
 };
 
 // esbuild peut placer l'import en fin de ligne, après d'autres instructions :
