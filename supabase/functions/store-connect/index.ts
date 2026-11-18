@@ -18,6 +18,7 @@ import postgres from 'npm:postgres@3.4.5';
 import { handleStoreConnect, type ConnectDependencies } from './handler.ts';
 import type { EgressDeps } from '../store-import/safe-egress.ts';
 import { pinnedFetchLike } from '../store-import/safe-egress.ts';
+import { buildAllowedOrigins } from '../../../src/lib/origin-allowlist.ts';
 
 /**
  * Lecture d'environnement sans supposer la présence de `Deno`.
@@ -37,9 +38,18 @@ const ANON_KEY = env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY');
 // par accident les réglages d'une autre fonction.
 const DATABASE_URL = env('STORE_CONNECT_DATABASE_URL') || env('SUPABASE_DB_URL');
 
-/** Origines autorisées, séparées par des virgules. */
-const ALLOWED_ORIGINS = env('VYORA_ALLOWED_ORIGINS')
-  .split(',').map((o) => o.trim()).filter(Boolean);
+/**
+ * Origines autorisées : la liste par défaut partagée avec `store-import` et
+ * `mcp-client` (application publiée, aperçus, développement local), PLUS les
+ * origines du secret `VYORA_ALLOWED_ORIGINS` (séparées par des virgules).
+ *
+ * Avant : seul le secret était lu. Secret absent ou incomplet = toutes les
+ * requêtes du navigateur recevaient `access-control-allow-origin: null`, donc
+ * étaient bloquées alors que les autres fonctions acceptaient la même origine.
+ * Un nouveau domaine de production se déclare donc UNE fois, dans le secret,
+ * et les origines connues continuent de fonctionner sans redéploiement.
+ */
+const ALLOWED_ORIGINS = buildAllowedOrigins(env('VYORA_ALLOWED_ORIGINS'));
 
 function requiredSql() {
   if (!DATABASE_URL) {

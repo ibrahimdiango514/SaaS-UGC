@@ -22,7 +22,7 @@
  * rendu ultérieur. Le serveur ne le réémet jamais : `readConnection` n'a pas de
  * champ pour cela.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, ExternalLink, KeyRound, Loader2, Plug, RefreshCw } from 'lucide-react';
 import { Button, Input } from '../components/ui';
 import { asAppError } from '../lib/errors';
@@ -97,6 +97,18 @@ export function ConnectorConnectForm({
   /** Le formulaire est-il déplié ? Replié par défaut quand tout va bien. */
   const [ouvert, setOuvert] = useState(false);
 
+  /**
+   * Vrai tant que le composant est monté. La lecture serveur est asynchrone :
+   * si l'écran hôte est démonté entre-temps (navigation, fin d'un test), le
+   * `setState` du `finally` toucherait un composant disparu — c'est l'erreur
+   * `window is not defined` observée après la fin de la suite `vitest`.
+   */
+  const monte = useRef(true);
+  useEffect(() => {
+    monte.current = true;
+    return () => { monte.current = false; };
+  }, []);
+
   const relireEtat = useCallback(async () => {
     if (!workspaceId || !requirement) {
       setEtat(null);
@@ -105,12 +117,12 @@ export function ConnectorConnectForm({
     setLectureEnCours(true);
     try {
       const lu = await readConnection({ workspaceId, connectorKey: cleConnecteur(requirement.key) });
-      setEtat(lu);
+      if (monte.current) setEtat(lu);
     } catch {
       // Une lecture ratée n'autorise pas à afficher « connectée ».
-      setEtat(null);
+      if (monte.current) setEtat(null);
     } finally {
-      setLectureEnCours(false);
+      if (monte.current) setLectureEnCours(false);
     }
   }, [workspaceId, requirement]);
 

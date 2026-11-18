@@ -24,7 +24,9 @@
 import process from 'node:process';
 
 export const DEFAULTS = {
-  site: 'https://vyora-ugc.netlify.app',
+  // `VYORA_SITE_URL` permet de viser le nouveau domaine Netlify sans toucher
+  // au code ; `--site` reste prioritaire. L'ancien domaine n'est qu'un repli.
+  site: (process.env.VYORA_SITE_URL || '').trim() || 'https://vyora-ugc.netlify.app',
   fn: 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import',
   repo: 'ibrahimdiango514/SaaS-UGC',
 };
