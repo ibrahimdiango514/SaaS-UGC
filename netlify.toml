@@ -57,13 +57,27 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# ---------------------------------------------------------------------------
+# Permissions-Policy : microphone ouvert à NOTRE origine seulement.
+#
+# La dictée vocale du chat (Business Grow et assistant VYORA) passe par l'API
+# `SpeechRecognition` du navigateur, qui exige l'autorisation micro. Avec
+# `microphone=()`, le navigateur refuse AVANT même de demander l'accord de
+# l'utilisateur : le bouton aurait été définitivement mort en production, quel
+# que soit le code de l'application.
+#
+# `microphone=(self)` n'ouvre rien aux iframes ni aux tiers : seul le document
+# de vyora-saas-ugc.netlify.app peut solliciter le micro, et l'utilisateur doit
+# toujours accepter explicitement. `camera` et `geolocation` restent fermés —
+# nous n'en avons aucun usage.
+# ---------------------------------------------------------------------------
 [[headers]]
   for = "/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
 
 # Relais zero-secret vers l'Edge Function `reelora-video` (Studio, références
 # multiples). Le navigateur n'appelle jamais *.supabase.co directement : il

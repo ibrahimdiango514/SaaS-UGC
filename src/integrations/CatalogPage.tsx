@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeft, ArrowRight, Check, Clock, ExternalLink, Filter, Lock, Plug, RefreshCw,
   Search, ShieldAlert, ShieldCheck, Unplug, X,
@@ -22,6 +22,9 @@ import { Badge, Button, Card, cn } from '../components/ui';
 import { ConnectorConnectForm } from './ConnectorConnectForm';
 import { MesBoutiquesConnectees, type BoutiquesAccess } from './MesBoutiquesConnectees';
 import { CustomApiConnectForm } from './CustomApiConnectForm';
+import { MetaConnectPanel } from './MetaConnectPanel';
+import { isMetaCatalogKey } from './meta/api';
+import { META_PRODUCT_DEFINITIONS } from '../business/meta/products';
 import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
 
@@ -143,6 +146,37 @@ export function IntegrationsCenter({
   const setBusyKey = controller ? () => {} : setInterneBusyKey;
   const notice = controller ? controller.notice : interneNotice;
   const setNotice = controller ? () => {} : setInterneNotice;
+
+  /**
+   * Retour du parcours Meta (`?meta=connected|error&product=…&code=…`).
+   *
+   * Le serveur a déjà échangé le code et vérifié les ressources avant de
+   * rediriger ici : ce paramètre n'est qu'un accusé de réception. On l'affiche
+   * une fois, puis on ouvre la fiche du produit concerné pour montrer l'état
+   * RÉEL relu depuis la base.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const resultat = searchParams.get('meta');
+    if (!resultat) return;
+    const produit = searchParams.get('product') ?? '';
+    const code = searchParams.get('code');
+    const definition = isMetaCatalogKey(produit) ? META_PRODUCT_DEFINITIONS[produit] : null;
+    const cible = isMetaCatalogKey(produit) ? INTEGRATIONS.find((e) => e.id === produit) ?? null : null;
+    if (resultat === 'connected') {
+      setNotice({ tone: 'success', text: `${definition?.label ?? 'Meta'} : autorisation reçue. Vérifiez l’état ci-dessous.` });
+      if (cible) setSelection(cible);
+    } else {
+      setNotice({
+        tone: 'error',
+        text: `${definition?.label ?? 'Meta'} : le parcours Meta n’a pas abouti${code ? ` (${code})` : ''}. Aucune connexion n’a été enregistrée.`,
+      });
+      if (cible) setSelection(cible);
+    }
+    const suivant = new URLSearchParams(searchParams);
+    for (const cle of ['meta', 'product', 'code']) suivant.delete(cle);
+    setSearchParams(suivant, { replace: true });
+  }, [searchParams, setSearchParams, setNotice]);
 
   const [query, setQuery] = useState('');
   const [categorie, setCategorie] = useState<CatalogCategory | 'all'>('all');
@@ -870,11 +904,21 @@ function FicheDetail({
   const etatConnu = statut !== null;
   // Une demande est toujours scopée à une entreprise : sans elle, le serveur
   // refuserait ou la rattacherait à un contexte indéterminé.
-  const demandePossible = etatConnu && entrepriseActive && canRequestActivation(entry, statut);
+  /**
+   * Les produits Meta passent par `MetaConnectPanel` : c'est lui qui porte le
+   * parcours réel (Embedded Signup / Login for Business), les pages, la
+   * vérification et la déconnexion. Les blocs génériques ci-dessous —
+   * « Demander l'activation », « Retirer l'association locale » — sont donc
+   * neutralisés pour ces fiches : proposer une demande d'activation sur un
+   * connecteur livré serait un mensonge, et deux boutons de déconnexion
+   * feraient douter duquel agit vraiment chez Meta.
+   */
+  const estMeta = isMetaCatalogKey(entry.id);
+  const demandePossible = etatConnu && entrepriseActive && !estMeta && canRequestActivation(entry, statut);
   const annulationPossible = etatConnu && canCancelRequest(statut);
   // « Connecté » au sens du socle Business Grow (ligne `connected`) : on peut
   // retirer l'association locale, même si aucun compte OAuth ne la corrobore.
-  const associationLocale = etatConnu && connection?.status === 'connected';
+  const associationLocale = etatConnu && !estMeta && connection?.status === 'connected';
   const connectable = etatConnu && canConnect(entry, statut);
   const manquantes = missingCapabilities(entry, compte);
 
@@ -999,7 +1043,23 @@ function FicheDetail({
             </div>
           ) : (
             <>
-              {entry.engine === 'custom-api' ? (
+              {isMetaCatalogKey(entry.id) ? (
+                /*
+                 * Fiches Meta : le parcours n'est ni un champ de clé ni une
+                 * simple redirection — il dépend du produit. `MetaConnectPanel`
+                 * porte les quatre parcours (Embedded Signup WhatsApp, Login for
+                 * Business Pages / Messenger / Instagram), la sélection des
+                 * pages, la vérification, le renouvellement et la déconnexion.
+                 * L'état affiché vient de `meta-connections`, donc d'un échange
+                 * OAuth réel : rien n'est simulé.
+                 */
+                <MetaConnectPanel
+                  product={entry.id}
+                  workspaceId={workspaceId}
+                  onChanged={onChanged}
+                  onConnected={onReload}
+                />
+              ) : entry.engine === 'custom-api' ? (
                 /*
                  * Parcours propre à ce connecteur : il n'y a pas de clé à
                  * demander mais une description à recueillir. Le composant

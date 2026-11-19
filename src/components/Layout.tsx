@@ -132,13 +132,13 @@ export default function Layout() {
     catch (error) { toast.error(asAppError(error).message); }
   };
 
-  if (loading) return <div className="grid min-h-screen place-items-center"><LoadingState label="Préparation de votre espace…" /></div>;
+  if (loading) return <div className="grid min-h-dvh place-items-center"><LoadingState label="Préparation de votre espace…" /></div>;
 
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Mon compte';
 
   return (
     <div
-      className={cn('min-h-screen lg:flex', scope === 'business' && 'vy-scope-business', scope === 'studio' && 'vy-scope-studio')}
+      className={cn('min-h-dvh lg:flex', scope === 'business' && 'vy-scope-business', scope === 'studio' && 'vy-scope-studio')}
       data-vy-scope={scope === 'admin' ? 'admin' : scope}
     >
       {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}

@@ -117,9 +117,23 @@ describe('catalogue — structure', () => {
      * pas de branche par connecteur dans le handler — c'est justement ce qui le
      * rend universel. Il est donc vérifié séparément, plus bas.
      */
+    /*
+     * Les quatre produits Meta ont leur moteur dans `meta-connect` (échange de
+     * code côté serveur, vérification des ressources, jetons en Vault). Ils ne
+     * passent PAS par `store-connect` : leur vérification est plus bas.
+     */
+    const MOTEURS_META = new Set(['whatsapp', 'facebook', 'messenger', 'instagram']);
     const MOTEURS_ECRITS = new Set(['prestashop', 'chariow', 'shopify', 'woocommerce']);
     for (const entry of INTEGRATIONS) {
-      if (MOTEURS_ECRITS.has(entry.id)) {
+      if (MOTEURS_META.has(entry.id)) {
+        expect(entry.engine, `${entry.id} : moteur Meta annoncé`).not.toBeNull();
+        // La fiche n'est une promesse que si la fonction Edge existe et gère
+        // réellement ce produit.
+        expect(existsSync('supabase/functions/meta-connect/handler.ts')).toBe(true);
+        expect(existsSync('supabase/functions/meta-connect/index.ts')).toBe(true);
+        const metaHandler = readFileSync('supabase/functions/meta-connect/handler.ts', 'utf8');
+        expect(metaHandler).toContain(`'${entry.id}'`);
+      } else if (MOTEURS_ECRITS.has(entry.id)) {
         expect(entry.engine, `${entry.id} : moteur annoncé`).not.toBeNull();
         // Le point qui rend la promesse vérifiable : le code du connecteur et
         // son point d'entrée déployé existent dans le dépôt.
@@ -417,13 +431,19 @@ describe('catalogue — affichage', () => {
     expect(screen.getAllByText(/Connexion et permissions/i).length).toBeGreaterThan(0);
   });
 
-  it('la fiche explique pourquoi on ne peut pas encore connecter', async () => {
+  it('la fiche explique ce qu’il faut avant de connecter', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('integration-instagram')).toBeTruthy());
     fireEvent.click(screen.getByTestId('integration-instagram'));
     await waitFor(() => expect(screen.getByRole('dialog', { name: /Fiche Instagram/i })).toBeTruthy());
-    // Message d'approbation externe, pas un bouton actif trompeur.
-    expect(screen.getByText(/exige une validation de son côté/i)).toBeTruthy();
+    /*
+     * Instagram a désormais un moteur (`meta-connect`) : la fiche n'affiche
+     * plus « validation externe requise » mais la revue Meta à passer ET
+     * l'état réel du serveur — ici « non configuré », puisque la preview refuse
+     * l'appel. Ce qui doit rester vrai : aucun bouton ne promet une connexion
+     * déjà faite, et l'approbation Meta est annoncée.
+     */
+    expect(screen.getByText(/App Review Meta/i)).toBeTruthy();
   });
 });
 

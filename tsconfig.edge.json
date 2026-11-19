@@ -50,6 +50,15 @@
     "supabase/functions/mcp-client/gestion-serveur.ts",
     "supabase/functions/mcp-client/gestion-http.ts",
     "supabase/functions/mcp-client/accueil.ts",
-    "supabase/functions/mcp-client/index.ts"
+    "supabase/functions/mcp-client/index.ts",
+    "supabase/functions/meta-connect/index.ts",
+    "supabase/functions/meta-connect/handler.ts",
+    "supabase/functions/meta-webhook/index.ts",
+    "supabase/functions/meta-webhook/handler.ts",
+    "src/business/meta/products.ts",
+    "src/business/meta/graph.ts",
+    "src/business/meta/oauth.ts",
+    "src/business/meta/webhook.ts",
+    "src/lib/origin-allowlist.ts"
   ]
 }

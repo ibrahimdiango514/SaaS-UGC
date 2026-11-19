@@ -407,7 +407,7 @@ export default function VideoStudio() {
   return (
     <StudioShell title="Video Studio · parcours détaillé" actions={<>
       <Link to="/app/studio" className="btn btn-primary btn-sm"><Sparkles size={13} /> Nouveau studio</Link>
-      <Link to="/app/studio/montage" className="btn btn-outline btn-sm"><Scissors size={13} /> Éditeur</Link>
+      <Link to="/app/montage" className="btn btn-outline btn-sm"><Scissors size={13} /> Éditeur</Link>
       <Link to="/app/historique" className="btn btn-outline btn-sm"><Clock3 size={13} /> Mes générations</Link>
       <Link to="/app/studio/avance" className="btn btn-ghost btn-sm"><Wand2 size={13} /> Parcours 5 étapes</Link>
     </>}>

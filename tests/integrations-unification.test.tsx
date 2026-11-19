@@ -112,16 +112,16 @@ beforeEach(() => {
   mocks.disconnectIntegration.mockResolvedValue({ connectorKey: 'facebook', disconnected: true });
 });
 
-describe('règle 1 — les 27 fournisseurs d’origine sont conservés', () => {
+describe('règle 1 — les fournisseurs d’origine sont conservés', () => {
   it('affiche le catalogue complet, sans en retirer aucun', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('integration-facebook')).toBeTruthy());
     for (const entry of INTEGRATIONS) {
       expect(screen.getByTestId(`integration-${entry.id}`)).toBeTruthy();
     }
-    // 28 depuis « Autre plateforme (API personnalisée) » : le catalogue ne
-    // perd aucune fiche, il en gagne une.
-    expect(INTEGRATIONS).toHaveLength(28);
+    // 30 depuis WhatsApp Business et Messenger, en plus des 28 précédents
+    // (« Autre plateforme » compris) : le catalogue ne perd aucune fiche.
+    expect(INTEGRATIONS).toHaveLength(30);
   });
 
   it('un fournisseur absent du catalogue ne peut pas apparaître par accident', async () => {
@@ -213,9 +213,16 @@ describe('règle 2 — les demandes d’activation existantes sont conservées',
     expect(within(fiche).queryByRole('button', { name: 'Demander l’activation' })).toBeNull();
   });
 
-  it('les six fournisseurs acceptés par le serveur proposent la demande', async () => {
+  it('les fournisseurs SANS parcours livré proposent la demande d’activation', async () => {
+    /*
+     * Facebook et Instagram ont désormais un parcours réel (`meta-connect`) :
+     * proposer « Demander l'activation » sur ces fiches serait faux, et le test
+     * l'a détecté. La règle testée — une demande reste proposée quand rien ne
+     * peut être connecté — est donc vérifiée sur les fournisseurs qui n'ont
+     * toujours aucun moteur, et plus du tout sur les quatre produits Meta.
+     */
     monter();
-    for (const id of ['facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce']) {
+    for (const id of ['youtube', 'tiktok']) {
       fireEvent.click(await screen.findByTestId(`integration-${id}`));
       const fiche = await screen.findByRole('dialog', { name: new RegExp(`Fiche `, 'i') });
       expect(within(fiche).getByRole('button', { name: 'Demander l’activation' })).toBeTruthy();

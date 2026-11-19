@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Loader2, Paperclip, ScanText, X, FileText, ImageIcon } from 'lucide-react';
+import { useDictee } from './useDictee';
+import { ArrowUp, Loader2, Mic, Paperclip, ScanText, Square, X, FileText, ImageIcon } from 'lucide-react';
 import type { AiAttachment, AiMode } from './api';
 import { MAX_ATTACHMENTS, formatBytes } from './attachments';
 import { prepareAttachment } from '../files/intoAssistant';
@@ -71,6 +72,66 @@ export function Composer({
   const [erreur, setErreur] = useState<string | null>(null);
   /** Téléversements en cours, avec leur progression réelle. */
   const [envois, setEnvois] = useState<Array<{ key: string; name: string; percent: number }>>([]);
+
+  /*
+   * Dictée vocale.
+   *
+   * Le fragment reconnu est INSÉRÉ dans le texte existant, à la position du
+   * curseur, au lieu de remplacer le message. Un utilisateur qui a déjà écrit
+   * trois lignes puis dicte une précision ne doit pas les perdre.
+   */
+  const dictee = useDictee((fragment) => {
+    /*
+     * Insertion À LA POSITION DU CURSEUR, comme annoncé.
+     *
+     * La version précédente ajoutait toujours à la fin : un utilisateur qui
+     * relisait son début de message et dictait une précision la voyait atterrir
+     * à l'autre bout du texte, hors de son regard et hors de son intention.
+     *
+     * Si le champ n'a pas le focus (cas fréquent sur mobile : le clavier se
+     * referme pendant l'écoute), on retombe proprement sur la fin du texte.
+     */
+    const zoneElement = zone.current;
+    const debut = zoneElement && document.activeElement === zoneElement
+      ? zoneElement.selectionStart
+      : null;
+    const fin = zoneElement && document.activeElement === zoneElement
+      ? zoneElement.selectionEnd
+      : null;
+    setTexte((actuel) => {
+      if (debut === null || fin === null) {
+        return actuel.trim() ? `${actuel.trimEnd()} ${fragment}` : fragment;
+      }
+      const avant = actuel.slice(0, debut);
+      const apres = actuel.slice(fin);
+      /*
+       * Une espace de séparation seulement si les DEUX côtés en manquent.
+       *
+       * Vérifier le seul côté gauche produisait un double espace quand le
+       * fragment dicté commençait lui-même par une espace — la reconnaissance
+       * vocale en produit régulièrement entre deux segments.
+       */
+      const prefixe = avant && !/\s$/.test(avant) && !/^\s/.test(fragment) ? ' ' : '';
+      const suffixe = apres && !/^\s/.test(apres) && !/\s$/.test(fragment) ? ' ' : '';
+      return `${avant}${prefixe}${fragment}${suffixe}${apres}`;
+    });
+    /*
+     * Remettre le curseur après le texte dicté, sinon la frappe suivante
+     * écraserait le fragment. On le fait au tour de rendu suivant, quand React
+     * a écrit la nouvelle valeur.
+     */
+    if (debut !== null && fin !== null && zoneElement) {
+      const position = debut + fragment.length + 1;
+      requestAnimationFrame(() => {
+        try {
+          zoneElement.focus();
+          zoneElement.setSelectionRange(position, position);
+        } catch {
+          /* champ démonté entre-temps : sans conséquence */
+        }
+      });
+    }
+  });
   const zone = useRef<HTMLTextAreaElement>(null);
   const fichiers = useRef<HTMLInputElement>(null);
 
@@ -281,6 +342,34 @@ export function Composer({
             <span className="hidden sm:inline">Analyse</span>
           </button>
 
+          {/*
+            Micro : n'apparaît QUE si le navigateur sait réellement transcrire.
+            Afficher un bouton mort « pour l'interface » serait exactement le
+            genre de fausse capacité qu'on veut éliminer — l'utilisateur
+            appuierait, rien ne se passerait, et il conclurait que le produit
+            est cassé. La raison de l'absence est exposée en infobulle.
+          */}
+          {dictee.disponible && (
+            <button
+              type="button"
+              onClick={() => (dictee.ecoute ? dictee.arreter() : dictee.demarrer())}
+              disabled={sending}
+              className={cn(
+                /* h-11 sur mobile : 44px est la cible tactile minimale recommandée ;
+                   36px provoquait des appuis manqués au pouce. */
+                'btn btn-sm h-11 gap-1.5 px-3 text-xs sm:h-9 sm:px-2.5',
+                dictee.ecoute ? 'btn-outline border-rose-400/60 text-rose-200' : 'btn-ghost',
+              )}
+              aria-pressed={dictee.ecoute}
+              aria-label={dictee.ecoute ? 'Arrêter la dictée' : 'Dicter le message'}
+              title={dictee.ecoute ? 'Arrêter l’écoute et conserver le texte transcrit' : 'Dicter votre message à voix haute'}
+              data-testid="composer-micro"
+            >
+              {dictee.ecoute ? <Square size={15} /> : <Mic size={15} />}
+              {dictee.ecoute && <span className="hidden sm:inline">Écoute…</span>}
+            </button>
+          )}
+
           <span className="flex-1" />
 
           {sendLabel === 'Envoyer' ? (
@@ -288,7 +377,7 @@ export function Composer({
               type="button"
               onClick={() => void envoyer()}
               disabled={!peutEnvoyer}
-              className="btn btn-primary btn-sm h-9 gap-1.5 px-3"
+              className="btn btn-primary btn-sm h-11 gap-1.5 px-4 sm:h-9 sm:px-3"
             >
               <ArrowUp size={15} />
               Envoyer
@@ -298,7 +387,7 @@ export function Composer({
               type="button"
               onClick={() => void envoyer()}
               disabled={!peutEnvoyer}
-              className="btn btn-primary btn-sm h-9 w-9 p-0"
+              className="btn btn-primary btn-sm h-11 w-11 p-0 sm:h-9 sm:w-9"
               aria-label={sendLabel}
             >
               <ArrowUp size={17} />
@@ -306,6 +395,31 @@ export function Composer({
           )}
         </div>
       </div>
+
+      {/*
+        État de la dictée : texte en cours de reconnaissance, erreur ou refus de
+        permission. Sans cette zone, un refus de micro serait totalement muet —
+        le bouton reviendrait simplement à son état initial.
+      */}
+      {dictee.ecoute && dictee.provisoire && (
+        <p className="mt-1.5 truncate rounded-lg bg-white/[0.03] px-2 py-1 text-[0.7rem] italic text-slate-400" role="status">
+          {dictee.provisoire}
+          {/*
+            Point d'écoute STATIQUE, pas une pulsation : il signale que le
+            navigateur écoute (état réel), sans simuler une activité qui
+            n'existe pas. Quand la reconnaissance s'arrête, la zone disparaît.
+          */}
+          <span className="ml-1 text-rose-300" aria-hidden="true">●</span>
+        </p>
+      )}
+      {dictee.erreur && (
+        <div role="alert" className="mt-1.5 flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2 py-1.5 text-[0.7rem] text-amber-100">
+          <span className="min-w-0 flex-1">{dictee.erreur}</span>
+          <button type="button" onClick={dictee.effacerErreur} className="shrink-0 text-amber-200/80 underline">
+            Masquer
+          </button>
+        </div>
+      )}
 
       <p className="mt-1.5 text-center text-[0.68rem] text-slate-600">
         VYORA peut se tromper. Vérifiez les informations importantes.

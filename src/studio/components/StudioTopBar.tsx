@@ -32,7 +32,7 @@ export const STUDIO_CATEGORIES: Category[] = [
     note: 'Montage, clips, effets, mise à l’échelle sur une vidéo importée.' },
   { id: 'lip-sync', label: 'Lip Sync', icon: Mic2, to: '/app/studio?mode=audio-source', available: true,
     note: 'Synchronisation labiale et avatars parlants à partir d’un audio importé.' },
-  { id: 'editor', label: 'Montage', icon: Scissors, to: '/app/studio/montage', available: true,
+  { id: 'editor', label: 'Montage', icon: Scissors, to: '/app/montage', available: true,
     note: 'Timeline, pistes, scènes, sous-titres et export.' },
   { id: 'creations', label: 'Mes créations', icon: Film, to: '/app/bibliotheque', available: true,
     note: 'Fichiers réellement produits, conservés dans le stockage privé.' },

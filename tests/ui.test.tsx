@@ -31,27 +31,22 @@ beforeEach(() => { window.history.pushState({}, '', '/'); });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe('parcours public', () => {
-  it('affiche la page d’accueil en français, sans abonnements non commercialisés', async () => {
+  it('affiche la landing de lancement en français, avec deux espaces', async () => {
     render(<App />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Vos idées prennent forme');
-    expect(screen.getByText('Fonctionnalités')).toBeTruthy();
-    // Les deux espaces sont présentés clairement
-    expect(screen.getByText('VYORA Studio')).toBeTruthy();
-    expect(screen.getByText('VYORA Business')).toBeTruthy();
-    // La section “défis résolus” remplace l’ancienne section Tarifs
-    expect(screen.getByText('Les défis que vous connaissez')).toBeTruthy();
-    expect(screen.getByText('Chaque jour, les mêmes obstacles')).toBeTruthy();
-    // Aucune offre fictive : le système commercial d’abonnements n’est pas
-    // encore lancé → pas de section Tarifs, pas de cartes de formules, pas de
-    // prix ni de bouton d’achat sur la page d’accueil.
-    expect(screen.queryByText('Tarifs')).toBeNull();
-    expect(screen.queryByText('Découverte')).toBeNull();
-    expect(screen.queryByText(/mois/)).toBeNull();
+    // La promesse est lisible dès le titre : elle parle de ce que VYORA rend.
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/argent|clients|impay/i);
+    // Les deux espaces sont présentés clairement, avec un titre chacun.
+    expect(screen.getByRole('heading', { name: 'VYORA Studio', level: 3 })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Business Grow', level: 3 })).toBeTruthy();
+    // La douleur est nommée avant la solution.
+    expect(screen.getByText(/Ce qui vous coûte de l’argent/i)).toBeTruthy();
+    // Pas de faux témoignage : la preuve sociale est éteinte par défaut.
+    expect(screen.queryByText(/Ils utilisent VYORA/i)).toBeNull();
   });
 
   it('navigue vers l’inscription et affiche le formulaire complet', async () => {
     render(<App />);
-    fireEvent.click(screen.getAllByRole('link', { name: /Créer mon compte/ })[0]);
+    fireEvent.click(screen.getAllByRole('link', { name: /Créer mon espace|Commencer/ })[0]);
     await waitFor(() => expect(window.location.pathname).toBe('/inscription'));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte'), { timeout: 5000 });
     // Parcours en trois étapes : identité → accès sécurisé → confirmation.
@@ -90,5 +85,17 @@ describe('parcours public', () => {
     render(<App />);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Politique de confidentialité');
     expect(screen.getByText('Données collectées')).toBeTruthy();
+  });
+
+  it('documente les intégrations Meta et expose l’ancre de suppression exigée par Meta', async () => {
+    window.history.pushState({}, '', '/confidentialite');
+    const { container } = render(<App />);
+    // Meta exige une « Data Deletion Instructions URL » : elle doit exister, et
+    // décrire la déconnexion réelle (jeton effacé + révocation chez Meta).
+    expect(screen.getByRole('heading', { level: 2, name: /Intégrations Meta/i })).toBeTruthy();
+    const suppression = container.querySelector('#suppression-des-donnees');
+    expect(suppression).toBeTruthy();
+    expect(suppression?.textContent).toMatch(/Déconnecter/);
+    expect(suppression?.textContent).toMatch(/révoquée chez Meta/);
   });
 });

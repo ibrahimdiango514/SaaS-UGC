@@ -37,7 +37,7 @@ import {
  * production — le chargeur est bien formé, mais l'artefact épinglé n'est pas
  * celui du dépôt.
  */
-const FONCTIONS_SUIVIES = ['store-import', 'store-connect'] as const;
+const FONCTIONS_SUIVIES = ['store-import', 'store-connect', 'meta-connect', 'meta-webhook'] as const;
 
 /**
  * Lit un fichier **tel qu'il est au commit donné**, via `git show`.
@@ -172,6 +172,30 @@ describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nom
       + `Souvent un module partagé modifié : ${empreintes.join(', ')}. `
       + 'Régénérez les artefacts puis réépinglez (voir la procédure dans le README du script).',
     );
+  });
+
+  it('le commit épinglé existe et contient l’artefact (contrôle du dépôt réel)', () => {
+    /*
+     * Le test précédent compare l'artefact au commit épinglé, mais `git show`
+     * échoue silencieusement si le commit n'existe pas localement : on retombe
+     * alors sur `null` et le message parle d'artefact « absent », pas de commit
+     * manquant. Or c'est la cause la plus fréquente (épingle posée sur un
+     * commit jamais poussé, ou sur une PR non fusionnée).
+     *
+     * On distingue donc explicitement les deux cas.
+     */
+    const commit = commitEpingle();
+    let existe = false;
+    try {
+      execFileSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: process.cwd(), stdio: 'ignore' });
+      existe = true;
+    } catch {
+      existe = false;
+    }
+    expect(
+      existe,
+      `le commit épinglé ${commit} n'existe pas dans ce dépôt : poussez l'artefact puis réépinglez`,
+    ).toBe(true);
   });
 
   it('ne réintroduit pas l’ancien chargement depuis la base', () => {

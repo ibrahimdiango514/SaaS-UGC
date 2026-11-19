@@ -150,43 +150,116 @@ export const INTEGRATIONS: IntegrationEntry[] = [
   /* ------------------------------ Réseaux sociaux ------------------------ */
   {
     id: 'instagram',
-    name: 'Instagram',
+    name: 'Instagram Business',
     category: 'social',
-    description: 'Publications, stories et statistiques de votre compte professionnel.',
-    capabilities: ['account-read', 'content-publish', 'publication-schedule', 'analytics-read'],
+    description: 'Compte professionnel Instagram relié à une page Facebook : publications, commentaires et statistiques.',
+    /*
+     * Parcours retenu, et un seul : « Instagram via Facebook Login » (compte
+     * professionnel relié à une Page). Les permissions sont celles de ce
+     * parcours (`instagram_basic`, `instagram_content_publish`,
+     * `instagram_manage_comments`, `instagram_manage_insights`) — surtout PAS
+     * les `instagram_business_*` de « Instagram API with Instagram Login », qui
+     * appartiennent à un autre enchaînement OAuth et ne se mélangent pas.
+     *
+     * `publication-schedule` est retiré : l'API de contenu Instagram n'expose
+     * pas de publication planifiée côté API ; VYORA publie immédiatement.
+     */
+    capabilities: ['account-read', 'content-publish', 'analytics-read'],
     auth: [
       {
         mode: 'oauth2',
-        label: 'Compte professionnel Instagram relié à une page Facebook',
+        label: 'Compte professionnel Instagram relié à une page Facebook dont vous êtes administrateur',
         serverConfigKey: 'META_APP_ID',
-        externalApproval: 'App Review Meta : instagram_content_publish, pages_show_list',
+        externalApproval: 'App Review Meta : instagram_basic, instagram_content_publish, instagram_manage_comments, instagram_manage_insights',
       },
       {
         mode: 'public-catalog',
         label: 'Aucune alternative : la publication exige une autorisation Meta.',
       },
     ],
-    engine: null,
-    docsUrl: 'https://developers.facebook.com/docs/instagram-api',
-    caveat: 'Compte professionnel obligatoire. L’approbation Meta conditionne la publication.',
+    engine: 'oauth2',
+    docsUrl: 'https://developers.facebook.com/docs/instagram-platform/content-publishing',
+    caveat:
+      'Compte professionnel obligatoire, relié à une Page. Tant que Meta n’a pas approuvé les permissions avancées, '
+      + 'seuls les comptes ajoutés comme testeurs de l’application peuvent se connecter.',
   },
   {
     id: 'facebook',
-    name: 'Facebook Pages',
+    name: 'Facebook',
     category: 'social',
-    description: 'Publier sur vos pages et lire leurs statistiques.',
-    capabilities: ['account-read', 'content-publish', 'publication-schedule', 'analytics-read'],
+    description: 'Connecter vos pages, publier, lire les statistiques et suivre les commentaires.',
+    /*
+     * Capacités réelles : `account-read` (liste des pages),
+     * `content-publish` (`/{page-id}/feed`), `analytics-read`
+     * (`/{page-id}/insights`). La planification est possible côté Meta
+     * (`scheduled_publish_time`), mais l'interface ne la propose pas encore :
+     * elle n'est donc pas déclarée.
+     */
+    capabilities: ['account-read', 'content-publish', 'analytics-read'],
     auth: [
       {
         mode: 'oauth2',
-        label: 'Page Facebook dont vous êtes administrateur',
+        label: 'Facebook Login for Business : pages dont vous êtes administrateur',
         serverConfigKey: 'META_APP_ID',
-        externalApproval: 'App Review Meta : pages_manage_posts, pages_read_engagement',
+        externalApproval: 'App Review Meta : pages_show_list, pages_read_engagement, pages_manage_posts, pages_manage_metadata',
       },
     ],
-    engine: null,
+    engine: 'oauth2',
     docsUrl: 'https://developers.facebook.com/docs/pages-api',
-    caveat: 'Rôle administrateur de la page requis.',
+    caveat:
+      'Rôle administrateur de la page requis. Vous choisissez les pages rattachées à l’entreprise après autorisation ; '
+      + 'les autres pages du compte ne sont pas exposées à VYORA.',
+  },
+  {
+    id: 'whatsapp',
+    name: 'WhatsApp Business',
+    category: 'social',
+    description: 'WhatsApp Cloud API : envoyer et recevoir des messages, suivre les statuts et gérer les modèles.',
+    /*
+     * `messages-read` + `messages-send` : les deux sens sont implémentés
+     * (Webhook signé pour la réception et les statuts, `/{phone-number-id}/messages`
+     * pour l'envoi). `analytics-read` est absent : la Cloud API ne publie pas
+     * de statistiques de compte lisibles par ce jeton.
+     */
+    capabilities: ['account-read', 'messages-read', 'messages-send'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'WhatsApp Embedded Signup : portefeuille professionnel Meta et numéro éligible',
+        serverConfigKey: 'META_APP_ID',
+        externalApproval: 'App Review Meta : whatsapp_business_management, whatsapp_business_messaging',
+      },
+    ],
+    engine: 'oauth2',
+    docsUrl: 'https://developers.facebook.com/docs/whatsapp/cloud-api',
+    caveat:
+      'Le numéro doit être éligible à la Cloud API et n’être utilisé ni sur l’application WhatsApp Business ni sur un autre fournisseur. '
+      + 'Hors fenêtre de 24 h, seul un modèle approuvé peut être envoyé.',
+  },
+  {
+    id: 'messenger',
+    name: 'Messenger',
+    category: 'social',
+    description: 'Conversations Messenger de vos pages : réception, historique et réponses.',
+    /*
+     * `messages-read` + `messages-send` sont réels : Webhook `page.messaging`
+     * pour la réception et `/{page-id}/messages` pour la réponse. Aucune
+     * statistique Messenger n'est exposée par cette permission : `analytics-read`
+     * est donc absent.
+     */
+    capabilities: ['account-read', 'messages-read', 'messages-send'],
+    auth: [
+      {
+        mode: 'oauth2',
+        label: 'Facebook Login for Business : page dont vous êtes administrateur, avec pages_messaging',
+        serverConfigKey: 'META_APP_ID',
+        externalApproval: 'App Review Meta : pages_messaging, pages_manage_metadata',
+      },
+    ],
+    engine: 'oauth2',
+    docsUrl: 'https://developers.facebook.com/docs/messenger-platform',
+    caveat:
+      'La page doit être sélectionnée pour Messenger. Hors fenêtre de 24 h, Messenger n’accepte plus de message libre.',
   },
   {
     id: 'tiktok',

@@ -114,7 +114,10 @@ describe('preuve de rendu du catalogue unifié', () => {
     expect(screen.getByTestId('integration-shopify').textContent).toContain('Autorisation manquante');
     expect(screen.getByTestId('integration-facebook').textContent).toContain('Activation demandée');
     // Fournisseurs exigeant une approbation de leur côté, sans compte relié.
-    for (const id of ['tiktok', 'instagram', 'microsoft365']) {
+    // Instagram n'en fait plus partie : il a un moteur (`meta-connect`), donc
+    // l'état est « Non connecté » — et la revue Meta reste annoncée dans la
+    // fiche. L'ajouter ici ferait passer un connecteur écrit pour bloqué.
+    for (const id of ['tiktok', 'microsoft365']) {
       expect(screen.getByTestId(`integration-${id}`).textContent).toContain('Validation externe requise');
     }
     /*

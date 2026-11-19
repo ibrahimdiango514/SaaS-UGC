@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import { ProtectedRoute, AdminRoute } from './components/Routes';
 import Landing from './pages/Landing';
 import Legal from './pages/Legal';
+import DeletionStatusPage from './pages/DeletionStatus';
 import NotFound from './pages/NotFound';
 
 const Login = lazy(() => import('./pages/Login'));
@@ -42,10 +43,13 @@ const McpConnections = lazy(() => import('./integrations/McpConnectionsPage').th
 const MesServeursMcp = lazy(() => import('./integrations/MesServeursMcpPage').then(({ MesServeursMcpPage }) => ({ default: MesServeursMcpPage })));
 const ConnexionsMcp = lazy(() => import('./integrations/ConnexionsMcpPage').then(({ ConnexionsMcpPage }) => ({ default: ConnexionsMcpPage })));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
+const BusinessAssistantPage = lazy(() => import('./business/BusinessAssistantPage'));
 const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
 const BusinessGrowSubscription = lazy(() => import('./pages/BusinessGrowSubscription'));
 const PaymentReturn = lazy(() => import('./pages/PaymentReturn'));
+// Outil de vérification responsive, réservé au développement (jamais lié en UI).
+const MatriceLargeurs = lazy(() => import('./dev/MatriceLargeurs'));
 
 export default function App() {
   return (
@@ -56,6 +60,12 @@ export default function App() {
             <Suspense fallback={<div role="status" className="p-6 text-sm text-slate-400">Chargement de l’espace…</div>}>
               <Routes>
                 <Route path="/" element={<Landing />} />
+                {/* Matrice de largeurs : mesure la page cible aux 11 largeurs
+                    imposées. En développement uniquement — en production, la
+                    route renvoie vers l'accueil. */}
+                {import.meta.env.DEV && (
+                  <Route path="/dev/matrice" element={<MatriceLargeurs />} />
+                )}
                 <Route path="/connexion" element={<Login />} />
                 <Route path="/inscription" element={<Signup />} />
                 <Route path="/proprietaire" element={<OwnerBootstrap />} />
@@ -64,6 +74,10 @@ export default function App() {
                 <Route path="/mot-de-passe-oublie" element={<ForgotPassword />} />
                 <Route path="/auth/callback" element={<AuthCallback />} />
                 <Route path="/confidentialite" element={<Legal kind="confidentialite" />} />
+                {/* Page PUBLIQUE de suivi d'une demande de suppression Meta.
+                    Meta exige une URL consultable sans authentification : elle
+                    doit donc rester HORS du bloc <ProtectedRoute>. */}
+                <Route path="/confidentialite/suivi" element={<DeletionStatusPage />} />
                 <Route path="/conditions" element={<Legal kind="conditions" />} />
 
                 <Route element={<ProtectedRoute />}>
@@ -75,6 +89,11 @@ export default function App() {
                       <Route path="projets/:id" element={<ProjectDetail />} />
                       <Route path="studio" element={<GenerationStudio />} />
                       <Route path="business" element={<BusinessGrow />} />
+                      {/* Assistant Business Grow : page DÉDIÉE, plein écran.
+                          L'onglet équivalent existe toujours dans Business Grow
+                          (même composant, même état) ; cette route existe parce
+                          qu'une conversation a besoin de toute la surface. */}
+                      <Route path="business/assistant" element={<BusinessAssistantPage />} />
                       <Route path="business/modules" element={<BusinessModules />} />
                       <Route path="business/modules/:moduleKey" element={<BusinessModuleWorkspace />} />
                       <Route path="business/abonnement" element={<BusinessGrowSubscription />} />
@@ -102,6 +121,14 @@ export default function App() {
                         de l'ancienne sidebar et paraissait inchange. Le catalogue
                         d'integrations suit la meme regle. */}
                     <Route path="/app/ai" element={<Assistant />} />
+                    {/* MONTAGE VIDÉO : espace de travail dédié, hors coquille.
+
+                        Dans <Layout>, la barre supérieure et la navigation retiraient
+                        de la hauteur à une interface déjà dense : timeline et panneaux
+                        se comprimaient, et sur un écran court le monteur devenait
+                        inutilisable. La route historique /app/studio/montage reste en
+                        place avec le rendu d'origine. */}
+                    <Route path="/app/montage" element={<VideoEditor pleinEcran />} />
                     <Route path="/app/connect" element={<Integrations />} />
                     <Route path="/app/connexions-ia" element={<McpConnections />} />
                     {/* MCP SORTANT : l'utilisateur connecte ses propres serveurs

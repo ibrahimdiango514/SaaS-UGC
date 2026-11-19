@@ -54,7 +54,7 @@ export function AfterGeneration({ result, job, onRegenerate, onEditScript, onVar
           <button type="button" onClick={onEditScript} className="studio-action"><PencilLine size={14} /> Modifier le script</button>
           <button type="button" onClick={onVariant} className="studio-action"><Sparkles size={14} /> Créer une variante</button>
           <Link to="/app/historique" className="studio-action"><History size={14} /> Voir l’historique</Link>
-          <Link to="/app/studio/montage" className="studio-action"><Clapperboard size={14} /> Reprendre dans l’éditeur</Link>
+          <Link to="/app/montage" className="studio-action"><Clapperboard size={14} /> Reprendre dans l’éditeur</Link>
         </div>
       </div>
     </div>

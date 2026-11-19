@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Clapperboard } from 'lucide-react';
 import { Card } from '../components/ui';
 
-const CONTENT: Record<string, { title: string; sections: { h: string; p: string }[] }> = {
+const CONTENT: Record<string, { title: string; sections: { h: string; p: string; id?: string }[] }> = {
   confidentialite: {
     title: 'Politique de confidentialité',
     sections: [
@@ -10,7 +10,9 @@ const CONTENT: Record<string, { title: string; sections: { h: string; p: string 
       { h: 'Hébergement', p: 'Les données sont stockées dans le projet Supabase européen (région eu-central-1). Les fichiers vidéo sont conservés dans le bucket privé ugc-assets, accessible uniquement via des URL signées ou une session autorisée.' },
       { h: 'Sécurité', p: 'Chaque table est protégée par des politiques RLS. Les clés d’API Groq et MuAPI, le jeton du worker et la clé service_role Supabase ne sont accessibles qu’aux fonctions serveur, jamais au navigateur.' },
       { h: 'Sous-traitants IA', p: 'Lorsque vous lancez une génération, le strict nécessaire (script, prompt, image de référence éventuelle et paramètres du modèle) est transmis à MuAPI. Aucun fournisseur n’est contacté si son secret serveur n’est pas configuré.' },
+      { h: 'Intégrations Meta (WhatsApp, Facebook, Messenger, Instagram)', p: 'Lorsque vous connectez un produit Meta depuis l’écran Intégrations, Meta vous montre sa propre fenêtre d’autorisation. VYORA reçoit alors un jeton d’accès, qu’elle conserve chiffré côté serveur, et les identifiants des actifs que vous avez explicitement sélectionnés (compte WhatsApp Business et numéro, Pages Facebook, compte Instagram professionnel). Ces éléments servent uniquement à exécuter les actions que vous demandez (lire les messages, envoyer une réponse, publier, consulter des statistiques). Le jeton ne quitte jamais le serveur. Une déconnexion depuis l’écran Intégrations supprime la connexion, efface le jeton du coffre serveur et révoque l’autorisation chez Meta.' },
       { h: 'Vos droits', p: 'Vous pouvez modifier votre profil, supprimer vos projets, avatars, prompts et créations depuis l’application. Pour toute demande relative à vos données, contactez le support VYORA.' },
+      { h: 'Suppression des données', id: 'suppression-des-donnees', p: 'Vous pouvez supprimer vous-même vos données depuis l’application. Pour les intégrations Meta, ouvrez l’écran Intégrations, sélectionnez la fiche concernée puis « Déconnecter » : la connexion, le jeton d’accès et la sélection de Pages ou de numéro sont supprimés immédiatement, et l’autorisation est révoquée chez Meta. Si vous avez demandé la suppression de vos données depuis Facebook, vous pouvez suivre l’avancement de votre demande sur la page de suivi, à l’aide du code de confirmation fourni par Meta. Pour obtenir la suppression complète de votre compte et de vos contenus, ou si vous n’avez plus accès à votre session, écrivez au support VYORA depuis l’adresse e-mail de votre compte : la demande est traitée et confirmée par écrit. Les journaux techniques ne conservent aucun jeton ni contenu de message au-delà de la durée nécessaire au diagnostic.' },
     ],
   },
   conditions: {
@@ -40,7 +42,7 @@ export default function Legal({ kind }: { kind: 'confidentialite' | 'conditions'
         <p className="mt-2 text-sm text-slate-500">Dernière mise à jour : {new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())}</p>
         <Card className="mt-8 space-y-7 p-7">
           {doc.sections.map((s) => (
-            <section key={s.h}><h2 className="text-base font-semibold text-white">{s.h}</h2><p className="mt-2 text-sm leading-relaxed text-slate-400">{s.p}</p></section>
+            <section key={s.h} id={s.id}><h2 className="text-base font-semibold text-white">{s.h}</h2><p className="mt-2 text-sm leading-relaxed text-slate-400">{s.p}</p></section>
           ))}
         </Card>
       </main>

@@ -140,7 +140,7 @@ export function toActivationRequests(rows: BusinessIntegrationConnection[]): Act
  * (Livraison 3), pas avant.
  */
 export const CONNECTORS_ACCEPTING_REQUESTS: ReadonlySet<string> = new Set([
-  'facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce',
+  'facebook', 'instagram', 'whatsapp', 'messenger', 'youtube', 'tiktok', 'shopify', 'woocommerce',
   // PrestaShop a un moteur réel : la demande d'activation reste possible pour
   // les comptes qui n'ont pas encore d'abonnement, et `bg_connect_integration`
   // accepte la clé. L'ajouter ici ne crée donc aucun bouton mort.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, ArrowRight, CheckCircle2, Clapperboard, LockKeyhole, Mail, Sparkles, UserPlus, UserRound,
 } from 'lucide-react';
@@ -8,6 +8,7 @@ import {
   AuthField, AuthNotice, AuthSteps, AuthSubmit, PasswordMeter, type AuthSubmitState,
 } from '../components/auth/AuthForm';
 import { useAuth } from '../context/AuthContext';
+import { setUnivers, applyUnivers, type Univers } from '../styles/preferences';
 import { useToast } from '../context/ToastContext';
 import { signUp } from '../lib/api';
 import { asAppError } from '../lib/errors';
@@ -37,6 +38,26 @@ export default function Signup() {
   const [state, setState] = useState<AuthSubmitState>('idle');
   const [error, setError] = useState('');
   const [needConfirmation, setNeedConfirmation] = useState(false);
+  const [params] = useSearchParams();
+
+  /**
+   * L'espace choisi sur la landing (`?espace=business|studio`) est mémorisé
+   * AVANT la redirection : l'utilisateur arrive directement dans le bon univers,
+   * au lieu de devoir deviner lequel ouvrir. Un plan `*_business` implique
+   * Business Grow, un plan `*_studio` implique Studio.
+   */
+  const espaceDemande: Univers = useMemo(() => {
+    const ecrit = params.get('espace');
+    if (ecrit === 'business' || ecrit === 'studio') return ecrit;
+    const plan = params.get('plan') ?? '';
+    if (plan.includes('business')) return 'business';
+    return 'studio';
+  }, [params]);
+
+  useEffect(() => {
+    setUnivers(espaceDemande);
+    applyUnivers(espaceDemande);
+  }, [espaceDemande]);
 
   useEffect(() => {
     if (user && !loading) navigate(isAdmin ? '/admin' : '/app', { replace: true });
@@ -88,7 +109,8 @@ export default function Signup() {
       if (data.session) {
         setState('success');
         toast.success('Votre espace VYORA est prêt !');
-        window.setTimeout(() => navigate('/app', { replace: true }), 380);
+        const destination = espaceDemande === 'business' ? '/app/business' : '/app/studio';
+        window.setTimeout(() => navigate(destination, { replace: true }), 380);
       } else {
         setState('idle');
         setSubmitting(false);

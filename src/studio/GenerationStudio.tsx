@@ -644,7 +644,7 @@ export default function GenerationStudio() {
       };
     }
     createLocalEditorDraft(project);
-    navigate(attach && jobId ? `/app/studio/montage?draft=1&job=${jobId}` : '/app/studio/montage?draft=1');
+    navigate(attach && jobId ? `/app/montage?draft=1&job=${jobId}` : '/app/montage?draft=1');
   };
 
   const onExample = (sector: SectorId, example: string) => {
