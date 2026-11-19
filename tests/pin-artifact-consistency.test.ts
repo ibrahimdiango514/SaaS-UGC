@@ -93,3 +93,54 @@ describe('artefact business-grow — le commit épinglé contient le bundle épi
     ).toBeGreaterThan(0);
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Le déploiement correspond-il au chargeur du dépôt ?                        */
+/* -------------------------------------------------------------------------- */
+
+describe('déploiement — le chargeur livré est celui qui tourne', () => {
+  /**
+   * ## Le risque visé
+   *
+   * Corriger le code, éprouver la base, committer — et croire que la production
+   * exécute le correctif. Tant que la fonction Edge n'est pas redéployée, le
+   * bundle à l'écran reste l'ancien : ici l'assistant ignore silencieusement
+   * `propose_prospect_save`, donc ne propose jamais d'enregistrer un prospect.
+   *
+   * Ce test ne peut pas interroger le projet Supabase (pas de jeton dans cet
+   * environnement). Il vérifie donc la partie déterministe et laisse le reste à
+   * la procédure documentée : le bundle livré doit contenir l'outil, et le
+   * chargeur doit le référencer. Si l'un des deux manque, aucun déploiement ne
+   * peut fonctionner, et le test le dit avant la mise en ligne.
+   */
+  const bundle = readFileSync('supabase/functions/business-grow.edge.js', 'utf8');
+
+  it('le bundle livré contient l’outil d’enregistrement de prospect', () => {
+    expect(bundle).toContain('propose_prospect_save');
+    /* Niveau de risque : une écriture doit rester soumise à approbation. */
+    expect(bundle).toContain('propose_prospect_save:"write_requires_approval"');
+  });
+
+  it('le bundle livré contient la normalisation des arguments', () => {
+    /*
+     * Sans normalisation, le modèle peut envoyer des clés françaises ou une
+     * étape accentuée : la base accepte, mais l'interface d'approbation
+     * afficherait une fiche vide.
+     */
+    expect(bundle).toContain('prochaineAction');
+    expect(bundle).toContain('entreprise');
+  });
+
+  it('le chargeur livré épingle bien ce bundle-ci', () => {
+    /* Le chargeur et le bundle doivent décrire le même contenu, sinon le
+     * démarrage échoue au contrôle de taille. */
+    const pins = chargeurFichier().match(/[0-9a-f]{64}|[0-9a-f]{40}/g) ?? [];
+    expect(pins.some((p) => p.length === 40), 'aucun commit épinglé').toBe(true);
+    expect(pins.some((p) => p.length === 64), 'aucune empreinte SHA-256').toBe(true);
+  });
+});
+
+/** Relit le chargeur au moment du test (le bloc précédent a sa propre copie). */
+function chargeurFichier(): string {
+  return readFileSync(CHARGEUR, 'utf8');
+}
