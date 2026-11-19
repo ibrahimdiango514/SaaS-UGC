@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Building2, Sparkles } from 'lucide-react';
 import { BusinessAssistant } from '../ai/BusinessAssistant';
 import { useAuth } from '../context/AuthContext';
-import '../../ai/assistant.css';
+import '../ai/assistant.css';
 
 /**
  * Assistant Business Grow — page dédiée, plein écran.
