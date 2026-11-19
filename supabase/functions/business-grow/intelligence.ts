@@ -19,6 +19,15 @@ export type BusinessToolName =
   | 'handoff_ugc_brief'
   | 'request_connector_read'
   /*
+   * Enregistrement réel d'un prospect dans la mémoire métier consentie.
+   *
+   * Ajouté parce que l'assistant annonçait « prospect enregistré » sans qu'aucun
+   * outil ne puisse le faire : la liste fermée côté base ne contenait rien qui
+   * écrive un `growth_prospect`. Sans cette entrée, le modèle n'a aucun moyen
+   * d'honorer sa promesse.
+   */
+  | 'propose_prospect_save'
+  /*
    * Outil MCP externe choisi par l'utilisateur.
    *
    * `mcp_tool` est une enveloppe : ses arguments portent le serveur visé et le
@@ -124,6 +133,12 @@ const TOOL_RISK_MAP: Record<BusinessToolName, ToolRiskLevel> = {
   propose_campaign_brief: 'write_requires_approval',
   handoff_ugc_brief: 'write_requires_approval',
   request_connector_read: 'read_only',
+  /*
+   * Écriture de données personnelles de tiers (nom, e-mail, téléphone) : elle
+   * exige l'approbation humaine, comme les autres écritures. Ne jamais la
+   * déclarer `read_only` — l'interface afficherait une confirmation sans poids.
+   */
+  propose_prospect_save: 'write_requires_approval',
   /*
    * Un outil MCP sort de VYORA : son effet n'est pas vérifiable par la base.
    * `external_publish_requires_approval` est le niveau le plus élevé, et c'est
@@ -316,7 +331,7 @@ export function buildBusinessSystemInstruction(input: {
   }
 
   sections.push(
-    'Si et seulement si une action structurée concrète doit être soumise à l’approbation de l’utilisateur (mémoriser un fait clé, créer un plan d’action, préparer un brief de campagne, ou préparer un brief vidéo vers Studio UGC), tu peux ajouter à la toute fin de ta réponse un bloc caché compact (< 400 caractères) exact, toujours fermé par --> : <!--REELORA_TOOL_PROPOSALS:[{"toolName":"propose_memory_save|propose_action_plan|propose_campaign_brief|handoff_ugc_brief","summary":"...","arguments":{...}}]-->. Pour handoff_ugc_brief, utilise les clés product, angle, hook, targetAudience. N’exécute jamais d’action sans validation humaine.',
+    'Si et seulement si une action structurée concrète doit être soumise à l’approbation de l’utilisateur (enregistrer un prospect, mémoriser un fait clé, créer un plan d’action, préparer un brief de campagne, ou préparer un brief vidéo vers Studio UGC), tu peux ajouter à la toute fin de ta réponse un bloc caché compact (< 400 caractères) exact, toujours fermé par --> : <!--REELORA_TOOL_PROPOSALS:[{"toolName":"propose_prospect_save|propose_memory_save|propose_action_plan|propose_campaign_brief|handoff_ugc_brief","summary":"...","arguments":{...}}]-->. Pour propose_prospect_save, utilise les clés name, company, email, phone, stage (prospect|contacte|qualifie|proposition|gagne|perdu), value (nombre), currency, nextAction, nextActionAt (AAAA-MM-JJ), notes. Pour handoff_ugc_brief, utilise les clés product, angle, hook, targetAudience. N’exécute jamais d’action sans validation humaine.',
   );
 
   return sections.join('\n\n');
@@ -369,6 +384,75 @@ export function normalizeToolProposalArguments(
       ...(cta ? { cta } : {}),
       ...(preferredRatio ? { preferredRatio } : {}),
       consumesStudioCredits: false,
+    };
+  }
+
+  if (toolName === 'propose_prospect_save') {
+    /*
+     * Normalisation d'un prospect. Sans elle, le modèle peut envoyer
+     * `{nom, entreprise}` ou `{stage: "négociation avancée"}` : la base accepte
+     * ces alias et retombe sur `prospect` pour une étape inconnue, mais
+     * l'interface d'approbation afficherait des champs vides. On aligne donc ici
+     * sur le schéma exact lu par `GrowthProspect`.
+     */
+    const name = cleanOptString(rawArgs.name, 160)
+      ?? cleanOptString(rawArgs.nom, 160)
+      ?? cleanOptString(rawArgs.title, 160)
+      ?? cleanOptString(fallbackSummary, 160)
+      ?? '';
+    const company = cleanOptString(rawArgs.company, 160)
+      ?? cleanOptString(rawArgs.entreprise, 160)
+      ?? cleanOptString(rawArgs.organization, 160)
+      ?? '';
+    const email = cleanOptString(rawArgs.email, 200) ?? cleanOptString(rawArgs.mail, 200) ?? '';
+    const phone = cleanOptString(rawArgs.phone, 60)
+      ?? cleanOptString(rawArgs.telephone, 60)
+      ?? cleanOptString(rawArgs.tel, 60)
+      ?? '';
+    const stageRaw = (cleanOptString(rawArgs.stage, 40) ?? cleanOptString(rawArgs.etape, 40) ?? '').toLowerCase();
+    /* Les accents et les libellés anglais ne doivent pas faire perdre l'étape. */
+    const stageKey = stageRaw.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const stage = ['prospect', 'contacte', 'qualifie', 'proposition', 'gagne', 'perdu'].includes(stageKey)
+      ? stageKey
+      : stageKey === 'contact' ? 'contacte'
+        : stageKey === 'qualified' ? 'qualifie'
+          : 'prospect';
+    const valueRaw = rawArgs.value ?? rawArgs.montant;
+    const value = typeof valueRaw === 'number' && Number.isFinite(valueRaw) && valueRaw >= 0
+      ? valueRaw
+      : typeof valueRaw === 'string' && /^\d+([.,]\d+)?$/.test(valueRaw.trim())
+        ? Number(valueRaw.trim().replace(',', '.'))
+        : undefined;
+    const currency = (cleanOptString(rawArgs.currency, 8) ?? cleanOptString(rawArgs.devise, 8) ?? '').toUpperCase();
+    const nextAction = cleanOptString(rawArgs.nextAction, 300)
+      ?? cleanOptString(rawArgs.prochaineAction, 300)
+      ?? '';
+    const nextActionAt = cleanOptString(rawArgs.nextActionAt, 20)
+      ?? cleanOptString(rawArgs.echeance, 20)
+      ?? '';
+    const notes = cleanOptString(rawArgs.notes, 2000) ?? cleanOptString(rawArgs.note, 2000) ?? '';
+
+    /*
+     * `...rawArgs` est retiré en fin de construction pour `value` : il pouvait
+     * réintroduire la valeur BRUTE après normalisation (« environ 5000 », -500),
+     * et la proposition partait alors avec un montant que la base refuse ou
+     * annule silencieusement. On reconstruit l'objet à partir des clés connues.
+     */
+    const { value: _v, montant: _m, nom: _n, entreprise: _e, telephone: _t,
+      etape: _et, devise: _d, prochaineAction: _pa, echeance: _ec, note: _no,
+      ...reste } = rawArgs;
+    return {
+      ...reste,
+      name,
+      company,
+      email,
+      phone,
+      stage,
+      ...(value !== undefined ? { value } : {}),
+      ...(currency ? { currency } : {}),
+      nextAction,
+      ...(nextActionAt ? { nextActionAt } : {}),
+      notes,
     };
   }
 

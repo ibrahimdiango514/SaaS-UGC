@@ -43,6 +43,7 @@ const McpConnections = lazy(() => import('./integrations/McpConnectionsPage').th
 const MesServeursMcp = lazy(() => import('./integrations/MesServeursMcpPage').then(({ MesServeursMcpPage }) => ({ default: MesServeursMcpPage })));
 const ConnexionsMcp = lazy(() => import('./integrations/ConnexionsMcpPage').then(({ ConnexionsMcpPage }) => ({ default: ConnexionsMcpPage })));
 const BusinessGrow = lazy(() => import('./business/BusinessGrow'));
+const BusinessAssistantPage = lazy(() => import('./business/BusinessAssistantPage'));
 const BusinessModules = lazy(() => import('./business/modules/BusinessModules'));
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
 const BusinessGrowSubscription = lazy(() => import('./pages/BusinessGrowSubscription'));
@@ -80,6 +81,11 @@ export default function App() {
                       <Route path="projets/:id" element={<ProjectDetail />} />
                       <Route path="studio" element={<GenerationStudio />} />
                       <Route path="business" element={<BusinessGrow />} />
+                      {/* Assistant Business Grow : page DÉDIÉE, plein écran.
+                          L'onglet équivalent existe toujours dans Business Grow
+                          (même composant, même état) ; cette route existe parce
+                          qu'une conversation a besoin de toute la surface. */}
+                      <Route path="business/assistant" element={<BusinessAssistantPage />} />
                       <Route path="business/modules" element={<BusinessModules />} />
                       <Route path="business/modules/:moduleKey" element={<BusinessModuleWorkspace />} />
                       <Route path="business/abonnement" element={<BusinessGrowSubscription />} />

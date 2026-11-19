@@ -13,6 +13,7 @@ import {
   type AiMessage,
   type AiMode,
 } from './api';
+import { cn } from '../components/ui';
 import './assistant.css';
 
 const CLE_REPLI = 'vyora.ai.sidebar.collapsed';
@@ -100,6 +101,7 @@ export function BusinessAssistant({
   providers = null,
   draftFromReport = null,
   onDraftConsumed,
+  pleinEcran = false,
 }: {
   workspaceId: string | null;
   /** État géré par Business Grow. Absent, le composant est autonome. */
@@ -117,6 +119,13 @@ export function BusinessAssistant({
   /** Texte préparé par un rapport d'agent. */
   draftFromReport?: string | null;
   onDraftConsumed?: () => void;
+  /**
+   * L'assistant EST la page : pas de cadre, pas de hauteur maximale.
+   *
+   * Par défaut il reste un encart, ce qui préserve la disposition existante
+   * (page Business Grow) sans la modifier. La page dédiée, elle, passe `true`.
+   */
+  pleinEcran?: boolean;
 }) {
   const autonome = useAssistant(workspaceId);
   const [mode, setMode] = useState<AiMode>('standard');
@@ -234,8 +243,25 @@ export function BusinessAssistant({
 
   return (
     <div
-      className="relative flex h-[min(78vh,860px)] min-h-[560px] overflow-hidden rounded-[1.4rem] border border-white/[0.09] bg-ink"
+      className={cn(
+        'relative flex overflow-hidden bg-ink',
+        /*
+         * Deux usages, deux mises en page.
+         *
+         * Encart (défaut) : hauteur bornée, coins arrondis — c'est ainsi que
+         * l'assistant apparaissait au milieu d'une page métier.
+         *
+         * Plein écran (`pleinEcran`) : aucune bordure, aucune hauteur maximale.
+         * L'assistant devient la page. Une hauteur figée ici serait un défaut :
+         * sur un écran de portable, elle laisserait une bande morte en bas ; sur
+         * un téléphone, elle pousserait la zone de saisie sous la ligne de flottaison.
+         */
+        pleinEcran
+          ? 'h-full min-h-0 w-full'
+          : 'h-[min(78vh,860px)] min-h-[560px] rounded-[1.4rem] border border-white/[0.09]',
+      )}
       data-testid="business-assistant"
+      data-layout={pleinEcran ? 'full' : 'card'}
     >
       {/*
         Un seul panneau monté à la fois. jsdom ne résout pas les media queries :

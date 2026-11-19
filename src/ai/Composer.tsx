@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Loader2, Paperclip, ScanText, X, FileText, ImageIcon } from 'lucide-react';
+import { useDictee } from './useDictee';
+import { ArrowUp, Loader2, Mic, Paperclip, ScanText, Square, X, FileText, ImageIcon } from 'lucide-react';
 import type { AiAttachment, AiMode } from './api';
 import { MAX_ATTACHMENTS, formatBytes } from './attachments';
 import { prepareAttachment } from '../files/intoAssistant';
@@ -71,6 +72,17 @@ export function Composer({
   const [erreur, setErreur] = useState<string | null>(null);
   /** Téléversements en cours, avec leur progression réelle. */
   const [envois, setEnvois] = useState<Array<{ key: string; name: string; percent: number }>>([]);
+
+  /*
+   * Dictée vocale.
+   *
+   * Le fragment reconnu est INSÉRÉ dans le texte existant, à la position du
+   * curseur, au lieu de remplacer le message. Un utilisateur qui a déjà écrit
+   * trois lignes puis dicte une précision ne doit pas les perdre.
+   */
+  const dictee = useDictee((fragment) => {
+    setTexte((actuel) => (actuel.trim() ? `${actuel.trimEnd()} ${fragment}` : fragment));
+  });
   const zone = useRef<HTMLTextAreaElement>(null);
   const fichiers = useRef<HTMLInputElement>(null);
 
@@ -281,6 +293,32 @@ export function Composer({
             <span className="hidden sm:inline">Analyse</span>
           </button>
 
+          {/*
+            Micro : n'apparaît QUE si le navigateur sait réellement transcrire.
+            Afficher un bouton mort « pour l'interface » serait exactement le
+            genre de fausse capacité qu'on veut éliminer — l'utilisateur
+            appuierait, rien ne se passerait, et il conclurait que le produit
+            est cassé. La raison de l'absence est exposée en infobulle.
+          */}
+          {dictee.disponible && (
+            <button
+              type="button"
+              onClick={() => (dictee.ecoute ? dictee.arreter() : dictee.demarrer())}
+              disabled={sending}
+              className={cn(
+                'btn btn-sm h-9 gap-1.5 px-2.5 text-xs',
+                dictee.ecoute ? 'btn-outline border-rose-400/60 text-rose-200' : 'btn-ghost',
+              )}
+              aria-pressed={dictee.ecoute}
+              aria-label={dictee.ecoute ? 'Arrêter la dictée' : 'Dicter le message'}
+              title={dictee.ecoute ? 'Arrêter l’écoute et conserver le texte transcrit' : 'Dicter votre message à voix haute'}
+              data-testid="composer-micro"
+            >
+              {dictee.ecoute ? <Square size={15} /> : <Mic size={15} />}
+              {dictee.ecoute && <span className="hidden sm:inline">Écoute…</span>}
+            </button>
+          )}
+
           <span className="flex-1" />
 
           {sendLabel === 'Envoyer' ? (
@@ -306,6 +344,26 @@ export function Composer({
           )}
         </div>
       </div>
+
+      {/*
+        État de la dictée : texte en cours de reconnaissance, erreur ou refus de
+        permission. Sans cette zone, un refus de micro serait totalement muet —
+        le bouton reviendrait simplement à son état initial.
+      */}
+      {dictee.ecoute && dictee.provisoire && (
+        <p className="mt-1.5 truncate rounded-lg bg-white/[0.03] px-2 py-1 text-[0.7rem] italic text-slate-400" role="status">
+          {dictee.provisoire}
+          <span className="ml-1 animate-pulse text-rose-300">●</span>
+        </p>
+      )}
+      {dictee.erreur && (
+        <div role="alert" className="mt-1.5 flex items-start gap-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2 py-1.5 text-[0.7rem] text-amber-100">
+          <span className="min-w-0 flex-1">{dictee.erreur}</span>
+          <button type="button" onClick={dictee.effacerErreur} className="shrink-0 text-amber-200/80 underline">
+            Masquer
+          </button>
+        </div>
+      )}
 
       <p className="mt-1.5 text-center text-[0.68rem] text-slate-600">
         VYORA peut se tromper. Vérifiez les informations importantes.
