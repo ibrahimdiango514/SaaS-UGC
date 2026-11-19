@@ -1,0 +1,42 @@
+{
+  "name": "VYORA — Business Grow et Studio",
+  "short_name": "VYORA",
+  "description": "Relancer ses clients, suivre ses impayés et produire ses contenus vidéo.",
+  "lang": "fr",
+  "dir": "ltr",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070b12",
+  "theme_color": "#070b12",
+  "categories": ["business", "productivity", "video"],
+  "icons": [
+    {
+      "src": "/vyora-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Aujourd’hui — Business Grow",
+      "short_name": "Aujourd’hui",
+      "url": "/app/business",
+      "description": "Relances dues, impayés et tâches du jour"
+    },
+    {
+      "name": "VYORA Studio",
+      "short_name": "Studio",
+      "url": "/app/studio",
+      "description": "Créer une vidéo"
+    }
+  ]
+}

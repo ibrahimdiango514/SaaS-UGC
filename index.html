@@ -3,16 +3,78 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#080a12" />
-    <meta name="description" content="VYORA — Create. Evolve. Grow. Une plateforme, deux dimensions : la création de contenus et le développement de votre activité grâce à l’IA." />
+    <meta name="theme-color" content="#070b12" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f6f4f0" media="(prefers-color-scheme: light)" />
+
+    <!-- SEO de base. Le titre dit ce que le produit fait, pas son slogan :
+         c'est ce qui apparaît dans un résultat de recherche et décide du clic. -->
+    <title>VYORA — Relancer ses clients, suivre ses impayés, produire ses vidéos</title>
+    <meta
+      name="description"
+      content="VYORA relance vos clients à votre place, suit vos impayés et produit vos contenus vidéo. Un outil, deux espaces : Business Grow pour gérer, VYORA Studio pour créer. Paiement Orange Money, Moov Money, Mobi Cash."
+    />
+    <link rel="canonical" href="https://vyora.app/" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="author" content="VYORA" />
+    <meta name="language" content="French" />
+    <meta name="geo.region" content="ML" />
+
+    <!-- Balises sociales. Les images pointent vers des fichiers locaux du
+         dépôt : aucun service tiers n'est requis, et rien ne casse si un
+         domaine n'est pas encore acheté (chemins relatifs absolus). -->
+    <meta property="og:type" content="website" />
     <meta property="og:site_name" content="VYORA" />
-    <meta property="og:title" content="VYORA — Create. Evolve. Grow." />
-    <meta property="og:description" content="One platform. Two dimensions. Infinite possibilities." />
-    <title>VYORA — Create. Evolve. Grow.</title>
+    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:title" content="VYORA — Récupérez l’argent qu’on vous doit" />
+    <meta
+      property="og:description"
+      content="Relances automatiques, suivi des impayés et production vidéo. Deux espaces, un seul compte. Pensé pour l’Afrique francophone."
+    />
+    <meta property="og:image" content="/brand/og-vyora.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="VYORA — Business Grow et VYORA Studio" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="VYORA — Récupérez l’argent qu’on vous doit" />
+    <meta
+      name="twitter:description"
+      content="Relances, impayés, vidéos publicitaires. Un outil, deux espaces."
+    />
+    <meta name="twitter:image" content="/brand/og-vyora.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/vyora-mark.svg" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Polices : `display=swap` évite le texte invisible pendant le chargement,
+         ce qui compte sur une connexion lente. Deux familles seulement. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="icon" type="image/svg+xml" href="/vyora-mark.svg" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Données structurées : aident les moteurs à comprendre l'offre. Aucune
+         note agrégée n'est déclarée tant qu'il n'existe pas d'avis réels. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "VYORA",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "fr",
+        "description": "Relances clients, suivi des impayés et production de contenus vidéo pour les commerçants, PME et créateurs d’Afrique francophone.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "XOF",
+          "description": "Compte gratuit sans carte bancaire"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

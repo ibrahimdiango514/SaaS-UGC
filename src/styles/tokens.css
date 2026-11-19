@@ -1,0 +1,275 @@
+/**
+ * VYORA — système de design central.
+ *
+ * ## Principe
+ *
+ * Une seule famille visuelle, deux tempéraments. Business Grow est chaleureux et
+ * solide (ambre, terre cuite, vert profond) parce qu'il parle d'argent, de
+ * clients et de confiance. Studio est cinématographique (cyan, violet, nuit)
+ * parce qu'il parle d'image et de création.
+ *
+ * Les deux partagent : la même grille, la même échelle typographique, les mêmes
+ * rayons, les mêmes durées d'animation. Seuls les accents changent, et ils sont
+ * portés par `[data-univers]`.
+ *
+ * ## Thèmes
+ *
+ * Tout passe par des variables. Aucune couleur n'est écrite en dur dans un
+ * composant. Le passage clair/sombre inverse les variables, pas les classes —
+ * c'est ce qui permet aux 200 fichiers existants de suivre le thème sans être
+ * réécrits.
+ *
+ * ## Remappage de l'échelle `slate` et de `white`
+ *
+ * Les classes Tailwind `text-slate-100`, `bg-white/[0.04]` sont utilisées
+ * partout. En thème clair, `text-slate-100` doit devenir du texte foncé et
+ * `bg-white/[0.04]` une teinte sombre translucide. On y parvient en faisant
+ * pointer `slate` et `white` vers des variables : en clair, l'échelle est
+ * inversée (100 ↔ 900) et `white` devient l'encre. Aucun composant à toucher.
+ */
+
+/* ---------------------------------------------------------------------------
+ * 1. Thème sombre (par défaut) — la nuit de VYORA
+ * ------------------------------------------------------------------------- */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Surfaces — triplets RGB pour que Tailwind applique les opacités
+     (`bg-panel/80`) sans casser le thème. */
+  --vy-bg: 7 11 18;
+  --vy-bg-deep: 4 7 13;
+  --vy-surface: 14 20 29;
+  --vy-surface-2: 20 28 39;
+  --vy-surface-3: 27 37 50;
+  --vy-bg-css: #070b12;
+
+  /* Lignes */
+  --vy-line: 148 163 184;
+  --vy-line-a: 0.13;
+  --vy-line-strong: 148 163 184;
+
+  /* Texte — via le remappage slate */
+  --vy-white: 255 255 255; /* « white » = encre */
+  --vy-slate-50: 248 250 252;
+  --vy-slate-100: 241 245 249;
+  --vy-slate-200: 226 232 240;
+  --vy-slate-300: 203 213 225;
+  --vy-slate-400: 148 163 184;
+  --vy-slate-500: 100 116 139;
+  --vy-slate-600: 71 85 105;
+  --vy-slate-700: 51 65 85;
+  --vy-slate-800: 30 41 59;
+  --vy-slate-900: 15 23 42;
+  --vy-slate-950: 2 6 23;
+
+  /* Ombres */
+  --vy-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --vy-shadow-md: 0 12px 40px -18px rgba(0, 0, 0, 0.8);
+  --vy-shadow-lg: 0 28px 70px -30px rgba(0, 0, 0, 0.9);
+
+  /* Mouvement */
+  --vy-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --vy-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --vy-dur-fast: 120ms;
+  --vy-dur: 200ms;
+  --vy-dur-slow: 420ms;
+
+  /* Rayons */
+  --vy-r-sm: 10px;
+  --vy-r: 14px;
+  --vy-r-lg: 20px;
+  --vy-r-xl: 28px;
+
+  /* Accent par défaut : neutre avant qu'un univers soit choisi */
+  --vy-accent: #22d3ee;
+  --vy-accent-soft: rgba(34, 211, 238, 0.14);
+  --vy-accent-ink: #08131a;
+  --vy-glow: rgba(34, 211, 238, 0.4);
+
+  /* Échelle d'accent en triplets : les opacités Tailwind (ring-brand-400/70)
+     fonctionnent, et chaque univers remplace l'échelle entière. */
+  --vy-brand-50: 236 254 255;
+  --vy-brand-100: 207 250 254;
+  --vy-brand-200: 165 243 252;
+  --vy-brand-300: 103 232 249;
+  --vy-brand-400: 34 211 238;
+  --vy-brand-500: 6 182 212;
+  --vy-brand-600: 8 145 178;
+  --vy-brand-700: 14 116 144;
+  --vy-brand-800: 21 94 117;
+  --vy-brand-900: 22 78 99;
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Thème clair — papier, encre, mêmes accents
+ * ------------------------------------------------------------------------- */
+[data-theme='light'] {
+  color-scheme: light;
+
+  --vy-bg: 246 244 240;
+  --vy-bg-deep: 239 234 226;
+  --vy-surface: 255 255 255;
+  --vy-surface-2: 251 249 245;
+  --vy-surface-3: 241 237 229;
+  --vy-bg-css: #f6f4f0;
+
+  --vy-line: 28 25 20;
+  --vy-line-a: 0.12;
+  --vy-line-strong: 28 25 20;
+
+  /* En clair, « white » porte l'encre : tout le texte devient lisible. */
+  --vy-white: 18 16 13;
+  --vy-slate-50: 12 10 9;
+  --vy-slate-100: 24 21 17;
+  --vy-slate-200: 41 37 32;
+  --vy-slate-300: 68 63 56;
+  --vy-slate-400: 108 101 92;
+  --vy-slate-500: 138 130 120;
+  --vy-slate-600: 165 157 147;
+  --vy-slate-700: 197 190 181;
+  --vy-slate-800: 222 217 210;
+  --vy-slate-900: 238 234 228;
+  --vy-slate-950: 250 248 245;
+
+  --vy-shadow-sm: 0 1px 2px rgba(28, 25, 20, 0.08);
+  --vy-shadow-md: 0 10px 30px -14px rgba(28, 25, 20, 0.22);
+  --vy-shadow-lg: 0 24px 60px -26px rgba(28, 25, 20, 0.28);
+
+  --vy-accent-ink: #ffffff;
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Les deux univers
+ *
+ * Business Grow : ambre et terre cuite sur vert profond. Chaleur, croissance,
+ * confiance. Un commerçant doit s'y sentir chez lui, pas dans un cockpit.
+ * ------------------------------------------------------------------------- */
+[data-univers='business'] {
+  --vy-accent: #f0a03c;
+  --vy-accent-2: #d97742;
+  --vy-accent-soft: rgba(240, 160, 60, 0.14);
+  --vy-accent-ink: #2a1704;
+  --vy-glow: rgba(240, 160, 60, 0.42);
+  --vy-signal: #4ea87c;
+  --vy-signal-soft: rgba(78, 168, 124, 0.14);
+  --vy-brand-50: 255 251 235;
+  --vy-brand-100: 254 243 199;
+  --vy-brand-200: 253 230 138;
+  --vy-brand-300: 252 211 77;
+  --vy-brand-400: 251 191 36;
+  --vy-brand-500: 245 158 11;
+  --vy-brand-600: 217 119 6;
+  --vy-brand-700: 180 83 9;
+  --vy-brand-800: 146 64 14;
+  --vy-brand-900: 120 53 15;
+}
+
+/* Studio : cyan cinématographique, violet de nuit, presque du néon contenu. */
+[data-univers='studio'] {
+  --vy-accent: #22d3ee;
+  --vy-accent-2: #a78bfa;
+  --vy-accent-soft: rgba(34, 211, 238, 0.13);
+  --vy-accent-ink: #04141a;
+  --vy-glow: rgba(34, 211, 238, 0.45);
+  --vy-signal: #34d399;
+  --vy-signal-soft: rgba(52, 211, 153, 0.13);
+  --vy-brand-50: 236 254 255;
+  --vy-brand-100: 207 250 254;
+  --vy-brand-200: 165 243 252;
+  --vy-brand-300: 103 232 249;
+  --vy-brand-400: 34 211 238;
+  --vy-brand-500: 6 182 212;
+  --vy-brand-600: 8 145 178;
+  --vy-brand-700: 14 116 144;
+  --vy-brand-800: 21 94 117;
+  --vy-brand-900: 22 78 99;
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. Échelle typographique fluide
+ *
+ * Une seule échelle pour tout le SaaS. `clamp` évite les sauts brutaux entre
+ * un téléphone de 320 px et un écran de 1440 px, sans media query par composant.
+ * Les bornes basses sont calibrées pour que « Récupérez 1 250 000 FCFA » ne
+ * déborde jamais sur 320 px.
+ * ------------------------------------------------------------------------- */
+:root {
+  --vy-text-2xs: clamp(0.688rem, 0.66rem + 0.14vw, 0.75rem);
+  --vy-text-xs: clamp(0.75rem, 0.72rem + 0.15vw, 0.813rem);
+  --vy-text-sm: clamp(0.813rem, 0.78rem + 0.17vw, 0.875rem);
+  --vy-text-base: clamp(0.875rem, 0.84rem + 0.18vw, 0.938rem);
+  --vy-text-lg: clamp(1rem, 0.94rem + 0.3vw, 1.125rem);
+  --vy-text-xl: clamp(1.125rem, 1.02rem + 0.52vw, 1.375rem);
+  --vy-text-2xl: clamp(1.375rem, 1.16rem + 1.06vw, 1.875rem);
+  --vy-text-3xl: clamp(1.625rem, 1.24rem + 1.9vw, 2.5rem);
+  --vy-text-4xl: clamp(1.938rem, 1.3rem + 3.2vw, 3.5rem);
+  --vy-text-5xl: clamp(2.25rem, 1.32rem + 4.6vw, 4.5rem);
+
+  /* Interlignes */
+  --vy-leading-tight: 1.1;
+  --vy-leading-snug: 1.28;
+  --vy-leading: 1.6;
+
+  /* Espacements d'échelle 4 px, exprimés en variables pour les composants
+     qui ne peuvent pas utiliser Tailwind (SVG, canvas, styles inline). */
+  --vy-s1: 4px;
+  --vy-s2: 8px;
+  --vy-s3: 12px;
+  --vy-s4: 16px;
+  --vy-s5: 24px;
+  --vy-s6: 32px;
+  --vy-s7: 48px;
+  --vy-s8: 64px;
+  --vy-s9: 96px;
+
+  /* Zone sûre iOS : le pouce ne doit jamais recouvrir un bouton. */
+  --vy-safe-b: env(safe-area-inset-bottom, 0px);
+  --vy-safe-t: env(safe-area-inset-top, 0px);
+  --vy-safe-l: env(safe-area-inset-left, 0px);
+  --vy-safe-r: env(safe-area-inset-right, 0px);
+}
+
+/* ---------------------------------------------------------------------------
+ * 5. Accessibilité : mouvement réduit
+ *
+ * On ne supprime pas les transitions (une interface sans transition paraît
+ * cassée) : on les ramène à une durée imperceptible et on désactive les
+ * animations en boucle.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --vy-dur-fast: 1ms;
+    --vy-dur: 1ms;
+    --vy-dur-slow: 1ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Confort de lecture : jamais de débordement horizontal, jamais de texte coupé. */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overflow-x: hidden;
+  }
+  body {
+    overflow-x: hidden;
+    overflow-wrap: break-word;
+  }
+  /* Les montants et les identifiants techniques ne cassent pas au milieu. */
+  .vy-nowrap {
+    white-space: nowrap;
+  }
+  /* Tout élément flex doit pouvoir rétrécir, sinon il pousse la page. */
+  .vy-min0 {
+    min-width: 0;
+  }
+}
