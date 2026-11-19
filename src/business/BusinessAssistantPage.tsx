@@ -34,6 +34,10 @@ import '../ai/assistant.css';
  * non `vh`) est indispensable sur Android : la barre d'adresse du navigateur se
  * replie au défilement, et `vh` compte une hauteur qui n'existe pas toujours —
  * d'où une zone de saisie coupée en bas de l'écran.
+ *
+ * La barre fait `h-16` (4rem) à TOUTES les tailles dans `Layout` : soustraire
+ * 4,5rem en `lg` comme le faisait la première version laissait une bande morte
+ * de 0,5rem en bas de la zone de saisie.
  */
 export default function BusinessAssistantPage() {
   const { workspace, workspaceId } = useAuth();
@@ -49,7 +53,7 @@ export default function BusinessAssistantPage() {
   }, [navigate]);
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] min-w-0 flex-col overflow-hidden lg:h-[calc(100dvh-4.5rem)]">
+    <div className="flex h-[calc(100dvh-4rem)] min-w-0 flex-col overflow-hidden">
       {/*
         Barre de contexte compacte, et rien de plus.
 
