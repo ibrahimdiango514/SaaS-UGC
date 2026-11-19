@@ -102,7 +102,7 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
     defaultOpen: true,
     items: [
       {
-        to: '/app/studio/montage',
+        to: '/app/montage',
         label: 'Montage vidéo',
         description: 'Assemblage, sous-titres et export',
         icon: Scissors,

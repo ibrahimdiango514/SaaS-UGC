@@ -113,6 +113,14 @@ export default function App() {
                         de l'ancienne sidebar et paraissait inchange. Le catalogue
                         d'integrations suit la meme regle. */}
                     <Route path="/app/ai" element={<Assistant />} />
+                    {/* MONTAGE VIDÉO : espace de travail dédié, hors coquille.
+
+                        Dans <Layout>, la barre supérieure et la navigation retiraient
+                        de la hauteur à une interface déjà dense : timeline et panneaux
+                        se comprimaient, et sur un écran court le monteur devenait
+                        inutilisable. La route historique /app/studio/montage reste en
+                        place avec le rendu d'origine. */}
+                    <Route path="/app/montage" element={<VideoEditor pleinEcran />} />
                     <Route path="/app/connect" element={<Integrations />} />
                     <Route path="/app/connexions-ia" element={<McpConnections />} />
                     {/* MCP SORTANT : l'utilisateur connecte ses propres serveurs

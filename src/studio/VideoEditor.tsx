@@ -109,7 +109,18 @@ function readVideoMeta(url: string): Promise<SceneMediaMeta | null> {
   });
 }
 
-export default function VideoEditor() {
+/**
+ * `pleinEcran` sort le monteur de la coquille SaaS (`/app/montage`).
+ *
+ * Dans la coquille, la barre supérieure et la navigation latérale retirent de la
+ * hauteur à une surface déjà dense : timeline et panneaux se compriment, et sur
+ * un écran court la piste de montage devient inutilisable. En espace dédié, le
+ * monteur dispose de `100dvh` et gère sa propre barre (`StudioTopBar`).
+ *
+ * Le défaut reste `false` : la route historique `/app/studio/montage` garde
+ * exactement le rendu existant.
+ */
+export default function VideoEditor({ pleinEcran = false }: { pleinEcran?: boolean } = {}) {
   const toast = useToast();
   const navigate = useNavigate();
   const { workspaceId } = useAuth();
@@ -732,8 +743,18 @@ export default function VideoEditor() {
     navigate('/app/studio?fromEditor=1');
   };
 
-  if (loading) return <div className="studio-v2"><StudioTopBar /><LoadingState label="Ouverture de l’AI Video Editor…" /></div>;
-  if (loadError || !project) return <div className="studio-v2"><StudioTopBar /><ErrorState message={loadError || 'Montage introuvable.'} onRetry={() => void load()} /></div>;
+  /*
+   * En plein écran, la racine occupe la fenêtre et défile en interne : la
+   * timeline garde sa hauteur au lieu d'être poussée hors de la vue par le
+   * contenu des panneaux. `overflow-y-auto` reste nécessaire — le monteur est
+   * plus haut que la fenêtre sur mobile.
+   */
+  const classeRacine = pleinEcran
+    ? 'studio-v2 flex h-[100dvh] flex-col overflow-y-auto overflow-x-hidden'
+    : 'studio-v2 animate-fadeUp pb-6';
+
+  if (loading) return <div className={classeRacine}><StudioTopBar /><LoadingState label="Ouverture de l’AI Video Editor…" /></div>;
+  if (loadError || !project) return <div className={classeRacine}><StudioTopBar /><ErrorState message={loadError || 'Montage introuvable.'} onRetry={() => void load()} /></div>;
 
   const selected = project.scenes.find((s) => s.id === selectedId) ?? project.scenes[0] ?? null;
   const missingCount = project.scenes.filter((s) => s.source.kind === 'none' || !s.source.url).length;
@@ -741,7 +762,7 @@ export default function VideoEditor() {
   const srtReady = buildSrt(project).trim().length > 0;
 
   return (
-    <div className="studio-v2 animate-fadeUp pb-6">
+    <div className={classeRacine}>
       <StudioTopBar />
 
       {/* Top editor header */}
@@ -777,7 +798,7 @@ export default function VideoEditor() {
               value={project.projectId ?? ''}
               onChange={(e) => {
                 const nextId = e.target.value;
-                if (nextId) navigate(`/app/studio/montage?projet=${nextId}`);
+                if (nextId) navigate(`/app/montage?projet=${nextId}`);
               }}
               className="w-auto max-w-[190px] text-xs"
             >
