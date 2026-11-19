@@ -122,7 +122,11 @@ describe('navigation Studio', () => {
   it('conserve le monteur vidéo et l’assistant', () => {
     // Deux exigences explicites : le monteur reste accessible, et l'assistant
     // garde son entrée.
-    expect(destinations).toContain('/app/studio/montage');
+    //
+    // Le monteur a migré vers `/app/montage`, espace dédié hors coquille : dans
+    // `<Layout>`, la barre et la nav comprimaient la timeline. L'ancienne route
+    // `/app/studio/montage` existe toujours pour les liens conservés.
+    expect(destinations).toContain('/app/montage');
     expect(destinations).toContain('/app/ai');
   });
 
@@ -133,5 +137,77 @@ describe('navigation Studio', () => {
 
   it('ne présente aucune destination en double', () => {
     expect(new Set(destinations).size).toBe(destinations.length);
+  });
+});
+/* -------------------------------------------------------------------------- */
+/* Studio — même exigence, autre périmètre                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Destinations Studio avant réorganisation (9 groupes, 17 entrées). */
+const DESTINATIONS_STUDIO_HISTORIQUES = [
+  '/app/ai',
+  '/app/studio/accueil',
+  '/app/studio',
+  '/app/studio/avance',
+  '/app/studio/classique',
+  '/app/montage',
+  '/app/presets',
+  '/app/avatars',
+  '/app/scripts',
+  '/app/prompts',
+  '/app/projets',
+  '/app/bibliotheque',
+  '/app/fichiers',
+  '/app/historique',
+  '/app/abonnement',
+  '/app/credits',
+  '/app/parametres',
+];
+
+describe('navigation Studio — réorganisation par usage', () => {
+  const destinations = STUDIO_NAV_GROUPS.flatMap((groupe) => groupe.items.map((item) => item.to));
+
+  it('conserve les 17 destinations historiques', () => {
+    for (const attendue of DESTINATIONS_STUDIO_HISTORIQUES) {
+      expect(destinations, `destination perdue : ${attendue}`).toContain(attendue);
+    }
+  });
+
+  it('n’a aucun doublon', () => {
+    expect(destinations.length).toBe(new Set(destinations).size);
+  });
+
+  it('ouvre au plus deux groupes par défaut', () => {
+    /*
+     * Au-delà, la barre redevient une liste de liens : le rangement ne sert plus
+     * à rien et la barre occupe autant de hauteur qu'avant la refonte.
+     */
+    const ouverts = STUDIO_NAV_GROUPS.filter((groupe) => groupe.defaultOpen);
+    expect(ouverts.length).toBeLessThanOrEqual(2);
+    expect(ouverts.map((groupe) => groupe.id)).toEqual(['accueil', 'creer']);
+  });
+
+  it('ne dépasse pas sept groupes', () => {
+    /* 9 -> 7 : « Avatars », « Scripts », « Historique » étaient trop fins pour
+     * justifier un niveau de premier niveau. */
+    expect(STUDIO_NAV_GROUPS.length).toBeLessThanOrEqual(7);
+  });
+
+  it('suit l’ordre de travail du créateur', () => {
+    expect(STUDIO_NAV_GROUPS.map((groupe) => groupe.id)).toEqual([
+      'accueil', 'creer', 'projets', 'bibliotheque', 'outils', 'assistant', 'parametres',
+    ]);
+  });
+
+  it('chaque groupe décrit son usage par un repère court', () => {
+    /* Le `hint` évite qu'un intitulé seul ne suffise pas à décider où aller. */
+    for (const groupe of STUDIO_NAV_GROUPS) {
+      expect(groupe.hint, `groupe sans hint : ${groupe.id}`).toBeTruthy();
+    }
+  });
+
+  it('le monteur vidéo a son entrée dédiée vers l’espace plein écran', () => {
+    const creer = STUDIO_NAV_GROUPS.find((groupe) => groupe.id === 'creer');
+    expect(creer?.items.map((item) => item.to)).toContain('/app/montage');
   });
 });

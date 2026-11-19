@@ -1,9 +1,10 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Bot, BookOpen, Boxes, Brain, CheckSquare, Clapperboard, Coins, CreditCard,
-  Film, FolderKanban, HardDrive, History, LayoutDashboard, LifeBuoy, Megaphone,
+  Bot, Boxes, Brain, CheckSquare, Clapperboard, CreditCard, FileText, Film,
+  FolderKanban, FolderOpen, History, LayoutDashboard, LifeBuoy, Megaphone,
   MessageSquare, Package, Plug, Radar, Scissors, Settings, Shield,
-  ShoppingCart, SlidersHorizontal, Sparkles, Truck, Users, Wallet, Wand2, Workflow,
+  ShoppingCart, SlidersHorizontal, Sparkles, Truck, Upload, UserRound, Users,
+  Wallet, Wand2, Workflow,
 } from 'lucide-react';
 
 export type WorkspaceScope = 'studio' | 'business';
@@ -39,23 +40,24 @@ export interface WorkspaceShortcut {
 }
 
 export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
+  /*
+   * ORDRE : on suit le parcours réel d'un créateur, pas l'ancienne arborescence
+   * technique. Accueil (où j'en suis) → Créer (ce que je veux produire) →
+   * Projets (ce que je construis) → Bibliothèque (ce que j'ai déjà produit) →
+   * Outils (avatars, scripts, presets) → Assistant → Paramètres.
+   *
+   * Seuls les deux premiers groupes sont ouverts par défaut : au-delà, la barre
+   * redevient une liste de liens et l'utilisateur perd le bénéfice du rangement.
+   *
+   * L'ancienne structure comptait neuf groupes — « Avatars », « Scripts et
+   * contenus » et « Historique » étaient des catégories de premier niveau pour
+   * deux ou trois entrées chacune, ce qui allongeait la barre sans l'éclairer.
+   * Aucune destination n'est perdue : les 17 entrées sont réparties ci-dessous.
+   */
   {
-    id: 'assistant',
-    label: 'Assistant IA',
-    hint: 'Chat, analyse et rédaction',
-    icon: Bot,
-    defaultOpen: true,
-    items: [{
-      to: '/app/ai',
-      label: 'Assistant VYORA',
-      description: 'Conversations, pièces jointes et analyse',
-      icon: Bot,
-      keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
-    }],
-  },
-  {
-    id: 'overview',
-    label: 'Vue d’ensemble',
+    id: 'accueil',
+    label: 'Accueil',
+    hint: 'Où j’en suis',
     icon: LayoutDashboard,
     defaultOpen: true,
     items: [{
@@ -67,8 +69,9 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
     }],
   },
   {
-    id: 'creation',
-    label: 'Création et génération',
+    id: 'creer',
+    label: 'Créer',
+    hint: 'Produire une vidéo',
     icon: Sparkles,
     defaultOpen: true,
     items: [
@@ -80,6 +83,13 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
         keywords: ['video', 'ugc', 'generer', 'creer'],
       },
       {
+        to: '/app/studio/classique',
+        label: 'Studio classique',
+        description: 'Interface de génération simplifiée',
+        icon: Film,
+        keywords: ['classique', 'simple', 'rapide'],
+      },
+      {
         to: '/app/studio/avance',
         label: 'Studio avancé',
         description: 'Parcours historique et options avancées',
@@ -87,135 +97,136 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
         keywords: ['avance', 'legacy', 'options'],
       },
       {
-        to: '/app/studio/classique',
-        label: 'Studio classique',
-        description: 'Interface de génération simplifiée',
-        icon: Film,
-        keywords: ['classique', 'simple', 'video'],
-      },
-    ],
-  },
-  {
-    id: 'production',
-    label: 'Production vidéo',
-    icon: Scissors,
-    defaultOpen: true,
-    items: [
-      {
         to: '/app/montage',
         label: 'Montage vidéo',
-        description: 'Assemblage, sous-titres et export',
+        description: 'Timeline, sous-titres et export — espace dédié',
         icon: Scissors,
-        keywords: ['montage', 'editeur', 'sous-titres', 'export'],
-      },
-      {
-        to: '/app/presets',
-        label: 'Réglages vidéo',
-        description: 'Formats, durées et préférences de rendu',
-        icon: SlidersHorizontal,
-        keywords: ['reglages', 'formats', 'presets', 'rendu'],
+        keywords: ['montage', 'timeline', 'editeur', 'sous-titres', 'export'],
       },
     ],
   },
   {
-    id: 'avatars',
-    label: 'Avatars et personnages IA',
-    icon: Users,
+    id: 'projets',
+    label: 'Projets',
+    hint: 'Ce que je construis',
+    icon: FolderOpen,
+    defaultOpen: false,
     items: [{
-      to: '/app/avatars',
-      label: 'Avatars IA',
-      description: 'Personnages et cohérence visuelle',
-      icon: Users,
-      keywords: ['avatar', 'personnage', 'visage', 'ia'],
+      to: '/app/projets',
+      label: 'Mes projets',
+      description: 'Reprendre un projet en cours',
+      icon: FolderOpen,
+      keywords: ['projets', 'reprendre', 'brouillon'],
     }],
   },
   {
-    id: 'content',
-    label: 'Scripts et contenus',
-    icon: BookOpen,
+    id: 'bibliotheque',
+    label: 'Bibliothèque',
+    hint: 'Ce que j’ai produit',
+    icon: Film,
+    defaultOpen: false,
     items: [
       {
+        to: '/app/bibliotheque',
+        label: 'Créations enregistrées',
+        description: 'Fichiers réellement produits',
+        icon: Film,
+        keywords: ['bibliotheque', 'creations', 'fichiers', 'enregistre'],
+      },
+      {
+        to: '/app/fichiers',
+        label: 'Fichiers importés',
+        description: 'Médias sources de vos montages',
+        icon: Upload,
+        keywords: ['fichiers', 'import', 'media', 'sources'],
+      },
+      {
+        to: '/app/historique',
+        label: 'Historique',
+        description: 'Générations passées et statuts',
+        icon: History,
+        keywords: ['historique', 'generations', 'passe'],
+      },
+    ],
+  },
+  {
+    id: 'outils',
+    label: 'Outils',
+    hint: 'Briques spécialisées',
+    icon: Wand2,
+    defaultOpen: false,
+    items: [
+      {
+        to: '/app/avatars',
+        label: 'Avatars',
+        description: 'Personnages et voix réutilisables',
+        icon: UserRound,
+        keywords: ['avatars', 'personnages', 'voix', 'presence'],
+      },
+      {
         to: '/app/scripts',
-        label: 'Scripts IA',
-        description: 'Scripts, hooks et angles créatifs',
-        icon: Wand2,
-        keywords: ['script', 'hook', 'contenu', 'texte'],
+        label: 'Scripts',
+        description: 'Textes et dialogues de vos vidéos',
+        icon: FileText,
+        keywords: ['scripts', 'textes', 'dialogues'],
       },
       {
         to: '/app/prompts',
         label: 'Prompts',
         description: 'Bibliothèque de prompts réutilisables',
-        icon: BookOpen,
-        keywords: ['prompt', 'bibliotheque', 'idees'],
+        icon: MessageSquare,
+        keywords: ['prompts', 'modeles', 'inspiration'],
+      },
+      {
+        to: '/app/presets',
+        label: 'Presets',
+        description: 'Styles et rendus enregistrés',
+        icon: SlidersHorizontal,
+        keywords: ['presets', 'styles', 'rendus'],
       },
     ],
   },
   {
-    id: 'library',
-    label: 'Projets et bibliothèque',
-    icon: FolderKanban,
-    items: [
-      {
-        to: '/app/projets',
-        label: 'Projets',
-        description: 'Briefs, scripts et vidéos par projet',
-        icon: FolderKanban,
-        matchPrefix: true,
-        keywords: ['projet', 'brief', 'scenario'],
-      },
-      {
-        to: '/app/bibliotheque',
-        label: 'Bibliothèque',
-        description: 'Créations enregistrées et fichiers privés',
-        icon: Sparkles,
-        keywords: ['bibliotheque', 'fichiers', 'creations', 'saved'],
-      },
-      {
-        to: '/app/fichiers',
-        label: 'Fichiers et médias',
-        description: 'Importer, prévisualiser, rattacher, supprimer',
-        icon: HardDrive,
-        keywords: ['fichiers', 'medias', 'upload', 'import', 'documents', 'images', 'videos'],
-      },
-    ],
-  },
-  {
-    id: 'history',
-    label: 'Historique',
-    icon: History,
+    id: 'assistant',
+    label: 'Assistant IA',
+    hint: 'Chat et analyse',
+    icon: Bot,
+    defaultOpen: false,
     items: [{
-      to: '/app/historique',
-      label: 'Générations récentes',
-      description: 'Statuts, coûts et résultats de génération',
-      icon: History,
-      keywords: ['historique', 'generations', 'jobs', 'statut'],
+      to: '/app/ai',
+      label: 'Assistant VYORA',
+      description: 'Conversations, pièces jointes et analyse',
+      icon: Bot,
+      keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
     }],
   },
   {
-    id: 'account',
-    label: 'Crédits et paramètres',
+    id: 'parametres',
+    label: 'Paramètres et crédits',
+    hint: 'Compte et facturation',
     icon: CreditCard,
+    defaultOpen: false,
     items: [
       {
         to: '/app/abonnement',
-        label: 'Abonnement Studio',
-        description: 'Formule et limites mensuelles',
+        label: 'Abonnement',
+        description: 'Formule et renouvellement',
         icon: CreditCard,
         keywords: ['abonnement', 'formule', 'plan'],
       },
       {
         to: '/app/credits',
-        label: 'Crédits Studio',
-        description: 'Packs, solde et historique d’usage',
-        icon: Coins,
-        keywords: ['credits', 'packs', 'solde', 'paiement'],
+        label: 'Crédits',
+        description: 'Packs, solde et historique du portefeuille',
+        icon: CreditCard,
+        keywords: ['credits', 'solde', 'portefeuille', 'packs'],
       },
       {
         to: '/app/parametres',
         label: 'Paramètres',
-        description: 'Compte, langue et préférences',
+        description: 'Profil et préférences du compte',
         icon: Settings,
-        keywords: ['parametres', 'compte', 'profil', 'reglages'],
+        keywords: ['parametres', 'profil', 'preferences', 'compte'],
       },
     ],
   },
