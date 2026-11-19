@@ -23,6 +23,7 @@ import {
   type ProviderProbeResult,
   type ProviderReply,
 } from './providers.ts';
+import { creerAccesMcp, type McpToolCatalogEntry } from './mcp-tools.ts';
 
 export type BusinessAction =
   | 'status'
@@ -49,6 +50,7 @@ export type BusinessAction =
   | 'requests.list'
   | 'tools.list'
   | 'tools.resolve'
+  | 'tools.mcp.list'
   | 'integrations.list'
   | 'integrations.request'
   | 'integrations.cancel'
@@ -65,7 +67,7 @@ export type BusinessAction =
 // Le client Phase 3 évite ainsi qu'un ancien serveur ignore workspaceId et
 // lise ou modifie silencieusement le périmètre personnel.
 const WORKSPACE_ACTIONS = new Set<string>([
-  'requests.list', 'tools.list', 'tools.resolve',
+  'requests.list', 'tools.list', 'tools.resolve', 'tools.mcp.list',
   'integrations.list', 'integrations.request', 'integrations.cancel', 'integrations.disconnect',
   'conversations.list', 'conversations.create', 'conversations.rename', 'conversations.delete',
   'messages.list', 'messages.send', 'memory.get', 'memory.consent', 'memory.profile.save',
@@ -270,6 +272,30 @@ export interface ImportConnectAccess {
 
 export interface BusinessGrowDependencies {
   store: BusinessGrowStore;
+  /**
+   * Outils MCP externes autorisés par l'utilisateur.
+   *
+   * Absent ⇒ un accès par défaut est construit (`creerAccesMcp`) : les agents
+   * voient alors les outils MCP réellement autorisés, sans qu'il faille modifier
+   * `index.ts`. Une valeur injectée garde la priorité, ce qui permet de tester
+   * le handler sans base.
+   *
+   * Ce chemin n'élargit aucun droit : l'isolation, la permission et la
+   * classification lecture/écriture sont décidées par les fonctions SQL.
+   */
+  mcp?: {
+    /** Catalogue des outils proposables (lecture seule) pour une entreprise. */
+    listerOutils: (userId: string, workspaceId: string) => Promise<McpToolCatalogEntry[]>;
+    /** Dépose une proposition d'outil ; `null` si ce n'est pas permis. */
+    proposerOutil: (input: {
+      userId: string;
+      conversationId: string;
+      requestId: string;
+      serverId: string;
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }) => Promise<string | null>;
+  };
   getUserId: (authorization: string) => Promise<string | null>;
   /**
    * Contrôle d'accès du module Import & Connect, **obligatoire** pour les
@@ -477,6 +503,19 @@ function parseRoutingOptions(raw: unknown): RoutingOptions {
 }
 
 export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies) {
+  /*
+   * Accès MCP par défaut.
+   *
+   * `index.ts` ne transmet pas `mcp` : ce module construit donc son propre accès,
+   * avec la même connexion que le reste du service (voir `mcp-tools.ts`). Une
+   * dépendance injectée garde la priorité — c'est ce qui permet de tester le
+   * handler sans base.
+   *
+   * L'accès est créé une seule fois, à la construction du handler : la connexion
+   * SQL, elle, reste ouverte à la première utilisation seulement (paresseuse), et
+   * une configuration absente donne un catalogue vide plutôt qu'une erreur.
+   */
+  const accesMcp = dependencies.mcp ?? creerAccesMcp();
   return async (request: Request): Promise<Response> => {
     const origin = request.headers.get('Origin');
     const originAllowed = isOriginAllowed(origin, dependencies.allowedOrigins);
@@ -765,6 +804,33 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             ? await dependencies.store.listToolExecutions(userId, conversationId)
             : [];
           data = { tools };
+          break;
+        }
+        case 'tools.mcp.list': {
+          /*
+           * Catalogue des outils MCP que l'utilisateur a explicitement
+           * autorisés sur cette entreprise. Lecture seule : rien n'est exécuté,
+           * rien n'est créé.
+           *
+           * La liste est calculée à chaque appel depuis `tool_permissions` :
+           * elle ne peut pas être périmée après une révocation, contrairement à
+           * un cache. `mcp` absent ⇒ liste vide, jamais une erreur : un agent
+           * sans connecteur doit rester utilisable.
+           */
+          if (!scopedWorkspace) {
+            return response(failure('INVALID_WORKSPACE', 'Entreprise requise.'), 400, origin, dependencies.allowedOrigins);
+          }
+          const outils = await accesMcp.listerOutils(userId, scopedWorkspace);
+          data = {
+            tools: outils,
+            /*
+             * Une écriture MCP n'est jamais exécutable dans cette version : la
+             * porte d'exécution n'a aucune autorisation d'écriture. Le dire
+             * explicitement évite qu'un client suppose que seul le catalogue
+             * limite les possibilités.
+             */
+            writesEnabled: false,
+          };
           break;
         }
         case 'tools.resolve': {
