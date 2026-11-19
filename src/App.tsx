@@ -48,6 +48,8 @@ const BusinessModules = lazy(() => import('./business/modules/BusinessModules'))
 const BusinessModuleWorkspace = lazy(() => import('./business/modules/BusinessModuleWorkspace'));
 const BusinessGrowSubscription = lazy(() => import('./pages/BusinessGrowSubscription'));
 const PaymentReturn = lazy(() => import('./pages/PaymentReturn'));
+// Outil de vérification responsive, réservé au développement (jamais lié en UI).
+const MatriceLargeurs = lazy(() => import('./dev/MatriceLargeurs'));
 
 export default function App() {
   return (
@@ -58,6 +60,12 @@ export default function App() {
             <Suspense fallback={<div role="status" className="p-6 text-sm text-slate-400">Chargement de l’espace…</div>}>
               <Routes>
                 <Route path="/" element={<Landing />} />
+                {/* Matrice de largeurs : mesure la page cible aux 11 largeurs
+                    imposées. En développement uniquement — en production, la
+                    route renvoie vers l'accueil. */}
+                {import.meta.env.DEV && (
+                  <Route path="/dev/matrice" element={<MatriceLargeurs />} />
+                )}
                 <Route path="/connexion" element={<Login />} />
                 <Route path="/inscription" element={<Signup />} />
                 <Route path="/proprietaire" element={<OwnerBootstrap />} />

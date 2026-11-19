@@ -14,7 +14,7 @@
 // prennent forme »). Ils sont remplacés, pas contournés : l'exigence de vérité
 // commerciale, elle, est conservée et renforcée.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import Landing from '../src/pages/Landing';

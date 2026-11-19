@@ -318,7 +318,7 @@ export function SceneHero({ univers, alt = '', className = '' }: Props) {
     return (
       <div
         className={`relative isolate overflow-hidden rounded-3xl border border-line ${className}`}
-        style={{ aspectRatio: '4 / 3', maxHeight: 'min(58vh, 460px)' }}
+        style={{ aspectRatio: '4 / 3', maxHeight: 'min(58dvh, 460px)' }}
         role={alt ? 'img' : undefined}
         aria-label={alt || undefined}
         aria-hidden={alt ? undefined : true}
@@ -331,7 +331,7 @@ export function SceneHero({ univers, alt = '', className = '' }: Props) {
   return (
     <div
       className={`relative isolate overflow-hidden rounded-3xl border border-line ${className}`}
-      style={{ aspectRatio: '4 / 3', maxHeight: 'min(58vh, 460px)' }}
+      style={{ aspectRatio: '4 / 3', maxHeight: 'min(58dvh, 460px)' }}
       role={alt ? 'img' : undefined}
       aria-label={alt || undefined}
       aria-hidden={alt ? undefined : true}

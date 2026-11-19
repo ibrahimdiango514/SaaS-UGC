@@ -6,6 +6,9 @@
 
 @layer base {
   * { -webkit-tap-highlight-color: transparent; }
+  /* Aucun mot français très long (ou montant en FCFA) ne doit déborder de son
+     conteneur ; c'est la deuxième barrière après `min-width: 0` sur flex. */
+  body { overflow-wrap: break-word; overflow-x: hidden; }
   html, body, #root { min-height: 100%; }
   body {
     @apply bg-ink text-slate-100 font-sans antialiased;
@@ -304,7 +307,7 @@
 
 @layer components {
   .landing-root {
-    @apply relative min-h-screen overflow-x-hidden bg-[#04070d] text-slate-200;
+    @apply relative min-h-dvh overflow-x-hidden bg-[#04070d] text-slate-200;
   }
   .landing-root ::selection { background: rgba(34, 211, 238, 0.28); color: #fff; }
   .landing-root a:focus-visible,
