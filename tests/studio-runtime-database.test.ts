@@ -35,7 +35,8 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec(read('20261120010940_studio_universal_catalog'));
  await db.exec(`alter table saas_ugc.studio_ai_models add column endpoint_evidence jsonb;`);
  await db.exec('create table saas_ugc.studio_ai_detail_events(model_id uuid,event_type text,status text,http_status integer,occurred_at timestamptz);');
- await db.exec(read('20261120033000_studio_runtime'));
+ await db.exec(read('20261120035256_studio_runtime'));
+ await db.exec(read('20261120035400_studio_runtime_claim_fix'));
  await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,account_access,input_schema)
  values('muapi','real-model','Real','image',true,false,'available','{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
  set test.uid='${uid}';set test.role='authenticated';set test.admin='yes';`);
@@ -61,6 +62,9 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  expect((await db.query<{available_balance:number}>('select available_balance from saas_ugc.ugc_wallets where user_id=$1',[uid])).rows[0].available_balance).toBe(95);
  await db.exec(`set test.role='service_role'`);
  await db.query(`select public.studio_runtime_submitted($1,'provider-id')`,[first.id]);
+ await db.query("update saas_ugc.studio_runtime_jobs set poll_after=now()-interval '1 second' where id=$1",[first.id]);
+ expect((await db.query<{jobs:unknown[]}>('select public.studio_runtime_due() jobs')).rows[0].jobs).toHaveLength(1);
+ expect((await db.query<{jobs:unknown[]}>('select public.studio_runtime_due() jobs')).rows[0].jobs).toHaveLength(0);
  await db.query(`select public.studio_runtime_finish($1,'succeeded','[{"kind":"text","text":"result"}]',0.3)`,[first.id]);
  await db.query(`select public.studio_runtime_finish($1,'failed','[]',0.3)`,[first.id]);
  expect((await db.query<{n:number}>("select count(*)::int n from saas_ugc.fake_ledger where operation='capture'")).rows[0].n).toBe(1);
