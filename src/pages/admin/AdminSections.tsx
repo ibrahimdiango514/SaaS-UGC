@@ -1,3 +1,4 @@
+import {UniversalCatalogHealth} from './UniversalCatalogHealth';
 /*
  * Sections administrateur adossées à des données réelles.
  *
@@ -24,6 +25,8 @@ import {
 } from '../../lib/api';
 import type { AdminMetrics, AdminVideoCatalogResponse, MuApiModel } from '../../lib/types';
 import { BarChart, LineChart, Sparkline } from './AdminCharts';
+import { UniversalCatalogSync } from './UniversalCatalogSync';
+import { UniversalCatalogBrowser } from './UniversalCatalogBrowser';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers partagés                                                           */
@@ -362,9 +365,12 @@ export function ModelsSection() {
 
   return (
     <div className="space-y-5" data-testid="admin-models">
+      <UniversalCatalogHealth />
+      <UniversalCatalogSync />
+      <UniversalCatalogBrowser />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-slate-500">
-          Catalogue MuAPI réel · {catalog ? `${catalog.catalog.detected_video} modèles vidéo détectés` : 'chargement'} ·
+          Sous-catalogue vidéo historique · {catalog ? `${catalog.catalog.detected_video} modèles vidéo détectés` : 'chargement'} ·
           récupéré le {catalog ? formatDate(catalog.catalog.fetched_at, true) : '—'}
         </p>
         <div className="flex gap-2">
@@ -393,7 +399,7 @@ export function ModelsSection() {
       </div>
 
       <Card>
-        <CardHeader title={`Catalogue complet (${filtered.length}/${models.length})`} description="Identifiant technique, nom commercial, catégorie, tarif et statut réel."
+        <CardHeader title={`Vidéos historiques (${filtered.length}/${models.length})`} description="Identifiant technique, nom commercial, catégorie, tarif et statut réel."
           action={<div className="flex flex-wrap gap-2">
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Rechercher un modèle…" className="max-w-xs" />
             <Select value={category} onChange={(event) => setCategory(event.target.value)} className="w-auto min-w-[150px]">
@@ -593,7 +599,7 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard label="Groq" value={groq ? (groq.configured ? 'configuré' : 'non configuré') : '—'} icon={<Sparkles size={19} />} tone={groq?.configured ? 'emerald' : 'brand'} hint={groq?.model ?? 'modèle inconnu'} />
         <StatCard label="Gemini" value={gemini ? (gemini.configured ? 'configuré' : 'non configuré') : '—'} icon={<Sparkles size={19} />} tone={gemini?.configured ? 'emerald' : 'brand'} hint={gemini?.model ?? 'modèle inconnu'} />
-        <StatCard label="MuAPI" value={metrics ? `${metrics.models.total} modèles` : '—'} icon={<Video size={19} />} tone="cyan" hint={metrics?.models.synced_at ? `synchronisé le ${formatDate(metrics.models.synced_at, true)}` : 'jamais synchronisé'} />
+        <UniversalCatalogHealth />
       </div>
 
       <ProviderHealthCronCard />

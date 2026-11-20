@@ -30,6 +30,12 @@
     ]
   },
   "include": [
+    "supabase/functions/studio-runtime/*.ts",
+    "supabase/functions/universal-catalog/*.ts",
+    "supabase/functions/video-quote/index.ts",
+    "supabase/functions/vyora-provider-discovery/index.ts",
+    "supabase/functions/_shared/ai-core/anthropic.ts",
+    "supabase/functions/reelora-video/index.ts",
     "supabase/functions/store-import/index.ts",
     "supabase/functions/store-import/handler.ts",
     "supabase/functions/store-connect/index.ts",

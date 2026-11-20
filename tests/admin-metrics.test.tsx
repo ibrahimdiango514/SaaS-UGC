@@ -151,6 +151,7 @@ describe('admin — catalogue modèles', () => {
     renderWithProviders(<ProvidersSection metrics={metrics} />);
     await waitFor(() => expect(screen.getByText('openai/gpt-oss-120b')).toBeTruthy());
     expect(screen.getByText('gemini-2.5-flash')).toBeTruthy();
-    expect(screen.getByText('415 modèles')).toBeTruthy();
+    expect(screen.getByTestId('universal-catalog-health')).toBeTruthy();
+    expect(screen.queryByText('415 modèles')).toBeNull();
   });
 });

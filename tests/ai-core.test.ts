@@ -434,6 +434,14 @@ describe('routage — règles, niveaux, capacités, budget, anti-doublon', () =>
     expect(r2).toBe('BUDGET_EXHAUSTED');
   });
 
+  it('budget épuisé : un tarif inconnu ne peut pas être considéré comme gratuit', () => {
+    const snap = makeSnapshot({ budget: { monthly: 1, alert: null, daily: null }, monthlySpendUsd: 1 });
+    snap.models = snap.models.filter((m) => m.provider === 'groq').map((m) => ({ ...m, verified: true, costIn: null, costOut: null }));
+    const result = buildAiChain(snap, {}, new Set(['groq']));
+    expect(result.steps).toEqual([]);
+    expect(result.skipReason).toBe('BUDGET_EXHAUSTED');
+  });
+
   it('anti-double-routage : l’agrégateur ne duplique jamais un modèle direct', () => {
     const { steps } = buildAiChain(makeSnapshot(), {}, configured);
     const bases = steps.map((s) => modelBaseKey(s.providerModelKey));
@@ -649,11 +657,22 @@ describe('moteur — appels unifiés et secours plafonné', () => {
     expect(released[0].outcomeCode).toBe('AI_UNAVAILABLE');
   });
 
-  it('idempotence — verrou indisponible : l’appel continue normalement', async () => {
-    const deps = makeEngineDeps(makeSnapshot(), okFetch(OPENAI_OK));
+  it('idempotence — verrou indisponible : aucun appel fournisseur', async () => {
+    const fetcher = okFetch(OPENAI_OK);
+    const deps = makeEngineDeps(makeSnapshot(), fetcher);
     deps.claimCall = async () => { throw new Error('lease down'); };
     const outcome = await runAiCall(deps, { messages, role: 'business_advisor', requestKey: 'req-4' });
-    expect(outcome.ok).toBe(true);
+    expect(outcome.code).toBe('AI_IDEMPOTENCY_UNAVAILABLE');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('idempotence — appel déjà terminé : aucun second appel fournisseur', async () => {
+    const fetcher = okFetch(OPENAI_OK);
+    const deps = makeEngineDeps(makeSnapshot(), fetcher);
+    deps.claimCall = async () => ({ claimed: false, status: 'succeeded', providerKey: 'groq', modelKey: 'model', outcomeCode: null });
+    const outcome = await runAiCall(deps, { messages, requestKey: 'req-5' });
+    expect(outcome.code).toBe('AI_DUPLICATE_IN_FLIGHT');
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('traçabilité — journal de routage : chaîne, score, coût, décision', async () => {

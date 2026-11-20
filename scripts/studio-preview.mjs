@@ -219,13 +219,7 @@ function estimateFor(body) {
     pricing_error: null,
     quote_id: 'preview-quote-' + credits,
     quote_expires_at: iso(600000),
-    provider_quote: {
-      available: true, cost_usd: null, currency: 'USD', source: 'preview',
-      error_code: null, error_message: null, checked_at: iso(),
-      catalog_synced_at: iso(-60000), stale_catalog: false,
-      pricing_basis: { note: 'devis simulé côté navigateur' },
-      billing_units: [], estimate_endpoint_available: false,
-    },
+    provider_quote: { available: true, error_code: null },
   };
 }
 
@@ -234,13 +228,7 @@ function edgeResponse(url, body) {
   if (fn === 'reelora-health') return { configured: { muapi: true, groq: true, gemini: true } };
   if (fn === 'video-quote') {
     return {
-      quote: {
-        available: true, cost_usd: null, currency: 'USD', source: 'preview',
-        error_code: null, error_message: null, checked_at: iso(),
-        catalog_synced_at: iso(-60000), stale_catalog: false,
-        pricing_basis: { note: 'devis simulé côté navigateur' },
-        billing_units: [], estimate_endpoint_available: false,
-      },
+      quote: { available: true, error_code: null },
       model_available: true, model_reason: null,
     };
   }
@@ -282,7 +270,7 @@ function edgeResponse(url, body) {
       };
     }
     if (action === 'estimate') return estimateFor(body);
-    if (action === 'quote') return { quote: edgeResponse(url, { action: 'video-quote' }).quote, model_available: true, model_reason: null };
+    if (action === 'quote') return { quote: { available: true, error_code: null }, model_available: true, model_reason: null };
     return { error: { code: 'PREVIEW_ONLY', message: 'Action non simulée dans la preview : ' + action } };
   }
   // Fonctions secondaires : elles ne portent aucune décision métier de la page
@@ -295,6 +283,15 @@ function edgeResponse(url, body) {
     const action = body?.action ?? 'health';
     if (action === 'health') return { configured: { groq: true, gemini: true }, providers: ['groq', 'gemini'], status: 'ok' };
     return { ok: true, preview: true, action };
+  }
+  if (fn === 'studio-runtime') {
+    return { error: { code: 'PREVIEW_ONLY', message: 'Runtime universel non simulé dans ce harnais ; aucune génération, aucun débit.' } };
+  }
+  if (fn === 'universal-catalog') {
+    return { error: { code: 'PREVIEW_ONLY', message: 'Synchronisation désactivée dans la preview.' } };
+  }
+  if (fn === 'vyora-provider-discovery') {
+    return { error: 'UNAUTHENTICATED' };
   }
   if (fn === 'vyora-provider-health') {
     return { providers: [{ provider_key: 'groq', status: 'available' }, { provider_key: 'gemini', status: 'available' }] };

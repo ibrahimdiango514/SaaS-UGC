@@ -1,3 +1,4 @@
+import {invalidateCatalog} from '../hooks/useCatalogRevision';
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
@@ -51,6 +52,90 @@ export async function invokeEdge<T>(name: string, body: Record<string, unknown>)
     );
   }
   return data as T;
+}
+
+export interface UniversalCatalogSyncResult {
+  scope: 'public'; fetched: number; pages: number;
+  result: { total: number; added: number; changed: number; missing: number; sync_id: string };
+}
+export interface UniversalCatalogDetailResult {
+  attempted: number; ok: number; http_error: number; invalid: number; network_error: number; persist_error: number;
+}
+export interface UniversalCatalogSummary {
+  models: number; details_ok: number; detail_errors: number; enabled: number;
+  last_sync: string | null; categories: Record<string, number>;
+}
+export interface UniversalAdminModel {
+  provider_model_id: string; provider_key: string; display_name: string; category: string;
+  public_catalog_present: boolean; account_access: string; integration_status: string;
+  studio_enabled: boolean; adapter_key: string | null; detail_status: string | null; detail_http_status: number | null;
+}
+export interface UniversalAdminModelDetail extends UniversalAdminModel {
+  description: string | null; input_fields: string[]; required_fields: string[];
+  endpoint_evidence?: unknown;
+  input_schema: unknown; output_schema: unknown; metadata: Record<string, unknown>;
+  provider_enabled: boolean | null; coming_soon: boolean | null; detail_checked_at: string | null;
+  recent_changes: { id: number; change_type: string; created_at: string }[];
+}
+export interface UniversalAdminPage { total: number; items: UniversalAdminModel[]; next_cursor: string | null }
+
+const nonnegativeInteger = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+
+export async function getUniversalAdminModels(filters: { query: string; category: string; status: string; after: string }): Promise<UniversalAdminPage> {
+  const data = await rpc<UniversalAdminPage>('studio_catalog_admin_models', { p_query: filters.query, p_category: filters.category, p_status: filters.status, p_after: filters.after, p_limit: 50 });
+  if (!data || !nonnegativeInteger(data.total) || !Array.isArray(data.items) ||
+      !(data.next_cursor === null || typeof data.next_cursor === 'string') || data.items.some(m => !m || typeof m.provider_model_id !== 'string')) {
+    throw new AppError('Réponse catalogue administrateur invalide.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+export async function getUniversalAdminModelDetail(modelId: string): Promise<UniversalAdminModelDetail> {
+  const data = await rpc<UniversalAdminModelDetail | null>('studio_catalog_admin_model_detail', { p_model_id: modelId });
+  if (!data || data.provider_model_id !== modelId || !Array.isArray(data.input_fields) || !Array.isArray(data.required_fields) || !Array.isArray(data.recent_changes)) {
+    throw new AppError('Fiche administrateur introuvable ou invalide.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+
+export interface UniversalInputValidation {
+  validation: { ok: true; fields: string[] } | { ok: false; code: string; field: string | null };
+  endpoint: { status: string; path: string | null; url: string | null; differs: boolean };
+  executable: false; mode: 'validation_only';
+}
+export async function validateUniversalModelInput(modelId: string, params: Record<string, unknown>): Promise<UniversalInputValidation> {
+  const data = await invokeEdge<UniversalInputValidation>('universal-catalog', { action: 'validate_muapi_input', model_id: modelId, params });
+  if (!data || data.mode !== 'validation_only' || data.executable !== false || typeof data.validation?.ok !== 'boolean' || !data.endpoint) {
+    throw new AppError('Réponse de validation invalide.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+
+export async function getUniversalCatalogSummary(): Promise<UniversalCatalogSummary> {
+  const data = await rpc<UniversalCatalogSummary>('studio_catalog_admin_summary');
+  if (!data || ![data.models, data.details_ok, data.detail_errors, data.enabled].every(nonnegativeInteger) ||
+      !(data.last_sync === null || typeof data.last_sync === 'string') || !data.categories ||
+      typeof data.categories !== 'object' || Array.isArray(data.categories) || !Object.values(data.categories).every(nonnegativeInteger)) {
+    throw new AppError('Le serveur n’a pas confirmé l’état du catalogue.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+
+/** Les deux actions sont autorisées par la fonction serveur, pas par l'interface. */
+export async function syncUniversalCatalog(): Promise<UniversalCatalogSyncResult> {
+  const data = await invokeEdge<UniversalCatalogSyncResult>('universal-catalog', { action: 'sync_muapi', scope: 'public' });
+  if (!data || data.scope !== 'public' || !nonnegativeInteger(data.fetched) || !nonnegativeInteger(data.pages) ||
+      !data.result || !nonnegativeInteger(data.result.total) || !nonnegativeInteger(data.result.added) ||
+      !nonnegativeInteger(data.result.changed) || !nonnegativeInteger(data.result.missing) || typeof data.result.sync_id !== 'string') {
+    throw new AppError('Le serveur n’a pas confirmé la synchronisation.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+export async function syncUniversalCatalogDetails(): Promise<UniversalCatalogDetailResult> {
+  const data = await invokeEdge<UniversalCatalogDetailResult>('universal-catalog', { action: 'sync_muapi_details', limit: 10 });
+  if (!data || ![data.attempted, data.ok, data.http_error, data.invalid, data.network_error, data.persist_error].every(nonnegativeInteger)) {
+    throw new AppError('Le serveur n’a pas confirmé la synchronisation des fiches.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1171,4 +1256,37 @@ export function newGenerationIdempotencyKey(): string {
   const g = globalThis as unknown as { crypto?: { randomUUID?: () => string } };
   const id = g.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `ugc-${id}`;
+}
+
+export interface UniversalStudioModel {
+  model_id:string;display_name:string;category:string;provider:string;schema:unknown;
+  credits:number|null;operational:boolean;blockers:string[];
+}
+export interface UniversalStudioPage {total:number;categories:Record<string,number>;items:UniversalStudioModel[];next_cursor:string|null;credits:number;workspace_id:string}
+export interface UniversalStudioJob {id:string;status:string;credits:number;display_name:string;provider_model_id:string;created_at:string;error_code:string|null;outputs:{kind:'file'|'text';path?:string;url?:string;mime?:string;text?:string}[]}
+export interface UniversalStudioQuote {quote_id:string;credits:number;expires_at:string;balance:number}
+export const universalRuntime = async <T>(action:string,body:Record<string,unknown>={}) => {
+ const result=await invokeEdge<T>('studio-runtime',{...body,action});
+ if(action==='admin_limits'||action==='admin_reconcile'||action==='admin_config'&&body.config!=null)invalidateCatalog();
+ return result;
+};
+export async function uploadUniversalInput(workspaceId:string,file:File):Promise<string> {
+  if(!/^[0-9a-f-]{36}$/i.test(workspaceId)||file.size<=0||file.size>50*1024*1024) throw new AppError('Fichier trop volumineux ou vide.','FILE_INVALID');
+  const ext=(file.name.split('.').pop()??'').toLowerCase();
+  if(!['png','jpg','jpeg','webp','gif','mp4','webm','mp3','wav','ogg','zip'].includes(ext))throw new AppError('Format non pris en charge.','FILE_INVALID');
+  const path=`${workspaceId}/studio-inputs/${crypto.randomUUID()}.${ext}`;
+  const {error}=await supabase.storage.from(STORAGE_BUCKET).upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
+  if(error)throw new AppError('Import privé impossible.','STORAGE_ERROR');
+  return 'storage://'+path;
+}
+
+export interface UniversalCatalogHealth extends UniversalCatalogSummary {
+ prepared:number;integrated:number;operational:number;studio_available:number;problems:number;
+ present:number;removed:number;pricing_missing:number;real_tests_missing:number;measured_at:string;
+}
+export async function getUniversalCatalogHealth():Promise<UniversalCatalogHealth>{
+ const data=await getUniversalCatalogSummary() as UniversalCatalogHealth;
+ if(![data.prepared,data.integrated,data.operational,data.studio_available,data.problems,data.present,data.removed,data.pricing_missing,data.real_tests_missing].every(nonnegativeInteger)||typeof data.measured_at!=='string')
+  throw new AppError('Les compteurs universels ne sont pas disponibles. Aucun compteur vidéo historique n’est utilisé en remplacement.','CATALOG_INVALID_RESPONSE');
+ return data;
 }

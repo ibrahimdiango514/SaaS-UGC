@@ -558,17 +558,8 @@ export type ProviderQuoteSource = 'provider_estimate' | 'catalog_tariff' | 'none
  */
 export interface ProviderQuote {
   available: boolean;
-  cost_usd: number | null;
-  currency: 'USD' | null;
-  source: ProviderQuoteSource;
-  error_code: string | null;
-  error_message: string | null;
-  checked_at: string;
-  catalog_synced_at: string | null;
-  stale_catalog: boolean;
-  pricing_basis: Record<string, string | number | boolean>;
-  billing_units: string[];
-  estimate_endpoint_available: boolean;
+  verified?: boolean;
+  error_code: 'PROMPT_REQUIRED' | null;
 }
 
 export interface VideoCostEstimate {
