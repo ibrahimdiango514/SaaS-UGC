@@ -158,7 +158,10 @@ describe('fenêtre de paiement — prix tout compris', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Payer/ }));
     await waitFor(() => expect(edgeCalls('create')).toHaveLength(1));
     const body = edgeCalls('create')[0][1] as Record<string, unknown>;
-    expect(JSON.stringify(body)).not.toMatch(/amount|price|fee|6000|5000/);
+    // A UUID may legitimately contain the hex substring 'fee' or '6000'.
+    // Assert the request contract, rather than matching random token values.
+    expect(body).toEqual({ action:'create', product:'studio', item:{kind:'pack',pack_key:'creator'},
+      country:'ML', flow:'softpay', network:'orange_ml', phone:'70123456', idempotency_key:expect.any(String) });
     await waitFor(() => expect(screen.getByText(/Validez la demande de/).textContent).toContain(FCFA('6 000')));
   });
 });

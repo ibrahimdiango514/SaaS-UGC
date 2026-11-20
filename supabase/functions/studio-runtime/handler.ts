@@ -89,7 +89,7 @@ export function createHandler(deps:Dependencies) {
   const raw=await provider(`/api/v1/predictions/${encodeURIComponent(job.provider_id)}/result`);
   const data=record(raw.data??raw);
   if(data.id && data.id!==job.provider_id || data.request_id && data.request_id!==job.provider_id) error('RESULT_ID_MISMATCH',503);
-  const parsed=job.protocol_key?familyResult(job.protocol_key as Protocol,data,job.provider_id):parsePrediction(data,job.output_kind);
+  const parsed=job.protocol_key?familyResult(job.protocol_key as Protocol,data,job.provider_id,job.result_field):parsePrediction(data,job.output_kind);
   if(parsed.state==='pending') return;
   const outputs:Json[]=[];
   if(parsed.text) outputs.push({kind:'text',text:parsed.text});
