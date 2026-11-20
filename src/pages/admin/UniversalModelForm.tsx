@@ -1,3 +1,4 @@
+import {SchemaValueInput} from './SchemaValueInput';
 import { useState } from 'react';
 import { Button } from '../../components/ui';
 import { validateUniversalModelInput } from '../../lib/api';
@@ -18,13 +19,13 @@ export function UniversalModelForm({ modelId, schema, evidence, onSubmit, upload
     const params: Record<string, unknown> = {};
     try {
       for (const { key, definition: d } of fields) {
-        const text = values[key] ?? (d.default === undefined ? '' : typeof d.default === 'string' ? d.default : JSON.stringify(d.default));
+        const text = values[key] ?? (d.default === undefined || d.default===null ? '' : typeof d.default === 'string' ? d.default : JSON.stringify(d.default));
         if (text === '') continue;
         params[key] = ['string','text'].includes(String(d.type)) ? text : JSON.parse(text);
       }
-      if (onSubmit) { setBusy(true); setMessage(await onSubmit(params)); return; }
       const local = validateMuapiInput(schema, params);
-      if (!local.ok) { setMessage(`${local.code} : ${local.field ?? 'schéma'}`); return; }
+      if (!local.ok && !(onSubmit && upload)) { setMessage(`${local.code} : ${local.field ?? 'schéma'}`); return; }
+      if (onSubmit) { setBusy(true); setMessage(await onSubmit(params)); return; }
       setBusy(true);
       const result = await validateUniversalModelInput(modelId, params);
       setMessage(result.validation.ok ? 'Paramètres validés par le serveur. Aucune génération lancée, aucun crédit débité.' : `${result.validation.code} : ${result.validation.field ?? 'schéma'}`);
@@ -36,12 +37,13 @@ export function UniversalModelForm({ modelId, schema, evidence, onSubmit, upload
     {onSubmit && <p>Ajoutez vos médias dans le stockage privé. Le serveur contrôle les fichiers et les paramètres avant le devis. Aucune génération avant confirmation des crédits.</p>}
     {fields.map(({ key, definition: d, required }) => {
       const id = `universal-field-${key}`;
-      const value = values[key] ?? (d.default === undefined ? '' : typeof d.default === 'string' ? d.default : JSON.stringify(d.default));
+      const value = values[key] ?? (d.default === undefined || d.default===null ? '' : typeof d.default === 'string' ? d.default : JSON.stringify(d.default));
       const label = `${typeof d.title === 'string' ? d.title : key}${required ? ' *' : ''}`;
       return <div key={key}><label htmlFor={id} className="block text-slate-200">{label}</label>
-        {Array.isArray(d.enum) ? <select id={id} className="studio-input w-full" value={value} onChange={e => set(key,e.target.value)}><option value="">Non renseigné</option>{d.enum.map((v,i) => <option key={i} value={typeof v === 'string' ? v : JSON.stringify(v)}>{String(v)}</option>)}</select>
-          : d.type === 'boolean' ? <select id={id} className="studio-input w-full" value={value} onChange={e => set(key,e.target.value)}><option value="">Non renseigné</option><option value="true">Oui</option><option value="false">Non</option></select>
-          : <textarea id={id} className="studio-input w-full" rows={d.type === 'array' ? 3 : 2} value={value} maxLength={32768} onChange={e => set(key,e.target.value)} placeholder={d.type === 'array' ? 'Tableau JSON, par exemple ["https://…"]' : typeof d.placeholder === 'string' ? d.placeholder : ''} />}
+        {(d.type==='object'||d.type==='array'&&!(d as any).field||Array.isArray(d.enum)&&(d.enum.some(v=>typeof v==='object')||(d as any).typing===true)) ? <SchemaValueInput id={id} upload={upload} definition={d} value={value?(['string','text'].includes(String(d.type))?value:(()=>{try{return JSON.parse(value);}catch{return undefined;}})()):undefined} onChange={v=>set(key,v===undefined?'':typeof v==='string'?v:JSON.stringify(v))}/>
+          : d.type === 'boolean' ? <select id={id} className="studio-input w-full" value={value} onChange={e=>set(key,e.target.value)}><option value="">Non renseigné</option><option value="true">Oui</option><option value="false">Non</option></select>
+          : Array.isArray(d.enum) ? <select id={id} className="studio-input w-full" value={value} onChange={e=>set(key,e.target.value)}><option value="">Non renseigné</option>{d.enum.map((v,i)=><option key={i} value={typeof v==='string'?v:JSON.stringify(v)}>{String(v)}</option>)}</select>
+          : <textarea id={id} className="studio-input w-full" rows={d.type==='array'?3:2} value={value} maxLength={32768} onChange={e=>set(key,e.target.value)} placeholder={d.type==='array'?'Tableau JSON, par exemple ["https://…"]':typeof d.placeholder==='string'?d.placeholder:''}/>}
         {upload && d.field !== undefined && <label className="mt-1 block">Importer un fichier privé
           <input type="file" disabled={busy} className="block w-full" onChange={async e => {
             const file=e.target.files?.[0];if(!file)return;setBusy(true);setMessage('');onValuesChange?.();

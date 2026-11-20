@@ -56,3 +56,12 @@ it('binds a direct media output only from explicit URL semantics and snapshots i
  const guessed=structuredClone(direct);(guessed.output_schema.schemas.properties.output.properties.provider_specific_field as any)={type:'string'};
  expect(protocolBinding(guessed)).toBeNull();
 });
+it('binds named URI lists alongside non-media metadata, rejecting ambiguous or untyped outputs',()=>{
+ const m={...model,output_schema:{schemas:{type:'object',properties:{id:{type:'string'},status:{type:'string'},output:{type:'object',properties:{images:{type:'array',items:{type:'string',format:'uri'}},character_id:{type:'string'}}}}}}};
+ expect(protocolBinding(m)).toBe('muapi_output_media_list_v1');expect(progress(m).result_field).toBe('images');
+ expect(adapterSelfTest('muapi_output_media_list_v1')).toBe(true);
+ expect(familyResult('muapi_output_media_list_v1',{id:'r',status:'completed',output:{images:['https://example.com/1.png','https://example.com/2.png'],character_id:'c'}},'r','images').media).toHaveLength(2);
+ expect(()=>familyResult('muapi_output_media_list_v1',{id:'r',status:'completed',output:{images:['http://127.0.0.1/a']}},'r','images')).toThrow();
+ const ambiguous=structuredClone(m);Object.assign(ambiguous.output_schema.schemas.properties.output.properties,{other:{type:'array',items:{type:'string',format:'uri'}}});expect(protocolBinding(ambiguous)).toBeNull();
+ const untyped=structuredClone(m);delete (untyped.output_schema.schemas.properties.output.properties.images.items as any).format;expect(protocolBinding(untyped)).toBeNull();
+});

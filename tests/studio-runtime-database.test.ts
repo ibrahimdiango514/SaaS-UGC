@@ -41,6 +41,7 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec(read('20261120044000_studio_direct_media_adapter'));
  await db.exec('create table saas_ugc.studio_ai_model_details(model_id uuid,status text);');
  await db.exec(read('20261120050000_studio_catalog_truth'));
+ await db.exec(read('20261120053000_studio_structured_media'));
  await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,account_access,input_schema)
  values('muapi','real-model','Real','image',true,false,'available','{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
  set test.uid='${uid}';set test.role='authenticated';set test.admin='yes';`);
@@ -70,6 +71,11 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  const closed=(await db.query<{h:{operational:number;studio_available:number;enabled:number}}>('select public.studio_catalog_admin_summary() h')).rows[0].h;
  expect(closed.operational).toBe(0);expect(closed.studio_available).toBe(0);expect(closed.enabled).toBe(1);
  await db.exec('update saas_ugc.studio_runtime_limits set enabled=true where id');
+ await db.exec('begin;savepoint protocol_test');
+ await db.query('select public.studio_save_integration($1,$2,$3)',[mid,hash,JSON.stringify({...progress,version:'muapi-families-3',protocol:'muapi_output_media_list_v1',result_field:'images'})]);
+ expect((await db.query<{protocol:string}>('select protocol from saas_ugc.studio_model_integrations')).rows[0].protocol).toBe('muapi_output_media_list_v1');
+ expect((await db.query<{enabled:boolean}>('select enabled from saas_ugc.studio_runtime_configs')).rows[0].enabled).toBe(false);
+ await db.exec('rollback');
  const q=await quote();
  await db.exec(`set test.role='authenticated';set test.uid='${other}'`);
  await expect(db.query('select public.studio_runtime_start($1,$2)',[q,crypto.randomUUID()])).rejects.toThrow('quote_expired');
