@@ -315,14 +315,15 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
 
   // — Idempotence : un appel déjà en cours ou déjà terminé ne repart PAS chez
   //   le fournisseur. C'est la protection contre la double facturation.
-  if (request.requestKey && deps.claimCall) {
+  if (request.requestKey) {
     try {
+      if (!deps.claimCall) throw new Error('idempotency unavailable');
       const claim = await deps.claimCall(request.requestKey, {
         space: request.space ?? 'system',
         userId: request.userId ?? null,
         workspaceId: request.workspaceId ?? null,
       });
-      if (!claim.claimed && claim.status === 'in_flight') {
+      if (!claim.claimed) {
         return {
           ok: false, code: 'AI_DUPLICATE_IN_FLIGHT', content: null,
           providerKey: claim.providerKey, modelKey: claim.modelKey, providerModelKey: null,
@@ -331,7 +332,13 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
         };
       }
     } catch {
-      // Un registre d'idempotence indisponible ne doit jamais bloquer l'appel.
+      // No provider request is safe without the requested idempotency lock.
+      return {
+        ok: false, code: 'AI_IDEMPOTENCY_UNAVAILABLE', content: null,
+        providerKey: null, modelKey: null, providerModelKey: null,
+        inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+        latencyMs: Date.now() - startedAt, attempts: [],
+      };
     }
   }
 

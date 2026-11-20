@@ -126,3 +126,25 @@ describe('Service de devis VYORA (production endpoint)', () => {
     expect(billingUnits(basis)).toEqual(['duration', 'resolution', 'audio']);
   });
 });
+
+it('la réponse HTTP authentifiée ne contient aucun tarif fournisseur', async () => {
+  const { handler } = await import('../supabase/functions/video-quote/index');
+  process.env.SUPABASE_URL = 'https://project.test';
+  process.env.SUPABASE_ANON_KEY = 'anon';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service';
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes('/auth/v1/user')) return new Response(JSON.stringify({ id: 'user' }), { status: 200 });
+    if (url.includes('/rest/v1/reelora_video_models')) return new Response(JSON.stringify([row()]), { status: 200 });
+    throw new Error('unexpected request');
+  }));
+  try {
+    const result = await handler(new Request('https://local', { method: 'POST', headers: { Authorization: 'Bearer user', 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: 'f24bd427-9445-42dc-af9a-3723bf79fffd', prompt: 'test' }) }));
+    const data = await result.json();
+    expect(result.status).toBe(200);
+    expect(data.quote).toEqual({ available: true, error_code: null });
+    expect(JSON.stringify(data)).not.toMatch(/cost_usd|currency|USD|markup|pricing_basis/);
+  } finally {
+    delete process.env.SUPABASE_URL; delete process.env.SUPABASE_ANON_KEY; delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  }
+});
