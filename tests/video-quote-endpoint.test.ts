@@ -142,7 +142,7 @@ it('la réponse HTTP authentifiée ne contient aucun tarif fournisseur', async (
     const result = await handler(new Request('https://local', { method: 'POST', headers: { Authorization: 'Bearer user', 'Content-Type': 'application/json' }, body: JSON.stringify({ model_id: 'f24bd427-9445-42dc-af9a-3723bf79fffd', prompt: 'test' }) }));
     const data = await result.json();
     expect(result.status).toBe(200);
-    expect(data.quote).toEqual({ available: true, error_code: null });
+    expect(data.quote).toEqual({ available: false, verified: true, error_code: null, error_message: 'Consultez le coût en crédits VYORA avant de confirmer.', billing_units: [] });
     expect(JSON.stringify(data)).not.toMatch(/cost_usd|currency|USD|markup|pricing_basis/);
   } finally {
     delete process.env.SUPABASE_URL; delete process.env.SUPABASE_ANON_KEY; delete process.env.SUPABASE_SERVICE_ROLE_KEY;
