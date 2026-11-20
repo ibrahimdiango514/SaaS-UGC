@@ -31,7 +31,7 @@ export function assessment(model: Json, plan?: string) {
 export function customerSchema(schema: unknown): unknown {
   const fields = muapiFormFields(schema);
   if (!fields) return null;
-  const rules = new Set(['type','enum','minimum','maximum','minValue','maxValue','step','minLength','maxLength','minItems','maxItems','field','format','typing','required','additionalProperties']);
+  const rules = new Set(['type','enum','minimum','maximum','minValue','maxValue','step','minLength','maxLength','minItems','maxItems','field','format','typing','required','additionalProperties','conditionalMaxItems','limitWhenFieldPresent']);
   const clean = (def: Json): Json => {
     const out: Json = {};
     for (const [k,v] of Object.entries(def)) if (rules.has(k)) out[k]=v;

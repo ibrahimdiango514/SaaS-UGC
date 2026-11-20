@@ -78,3 +78,12 @@ it('applies declared valid nested defaults identically for quote and submission,
  const s={schemas:{input_data:{type:'object',properties:{turns:{type:'array',items:{type:'object',properties:{text:{type:'string'},stability:{type:'number',default:0.5,minimum:0,maximum:1}}}},language:{type:'string',default:null},bad:{type:'int',default:20,maximum:10}}}}};
  expect(muapiDefaults(s,{turns:[{text:'hello'},{text:'explicit',stability:0}]})).toEqual({turns:[{text:'hello',stability:0.5},{text:'explicit',stability:0}]});
 });
+it('enforces the observed Qwen mask-dependent reference-image cap without dropping the base limit',()=>{
+ const s={schemas:{input_data:{type:'object',properties:{mask:{type:'string'},images:{type:'array',items:{type:'string'},minItems:1,maxItems:10,conditionalMaxItems:1,limitWhenFieldPresent:'mask'}}}}};
+ expect(validateMuapiInput(s,{images:['a','b']}).ok).toBe(true);
+ expect(validateMuapiInput(s,{mask:'present',images:['a']}).ok).toBe(true);
+ expect(validateMuapiInput(s,{mask:'present',images:['a','b']})).toMatchObject({code:'PARAMETER_INVALID'});
+ expect(validateMuapiInput(s,{images:Array(11).fill('a')})).toMatchObject({code:'PARAMETER_INVALID'});
+ const unresolved=structuredClone(s);unresolved.schemas.input_data.properties.images.limitWhenFieldPresent='undeclared';
+ expect(validateMuapiInput(unresolved,{})).toMatchObject({code:'SCHEMA_UNSUPPORTED'});
+});

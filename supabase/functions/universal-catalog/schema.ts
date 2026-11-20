@@ -26,6 +26,8 @@ export function enumChoices(s: JsonObject): {value:unknown;label:string}[] | nul
  if(!Array.isArray(s.enum))return null;
  return s.enum.map(x=>object(x)?{value:x.value,label:String(x.label)}:{value:x,label:String(x)});
 }
+const conditionalDefinitions=(properties:JsonObject)=>Object.values(properties).every(raw=>{const d=raw as JsonObject;return d.limitWhenFieldPresent===undefined||typeof d.limitWhenFieldPresent==='string'&&Object.hasOwn(properties,d.limitWhenFieldPresent);});
+const conditionalValues=(properties:JsonObject,values:JsonObject)=>Object.entries(properties).every(([key,raw])=>{const d=raw as JsonObject;return typeof d.limitWhenFieldPresent!=='string'||!Object.hasOwn(values,d.limitWhenFieldPresent)||!Array.isArray(values[key])||(values[key] as unknown[]).length<=Number(d.conditionalMaxItems);});
 function supported(s: JsonObject, depth=0): boolean {
   if(depth>5)return false;
   if(s.type==='object') {
@@ -33,14 +35,15 @@ function supported(s: JsonObject, depth=0): boolean {
     if(s.additionalProperties!==undefined&&typeof s.additionalProperties!=='boolean')return false;
     const req=s.required??[];
     return Array.isArray(req)&&new Set(req).size===req.length&&req.every(k=>typeof k==='string'&&Object.hasOwn(s.properties as object,k))&&
-      Object.entries(s.properties).every(([k,v])=>safeKey(k)&&object(v)&&supported(v,depth+1));
+      conditionalDefinitions(s.properties)&&Object.entries(s.properties).every(([k,v])=>safeKey(k)&&object(v)&&supported(v,depth+1));
   }
   if ('field' in s && !mediaFields.includes(String(s.field))) return false;
   if ('format' in s && !['uri','url','text'].includes(String(s.format))) return false;
   if ('field' in s && !(s.type === 'string' || s.type === 'array')) return false;
   if ('format' in s && !textual(s.type)) return false;
   if (s.type === 'array') {
-    return only(s, ['type', 'items', 'minItems', 'maxItems', 'field']) && object(s.items) &&
+    if(('conditionalMaxItems' in s||'limitWhenFieldPresent' in s)&&(!natural(s.conditionalMaxItems)||typeof s.limitWhenFieldPresent!=='string'||!safeKey(s.limitWhenFieldPresent)))return false;
+    return only(s, ['type', 'items', 'minItems', 'maxItems', 'field','conditionalMaxItems','limitWhenFieldPresent']) && object(s.items) &&
       supported(s.items,depth+1) && (!s.field || s.items.type === 'string') &&
       (s.minItems === undefined || natural(s.minItems)) && (s.maxItems === undefined || natural(s.maxItems)) &&
       !(number(s.minItems) && number(s.maxItems) && s.minItems > s.maxItems);
@@ -72,7 +75,7 @@ function valid(s: JsonObject, v: unknown): boolean {
   if(s.type==='object') {
     if(!object(v)||Object.keys(v).length>100)return false;
     const props=s.properties as JsonObject;
-    return (s.required as string[]??[]).every(k=>Object.hasOwn(v,k))&&Object.entries(v).every(([k,x])=>Object.hasOwn(props,k)&&valid(props[k] as JsonObject,x));
+    return conditionalValues(props,v)&&(s.required as string[]??[]).every(k=>Object.hasOwn(v,k))&&Object.entries(v).every(([k,x])=>Object.hasOwn(props,k)&&valid(props[k] as JsonObject,x));
   }
   if (s.type === 'array') {
     if (!Array.isArray(v)||v.length>256) return false;
@@ -104,9 +107,11 @@ export function validateMuapiInput(inputSchema: unknown, params: unknown): Schem
   if (Object.keys(root.properties).length > 100 || Object.keys(root.properties).some(k => !safeKey(k))) return fail('SCHEMA_UNSUPPORTED',null);
   if (!Array.isArray(required) || required.some(x => typeof x !== 'string' || !Object.prototype.hasOwnProperty.call(root.properties, x)) || new Set(required).size !== required.length) return fail('SCHEMA_UNSUPPORTED',null);
   for (const [field, def] of Object.entries(root.properties)) if (!object(def) || !supported(def)) return fail('SCHEMA_UNSUPPORTED',field);
+  if(!conditionalDefinitions(root.properties))return fail('SCHEMA_UNSUPPORTED',null);
   if (!object(params) || Object.keys(params).length > 100) return fail('PARAMETER_INVALID',null);
   for (const key of Object.keys(params)) if (!Object.prototype.hasOwnProperty.call(root.properties,key)) return fail('PARAMETER_INVALID',key);
   for (const field of required as string[]) if (!Object.prototype.hasOwnProperty.call(params,field)) return fail('PARAMETER_REQUIRED',field);
+  if(!conditionalValues(root.properties,params))return fail('PARAMETER_INVALID',null);
   const value: JsonObject = {};
   for (const [key,v] of Object.entries(params)) {
     if (!valid(root.properties[key] as JsonObject,v)) return fail('PARAMETER_INVALID',key);
