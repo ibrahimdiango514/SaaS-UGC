@@ -39,6 +39,8 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec(read('20261120035400_studio_runtime_claim_fix'));
  await db.exec(read('20261120041508_studio_family_progress'));
  await db.exec(read('20261120044000_studio_direct_media_adapter'));
+ await db.exec('create table saas_ugc.studio_ai_model_details(model_id uuid,status text);');
+ await db.exec(read('20261120050000_studio_catalog_truth'));
  await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,account_access,input_schema)
  values('muapi','real-model','Real','image',true,false,'available','{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
  set test.uid='${uid}';set test.role='authenticated';set test.admin='yes';`);
@@ -62,6 +64,12 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec("set test.role='authenticated'");
  await expect(db.query('select public.studio_save_integration($1,$2,$3)',[mid,hash,JSON.stringify(progress)])).rejects.toThrow('forbidden');
  await db.exec("set test.role='service_role'");
+ const health=(await db.query<{h:{models:number;prepared:number;enabled:number;operational:number;studio_available:number}}>('select public.studio_catalog_admin_summary() h')).rows[0].h;
+ expect(health.models).toBe(1);expect(health.prepared).toBe(1);expect(health.enabled).toBe(1);expect(health.operational).toBe(1);expect(health.studio_available).toBe(1);
+ await db.exec('update saas_ugc.studio_runtime_limits set enabled=false where id');
+ const closed=(await db.query<{h:{operational:number;studio_available:number;enabled:number}}>('select public.studio_catalog_admin_summary() h')).rows[0].h;
+ expect(closed.operational).toBe(0);expect(closed.studio_available).toBe(0);expect(closed.enabled).toBe(1);
+ await db.exec('update saas_ugc.studio_runtime_limits set enabled=true where id');
  const q=await quote();
  await db.exec(`set test.role='authenticated';set test.uid='${other}'`);
  await expect(db.query('select public.studio_runtime_start($1,$2)',[q,crypto.randomUUID()])).rejects.toThrow('quote_expired');

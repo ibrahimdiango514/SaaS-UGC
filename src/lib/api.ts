@@ -1,3 +1,4 @@
+import {invalidateCatalog} from '../hooks/useCatalogRevision';
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
 import type {
@@ -1264,7 +1265,11 @@ export interface UniversalStudioModel {
 export interface UniversalStudioPage {total:number;categories:Record<string,number>;items:UniversalStudioModel[];next_cursor:string|null;credits:number;workspace_id:string}
 export interface UniversalStudioJob {id:string;status:string;credits:number;display_name:string;provider_model_id:string;created_at:string;error_code:string|null;outputs:{kind:'file'|'text';path?:string;url?:string;mime?:string;text?:string}[]}
 export interface UniversalStudioQuote {quote_id:string;credits:number;expires_at:string;balance:number}
-export const universalRuntime = <T>(action:string,body:Record<string,unknown>={}) => invokeEdge<T>('studio-runtime',{...body,action});
+export const universalRuntime = async <T>(action:string,body:Record<string,unknown>={}) => {
+ const result=await invokeEdge<T>('studio-runtime',{...body,action});
+ if(action==='admin_limits'||action==='admin_reconcile'||action==='admin_config'&&body.config!=null)invalidateCatalog();
+ return result;
+};
 export async function uploadUniversalInput(workspaceId:string,file:File):Promise<string> {
   if(!/^[0-9a-f-]{36}$/i.test(workspaceId)||file.size<=0||file.size>50*1024*1024) throw new AppError('Fichier trop volumineux ou vide.','FILE_INVALID');
   const ext=(file.name.split('.').pop()??'').toLowerCase();
@@ -1273,4 +1278,15 @@ export async function uploadUniversalInput(workspaceId:string,file:File):Promise
   const {error}=await supabase.storage.from(STORAGE_BUCKET).upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
   if(error)throw new AppError('Import privé impossible.','STORAGE_ERROR');
   return 'storage://'+path;
+}
+
+export interface UniversalCatalogHealth extends UniversalCatalogSummary {
+ prepared:number;integrated:number;operational:number;studio_available:number;problems:number;
+ present:number;removed:number;pricing_missing:number;real_tests_missing:number;measured_at:string;
+}
+export async function getUniversalCatalogHealth():Promise<UniversalCatalogHealth>{
+ const data=await getUniversalCatalogSummary() as UniversalCatalogHealth;
+ if(![data.prepared,data.integrated,data.operational,data.studio_available,data.problems,data.present,data.removed,data.pricing_missing,data.real_tests_missing].every(nonnegativeInteger)||typeof data.measured_at!=='string')
+  throw new AppError('Les compteurs universels ne sont pas disponibles. Aucun compteur vidéo historique n’est utilisé en remplacement.','CATALOG_INVALID_RESPONSE');
+ return data;
 }

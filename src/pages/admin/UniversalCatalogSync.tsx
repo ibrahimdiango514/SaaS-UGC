@@ -1,3 +1,4 @@
+import {invalidateCatalog,useCatalogRevision} from '../../hooks/useCatalogRevision';
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, CardHeader } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
@@ -5,6 +6,7 @@ import { getUniversalCatalogSummary, syncUniversalCatalog, syncUniversalCatalogD
 
 /** Manual administrator operations only; the server rechecks the role. */
 export function UniversalCatalogSync() {
+ const catalogRevision=useCatalogRevision();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -14,7 +16,7 @@ export function UniversalCatalogSync() {
     try { setSummary(await getUniversalCatalogSummary()); setSummaryError(''); }
     catch { setSummary(null); setSummaryError('Impossible de lire l’état du registre.'); }
   }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh,catalogRevision]);
   async function run(action: 'catalog' | 'details') {
     setBusy(true); setMessage(''); setError('');
     try {
@@ -25,6 +27,7 @@ export function UniversalCatalogSync() {
         const r = await syncUniversalCatalogDetails();
         setMessage(`${r.attempted} fiche(s) tentée(s) : ${r.ok} enregistrée(s), ${r.http_error + r.invalid + r.network_error + r.persist_error} erreur(s).`);
       }
+      invalidateCatalog();
       await refresh();
     } catch (err) { setError(asAppError(err).message); }
     finally { setBusy(false); }

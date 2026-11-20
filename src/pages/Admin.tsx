@@ -1,3 +1,4 @@
+import {UniversalCatalogHealth} from './admin/UniversalCatalogHealth';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Activity, Bot, Brain, Coins, Cpu, CreditCard, FileClock, RefreshCw, Settings2, Shield, Sparkles, TrendingUp, Users, Video, Zap } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Badge, Modal, Banner, LoadingState, ErrorState, EmptyState, Tabs, StatCard } from '../components/ui';
@@ -245,7 +246,7 @@ export default function Admin() {
         { id: 'recharges', label: 'Recharges', icon: <CreditCard size={14} /> },
         { id: 'saspay', label: 'Paiements SasPay', icon: <Coins size={14} /> },
         { id: 'services', label: 'Services', icon: <Zap size={14} /> },
-        { id: 'models', label: 'Modèles vidéo', icon: <Video size={14} /> },
+        { id: 'models', label: 'Catalogue MuAPI', icon: <Video size={14} /> },
         { id: 'providers', label: 'Fournisseurs IA', icon: <Bot size={14} /> },
         { id: 'ai-core', label: 'Contrôle IA', icon: <Cpu size={14} /> },
         { id: 'studio-activity', label: 'Activité Studio', icon: <Video size={14} /> },
@@ -255,13 +256,14 @@ export default function Admin() {
         { id: 'audit', label: 'Journal', icon: <FileClock size={14} /> },
       ]} />
 
+      {tab === 'overview' && <UniversalCatalogHealth onInspect={()=>setTab('models')} />}
       {tab === 'overview' && overview && (
         <>
           <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Revenus encaissés" value={metrics ? money(metrics.revenue.collected_total_minor, metrics.revenue.currency) : '—'} icon={<CreditCard size={19} />} hint={metrics ? `${metrics.revenue.collected_orders} commande(s) payée(s)` : undefined} tone="emerald" />
             <StatCard label="MRR" value={metrics ? money(metrics.mrr.current_minor, metrics.mrr.currency) : '—'} icon={<TrendingUp size={19} />} hint={metrics ? `${metrics.mrr.active_recurring_subscriptions} abonnement(s) récurrent(s)` : undefined} tone="amber" />
             <StatCard label="Période exploitable" value={metrics ? metrics.history.months_of_history : '—'} icon={<Activity size={19} />} hint={metrics ? `depuis ${metrics.history.exploitable_from}` : undefined} tone="cyan" />
-            <StatCard label="Modèles vidéo" value={metrics ? metrics.models.total : '—'} icon={<Video size={19} />} hint={metrics ? `${metrics.models.selectable} sélectionnable(s)` : undefined} />
+            <StatCard label="Vidéos historiques uniquement" value={metrics ? metrics.models.total : '—'} icon={<Video size={19} />} hint="Sous-catalogue conservé, pas le total MuAPI" />
           </div>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Utilisateurs" value={overview.users} icon={<Users size={19} />} />

@@ -1,3 +1,4 @@
+import {useCatalogRevision} from '../hooks/useCatalogRevision';
 import { useEffect,useState } from 'react';
 import { Button,Card } from '../components/ui';
 import { asAppError } from '../lib/errors';
@@ -6,11 +7,13 @@ import { UniversalModelForm } from '../pages/admin/UniversalModelForm';
 import { StudioShell } from './components/StudioShell';
 const reasons:Record<string,string>={PROVIDER_UNAVAILABLE:'Indisponible chez le fournisseur',ENDPOINT_UNVERIFIED:'Endpoint à vérifier',SCHEMA_UNSUPPORTED:'Contraintes du formulaire à intégrer',UNSAFE_PARAMETER:'Paramètre technique non autorisé',PRICING_REQUIRED:'Crédits à configurer',ADAPTER_UNVERIFIED:'Protocole à vérifier',PAID_VALIDATION_PENDING:'Validation réelle en attente d’autorisation financière',ADMIN_DISABLED:'Désactivé par l’administration',RUNTIME_DISABLED:'Exécution non ouverte',ACCESS_UNCONFIRMED:'Accès fournisseur non confirmé',QUOTA_POLICY_PENDING:'Politique de quota à valider',ESTIMATE_ENDPOINT_UNVERIFIED:'Estimation fournisseur à vérifier',PLAN_UNAVAILABLE:'Non disponible pour votre abonnement'};
 export default function UniversalStudio(){
+ const catalogRevision=useCatalogRevision();
  const [page,setPage]=useState<UniversalStudioPage|null>(null),[query,setQuery]=useState(''),[filter,setFilter]=useState(''),[category,setCategory]=useState(''),[cursors,setCursors]=useState(['']);
  const [selected,setSelected]=useState<UniversalStudioModel|null>(null),[quote,setQuote]=useState<UniversalStudioQuote|null>(null),[job,setJob]=useState<string|null>(null),[jobs,setJobs]=useState<UniversalStudioJob[]>([]);
  const [error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,setRefresh]=useState(0),[requestKey,setRequestKey]=useState('');
  const after=cursors[cursors.length-1];
- useEffect(()=>{let live=true;setBusy(true);setError('');universalRuntime<UniversalStudioPage>('models',{after,query:filter,category}).then(p=>{if(live)setPage(p);}).catch(e=>{if(live)setError(asAppError(e).message);}).finally(()=>{if(live)setBusy(false);});return()=>{live=false;};},[after,filter,category,refresh]);
+ useEffect(()=>{let live=true;setBusy(true);setError('');universalRuntime<UniversalStudioPage>('models',{after,query:filter,category}).then(p=>{if(live)setPage(p);}).catch(e=>{if(live)setError(asAppError(e).message);}).finally(()=>{if(live)setBusy(false);});return()=>{live=false;};},[after,filter,category,refresh,catalogRevision]);
+ useEffect(()=>{if(!selected||!page)return;const next=page.items.find(m=>m.model_id===selected.model_id)??null;if(JSON.stringify(next)!==JSON.stringify(selected)){setSelected(next);setQuote(null);}},[page,selected]);
  useEffect(()=>{let live=true;universalRuntime<{jobs:UniversalStudioJob[]}>('history').then(r=>{if(live)setJobs(r.jobs);}).catch(()=>{});return()=>{live=false;};},[refresh]);
  useEffect(()=>{if(!job)return;let active=true;let timer:ReturnType<typeof setTimeout>;const tick=async()=>{try{const r=await universalRuntime<{status:string}>('status',{job_id:job});if(active){setRefresh(n=>n+1);if(['succeeded','failed','uncertain','expired'].includes(r.status)){setJob(null);return;}}}catch{/* Explicit history refresh is still available; never auto-submit. */}if(active)timer=setTimeout(tick,15000);};timer=setTimeout(tick,15000);return()=>{active=false;clearTimeout(timer);};},[job]);
  const reset=()=>{setCursors(['']);setSelected(null);setQuote(null);};
