@@ -17,7 +17,7 @@ it('applies endpoint evidence additively, preserves admin/service gates and neve
     await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,input_schema)
       values('muapi','qwen3-text-to-image','Qwen','image','{"schemas":{"input_data":{"type":"object","properties":{}}}}'),
       ('muapi','keep-me','Keep','video','{}');`);
-    await db.exec(read('20261120030000_studio_endpoint_evidence'));
+    await db.exec(read('20261120024717_studio_endpoint_evidence'));
     expect((await db.query<{n:number}>('select count(*)::int as n from saas_ugc.studio_ai_models where studio_enabled')).rows[0].n).toBe(0);
     const evidence = await db.query<{endpoint_evidence:{endpoint:string}}>("select endpoint_evidence from saas_ugc.studio_ai_models where provider_model_id='qwen3-text-to-image'");
     expect(evidence.rows[0].endpoint_evidence.endpoint).toBe('/api/v1/qwen3-text-to-image');

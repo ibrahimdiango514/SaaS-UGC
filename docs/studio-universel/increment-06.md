@@ -54,8 +54,26 @@ Les 415 modèles vidéo historiques ne sont pas modifiés. Aucun appel payant ni
 
 ## Déploiement
 
-Au moment de la préparation de cette note : non déployé. La PR doit passer la CI,
-être fusionnée selon les protections, puis la migration et le chargeur doivent être
-publiés. Les preuves et versions finales seront consignées dans la PR. Aucun secret
-supplémentaire n'est requis pour cette validation sans fournisseur. Des sessions
-admin/utilisateur réelles restent nécessaires pour le parcours authentifié E2E.
+PR #34 fusionnée après CI verte, commit main `e19e3dd8150c9249148ca3af4b1c553ad9e5f383`.
+Migration appliquée sur le projet principal, version confirmée dans l'historique :
+`20261120024717`, nom `studio_endpoint_evidence`. Le nom du fichier du dépôt est
+aligné sur cette version générée par le connecteur pour éviter une double application.
+
+Après migration : 861 modèles conservés, sept évidences de premier niveau, 861
+chemins déclarés syntaxiquement valides, 0 activé. Ces comptes ne sont PAS 861
+modèles exécutables. Aucun endpoint de génération n'a été appelé.
+
+Artefact publié par transaction depuis le commit fusionné, après contrôle SHA-256
+du SQL `5fa0afb29cc519955041c99e931632fb5186d680dda802d70cc2d9005226e611`.
+Chargeur exact du dépôt déployé : `universal-catalog` **v2 ACTIVE**, verify_jwt=true,
+artefact `cefab37c48ef92a0cae73a536f59e5633a6ca9fe2bbba34ce2e8d2bb762b8f54`,
+13109 caractères, quatre tranches. Anciennes fonctions et artefacts conservés.
+
+Frontend : GET production `https://vyora-saas-ugc.netlify.app/` HTTP 200,
+cachet `vyora-revision=e19e3dd` mesuré via pg_net 17837. Le contrôle GitHub vise
+maintenant ce domaine par défaut, et non l'ancienne URL 404.
+
+La présence du nouveau code frontend et les métadonnées ACTIVE de l'Edge ne
+prouvent pas un parcours authentifié de production. Il manque des sessions réelles
+admin/utilisateur pour cette preuve ; aucun secret supplémentaire n'est requis pour
+la validation elle-même. Aucune clé ni aucun mot de passe n'est demandé dans le chat.
