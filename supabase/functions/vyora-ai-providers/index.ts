@@ -242,8 +242,8 @@ function aiEngineDeps(outcomeBox: { outcome: AiCallOutcome | null }): AiEngineDe
         p_workspace_id: meta.workspaceId,
       });
       void outcomeBox;
-      const row = Array.isArray(res.data) ? (res.data[0] as Json | undefined) : undefined;
-      if (!res.ok || !row) return { claimed: true, status: 'in_flight', providerKey: null, modelKey: null, outcomeCode: null };
+      const row = Array.isArray(res.data) ? (res.data[0] as Json | undefined) : (res.data && typeof res.data === 'object' ? res.data as Json : undefined);
+      if (!res.ok || !row || typeof row.claimed !== 'boolean') throw new Error('AI_IDEMPOTENCY_UNAVAILABLE');
       return {
         claimed: row.claimed === true,
         status: typeof row.status === 'string' ? row.status : 'in_flight',
@@ -485,7 +485,8 @@ export async function handler(req: Request): Promise<Response> {
         verified_model: null,
         message: 'Secret absent : aucun appel effectué, aucun statut inventé.',
       });
-      await rpc('vyora_ai_record_probe', {
+      // A read-only discovery must not deactivate an existing provider.
+      if (probeCompletion) await rpc('vyora_ai_record_probe', {
         p_payload: {
           provider_key: key,
           catalog_ok: false,
@@ -508,8 +509,11 @@ export async function handler(req: Request): Promise<Response> {
     // Le catalogue est écrit AVANT le choix du modèle de test : on ne devine
     // jamais un identifiant de modèle, on le lit chez le fournisseur.
     let syncedModels = 0;
-    if (probe.catalogOk && probe.models.length > 0) {
-      const payload = probe.models.slice(0, 400).map((model) => ({
+    // The legacy sync marks all unseen rows absent, and probeProvider does not
+    // yet prove pagination completeness. Never mutate the catalog in read-only
+    // mode. Also refuse to sync a truncated >400-model snapshot on legacy probes.
+    if (probeCompletion && probe.catalogOk && probe.models.length > 0 && probe.models.length <= 400) {
+      const payload = probe.models.map((model) => ({
         model_key: model.modelKey,
         provider_model: model.providerModel,
         display_name: model.displayName,
@@ -522,7 +526,7 @@ export async function handler(req: Request): Promise<Response> {
         note: model.note,
       }));
       const synced = await rpc('vyora_ai_sync_catalog', { p_provider_key: key, p_models: payload });
-      syncedModels = typeof synced.data === 'number' ? synced.data : probe.models.length;
+      syncedModels = synced.ok && typeof synced.data === 'number' ? synced.data : 0;
     }
 
     // Modèle de test : un choix EXPLICITE de l'opérateur, sinon le modèle le
@@ -554,7 +558,9 @@ export async function handler(req: Request): Promise<Response> {
         ? null
         : completion.catalogErrorCode;
 
-    await rpc('vyora_ai_record_probe', {
+    // In catalog-only mode, a null completion is not a failed completion.
+    // The legacy RPC would disable the provider, so never write its verdict.
+    if (probeCompletion) await rpc('vyora_ai_record_probe', {
       p_payload: {
         provider_key: key,
         catalog_ok: completion.catalogOk,
@@ -571,9 +577,8 @@ export async function handler(req: Request): Promise<Response> {
     results.push({
       provider: key,
       transport: str(row.transport, 20) || 'rest',
-      status: completion.completionOk === true
-        ? 'healthy'
-        : completion.catalogOk ? 'degraded' : 'failed',
+      status: !probeCompletion ? (completion.catalogOk ? 'catalog_accessible' : 'catalog_inaccessible')
+        : completion.completionOk === true ? 'healthy' : completion.catalogOk ? 'degraded' : 'failed',
       credentials_present: true,
       missing,
       catalog_http_status: completion.catalogHttpStatus,
@@ -602,8 +607,6 @@ export async function handler(req: Request): Promise<Response> {
     results,
   });
 }
-
-const runtime = globalThis as unknown as { Deno?: { serve?: (fn: (r: Request) => Promise<Response>) => void } };
 
 runtimeGlobal.__vyoraAiProvidersHandler = handler;
 runtimeGlobal.Deno?.serve?.(handler);

@@ -17,7 +17,7 @@
 //   { action: "model-detail", model_id }        -> real input_schema for one model
 //   { action: "models" }                        -> live/cached verified video models (legacy Studio)
 //   { action: "estimate", service_key, model_id, params?, prompt?, image_url? }
-//                                               -> backend credit + exact provider cost estimate
+//                                               -> backend credit estimate (provider cost stays server-side)
 //   { action: "start", job_id }                 -> idempotent MuAPI submission
 //   { action: "status", job_id }                -> DB state + signed preview URL
 //
@@ -35,6 +35,8 @@ import {
   type ProviderReplyLike,
   type QuoteModelMeta,
 } from "../_shared/video-quote.ts";
+
+import { customerQuote } from "../_shared/customer-quote.ts";
 
 type Json = Record<string, unknown>;
 const MUAPI_BASE = "https://api.muapi.ai";
@@ -1301,7 +1303,7 @@ async function resolveProviderQuote(body: Json): Promise<ResolvedProviderQuote> 
   }));
 }
 
-/** Devis fournisseur public (aucun crédit, aucune génération, aucun débit). */
+/** Vérification de devis client (aucun crédit, aucune génération, aucun débit). */
 async function actionProviderQuote(body: Json): Promise<Response> {
   const resolved = await resolveProviderQuote(body);
   return json({
@@ -1309,7 +1311,7 @@ async function actionProviderQuote(body: Json): Promise<Response> {
     model_available: resolved.modelAvailable,
     model_status: resolved.modelStatus,
     model_reason: resolved.modelReason,
-    quote: resolved.quote,
+    quote: customerQuote(resolved.quote),
   });
 }
 
@@ -1333,12 +1335,12 @@ async function actionEstimate(body: Json, userId: string): Promise<Response> {
   if (!service?.active || !modelAvailable) {
     pricingError = "Ce modèle ou ce service n'est pas disponible pour le moment.";
   } else if (!quoteAvailable || providerCostUsd === null) {
-    pricingError = quote?.error_message ?? "Le tarif exact de cette génération n'est pas disponible.";
+    pricingError = quote?.error_code === "PROMPT_REQUIRED" ? "Renseignez une instruction vidéo pour obtenir un devis." : "Le coût en crédits est temporairement indisponible.";
   } else {
     const config = await loadVideoPricingConfig();
     if (!config?.enabled || config.usd_to_xof === null || config.credit_value_xof === null
       || config.markup_percent === null || config.additional_cost_usd === null || !config.updated_at) {
-      pricingError = "La tarification en crédits n'est pas encore configurée. Le devis fournisseur en USD reste disponible, mais la réservation de crédits est bloquée.";
+      pricingError = "La tarification en crédits n'est pas encore configurée. La réservation de crédits est bloquée.";
     } else {
       creditsCost = calculateVideoCredits(providerCostUsd, config);
       if (creditsCost === null) {
@@ -1382,7 +1384,7 @@ async function actionEstimate(body: Json, userId: string): Promise<Response> {
     pricing_error: pricingError,
     quote_id: quoteId,
     quote_expires_at: quoteId ? new Date(Date.now() + 10 * 60 * 1000).toISOString() : null,
-    provider_quote: quote,
+    provider_quote: customerQuote(quote),
   });
 }
 

@@ -18,20 +18,33 @@
  * affiche `hasCredential` tel que le serveur le rapporte. Un statut
  * `connected` sans secret — trace d'une ancienne demande d'activation — est
  * affiché comme une anomalie, jamais comme une connexion saine.
+ *
+ * ## Verrou Business Grow (constat de production, 2026-11-18)
+ *
+ * Sans abonnement actif, ce panneau lisait quand même les quatre connecteurs :
+ * quatre appels `store-connect` inutiles, qui échouaient (CORS / réseau) et
+ * affichaient « Vérification en cours » puis une erreur — alors que l'écran
+ * disait, juste au-dessus, que les connexions ne sont pas lues sans
+ * abonnement. L'écran hôte décide désormais, par `access`, si la lecture a
+ * lieu : `locked` et `pending` n'émettent **aucune** requête.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Clock,
   Link2,
   Loader2,
+  Lock,
   Plug,
   RefreshCw,
   ShieldAlert,
   XCircle,
 } from 'lucide-react';
 import { Button, EmptyState } from '../components/ui';
+import { SUBSCRIPTION_PATH } from '../business/import-connect/access';
 import {
   CONNECTION_STATE_LABELS,
   deriveConnectionState,
@@ -51,8 +64,24 @@ export interface ConnectedStore {
   readError?: string;
 }
 
+/**
+ * Accès aux connexions, décidé par l'écran hôte à partir de la réponse du
+ * serveur (`integrations.list` refuse sans abonnement Business Grow actif).
+ *
+ * - `active`  : abonnement vérifié côté serveur → les états sont lus ;
+ * - `locked`  : abonnement absent/inactif → verrouillé, aucune requête ;
+ * - `pending` : vérification en cours ou impossible → aucune requête, et
+ *               aucune conclusion (ni « connectée », ni « non configurée »).
+ */
+export type BoutiquesAccess =
+  | { kind: 'active' }
+  | { kind: 'pending'; message?: string }
+  | { kind: 'locked'; title: string; detail: string; showSubscribe: boolean };
+
 export interface MesBoutiquesProps {
   workspaceId: string | null;
+  /** Verrou d'accès : seules les valeurs `active` déclenchent une lecture. */
+  access: BoutiquesAccess;
   /** Ouvre la fiche du connecteur (fourni par l'écran hôte). */
   onOpenConnector?: (connectorKey: string) => void;
   /** Callback quand l'utilisateur demande un rafraîchissement manuel. */
@@ -78,14 +107,17 @@ const TONS: Record<ConnectionState, { tone: string; icon: typeof CheckCircle2; l
   expired: { tone: 'text-amber-300', icon: Clock, label: 'Connexion expirée' },
 };
 
-export function MesBoutiquesConnectees({ workspaceId, onOpenConnector }: MesBoutiquesProps) {
+export function MesBoutiquesConnectees({ workspaceId, access, onOpenConnector }: MesBoutiquesProps) {
   const [etats, setEtats] = useState<Record<string, ConnectedStore> | null>(null);
   const [chargement, setChargement] = useState(false);
   const [erreurGlobale, setErreurGlobale] = useState<string | null>(null);
+  const accesActif = access.kind === 'active';
 
   const lire = useCallback(async () => {
-    if (!workspaceId) {
+    // Sans abonnement vérifié, on ne lit RIEN : pas de requête, pas d'état.
+    if (!workspaceId || !accesActif) {
       setEtats(null);
+      setChargement(false);
       return;
     }
     setChargement(true);
@@ -119,7 +151,7 @@ export function MesBoutiquesConnectees({ workspaceId, onOpenConnector }: MesBout
 
     setEtats(resultat);
     setChargement(false);
-  }, [workspaceId]);
+  }, [workspaceId, accesActif]);
 
   useEffect(() => {
     void lire();
@@ -148,8 +180,53 @@ export function MesBoutiquesConnectees({ workspaceId, onOpenConnector }: MesBout
     );
   }
 
+  if (access.kind === 'locked') {
+    return (
+      <section
+        className="rounded-xl border border-violet-300/25 bg-violet-400/[0.06] p-4"
+        data-testid="mes-boutiques"
+        data-access="locked"
+      >
+        <h3 className="flex items-center gap-1.5 font-display text-sm font-semibold text-white">
+          <Lock size={14} className="text-violet-200" /> Connexions verrouillées
+        </h3>
+        <p className="mt-1 text-xs text-violet-100/90">{access.title}</p>
+        <p className="mt-0.5 text-[0.7rem] text-violet-100/70">{access.detail}</p>
+        <p className="mt-1.5 text-[0.7rem] text-violet-100/70">
+          Vos boutiques (PrestaShop, Chariow, Shopify, WooCommerce) ne sont pas interrogées tant que
+          l’abonnement Business Grow n’est pas actif : aucune requête n’est émise, aucun état n’est supposé.
+        </p>
+        {access.showSubscribe && (
+          <Link
+            to={SUBSCRIPTION_PATH}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-100 underline-offset-2 hover:underline"
+            data-testid="mes-boutiques-abonnement"
+          >
+            Voir l’abonnement Business Grow <ArrowRight size={12} />
+          </Link>
+        )}
+      </section>
+    );
+  }
+
+  if (access.kind === 'pending') {
+    return (
+      <section className="rounded-xl border border-line bg-panel/60 p-4" data-testid="mes-boutiques" data-access="pending">
+        <h3 className="flex items-center gap-1.5 font-display text-sm font-semibold text-white">
+          <Link2 size={14} className="text-brand-300" /> Mes boutiques connectées
+        </h3>
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
+          {access.message
+            ? <AlertTriangle size={12} className="shrink-0 text-amber-300" />
+            : <Loader2 size={12} className="animate-spin" />}
+          {access.message ?? 'Vérification de l’abonnement Business Grow… Les boutiques ne sont pas interrogées avant cette vérification.'}
+        </p>
+      </section>
+    );
+  }
+
   return (
-    <section className="rounded-xl border border-line bg-panel/60 p-4" data-testid="mes-boutiques">
+    <section className="rounded-xl border border-line bg-panel/60 p-4" data-testid="mes-boutiques" data-access="active">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 className="flex items-center gap-1.5 font-display text-sm font-semibold text-white">
@@ -207,8 +284,12 @@ export function MesBoutiquesConnectees({ workspaceId, onOpenConnector }: MesBout
                   <span className="text-xs font-semibold text-white">
                     {exigence?.label ?? ligne.connectorKey}
                   </span>
-                  <span className={`text-[0.68rem] ${apparence.tone}`}>
-                    {CONNECTION_STATE_LABELS[ligne.state] ?? apparence.label}
+                  <span className={`text-[0.68rem] ${ligne.readError ? 'text-amber-300' : apparence.tone}`}>
+                    {/*
+                      * Une lecture échouée n'est pas « en cours » : le dire
+                      * laissait croire qu'un résultat allait arriver.
+                      */}
+                    {ligne.readError ? 'État illisible' : (CONNECTION_STATE_LABELS[ligne.state] ?? apparence.label)}
                   </span>
                   {onOpenConnector && (
                     <Button

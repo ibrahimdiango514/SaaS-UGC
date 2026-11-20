@@ -53,6 +53,76 @@ export async function invokeEdge<T>(name: string, body: Record<string, unknown>)
   return data as T;
 }
 
+export interface UniversalCatalogSyncResult {
+  scope: 'public'; fetched: number; pages: number;
+  result: { total: number; added: number; changed: number; missing: number; sync_id: string };
+}
+export interface UniversalCatalogDetailResult {
+  attempted: number; ok: number; http_error: number; invalid: number; network_error: number; persist_error: number;
+}
+export interface UniversalCatalogSummary {
+  models: number; details_ok: number; detail_errors: number; enabled: number;
+  last_sync: string | null; categories: Record<string, number>;
+}
+export interface UniversalAdminModel {
+  provider_model_id: string; provider_key: string; display_name: string; category: string;
+  public_catalog_present: boolean; account_access: string; integration_status: string;
+  studio_enabled: boolean; adapter_key: string | null; detail_status: string | null; detail_http_status: number | null;
+}
+export interface UniversalAdminModelDetail extends UniversalAdminModel {
+  description: string | null; input_fields: string[]; required_fields: string[];
+  input_schema: unknown; output_schema: unknown; metadata: Record<string, unknown>;
+  provider_enabled: boolean | null; coming_soon: boolean | null; detail_checked_at: string | null;
+  recent_changes: { id: number; change_type: string; created_at: string }[];
+}
+export interface UniversalAdminPage { total: number; items: UniversalAdminModel[]; next_cursor: string | null }
+
+const nonnegativeInteger = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+
+export async function getUniversalAdminModels(filters: { query: string; category: string; status: string; after: string }): Promise<UniversalAdminPage> {
+  const data = await rpc<UniversalAdminPage>('studio_catalog_admin_models', { p_query: filters.query, p_category: filters.category, p_status: filters.status, p_after: filters.after, p_limit: 50 });
+  if (!data || !nonnegativeInteger(data.total) || !Array.isArray(data.items) ||
+      !(data.next_cursor === null || typeof data.next_cursor === 'string') || data.items.some(m => !m || typeof m.provider_model_id !== 'string')) {
+    throw new AppError('Réponse catalogue administrateur invalide.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+export async function getUniversalAdminModelDetail(modelId: string): Promise<UniversalAdminModelDetail> {
+  const data = await rpc<UniversalAdminModelDetail | null>('studio_catalog_admin_model_detail', { p_model_id: modelId });
+  if (!data || data.provider_model_id !== modelId || !Array.isArray(data.input_fields) || !Array.isArray(data.required_fields) || !Array.isArray(data.recent_changes)) {
+    throw new AppError('Fiche administrateur introuvable ou invalide.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+
+export async function getUniversalCatalogSummary(): Promise<UniversalCatalogSummary> {
+  const data = await rpc<UniversalCatalogSummary>('studio_catalog_admin_summary');
+  if (!data || ![data.models, data.details_ok, data.detail_errors, data.enabled].every(nonnegativeInteger) ||
+      !(data.last_sync === null || typeof data.last_sync === 'string') || !data.categories ||
+      typeof data.categories !== 'object' || Array.isArray(data.categories) || !Object.values(data.categories).every(nonnegativeInteger)) {
+    throw new AppError('Le serveur n’a pas confirmé l’état du catalogue.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+
+/** Les deux actions sont autorisées par la fonction serveur, pas par l'interface. */
+export async function syncUniversalCatalog(): Promise<UniversalCatalogSyncResult> {
+  const data = await invokeEdge<UniversalCatalogSyncResult>('universal-catalog', { action: 'sync_muapi', scope: 'public' });
+  if (!data || data.scope !== 'public' || !nonnegativeInteger(data.fetched) || !nonnegativeInteger(data.pages) ||
+      !data.result || !nonnegativeInteger(data.result.total) || !nonnegativeInteger(data.result.added) ||
+      !nonnegativeInteger(data.result.changed) || !nonnegativeInteger(data.result.missing) || typeof data.result.sync_id !== 'string') {
+    throw new AppError('Le serveur n’a pas confirmé la synchronisation.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+export async function syncUniversalCatalogDetails(): Promise<UniversalCatalogDetailResult> {
+  const data = await invokeEdge<UniversalCatalogDetailResult>('universal-catalog', { action: 'sync_muapi_details', limit: 10 });
+  if (!data || ![data.attempted, data.ok, data.http_error, data.invalid, data.network_error, data.persist_error].every(nonnegativeInteger)) {
+    throw new AppError('Le serveur n’a pas confirmé la synchronisation des fiches.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Authentication & bootstrap                                                 */
 /* -------------------------------------------------------------------------- */
