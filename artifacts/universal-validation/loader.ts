@@ -1,12 +1,12 @@
-// universal-catalog-23be06fe3f461d378f1351c20f88473c22cfb4179df1d56ea4564a20d059a3a2 — chargeur de production (seule source déployée).
+// universal-catalog-842869e36c78947a60bc628dbe78f09d7e497d7eb607aca58fbe123790c9682f — chargeur de production (seule source déployée).
 // Généré par scripts/build-edge-loader.mjs : ne pas éditer.
 //
 // Le canal de déploiement altère les sources longues : ce fichier reste court.
 // Le code métier est lu dans public._edge_function_artifact_slices (nom + SHA-256), recomposé,
 // puis vérifié AVANT exécution : un artefact absent ou modifié n'est jamais exécuté.
-const NAME = "universal-catalog-23be06fe3f461d378f1351c20f88473c22cfb4179df1d56ea4564a20d059a3a2";
-const SHA256 = "23be06fe3f461d378f1351c20f88473c22cfb4179df1d56ea4564a20d059a3a2";
-const CHARS = 14231;
+const NAME = "universal-catalog-842869e36c78947a60bc628dbe78f09d7e497d7eb607aca58fbe123790c9682f";
+const SHA256 = "842869e36c78947a60bc628dbe78f09d7e497d7eb607aca58fbe123790c9682f";
+const CHARS = 14955;
 
 function env(name: string): string {
   const g = globalThis as unknown as {

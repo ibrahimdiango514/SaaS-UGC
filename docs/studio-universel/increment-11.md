@@ -22,3 +22,8 @@ Le correctif ne prétend pas résoudre les contrats absents/incohérents (notamm
 - Contrat MuAPI officiel corrigé ou exemple officiel fiable pour les endpoints contradictoires et sorties ambiguës ; ne pas inventer ces contrats.
 
 La clôture complète n'est pas acquise et aucun autre fournisseur ne doit être annoncé activé avant la clôture MuAPI. Les preuves après publication sont consignées dans la PR.
+
+## Preuves de production PR42 et poursuite
+PR42 fusionnée `3ce4397`, migration53000 appliquée après vérification SHA256, studio-runtime v4 et universal-catalog v3 ACTIVE. Sonde18144 HTTP200 :861 évalués,535 préparés,0 requête payante ; états persistés535 préparés/326 bloqués. Sonde18145 runtime anonyme401. Sonde18146 frontend200 révision3ce4397. Zéro configuration runtime, zéro tâche : ce ne sont PAS535 modèles opérationnels.
+
+Correction suivante : contrainte MuAPI observée `conditionalMaxItems` + `limitWhenFieldPresent`, notamment Qwen2.1 avec masque. Le plafond conditionnel et le plafond normal sont tous deux appliqués, y compris dans les objets imbriqués ; les références à un champ absent du schéma restent refusées. Aucune contrainte n'est supprimée pour contourner le blocage. Tests ajoutés pour les deux branches et la limite générale. Déploiement de cette correction à vérifier séparément dans la PR suivante.
