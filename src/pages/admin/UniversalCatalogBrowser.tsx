@@ -1,3 +1,4 @@
+import {useCatalogRevision} from '../../hooks/useCatalogRevision';
 import { UniversalIntegrationProgress } from './UniversalIntegrationProgress';
 import { useEffect, useState } from 'react';
 import { UniversalRuntimeConfig } from './UniversalRuntimeConfig';
@@ -28,6 +29,7 @@ function SchemaPreview({ schema }: { schema: unknown }) {
 
 /** Administration consultation only: no claim that the catalog is executable. */
 export function UniversalCatalogBrowser() {
+ const catalogRevision=useCatalogRevision();
   const [queryInput,setQueryInput] = useState('');
   const [query,setQuery] = useState('');
   const [category,setCategory] = useState('');
@@ -42,17 +44,17 @@ export function UniversalCatalogBrowser() {
   const [detailError,setDetailError] = useState('');
   const after = history[history.length-1];
   const binding = detail ? resolveMuapiEndpoint(detail.provider_model_id, detail.input_schema, detail.endpoint_evidence) : null;
-  useEffect(() => { let active=true; getUniversalCatalogSummary().then(x => { if (active) setCategories(Object.keys(x.categories).sort()); }).catch(() => { if (active) setCategories([]); }); return () => { active=false; }; }, []);
+  useEffect(() => { let active=true; getUniversalCatalogSummary().then(x => { if (active) setCategories(Object.keys(x.categories).sort()); }).catch(() => { if (active) setCategories([]); }); return () => { active=false; }; }, [catalogRevision]);
   useEffect(() => {
     let active=true; setLoading(true); setError(''); setPage(null);
     getUniversalAdminModels({query,category,status,after}).then(x => { if(active) setPage(x); }).catch(e => { if(active) setError(asAppError(e).message); }).finally(() => { if(active) setLoading(false); });
     return () => { active=false; };
-  }, [query,category,status,after]);
+  }, [query,category,status,after,catalogRevision]);
   useEffect(() => {
-    let active=true; setDetail(null); setDetailError('');
+    let active=true; setDetail(previous=>previous?.provider_model_id===modelId?previous:null); setDetailError('');
     if (modelId) getUniversalAdminModelDetail(modelId).then(x => { if(active) setDetail(x); }).catch(e => { if(active) setDetailError(asAppError(e).message); });
     return () => { active=false; };
-  }, [modelId]);
+  }, [modelId,catalogRevision]);
   const resetPage = () => { setHistory(['']); setModelId(null); };
   return <Card><UniversalIntegrationProgress /><CardHeader title="Explorer le registre universel" description="Consultation administrateur des références MuAPI, y compris celles non intégrées. Ce registre ne permet pas encore de lancer une génération." />
     <div className="space-y-4 p-5 pt-0 text-sm text-slate-300">
