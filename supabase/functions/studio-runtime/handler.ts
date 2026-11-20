@@ -1,3 +1,4 @@
+import { integrationProgress,protocolBinding,submissionId,familyResult,type Protocol } from './families.ts';
 import { assessment,customerModel,fileType,parsePrediction,predictionId,record,UUID,type Json } from './core.ts';
 import { validateMuapiInput } from '../universal-catalog/schema.ts';
 import { extractProviderCostUsd,extractProviderCurrency } from '../_shared/video-quote.ts';
@@ -88,7 +89,7 @@ export function createHandler(deps:Dependencies) {
   const raw=await provider(`/api/v1/predictions/${encodeURIComponent(job.provider_id)}/result`);
   const data=record(raw.data??raw);
   if(data.id && data.id!==job.provider_id || data.request_id && data.request_id!==job.provider_id) error('RESULT_ID_MISMATCH',503);
-  const parsed=parsePrediction(data,job.output_kind);
+  const parsed=job.protocol_key?familyResult(job.protocol_key as Protocol,data,job.provider_id):parsePrediction(data,job.output_kind);
   if(parsed.state==='pending') return;
   const outputs:Json[]=[];
   if(parsed.text) outputs.push({kind:'text',text:parsed.text});
@@ -108,6 +109,25 @@ export function createHandler(deps:Dependencies) {
   const expected=await rpc('reelora_worker_token');
   if(typeof expected!=='string'||!expected||!token||expected.length!==token.length) error('FORBIDDEN',403);
   let diff=0;for(let i=0;i<token.length;i++)diff|=token.charCodeAt(i)^expected.charCodeAt(i);if(diff)error('FORBIDDEN',403);
+  if(body.task==='integrations') {
+   const documentation=await fetcher('https://api.muapi.ai/openapi.json',{method:'GET',redirect:'error',signal:AbortSignal.timeout(30000)});
+   if(!documentation.ok)error('OFFICIAL_CONTRACT_UNAVAILABLE',503);
+   const documentationText=await documentation.text();
+   if(documentationText.length>20000000)error('OFFICIAL_CONTRACT_TOO_LARGE',503);
+   const openapi=record(JSON.parse(documentationText));
+   openapi.__document_sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(documentationText)))).map(b=>b.toString(16).padStart(2,'0')).join('');
+   if(!record(openapi.paths)['/api/v1/predictions/{id}/result']?.get)error('OFFICIAL_CONTRACT_UNAVAILABLE',503);
+   let after='',assessed=0,prepared=0;
+   let accountIds:Set<string>|null=null;
+   if(env('MUAPI_API_KEY')) {try{const account=await fetchMuapiCatalog(fetcher,env('MUAPI_API_KEY'));accountIds=new Set(account.models.map(m=>m.provider_model_id));}catch{/* A public listing or failed account probe never proves model access. */}}
+   for(let page=0;page<1000;page++) {
+    const batch=await rpc('studio_runtime_models',{p_after:after,p_limit:100});
+    for(const model of batch.items) {const progress=integrationProgress(model,openapi);const report={...progress,stages:{...progress.stages,authenticated_catalog_visible:accountIds?.has(model.provider_model_id)??false}};if(await rpc('studio_save_integration',{p_model_id:model.id,p_hash:model.spec_hash,p_report:report})){assessed++;if(report.status==='integration_prepared')prepared++;}}
+    if(batch.items.length<100)return {assessed,prepared,authenticated_catalog_visible:accountIds?.size??0,paid_requests:0};
+    after=batch.items[batch.items.length-1].provider_model_id;
+   }
+   error('CATALOG_TOO_LARGE',503);
+  }
   if(body.task==='catalog') {
    const snapshot=await fetchMuapiCatalog(fetcher);
    return await rpc('studio_sync_muapi_catalog',{p_models:snapshot.models,p_scope:'public'});
@@ -139,6 +159,7 @@ export function createHandler(deps:Dependencies) {
    const auth=await fetcher(`${base()}/auth/v1/user`,{headers:headers(jwt),signal:AbortSignal.timeout(15000)});
    if(!auth.ok)error('UNAUTHENTICATED',401);
    const user=record(await auth.json());if(!UUID.test(user.id))error('UNAUTHENTICATED',401);
+   if(action==='admin_progress')return reply(await rpc('studio_integration_progress',{p_after:body!.after??'',p_family:body!.family??'',p_status:body!.status??'',p_query:body!.query??''},jwt));
    if(action==='admin_report')return reply(await rpc('studio_runtime_sync_report',{},jwt));
    if(action==='admin_reconcile')return reply({saved:await rpc('studio_runtime_admin_reconcile',{p_job_id:body!.job_id,p_provider_id:body!.provider_id,p_reference:body!.reference},jwt)});
    if(action==='admin_limits')return reply({saved:await rpc('studio_runtime_admin_limits',{p_enabled:body!.enabled,p_daily_usd:body!.daily_usd},jwt)});
@@ -174,7 +195,7 @@ export function createHandler(deps:Dependencies) {
       const model=await rpc('studio_runtime_model',{p_model_id:job.provider_model_id});
       const a=assessment(model,ctx.plan);if(!a.operational||!a.endpoint.path)error('MODEL_NOT_OPERATIONAL',409);
       const submitted=await provider(`/api/v1/${a.endpoint.path}`,job.params);
-      const id=predictionId(submitted);if(!id)error('SUBMISSION_UNCERTAIN',409);
+      const id=protocolBinding(model)?submissionId(submitted):predictionId(submitted);if(!id)error('SUBMISSION_UNCERTAIN',409);
       if(!await rpc('studio_runtime_submitted',{p_job_id:job.id,p_provider_id:id}))error('SUBMISSION_UNCERTAIN',409);
      } catch { await rpc('studio_runtime_uncertain',{p_job_id:started.id}); }
     }

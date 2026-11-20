@@ -284,6 +284,9 @@ function edgeResponse(url, body) {
     if (action === 'health') return { configured: { groq: true, gemini: true }, providers: ['groq', 'gemini'], status: 'ok' };
     return { ok: true, preview: true, action };
   }
+  if (fn === 'studio-runtime') {
+    return { error: { code: 'PREVIEW_ONLY', message: 'Runtime universel non simulé dans ce harnais ; aucune génération, aucun débit.' } };
+  }
   if (fn === 'universal-catalog') {
     return { error: { code: 'PREVIEW_ONLY', message: 'Synchronisation désactivée dans la preview.' } };
   }

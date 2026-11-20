@@ -80,3 +80,7 @@ verify_jwt = true
 # Découverte strictement en lecture seule ; authentification interne par jeton Vault.
 [functions.vyora-provider-discovery]
 verify_jwt = false
+
+# JWT client vérifié via Auth ; worker protégé par jeton Vault.
+[functions.studio-runtime]
+verify_jwt = false

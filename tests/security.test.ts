@@ -66,8 +66,14 @@ describe('configuration des Edge Functions', () => {
   });
   it('les endpoints sans JWT vérifient eux-mêmes leur authentification', () => {
     expect(config).not.toContain('--no-verify-jwt');
-    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(7);
+    expect(config.match(/verify_jwt\s*=\s*false/g)?.length).toBe(8);
     expect(config).toMatch(/\[functions\.vyora-provider-discovery\][\s\S]*?verify_jwt\s*=\s*false/);
+    expect(config).toMatch(/\[functions\.studio-runtime\][\s\S]*?verify_jwt\s*=\s*false/);
+    const runtime = read('supabase/functions/studio-runtime/handler.ts');
+    expect(runtime).toContain('/auth/v1/user');
+    expect(runtime).toContain("if(!auth.ok)error('UNAUTHENTICATED',401)");
+    expect(runtime).toContain("rpc('reelora_worker_token')");
+    expect(runtime).toContain("if(diff)error('FORBIDDEN',403)");
     const discovery = read('supabase/functions/vyora-provider-discovery/index.ts');
     expect(discovery).toContain('vyora_provider_health_cron_token');
     expect(discovery).toContain('!equal(supplied,token)');
