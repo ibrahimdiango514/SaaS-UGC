@@ -1,6 +1,6 @@
 import { integrationProgress,protocolBinding,submissionId,familyResult,type Protocol } from './families.ts';
 import { assessment,customerModel,fileType,parsePrediction,predictionId,record,UUID,type Json } from './core.ts';
-import { validateMuapiInput } from '../universal-catalog/schema.ts';
+import { validateMuapiInput,muapiDefaults } from '../universal-catalog/schema.ts';
 import { extractProviderCostUsd,extractProviderCurrency } from '../_shared/video-quote.ts';
 import { fetchMuapiCatalog } from '../universal-catalog/catalog.ts';
 import { fetchMuapiDetail } from '../universal-catalog/details.ts';
@@ -42,19 +42,35 @@ export function createHandler(deps:Dependencies) {
   return url;
  }
  async function inputParams(model:Json,params:unknown,jwt:string,ctx:Json) {
+  params=muapiDefaults(model.input_schema,params);
   const a=assessment(model),raw=record(params),out:Json={...raw};
   if(!a.fields) error('SCHEMA_UNSUPPORTED',409);
-  for(const field of a.fields!) {
-   const d=field.definition;
-   if(!d.field && d.format!=='uri') continue;
-   const values=d.type==='array'?raw[field.key]:[raw[field.key]];
-   if(values===undefined) continue;
-   if(!Array.isArray(values)) error('PARAMETER_INVALID');
+  if(!params||typeof params!=='object'||Array.isArray(params))error('PARAMETER_INVALID');
+  // Validate the entire shape before Storage lookups/signing. Markers are only
+  // substituted in this non-network preflight; real media still require ownership.
+  const preflight=(v:unknown):unknown=>typeof v==='string'&&v.startsWith('storage://')?'https://storage.example.com/private-input':Array.isArray(v)?v.map(preflight):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,preflight(x)])):v;
+  const check=validateMuapiInput(model.input_schema,preflight(params));if(!check.ok)error(check.code);
+
+  async function resolve(d:Json,value:unknown):Promise<unknown> {
+   if(value===undefined)return undefined;
+   if(d.type==='object'&&value&&typeof value==='object'&&!Array.isArray(value)) {
+    const resolved:Json={};for(const [k,v] of Object.entries(value)) {
+     if(!Object.hasOwn(record(d.properties),k))error('PARAMETER_INVALID');
+     Object.defineProperty(resolved,k,{value:await resolve(d.properties[k],v),enumerable:true});
+    }return resolved;
+   }
+   if(d.type==='array'&&!d.field) {
+    if(!Array.isArray(value)||value.length>256)error('PARAMETER_INVALID');
+    return Promise.all((value as unknown[]).map(v=>resolve(record(d.items),v)));
+   }
+   if(!d.field&&d.format!=='uri'&&d.format!=='url')return value;
+   const values=d.type==='array'?value:[value];
+   if(!Array.isArray(values)||values.length>256)error('PARAMETER_INVALID');
    const signed:string[]=[];
-   for(const value of values) {
+   for(const value of values as unknown[]) {
     if(value===undefined) continue;
     if(typeof value!=='string'||!value.startsWith('storage://')) error('PRIVATE_UPLOAD_REQUIRED');
-    const path=value.slice(10);
+    const path=(value as string).slice(10);
     if(!path.startsWith(ctx.workspace_id+'/studio-inputs/')) error('FILE_FORBIDDEN',403);
     const info=await rpc('studio_runtime_input',{p_path:path},jwt);
     const size=Number(info?.metadata?.size);
@@ -70,8 +86,9 @@ export function createHandler(deps:Dependencies) {
     if(!type || kind && kind!==type.kind) error('FILE_TYPE_INVALID');
     signed.push(url);
    }
-   if(raw[field.key]!==undefined) out[field.key]=d.type==='array'?signed:signed[0];
+   return d.type==='array'?signed:signed[0];
   }
+  for(const field of a.fields!)if(Object.hasOwn(raw,field.key))out[field.key]=await resolve(field.definition,raw[field.key]);
   const validated=validateMuapiInput(model.input_schema,out);
   if(!validated.ok) error(validated.code);
   return validated.ok?validated.value:{};

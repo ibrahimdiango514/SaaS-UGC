@@ -57,3 +57,24 @@ describe('contraintes MuAPI observées en production', () => {
     }
   });
 });
+
+describe('structured MuAPI inputs (dialogue and keyframes)',()=>{
+ const schema={schemas:{input_data:{type:'object',properties:{dialogue:{type:'array',maxItems:2,items:{type:'object',required:['text','voice'],properties:{text:{type:'string',minLength:1},voice:{type:'string',typing:true,enum:[{label:'Official voice',value:'voice-1'}]},weight:{type:'number',minValue:0,maxValue:1,step:0.1}}}}}}}};
+ it('validates nested types, required values, bounds and labelled/custom choices',()=>{
+  expect(validateMuapiInput(schema,{dialogue:[{text:'Bonjour',voice:'custom-voice',weight:0.3}]}).ok).toBe(true);
+  for(const dialogue of [[{voice:'voice-1'}],[{text:'Bonjour',voice:'x',weight:1.1}],[{text:'Bonjour',voice:'x',unknown:true}]])expect(validateMuapiInput(schema,{dialogue}).ok).toBe(false);
+  const strict={schemas:{input_data:{type:'object',properties:{voice:{type:'string',enum:[{label:'Voice',value:'id'}]}}}}};
+  expect(validateMuapiInput(strict,{voice:'Voice'}).ok).toBe(false);expect(validateMuapiInput(strict,{voice:'id'}).ok).toBe(true);
+ });
+ it('does not weaken unknown nested constraints or prototype protection',()=>{
+  const bad=structuredClone(schema);Object.assign(bad.schemas.input_data.properties.dialogue.items.properties.text,{pattern:'^x'});
+  expect(validateMuapiInput(bad,{})).toMatchObject({code:'SCHEMA_UNSUPPORTED'});
+  expect(validateMuapiInput(schema,JSON.parse('{"dialogue":[{"text":"x","voice":"v","__proto__":{}}]}')).ok).toBe(false);
+  expect(validateMuapiInput(schema,{dialogue:Array(257).fill({text:'x',voice:'v'})}).ok).toBe(false);
+ });
+});
+it('applies declared valid nested defaults identically for quote and submission, without changing explicit values',async()=>{
+ const {muapiDefaults}=await import('../supabase/functions/universal-catalog/schema');
+ const s={schemas:{input_data:{type:'object',properties:{turns:{type:'array',items:{type:'object',properties:{text:{type:'string'},stability:{type:'number',default:0.5,minimum:0,maximum:1}}}},language:{type:'string',default:null},bad:{type:'int',default:20,maximum:10}}}}};
+ expect(muapiDefaults(s,{turns:[{text:'hello'},{text:'explicit',stability:0}]})).toEqual({turns:[{text:'hello',stability:0.5},{text:'explicit',stability:0}]});
+});

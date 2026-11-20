@@ -39,3 +39,12 @@ describe('universal runtime safety without provider spending',()=>{
   expect(fetcher).not.toHaveBeenCalled();
  });
 });
+it('checks unsafe parameters recursively and preserves only validated defaults and nested customer rules',()=>{
+ const structured={...model,input_schema:{schemas:{input_data:{type:'object',endpoint_url:'model',properties:{turns:{type:'array',items:{type:'object',required:['prompt'],properties:{prompt:{type:'string',description:'supplier cost secret'},api_key:{type:'string'}}}},seed:{type:'int',default:4,minValue:1,maxValue:8},invalid:{type:'int',default:99,maxValue:8}}}}}};
+ expect(assessment(structured,'pro').blockers).toContain('UNSAFE_PARAMETER');
+ const projected=customerModel(structured,'pro').schema as any;
+ expect(projected.schemas.input_data.properties.turns.items.required).toEqual(['prompt']);
+ expect(projected.schemas.input_data.properties.seed.default).toBe(4);
+ expect(projected.schemas.input_data.properties.invalid.default).toBeUndefined();
+ expect(JSON.stringify(projected)).not.toContain('supplier cost secret');
+});

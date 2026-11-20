@@ -1,4 +1,4 @@
-import { muapiFormFields } from '../universal-catalog/schema.ts';
+import { muapiFormFields,validateMuapiInput,enumChoices } from '../universal-catalog/schema.ts';
 import { resolveMuapiEndpoint } from '../universal-catalog/endpoint.ts';
 export type Json = Record<string, any>;
 export const record = (x: unknown): Json => x && typeof x === 'object' && !Array.isArray(x) ? x as Json : {};
@@ -12,7 +12,8 @@ export function assessment(model: Json, plan?: string) {
   if (model.account_access !== 'available') blockers.push('ACCESS_UNCONFIRMED');
   if (endpoint.status !== 'declared') blockers.push('ENDPOINT_UNVERIFIED');
   if (!fields) blockers.push('SCHEMA_UNSUPPORTED');
-  if (fields?.some(f => ['webhook','callback_url','api_key','authorization','endpoint'].includes(f.key.toLowerCase()))) blockers.push('UNSAFE_PARAMETER');
+  const unsafe=(schema:Json):boolean=>Object.entries(record(schema.properties)).some(([k,v])=>['webhook','callback_url','api_key','authorization','endpoint'].includes(k.toLowerCase())||unsafe(record(v)))||Boolean(schema.items&&unsafe(record(schema.items)));
+  if (unsafe(record(record(model.input_schema).schemas?.input_data))) blockers.push('UNSAFE_PARAMETER');
   if (!Number.isSafeInteger(c.credits) || c.credits <= 0 || !(Number(c.max_cost_usd) > 0)) blockers.push('PRICING_REQUIRED');
   const category=String(model.category).toLowerCase();
   const expectedQuota=category.includes('video')?'video':category.includes('image')?'image':category==='text to text'?'script':null;
@@ -30,13 +31,15 @@ export function assessment(model: Json, plan?: string) {
 export function customerSchema(schema: unknown): unknown {
   const fields = muapiFormFields(schema);
   if (!fields) return null;
-  const rules = new Set(['type','enum','minimum','maximum','minValue','maxValue','step','minLength','maxLength','minItems','maxItems','field','format']);
+  const rules = new Set(['type','enum','minimum','maximum','minValue','maxValue','step','minLength','maxLength','minItems','maxItems','field','format','typing','required','additionalProperties']);
   const clean = (def: Json): Json => {
     const out: Json = {};
     for (const [k,v] of Object.entries(def)) if (rules.has(k)) out[k]=v;
     if (def.items) out.items=clean(def.items);
-    // Defaults are user parameters, but deliberately not forwarded: they can
-    // contain supplier prose. The UI requires explicit selections.
+    if(Array.isArray(def.enum))out.enum=enumChoices(def)?.map(c=>c.value);
+    if(def.properties)out.properties=Object.fromEntries(Object.entries(record(def.properties)).map(([k,v])=>[k,clean(record(v))]));
+    if(def.default!==undefined&&def.default!==null&&validateMuapiInput({schemas:{input_data:{type:'object',properties:{value:def}}}},{value:def.default}).ok)out.default=def.default;
+    // Descriptions, examples and other supplier annotations remain server-side.
     return out;
   };
   return { schemas: { input_data: {type:'object',required:fields.filter(f=>f.required).map(f=>f.key),properties:Object.fromEntries(fields.map(f=>[f.key,clean(f.definition)])), 'x-order-properties':fields.map(f=>f.key)} } };
