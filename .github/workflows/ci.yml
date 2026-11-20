@@ -1,0 +1,33 @@
+name: VYORA CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ['arena/**']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch origin 25385118f1ebc3e418fbae17d07e5262dafe3db9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run typecheck:edge
+      - run: node scripts/build-universal-validation.mjs --check
+      - run: node scripts/build-studio-runtime.mjs --check
+      - run: npm run check:edge-imports
+      - run: npm test
+      - run: npm run build
+      - run: node scripts/build-privacy-release.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: privacy-release
+          path: artifacts/privacy-release/
