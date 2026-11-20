@@ -1256,3 +1256,21 @@ export function newGenerationIdempotencyKey(): string {
   const id = g.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `ugc-${id}`;
 }
+
+export interface UniversalStudioModel {
+  model_id:string;display_name:string;category:string;provider:string;schema:unknown;
+  credits:number|null;operational:boolean;blockers:string[];
+}
+export interface UniversalStudioPage {total:number;categories:Record<string,number>;items:UniversalStudioModel[];next_cursor:string|null;credits:number;workspace_id:string}
+export interface UniversalStudioJob {id:string;status:string;credits:number;display_name:string;provider_model_id:string;created_at:string;error_code:string|null;outputs:{kind:'file'|'text';path?:string;url?:string;mime?:string;text?:string}[]}
+export interface UniversalStudioQuote {quote_id:string;credits:number;expires_at:string;balance:number}
+export const universalRuntime = <T>(action:string,body:Record<string,unknown>={}) => invokeEdge<T>('studio-runtime',{...body,action});
+export async function uploadUniversalInput(workspaceId:string,file:File):Promise<string> {
+  if(!/^[0-9a-f-]{36}$/i.test(workspaceId)||file.size<=0||file.size>50*1024*1024) throw new AppError('Fichier trop volumineux ou vide.','FILE_INVALID');
+  const ext=(file.name.split('.').pop()??'').toLowerCase();
+  if(!['png','jpg','jpeg','webp','gif','mp4','webm','mp3','wav','ogg','zip'].includes(ext))throw new AppError('Format non pris en charge.','FILE_INVALID');
+  const path=`${workspaceId}/studio-inputs/${crypto.randomUUID()}.${ext}`;
+  const {error}=await supabase.storage.from(STORAGE_BUCKET).upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
+  if(error)throw new AppError('Import privé impossible.','STORAGE_ERROR');
+  return 'storage://'+path;
+}

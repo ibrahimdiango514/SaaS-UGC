@@ -28,6 +28,7 @@ const StudioPricing = lazy(() => import('./pages/StudioPricing'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Admin = lazy(() => import('./pages/Admin'));
 const VideoStudio = lazy(() => import('./studio/VideoStudio'));
+const UniversalStudio = lazy(() => import('./studio/UniversalStudio'));
 const GenerationStudio = lazy(() => import('./studio/GenerationStudio'));
 const FilesPage = lazy(() => import('./pages/Files'));
 const VideoEditor = lazy(() => import('./studio/VideoEditor'));
@@ -74,6 +75,7 @@ export default function App() {
                       <Route path="projets" element={<StudioProjects />} />
                       <Route path="projets/:id" element={<ProjectDetail />} />
                       <Route path="studio" element={<GenerationStudio />} />
+                      <Route path="studio/universel" element={<UniversalStudio />} />
                       <Route path="business" element={<BusinessGrow />} />
                       <Route path="business/modules" element={<BusinessModules />} />
                       <Route path="business/modules/:moduleKey" element={<BusinessModuleWorkspace />} />
