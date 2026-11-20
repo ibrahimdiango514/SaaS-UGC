@@ -42,6 +42,7 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec('create table saas_ugc.studio_ai_model_details(model_id uuid,status text);');
  await db.exec(read('20261120050000_studio_catalog_truth'));
  await db.exec(read('20261120053000_studio_structured_media'));
+ await db.exec(read('20261120054000_studio_text_adapter'));
  await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,account_access,input_schema)
  values('muapi','real-model','Real','image',true,false,'available','{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
  set test.uid='${uid}';set test.role='authenticated';set test.admin='yes';`);

@@ -65,3 +65,11 @@ it('binds named URI lists alongside non-media metadata, rejecting ambiguous or u
  const ambiguous=structuredClone(m);Object.assign(ambiguous.output_schema.schemas.properties.output.properties,{other:{type:'array',items:{type:'string',format:'uri'}}});expect(protocolBinding(ambiguous)).toBeNull();
  const untyped=structuredClone(m);delete (untyped.output_schema.schemas.properties.output.properties.images.items as any).format;expect(protocolBinding(untyped)).toBeNull();
 });
+it('uses a declared text-result protocol rather than interpreting URL schemas as text',()=>{
+ const text={...model,category:'Text to Text',output_schema:{schemas:{type:'object',properties:{id:{type:'string'},status:{type:'string'},output:{type:'object',properties:{text:{type:'string',description:'Generated text response'}}}}}}};
+ expect(protocolBinding(text)).toBe('muapi_output_text_v1');expect(progress(text).status).toBe('integration_prepared');
+ expect(adapterSelfTest('muapi_output_text_v1')).toBe(true);
+ expect(familyResult('muapi_output_text_v1',{id:'r',status:'completed',output:{text:'Bonjour'}},'r')).toEqual({state:'succeeded',media:[],text:'Bonjour'});
+ for(const output of [{text:''},{text:2},{text:'x'.repeat(131073)},['https://example.com/a']])expect(()=>familyResult('muapi_output_text_v1',{id:'r',status:'completed',output},'r')).toThrow();
+ expect(protocolBinding({...model,category:'Text to Text'})).toBeNull();
+});

@@ -1,12 +1,12 @@
-// studio-runtime-8dcae5062bb870bec6dd634af3c1d9521d4d91a696fc4eec4503caf425b510dd — chargeur de production (seule source déployée).
+// studio-runtime-0a0c298b2fbc4784485dbf459abeebd2a2bc2e30939dc6947539ee77d2592512 — chargeur de production (seule source déployée).
 // Généré par scripts/build-edge-loader.mjs : ne pas éditer.
 //
 // Le canal de déploiement altère les sources longues : ce fichier reste court.
 // Le code métier est lu dans public._edge_function_artifact_slices (nom + SHA-256), recomposé,
 // puis vérifié AVANT exécution : un artefact absent ou modifié n'est jamais exécuté.
-const NAME = "studio-runtime-8dcae5062bb870bec6dd634af3c1d9521d4d91a696fc4eec4503caf425b510dd";
-const SHA256 = "8dcae5062bb870bec6dd634af3c1d9521d4d91a696fc4eec4503caf425b510dd";
-const CHARS = 42646;
+const NAME = "studio-runtime-0a0c298b2fbc4784485dbf459abeebd2a2bc2e30939dc6947539ee77d2592512";
+const SHA256 = "0a0c298b2fbc4784485dbf459abeebd2a2bc2e30939dc6947539ee77d2592512";
+const CHARS = 43209;
 
 function env(name: string): string {
   const g = globalThis as unknown as {
