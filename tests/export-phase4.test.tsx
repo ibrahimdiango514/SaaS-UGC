@@ -118,6 +118,8 @@ function readyProject(overrides: Partial<EditorProject> = {}): EditorProject {
   };
 }
 
+const pendingVideoTimers = new Set<ReturnType<typeof setTimeout>>();
+
 beforeEach(() => {
   vi.clearAllMocks();
   const store = new Map<string, string>();
@@ -140,6 +142,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const timer of pendingVideoTimers) clearTimeout(timer);
+  pendingVideoTimers.clear();
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -250,12 +254,14 @@ function installBrowserVideoCanvasMock(videosOut: HTMLVideoElement[], loadDelayM
     if (tag === 'video') {
       const v = el as HTMLVideoElement;
       videosOut.push(v);
+      // Keep the event in this element's jsdom realm even after a test teardown.
+      const VideoEvent = v.ownerDocument.defaultView!.Event;
       let ct = 0;
       Object.defineProperty(v, 'currentTime', {
         get: () => ct,
         set: (val: number) => {
           ct = val;
-          queueMicrotask(() => v.dispatchEvent(new Event('seeked')));
+          queueMicrotask(() => v.dispatchEvent(new VideoEvent('seeked')));
         },
         configurable: true,
       });
@@ -266,7 +272,11 @@ function installBrowserVideoCanvasMock(videosOut: HTMLVideoElement[], loadDelayM
       Object.defineProperty(v, 'pause', { value: vi.fn(), configurable: true });
       Object.defineProperty(v, 'play', { value: vi.fn(async () => undefined), configurable: true });
       Object.defineProperty(v, 'load', { value: vi.fn(), configurable: true });
-      setTimeout(() => v.dispatchEvent(new Event('loadeddata')), loadDelayMs);
+      const timer = setTimeout(() => {
+        pendingVideoTimers.delete(timer);
+        v.dispatchEvent(new VideoEvent('loadeddata'));
+      }, loadDelayMs);
+      pendingVideoTimers.add(timer);
     } else if (tag === 'canvas') {
       const c = el as HTMLCanvasElement;
       vi.spyOn(c, 'getContext').mockReturnValue({

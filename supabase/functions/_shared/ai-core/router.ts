@@ -83,7 +83,8 @@ function hasCapabilities(model: AiRegistryModel, required: string[]): boolean {
 }
 
 function isFree(model: AiRegistryModel): boolean {
-  return (model.costIn === null || model.costIn === 0) && (model.costOut === null || model.costOut === 0);
+  // Unknown prices are not free: exhausted budgets fail closed.
+  return model.costIn === 0 && model.costOut === 0;
 }
 
 /** Favorise les prix connus et bas ; l'inconnu n'est jamais traité comme gratuit. */

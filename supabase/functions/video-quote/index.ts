@@ -3,11 +3,12 @@
 // Contrat : POST { model_id, params?, prompt?, image_url?, last_image_url? }
 //   -> { model_id, model_available, model_status, model_reason, quote }
 // Aucune génération, aucun crédit débité, aucune réservation : cet endpoint
-// interroge uniquement le tarif réel du fournisseur en USD.
+// vérifie le tarif côté serveur sans exposer les montants au client.
 //
 // Les clés (MUAPI_API_KEY, SUPABASE_SERVICE_ROLE_KEY) restent des secrets Edge.
-// Fonction volontairement autonome (aucun import relatif) pour être déployable
-// telle quelle par l'API de gestion Supabase.
+// Le module partagé doit être inclus lors du bundling de déploiement.
+
+import { customerQuote } from "../_shared/customer-quote.ts";
 
 type Json = Record<string, unknown>;
 
@@ -390,7 +391,8 @@ export async function handler(req: Request): Promise<Response> {
     // public_id et model_id n'ont pas le même type : une seule colonne est filtrée
     // (un `or` sur les deux ferait échouer la conversion uuid côté PostgREST).
     const rows = await rest(`reelora_video_models?${isUuid ? 'public_id' : 'model_id'}=eq.${encoded}&select=*&limit=1`);
-    return json(await buildQuote(rows[0] ?? null, requestedId, body));
+    const result = await buildQuote(rows[0] ?? null, requestedId, body);
+    return json({ ...result, quote: customerQuote(result.quote) });
   } catch (error) {
     console.error("video-quote", redact(error instanceof Error ? error.message : String(error)));
     return fail("QUOTE_INTERNAL_ERROR", "Le devis fournisseur est momentanément indisponible.", 500);
