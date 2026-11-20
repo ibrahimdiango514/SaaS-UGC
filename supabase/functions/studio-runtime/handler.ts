@@ -85,11 +85,10 @@ export function createHandler(deps:Dependencies) {
  }
  async function reconcile(job:Json) {
   if(!job.provider_id) return;
-  const model=await rpc('studio_runtime_model',{p_model_id:(await rpc('studio_runtime_job',{p_job_id:job.id,p_user_id:job.user_id})).provider_model_id});
   const raw=await provider(`/api/v1/predictions/${encodeURIComponent(job.provider_id)}/result`);
   const data=record(raw.data??raw);
   if(data.id && data.id!==job.provider_id || data.request_id && data.request_id!==job.provider_id) error('RESULT_ID_MISMATCH',503);
-  const parsed=parsePrediction(data,record(model.runtime_config).output_kind);
+  const parsed=parsePrediction(data,job.output_kind);
   if(parsed.state==='pending') return;
   const outputs:Json[]=[];
   if(parsed.text) outputs.push({kind:'text',text:parsed.text});
@@ -140,6 +139,8 @@ export function createHandler(deps:Dependencies) {
    const auth=await fetcher(`${base()}/auth/v1/user`,{headers:headers(jwt),signal:AbortSignal.timeout(15000)});
    if(!auth.ok)error('UNAUTHENTICATED',401);
    const user=record(await auth.json());if(!UUID.test(user.id))error('UNAUTHENTICATED',401);
+   if(action==='admin_report')return reply(await rpc('studio_runtime_sync_report',{},jwt));
+   if(action==='admin_reconcile')return reply({saved:await rpc('studio_runtime_admin_reconcile',{p_job_id:body!.job_id,p_provider_id:body!.provider_id,p_reference:body!.reference},jwt)});
    if(action==='admin_limits')return reply({saved:await rpc('studio_runtime_admin_limits',{p_enabled:body!.enabled,p_daily_usd:body!.daily_usd},jwt)});
    if(action==='admin_config') {
     const config=await rpc('studio_runtime_admin_config',{p_model_id:body!.model_id,p_config:body!.config??null},jwt);

@@ -9,6 +9,7 @@ export function assessment(model: Json, plan?: string) {
   const fields = muapiFormFields(model.input_schema);
   const blockers: string[] = [];
   if (!model.public_catalog_present || model.provider_enabled !== true || model.coming_soon === true) blockers.push('PROVIDER_UNAVAILABLE');
+  if (model.account_access !== 'available') blockers.push('ACCESS_UNCONFIRMED');
   if (endpoint.status !== 'declared') blockers.push('ENDPOINT_UNVERIFIED');
   if (!fields) blockers.push('SCHEMA_UNSUPPORTED');
   if (fields?.some(f => ['webhook','callback_url','api_key','authorization','endpoint'].includes(f.key.toLowerCase()))) blockers.push('UNSAFE_PARAMETER');
@@ -44,7 +45,7 @@ export function customerModel(model: Json, plan: string) {
   const a=assessment(model,plan), c=record(model.runtime_config);
   return {model_id:model.provider_model_id,display_name:model.display_name,category:model.category,provider:'MuAPI',
     schema:customerSchema(model.input_schema),credits:Number.isSafeInteger(c.credits)?c.credits:null,
-    operational:a.operational,blockers:a.blockers};
+    operational:a.operational,blockers:a.blockers,stages:{catalogued:true,endpoint_confirmed:a.endpoint.status==='declared',schema_validated:a.fields!==null,form_ready:a.fields!==null,adapter_ready:c.adapter==='muapi_prediction_v1'&&!!c.verified_at,access_confirmed:model.account_access==='available',pricing_configured:Number.isSafeInteger(c.credits)&&c.credits>0,technical_test_performed:!!c.verified_at&&c.verified_hash===model.spec_hash,enabled:c.enabled===true}};
 }
 export function predictionId(raw: unknown): string | null {
   const id=record(raw).request_id;

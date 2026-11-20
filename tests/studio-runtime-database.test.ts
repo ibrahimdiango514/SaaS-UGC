@@ -6,7 +6,7 @@ const read=(x:string)=>readFileSync('supabase/migrations/'+x+'.sql','utf8');
 it('executes universal reservation, replay, capture/refund and isolation using fake wallets only',async()=>{
  const db=new PGlite();
  try {
- await db.exec(`create schema saas_ugc;create schema ugc_private;create schema auth;create schema storage;
+ await db.exec(`create schema saas_ugc;create schema ugc_private;create schema auth;create schema storage;create schema cron;create function cron.schedule(text,text,text) returns integer language sql as $$select 1$$;
  create role anon;create role authenticated;create role service_role;
  create table auth.users(id uuid primary key);
  insert into auth.users values('${uid}'),('${other}');
@@ -23,7 +23,7 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  create table saas_ugc.ugc_usage_events(user_id uuid,event_kind text,reference_id uuid);
  create table storage.objects(bucket_id text,name text,metadata jsonb);
  create table saas_ugc.fake_ledger(user_id uuid,key text unique,operation text);
- create function public.reelora_consume_quota(p_kind text,p_reference_id uuid,p_metadata jsonb) returns jsonb language plpgsql as $$begin insert into saas_ugc.ugc_usage_events values(auth.uid(),p_kind,p_reference_id);return '{}';end$$;
+ create function public.reelora_consume_quota(p_kind text,p_reference_id uuid,p_metadata jsonb) returns jsonb language plpgsql as $$begin perform ugc_private.reelora_assert_active(); insert into saas_ugc.ugc_usage_events values(auth.uid(),p_kind,p_reference_id);return '{}';end$$;
  create function ugc_private.apply_wallet_delta(uuid,text,bigint,bigint,text,text,jsonb) returns uuid language plpgsql as $$begin
  if exists(select 1 from saas_ugc.fake_ledger where key=$5) then return gen_random_uuid();end if;
  update saas_ugc.ugc_wallets set available_balance=available_balance+$3,reserved_balance=reserved_balance+$4 where user_id=$1 and available_balance+$3>=0 and reserved_balance+$4>=0;
@@ -36,16 +36,16 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec(`alter table saas_ugc.studio_ai_models add column endpoint_evidence jsonb;`);
  await db.exec('create table saas_ugc.studio_ai_detail_events(model_id uuid,event_type text,status text,http_status integer,occurred_at timestamptz);');
  await db.exec(read('20261120033000_studio_runtime'));
- await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,input_schema)
- values('muapi','real-model','Real','image',true,false,'{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
+ await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,account_access,input_schema)
+ values('muapi','real-model','Real','image',true,false,'available','{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
  set test.uid='${uid}';set test.role='authenticated';set test.admin='yes';`);
  const config={credits:5,max_cost_usd:0.4,quota_kind:'image',output_kind:'media',allowed_plans:['pro'],enabled:false};
  await db.query('select public.studio_runtime_admin_config($1,$2::jsonb)',['real-model',JSON.stringify(config)]);
  await expect(db.query('select public.studio_runtime_admin_config($1,$2::jsonb)',['real-model',JSON.stringify({...config,enabled:true})])).rejects.toThrow('verification_required');
  const hash=(await db.query<{hash:string}>(`select ugc_private.studio_spec_hash(id) as hash from saas_ugc.studio_ai_models`)).rows[0].hash;
- await expect(db.query(`select public.studio_runtime_attest('real-model',$1,'MOCK request never sent')`,[hash])).rejects.toThrow('forbidden');
+ await expect(db.query(`select public.studio_runtime_attest('real-model',$1,'MOCK request never sent','/api/v1/models/real-model/estimate-cost')`,[hash])).rejects.toThrow('forbidden');
  await db.exec(`set test.role='service_role'`);
- await db.query(`select public.studio_runtime_attest('real-model',$1,'MOCK request never sent')`,[hash]);
+ await db.query(`select public.studio_runtime_attest('real-model',$1,'MOCK request never sent','/api/v1/models/real-model/estimate-cost')`,[hash]);
  await db.query('select public.studio_runtime_admin_config($1,$2::jsonb)',['real-model',JSON.stringify({...config,enabled:true})]);
  await db.exec('select public.studio_runtime_admin_limits(true,1)');
  const mid=(await db.query<{id:string}>('select id from saas_ugc.studio_ai_models')).rows[0].id;
@@ -73,6 +73,13 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.query(`select public.studio_runtime_finish($1,'failed','[]',0)`,[j2]);
  expect((await db.query<{n:number}>("select count(*)::int n from saas_ugc.fake_ledger where operation='release'")).rows[0].n).toBe(1);
  expect((await db.query<{available_balance:number}>('select available_balance from saas_ugc.ugc_wallets where user_id=$1',[uid])).rows[0].available_balance).toBe(95);
+ const qe=await quote();
+ const je=(await db.query<{j:{id:string}}>('select public.studio_runtime_start($1,$2) j',[qe,crypto.randomUUID()])).rows[0].j.id;
+ await db.query("update saas_ugc.studio_runtime_jobs set reservation_deadline=now()-interval '1 second' where id=$1",[je]);
+ await db.query('select public.studio_runtime_uncertain($1)',[je]);
+ expect((await db.query<{n:number}>('select public.studio_runtime_expire() n')).rows[0].n).toBe(1);
+ expect((await db.query<{n:number}>('select public.studio_runtime_expire() n')).rows[0].n).toBe(0);
+ expect((await db.query<{r:boolean}>("select public.studio_runtime_finish($1,'succeeded','[{\"kind\":\"text\",\"text\":\"late\"}]',0.3) r",[je])).rows[0].r).toBe(false);
  // Quote invalidation on schema changes; settings survive catalog syncs.
  const q3=await quote();
  await db.exec(`update saas_ugc.studio_ai_models set input_schema='{}';set test.role='authenticated'`);

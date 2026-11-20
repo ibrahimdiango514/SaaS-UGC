@@ -1,7 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {assessment,customerModel,fileType,parsePrediction,predictionId} from '../supabase/functions/studio-runtime/core';
 import {createHandler} from '../supabase/functions/studio-runtime/handler';
-const model={provider_model_id:'model',display_name:'Model',category:'image',public_catalog_present:true,provider_enabled:true,coming_soon:false,runtime_enabled:true,spec_hash:'abc',endpoint_evidence:{endpoint:'/api/v1/model'},input_schema:{schemas:{input_data:{type:'object',endpoint_url:'model',properties:{prompt:{type:'string',description:'supplier cost secret'}},required:['prompt']}}},runtime_config:{adapter:'muapi_prediction_v1',estimate_path:'/api/v1/models/model/estimate-cost',credits:4,quota_kind:'image',max_cost_usd:.1,verified_hash:'abc',verified_at:'2026-11-20',enabled:true,allowed_plans:['pro']}};
+const model={provider_model_id:'model',display_name:'Model',category:'image',account_access:'available',public_catalog_present:true,provider_enabled:true,coming_soon:false,runtime_enabled:true,spec_hash:'abc',endpoint_evidence:{endpoint:'/api/v1/model'},input_schema:{schemas:{input_data:{type:'object',endpoint_url:'model',properties:{prompt:{type:'string',description:'supplier cost secret'}},required:['prompt']}}},runtime_config:{adapter:'muapi_prediction_v1',estimate_path:'/api/v1/models/model/estimate-cost',credits:4,quota_kind:'image',max_cost_usd:.1,verified_hash:'abc',verified_at:'2026-11-20',enabled:true,allowed_plans:['pro']}};
 describe('universal runtime safety without provider spending',()=>{
  it('requires every activation gate and matching schema verification',()=>{
   expect(assessment(model,'pro').operational).toBe(true);

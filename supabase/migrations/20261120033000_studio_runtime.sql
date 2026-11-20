@@ -27,7 +27,8 @@ create table saas_ugc.studio_runtime_jobs (
   id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id), workspace_id uuid not null,
   quote_id uuid not null unique references saas_ugc.studio_runtime_quotes(id),
   request_key uuid not null, model_id uuid not null references saas_ugc.studio_ai_models(id),
-  status text not null check(status in ('submitting','processing','uncertain','succeeded','failed')),
+  status text not null check(status in ('submitting','processing','uncertain','succeeded','failed','expired')),
+  output_kind text not null default 'media', reservation_deadline timestamptz not null default now()+interval '24 hours',
   provider_id text, credits integer not null, estimated_usd numeric not null, actual_usd numeric,
   quota_kind text not null, outputs jsonb not null default '[]', error_code text,
   poll_after timestamptz not null default now()+interval '30 seconds',
@@ -109,12 +110,12 @@ declare mid uuid; c saas_ugc.studio_runtime_configs%rowtype; begin
 end $$;
 -- No HTTP action can attest a live test. Explicit financial authorization and a
 -- real, documented provider request are required before this service-only RPC.
-create function public.studio_runtime_attest(p_model_id text,p_hash text,p_reference text) returns boolean language plpgsql security definer set search_path='' as $$
+create function public.studio_runtime_attest(p_model_id text,p_hash text,p_reference text,p_estimate_path text) returns boolean language plpgsql security definer set search_path='' as $$
 declare mid uuid; begin
  if auth.role() is distinct from 'service_role' then raise exception 'forbidden'; end if;
  select id into mid from saas_ugc.studio_ai_models where provider_key='muapi' and provider_model_id=p_model_id;
- if mid is null or p_hash is distinct from ugc_private.studio_spec_hash(mid) or length(coalesce(p_reference,''))<12 then raise exception 'verification_invalid'; end if;
- update saas_ugc.studio_runtime_configs set verified_hash=p_hash,verification_reference=p_reference,verified_at=now(),enabled=false,revision=revision+1 where model_id=mid and credits>0 and max_cost_usd>0;
+ if mid is null or p_hash is distinct from ugc_private.studio_spec_hash(mid) or length(coalesce(p_reference,''))<12 or p_estimate_path is null or p_estimate_path !~ '^/api/v1/models/[A-Za-z0-9._~-]{1,160}/estimate-cost$' then raise exception 'verification_invalid'; end if;
+ update saas_ugc.studio_runtime_configs set estimate_path=p_estimate_path,verified_hash=p_hash,verification_reference=p_reference,verified_at=now(),enabled=false,revision=revision+1 where model_id=mid and credits>0 and max_cost_usd>0;
  return found;
 end $$;
 create function public.studio_runtime_admin_limits(p_enabled boolean,p_daily_usd numeric) returns boolean language plpgsql security definer set search_path='' as $$
@@ -151,7 +152,7 @@ declare uid uuid:=auth.uid(); q saas_ugc.studio_runtime_quotes%rowtype; c saas_u
  if not found or q.expires_at<=now() then raise exception 'quote_expired'; end if;
  select * into c from saas_ugc.studio_runtime_configs where model_id=q.model_id for update;
  if not found or not c.enabled or c.credits is null or c.credits<>q.credits or c.verified_at is null or c.verified_hash is distinct from ugc_private.studio_spec_hash(q.model_id) or c.verified_hash is distinct from q.spec_hash or c.revision<>q.config_revision or not ((ctx->>'plan')=any(c.allowed_plans)) then raise exception 'model_unavailable'; end if;
- if not exists(select 1 from saas_ugc.studio_ai_models where id=q.model_id and public_catalog_present and provider_enabled is true and coming_soon is not true) then raise exception 'model_unavailable'; end if;
+ if not exists(select 1 from saas_ugc.studio_ai_models where id=q.model_id and account_access='available' and public_catalog_present and provider_enabled is true and coming_soon is not true) then raise exception 'model_unavailable'; end if;
  select * into lim from saas_ugc.studio_runtime_limits where id for update;
  if not lim.enabled or q.estimated_usd>c.max_cost_usd then raise exception 'runtime_disabled'; end if;
  select coalesce(sum(greatest(estimated_usd,coalesce(actual_usd,0))),0) into used from saas_ugc.studio_runtime_jobs where created_at>=date_trunc('day',now() at time zone 'UTC') at time zone 'UTC';
@@ -161,6 +162,7 @@ declare uid uuid:=auth.uid(); q saas_ugc.studio_runtime_quotes%rowtype; c saas_u
  perform ugc_private.apply_wallet_delta(uid,'reserve',-q.credits::bigint,q.credits::bigint,'studio:reserve:'||jid::text,'Réservation Studio universel',jsonb_build_object('studio_job_id',jid));
  insert into saas_ugc.studio_runtime_jobs(id,user_id,workspace_id,quote_id,request_key,model_id,status,credits,estimated_usd,quota_kind)
  values(jid,uid,(ctx->>'workspace_id')::uuid,q.id,p_request_key,q.model_id,'submitting',q.credits,q.estimated_usd,c.quota_kind);
+ update saas_ugc.studio_runtime_jobs set output_kind=c.output_kind where id=jid;
  return jsonb_build_object('id',jid,'new',true);
 end $$;
 create function public.studio_runtime_job(p_job_id uuid,p_user_id uuid) returns jsonb language plpgsql stable security definer set search_path='' as $$
@@ -179,16 +181,18 @@ end $$;
 create function public.studio_runtime_due(p_job_id uuid default null) returns jsonb language plpgsql security definer set search_path='' as $$
 begin if auth.role() is distinct from 'service_role' then raise exception 'forbidden'; end if;
  update saas_ugc.studio_runtime_jobs set status='uncertain',error_code='SUBMISSION_UNCERTAIN' where status='submitting' and created_at<now()-interval '5 minutes';
+ perform public.studio_runtime_expire();
  return coalesce((with due as(select id from saas_ugc.studio_runtime_jobs where status='processing' and poll_after<now() and (p_job_id is null or id=p_job_id) order by poll_after for update skip locked limit 3), claimed as(update saas_ugc.studio_runtime_jobs j set poll_after=now()+interval '2 minutes' from due where due.id=j.id returning j.*) select jsonb_agg(to_jsonb(claimed)) from claimed),'[]'::jsonb);
 end $$;
 create function public.studio_runtime_finish(p_job_id uuid,p_status text,p_outputs jsonb,p_actual_usd numeric) returns boolean language plpgsql security definer set search_path='' as $$
 declare j saas_ugc.studio_runtime_jobs%rowtype; begin
  if auth.role() is distinct from 'service_role' then raise exception 'forbidden'; end if;
  if p_status not in ('succeeded','failed') or p_outputs is null or jsonb_typeof(p_outputs)<>'array' or jsonb_array_length(p_outputs)>16 or octet_length(p_outputs::text)>200000 then raise exception 'invalid_result'; end if;
+ if p_status='succeeded' and (p_actual_usd is null or p_actual_usd<0) then raise exception 'actual_cost_required'; end if;
  if p_status='succeeded' and jsonb_array_length(p_outputs)=0 then raise exception 'empty_result'; end if;
  select * into j from saas_ugc.studio_runtime_jobs where id=p_job_id for update;
  if not found then raise exception 'job_not_found'; end if;
- if j.status in ('succeeded','failed') then return false; end if;
+ if j.status in ('succeeded','failed','expired') then return false; end if;
  if j.status<>'processing' then raise exception 'job_not_processing'; end if;
  update saas_ugc.studio_runtime_jobs set status=p_status,outputs=p_outputs,actual_usd=greatest(coalesce(p_actual_usd,estimated_usd),0),error_code=case when p_status='failed' then 'PROVIDER_FAILED' else null end,updated_at=now() where id=j.id;
  if p_status='succeeded' then
@@ -234,3 +238,64 @@ begin perform ugc_private.reelora_assert_admin();
 end $$;
 revoke all on function public.studio_runtime_sync_report() from public,anon;
 grant execute on function public.studio_runtime_sync_report() to authenticated;
+
+-- Platform SLA: an ambiguous provider request is never resubmitted, and cannot
+-- hold customer credits indefinitely. After 24h VYORA bears any late cost;
+-- terminal expired jobs can never subsequently capture credits.
+create function public.studio_runtime_expire() returns integer language plpgsql security definer set search_path='' as $$
+declare j saas_ugc.studio_runtime_jobs%rowtype; n integer:=0; begin
+ if auth.role() is distinct from 'service_role' then raise exception 'forbidden'; end if;
+ for j in select * from saas_ugc.studio_runtime_jobs where status in ('submitting','processing','uncertain') and reservation_deadline<=now() order by id for update skip locked limit 100 loop
+  perform ugc_private.apply_wallet_delta(j.user_id,'release',j.credits::bigint,-j.credits::bigint,'studio:release:'||j.id::text,'Réservation expirée — coût tardif pris en charge par VYORA',jsonb_build_object('studio_job_id',j.id));
+  delete from saas_ugc.ugc_usage_events where user_id=j.user_id and reference_id=j.id and event_kind=j.quota_kind;
+  update saas_ugc.studio_runtime_jobs set status='expired',error_code='RESERVATION_EXPIRED',updated_at=now() where id=j.id;
+  n:=n+1;
+ end loop;
+ delete from saas_ugc.studio_runtime_requests where created_at<now()-interval '1 day';
+ delete from saas_ugc.studio_runtime_quotes q where expires_at<now()-interval '1 day' and not exists(select 1 from saas_ugc.studio_runtime_jobs existing_job where existing_job.quote_id=q.id);
+ return n;
+end $$;
+revoke all on function public.studio_runtime_expire() from public,anon,authenticated;
+grant execute on function public.studio_runtime_expire() to service_role;
+
+-- Only a provider request ID supported by an administrative evidence reference
+-- may reconnect an uncertain task. This action NEVER submits a new generation.
+create function public.studio_runtime_admin_reconcile(p_job_id uuid,p_provider_id text,p_reference text) returns boolean language plpgsql security definer set search_path='' as $$
+begin
+ perform ugc_private.reelora_assert_admin();
+ if p_reference is null or length(p_reference)<12 or p_provider_id is null or p_provider_id !~ '^[A-Za-z0-9_-]{1,200}$' then raise exception 'evidence_required'; end if;
+ update saas_ugc.studio_runtime_jobs set provider_id=p_provider_id,status='processing',error_code=null,poll_after=now(),updated_at=now()
+ where id=p_job_id and status='uncertain' and reservation_deadline>now();
+ return found;
+end $$;
+revoke all on function public.studio_runtime_admin_reconcile(uuid,text,text) from public,anon;
+grant execute on function public.studio_runtime_admin_reconcile(uuid,text,text) to authenticated;
+
+-- Principal-project scheduler. Worker token stays in Vault, never browser/code.
+select cron.schedule('studio-universal-poll','* * * * *',$cron$
+ select net.http_post(url:='https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/studio-runtime',
+ headers:=jsonb_build_object('Content-Type','application/json','x-reelora-worker-token',(select decrypted_secret from vault.decrypted_secrets where name='reelora_worker_token' limit 1)),
+ body:='{"action":"worker","task":"poll"}'::jsonb,timeout_milliseconds:=60000);
+$cron$);
+select cron.schedule('studio-universal-catalog','17 */6 * * *',$cron$
+ select net.http_post(url:='https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/studio-runtime',
+ headers:=jsonb_build_object('Content-Type','application/json','x-reelora-worker-token',(select decrypted_secret from vault.decrypted_secrets where name='reelora_worker_token' limit 1)),
+ body:='{"action":"worker","task":"catalog"}'::jsonb,timeout_milliseconds:=60000);
+$cron$);
+select cron.schedule('studio-universal-details','*/5 * * * *',$cron$
+ select net.http_post(url:='https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/studio-runtime',
+ headers:=jsonb_build_object('Content-Type','application/json','x-reelora-worker-token',(select decrypted_secret from vault.decrypted_secrets where name='reelora_worker_token' limit 1)),
+ body:='{"action":"worker","task":"details"}'::jsonb,timeout_milliseconds:=60000);
+$cron$);
+
+-- Serialize the existing quota RPC itself, so cached/legacy video clients share
+-- the same lock with universal jobs. Preserve its live policy and permissions.
+do $lock$
+declare original text; modified text;
+begin
+ select pg_get_functiondef('public.reelora_consume_quota(text,uuid,jsonb)'::regprocedure) into original;
+ if strpos(original,'perform ugc_private.reelora_assert_active();')=0 then raise exception 'quota_definition_not_recognized'; end if;
+ modified:=replace(original,'perform ugc_private.reelora_assert_active();',
+ 'perform ugc_private.reelora_assert_active(); perform pg_advisory_xact_lock(hashtext(''vyora-quota-''||auth.uid()::text));');
+ execute modified;
+end $lock$;
