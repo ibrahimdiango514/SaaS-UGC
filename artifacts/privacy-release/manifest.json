@@ -1,0 +1,23 @@
+[
+  {
+    "slug": "video-quote",
+    "artifact": "video-quote-07731516e70e1b8d721b2939f3b5b72742b909c2b7f311c5f42c53291c4b3893",
+    "sha256": "07731516e70e1b8d721b2939f3b5b72742b909c2b7f311c5f42c53291c4b3893",
+    "chars": 10724,
+    "parts": 3
+  },
+  {
+    "slug": "reelora-video",
+    "artifact": "reelora-video-710cb2006dd55d7235227e29b475cc9939ee244e840cd0810c79e066735d6ade",
+    "sha256": "710cb2006dd55d7235227e29b475cc9939ee244e840cd0810c79e066735d6ade",
+    "chars": 48424,
+    "parts": 11
+  },
+  {
+    "slug": "vyora-ai",
+    "artifact": "vyora-ai-33362ce06afc95e5f304fdb2f182df1bb00b7b7f041397edf38c38fa6b183263",
+    "sha256": "33362ce06afc95e5f304fdb2f182df1bb00b7b7f041397edf38c38fa6b183263",
+    "chars": 36751,
+    "parts": 9
+  }
+]

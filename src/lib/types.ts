@@ -558,6 +558,7 @@ export type ProviderQuoteSource = 'provider_estimate' | 'catalog_tariff' | 'none
  */
 export interface ProviderQuote {
   available: boolean;
+  verified?: boolean;
   error_code: 'PROMPT_REQUIRED' | null;
 }
 

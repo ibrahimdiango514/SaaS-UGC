@@ -10,7 +10,7 @@ export function ProviderQuotePanel({ quote, busy, error, onRefresh, compact = fa
   onRefresh?: () => void;
   compact?: boolean;
 }) {
-  const state = busy && !quote ? 'loading' : error ? 'error' : !quote ? 'empty' : quote.available ? 'available' : 'unavailable';
+  const state = busy && !quote ? 'loading' : error ? 'error' : !quote ? 'empty' : (quote.verified ?? quote.available) ? 'available' : 'unavailable';
   const message = state === 'loading' ? 'Calcul du devis en cours…'
     : state === 'error' ? 'Impossible de vérifier le devis. Réessayez.'
     : state === 'empty' ? 'Sélectionnez un modèle et des paramètres valides.'

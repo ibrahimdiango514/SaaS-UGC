@@ -283,8 +283,11 @@ function buildProviderQuote(input) {
 function customerQuote(quote) {
   if (!quote) return null;
   return {
-    available: quote.available === true,
-    error_code: quote.error_code === "PROMPT_REQUIRED" ? "PROMPT_REQUIRED" : null
+    available: false,
+    verified: quote.available === true,
+    error_code: quote.error_code === "PROMPT_REQUIRED" ? "PROMPT_REQUIRED" : null,
+    error_message: "Consultez le co\xFBt en cr\xE9dits VYORA avant de confirmer.",
+    billing_units: []
   };
 }
 

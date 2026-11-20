@@ -717,7 +717,7 @@ describe('Catalogue, estimation et suivi', () => {
       model_available: true, pricing_available: true, quote_id: QUOTE_ID, model_id: PUBLIC_MODEL_ID });
     expect(data).not.toHaveProperty('provider_cost_usd');
     expect(data).not.toHaveProperty('provider_quote_error');
-    expect(data.provider_quote).toEqual({ available: true, error_code: null });
+    expect(data.provider_quote).toEqual({ available: false, verified: true, error_code: null, error_message: 'Consultez le coût en crédits VYORA avant de confirmer.', billing_units: [] });
     expect(JSON.stringify(data)).not.toMatch(/cost_usd|currency|markup|USD/);
     expect(JSON.stringify(data)).not.toContain('seedance-lite-t2v');
   });
@@ -966,7 +966,7 @@ describe('Catalogue VYORA, schéma client et devis opaque', () => {
     });
     expect(estimate).not.toHaveProperty('provider_cost_usd');
     expect(estimate).not.toHaveProperty('quote_params');
-    expect(estimate.provider_quote).toEqual({ available: true, error_code: null });
+    expect(estimate.provider_quote).toEqual({ available: false, verified: true, error_code: null, error_message: 'Consultez le coût en crédits VYORA avant de confirmer.', billing_units: [] });
     expect(JSON.stringify(estimate)).not.toContain('seedance-lite-t2v');
     expect(JSON.stringify(estimate)).not.toContain(MUAPI_KEY);
     expect(muapiEstimateCalls()).toHaveLength(1);
@@ -1052,7 +1052,7 @@ describe('Validation du catalogue et des devis VYORA', () => {
       pricing_available: true, quote_id: QUOTE_ID, model_id: PUBLIC_MODEL_ID,
     });
     expect(e).not.toHaveProperty('provider_cost_usd');
-    expect(e.provider_quote).toEqual({ available: true, error_code: null });
+    expect(e.provider_quote).toEqual({ available: false, verified: true, error_code: null, error_message: 'Consultez le coût en crédits VYORA avant de confirmer.', billing_units: [] });
     expect(JSON.stringify(e)).not.toContain('seedance-lite-t2v');
     expect(muapiEstimateCalls()).toHaveLength(0);
     expect(muapiSubmits()).toHaveLength(0);
@@ -1074,7 +1074,7 @@ describe('Validation du catalogue et des devis VYORA', () => {
     });
     expect(e).not.toHaveProperty('provider_cost_usd');
     expect(e).not.toHaveProperty('quote_params');
-    expect(e.provider_quote).toEqual({ available: true, error_code: null });
+    expect(e.provider_quote).toEqual({ available: false, verified: true, error_code: null, error_message: 'Consultez le coût en crédits VYORA avant de confirmer.', billing_units: [] });
     expect(muapiEstimateCalls()).toHaveLength(1);
     expect(muapiEstimateCalls()[0].url).toContain('/api/v1/models/seedance-lite-t2v/estimate-cost');
     expect(muapiEstimateCalls()[0].body).toMatchObject({ prompt, ...params });
@@ -1207,7 +1207,7 @@ describe('Devis fournisseur réel (action quote) — aucun prix inventé', () =>
     expect(r.status).toBe(200);
     const body = await bodyOf(r);
     const quote = body.quote as Record<string, unknown>;
-    expect(quote).toEqual({ available: true, error_code: null });
+    expect(quote).toEqual({ available: false, verified: true, error_code: null, error_message: 'Consultez le coût en crédits VYORA avant de confirmer.', billing_units: [] });
     expect(JSON.stringify(quote)).not.toContain(PROMPT);
     expect(JSON.stringify(quote)).not.toContain('seedance-lite-t2v');
     expect(JSON.stringify(body)).not.toContain(MUAPI_KEY);
@@ -1271,7 +1271,7 @@ describe('Devis fournisseur réel (action quote) — aucun prix inventé', () =>
     const r = await videoHandler(post(EDGE_URL, { action: 'quote', model_id: PUBLIC_MODEL_ID, prompt: PROMPT }));
     const body = await bodyOf(r);
     expect((body.quote as Record<string, unknown>)).toMatchObject({
-      available: true, error_code: null,
+      available: false, verified: true, error_code: null,
     });
   });
 });
