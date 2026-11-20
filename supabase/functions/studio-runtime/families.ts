@@ -5,8 +5,8 @@ import {muapiFormFields,validateMuapiInput,isHttpsInput} from '../universal-cata
 import {resolveMuapiEndpoint} from '../universal-catalog/endpoint.ts';
 type Obj=Record<string,any>;
 const obj=(x:unknown):Obj=>x&&typeof x==='object'&&!Array.isArray(x)?x as Obj:{};
-export const PROTOCOL_VERSION='muapi-families-3';
-export type Protocol='muapi_output_envelope_v1'|'muapi_output_urls_v1'|'muapi_output_media_v1'|'muapi_output_media_list_v1';
+export const PROTOCOL_VERSION='muapi-families-4';
+export type Protocol='muapi_output_envelope_v1'|'muapi_output_urls_v1'|'muapi_output_media_v1'|'muapi_output_media_list_v1'|'muapi_output_text_v1';
 export function classifyFamily(model:Obj):string {
  const categories:Record<string,string>={'Text to Image':'text-to-image','Image to Image':'image-to-image','Text to Video':'text-to-video','Image to Video':'image-to-video','Video to Video':'video-to-video','Text to Audio':'audio-generation','Audio to Video':'audio-to-video','Text to Text':'text','Image to 3D':'image-to-3d','Text to 3D':'text-to-3d','Training':'training','Lora Support':'lora'};
  // Distinct editing/upscale/TTS/lip-sync labels require provider capability
@@ -27,7 +27,8 @@ export function protocolBinding(model:Obj):Protocol|null {
  if(obj(props.id).type!=='string'||obj(props.status).type!=='string')return null;
  // Text models sometimes carry a copied URL schema. Ambiguity must not be
  // silently interpreted as generated text or a file.
- if(['text','training','other','lora'].includes(classifyFamily(model)))return null;
+ if(classifyFamily(model)==='text')return output.type==='object'&&Object.keys(obj(output.properties)).length===1&&obj(obj(output.properties).text).type==='string'&&!obj(obj(output.properties).text).format?'muapi_output_text_v1':null;
+ if(['training','other','lora'].includes(classifyFamily(model)))return null;
  if(output.type==='array'&&obj(output.items).type==='string'&&obj(output.items).format==='uri')return 'muapi_output_urls_v1';
  const inner=obj(output.properties),urls=obj(inner.outputs);
  if(output.type==='object'&&obj(inner.id).type==='string'&&obj(inner.status).type==='string'&&urls.type==='array'&&obj(urls.items).type==='string'&&obj(urls.items).format==='uri')return 'muapi_output_envelope_v1';
@@ -39,7 +40,7 @@ export function submissionId(raw:unknown):string {
  if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(id))throw new Error('SUBMISSION_UNRECOGNIZED');
  return id;
 }
-export function familyResult(protocol:Protocol,raw:unknown,expectedId:string,resultField?:string|null):{state:'pending'|'failed'|'succeeded';media:string[];text:null} {
+export function familyResult(protocol:Protocol,raw:unknown,expectedId:string,resultField?:string|null):{state:'pending'|'failed'|'succeeded';media:string[];text:string|null} {
  const root=obj(raw);
  if(root.id!==expectedId)throw new Error('RESULT_ID_MISMATCH');
  const body=protocol==='muapi_output_envelope_v1'?obj(root.output):root;
@@ -49,15 +50,16 @@ export function familyResult(protocol:Protocol,raw:unknown,expectedId:string,res
  if(['queued','pending','starting','processing'].includes(status))return {state:'pending',media:[],text:null};
  if(['failed','cancelled','canceled'].includes(status))return {state:'failed',media:[],text:null};
  if(!['completed','succeeded'].includes(status))throw new Error('RESULT_STATUS_UNRECOGNIZED');
+ if(protocol==='muapi_output_text_v1'){const text=obj(root.output).text;if(typeof text!=='string'||!text.trim()||text.length>131072)throw new Error('RESULT_TEXT_UNRECOGNIZED');return {state:'succeeded',media:[],text};}
  const urls=protocol==='muapi_output_envelope_v1'?body.outputs:protocol==='muapi_output_media_v1'&&resultField?[obj(root.output)[resultField]]:protocol==='muapi_output_media_list_v1'&&resultField?obj(root.output)[resultField]:protocol==='muapi_output_urls_v1'?root.output:null;
  if(!Array.isArray(urls)||urls.length===0||urls.length>16||urls.some(u=>typeof u!=='string'||u.length>8192||!isHttpsInput(u)))throw new Error('RESULT_OUTPUT_UNRECOGNIZED');
  return {state:'succeeded',media:urls,text:null};
 }
 export function adapterSelfTest(protocol:Protocol):boolean {
  const field=['muapi_output_media_v1','muapi_output_media_list_v1'].includes(protocol)?'declared_media':null;
- const payload=protocol==='muapi_output_media_list_v1'?{id:'fixture',status:'completed',output:{declared_media:['https://example.com/result.png']}}:protocol==='muapi_output_media_v1'?{id:'fixture',status:'completed',output:{declared_media:'https://example.com/result.png'}}:protocol==='muapi_output_envelope_v1'?{id:'fixture',status:'completed',output:{id:'fixture',status:'completed',outputs:['https://example.com/result.png']}}:{id:'fixture',status:'completed',output:['https://example.com/result.png']};
+ const payload=protocol==='muapi_output_text_v1'?{id:'fixture',status:'completed',output:{text:'Declared text result'}}:protocol==='muapi_output_media_list_v1'?{id:'fixture',status:'completed',output:{declared_media:['https://example.com/result.png']}}:protocol==='muapi_output_media_v1'?{id:'fixture',status:'completed',output:{declared_media:'https://example.com/result.png'}}:protocol==='muapi_output_envelope_v1'?{id:'fixture',status:'completed',output:{id:'fixture',status:'completed',outputs:['https://example.com/result.png']}}:{id:'fixture',status:'completed',output:['https://example.com/result.png']};
  try {
-  if(submissionId({request_id:'fixture'})!=='fixture'||familyResult(protocol,payload,'fixture',field).media.length!==1)return false;
+  if(submissionId({request_id:'fixture'})!=='fixture'||(protocol==='muapi_output_text_v1'?!familyResult(protocol,payload,'fixture',field).text:familyResult(protocol,payload,'fixture',field).media.length!==1))return false;
   try{familyResult(protocol,payload,'wrong',field);return false;}catch{/* Expected fail closed. */}
   return true;
  }catch{return false;}
@@ -72,7 +74,7 @@ export function integrationProgress(model:Obj,openapi:Obj={}) {
  const fileFields=(fields??[]).flatMap(f=>leaves(f.definition));
  const supportedMedia=['image','video','audio','images_list','videos_list','audios_list'];
  const uploadsReady=fileFields.every(f=>supportedMedia.includes(String(f.field)));
- const outputReady=['text-to-image','image-to-image','image-editing','image-enhancement','text-to-video','image-to-video','video-to-video','video-editing','lip-sync','avatar-animation','storyboard','audio-to-video','audio-generation'].includes(family);
+ const outputReady=protocol==='muapi_output_text_v1'||['text-to-image','image-to-image','image-editing','image-enhancement','text-to-video','image-to-video','video-to-video','video-editing','lip-sync','avatar-animation','storyboard','audio-to-video','audio-generation'].includes(family);
  const schemaReady=fields!==null;
  // Required input tests are per-model, never just a count of adapter files.
  const invalid=validateMuapiInput(model.input_schema,{__unexpected_field:true});
