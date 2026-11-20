@@ -24,6 +24,8 @@ import {
 } from '../../lib/api';
 import type { AdminMetrics, AdminVideoCatalogResponse, MuApiModel } from '../../lib/types';
 import { BarChart, LineChart, Sparkline } from './AdminCharts';
+import { UniversalCatalogSync } from './UniversalCatalogSync';
+import { UniversalCatalogBrowser } from './UniversalCatalogBrowser';
 
 /* -------------------------------------------------------------------------- */
 /* Helpers partagés                                                           */
@@ -362,6 +364,8 @@ export function ModelsSection() {
 
   return (
     <div className="space-y-5" data-testid="admin-models">
+      <UniversalCatalogSync />
+      <UniversalCatalogBrowser />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-slate-500">
           Catalogue MuAPI réel · {catalog ? `${catalog.catalog.detected_video} modèles vidéo détectés` : 'chargement'} ·

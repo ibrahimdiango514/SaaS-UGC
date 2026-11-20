@@ -710,15 +710,15 @@ describe('Catalogue, estimation et suivi', () => {
     expect(rpcCalls('reelora_sync_video_models')).toHaveLength(1);
   });
 
-  it('retourne un devis en crédits et le vrai tarif USD fournisseur vérifié', async () => {
+  it('retourne uniquement un devis client en crédits', async () => {
     const r = await videoHandler(post(EDGE_URL, { action: 'estimate', service_key: 'ugc_clip_8s', model_id: 'seedance-lite-t2v' }));
     const data = await bodyOf(r);
     expect(data).toMatchObject({ service_key: 'ugc_clip_8s', credits_cost: 13,
       model_available: true, pricing_available: true, quote_id: QUOTE_ID, model_id: PUBLIC_MODEL_ID });
     expect(data).not.toHaveProperty('provider_cost_usd');
     expect(data).not.toHaveProperty('provider_quote_error');
-    expect(data.provider_quote).toMatchObject({ available: true, currency: 'USD', source: 'catalog_tariff' });
-    expect((data.provider_quote as Record<string, unknown>).cost_usd).toBeGreaterThan(0);
+    expect(data.provider_quote).toEqual({ available: true, error_code: null });
+    expect(JSON.stringify(data)).not.toMatch(/cost_usd|currency|markup|USD/);
     expect(JSON.stringify(data)).not.toContain('seedance-lite-t2v');
   });
 
@@ -950,7 +950,7 @@ describe('Catalogue VYORA, schéma client et devis opaque', () => {
     expect(muapiSubmits()).toHaveLength(0);
   });
 
-  it('calcule les crédits côté serveur et expose le devis USD sans identifiant technique', async () => {
+  it('calcule les crédits côté serveur sans exposer le tarif fournisseur', async () => {
     state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
     const params = { aspect_ratio: '9:16', resolution: '480p', duration: 5, camera_fixed: false };
     const prompt = 'Une publicité UGC verticale pour un sérum cosmétique avec accroche et appel à l’achat.';
@@ -966,9 +966,7 @@ describe('Catalogue VYORA, schéma client et devis opaque', () => {
     });
     expect(estimate).not.toHaveProperty('provider_cost_usd');
     expect(estimate).not.toHaveProperty('quote_params');
-    expect(estimate.provider_quote).toMatchObject({
-      available: true, cost_usd: 0.12, currency: 'USD', source: 'provider_estimate',
-    });
+    expect(estimate.provider_quote).toEqual({ available: true, error_code: null });
     expect(JSON.stringify(estimate)).not.toContain('seedance-lite-t2v');
     expect(JSON.stringify(estimate)).not.toContain(MUAPI_KEY);
     expect(muapiEstimateCalls()).toHaveLength(1);
@@ -1054,7 +1052,7 @@ describe('Validation du catalogue et des devis VYORA', () => {
       pricing_available: true, quote_id: QUOTE_ID, model_id: PUBLIC_MODEL_ID,
     });
     expect(e).not.toHaveProperty('provider_cost_usd');
-    expect(e.provider_quote).toMatchObject({ available: true, currency: 'USD', source: 'catalog_tariff' });
+    expect(e.provider_quote).toEqual({ available: true, error_code: null });
     expect(JSON.stringify(e)).not.toContain('seedance-lite-t2v');
     expect(muapiEstimateCalls()).toHaveLength(0);
     expect(muapiSubmits()).toHaveLength(0);
@@ -1076,9 +1074,7 @@ describe('Validation du catalogue et des devis VYORA', () => {
     });
     expect(e).not.toHaveProperty('provider_cost_usd');
     expect(e).not.toHaveProperty('quote_params');
-    expect(e.provider_quote).toMatchObject({
-      available: true, cost_usd: 0.12, currency: 'USD', source: 'provider_estimate',
-    });
+    expect(e.provider_quote).toEqual({ available: true, error_code: null });
     expect(muapiEstimateCalls()).toHaveLength(1);
     expect(muapiEstimateCalls()[0].url).toContain('/api/v1/models/seedance-lite-t2v/estimate-cost');
     expect(muapiEstimateCalls()[0].body).toMatchObject({ prompt, ...params });
@@ -1199,7 +1195,7 @@ describe('UI du Studio avec devis de crédits opaque', () => {
 describe('Devis fournisseur réel (action quote) — aucun prix inventé', () => {
   const PROMPT = 'Publicité UGC verticale pour un sérum cosmétique avec démonstration et appel à l’achat.';
 
-  it('expose le tarif dynamique exact, sa base tarifaire et sa fraîcheur', async () => {
+  it('ne divulgue pas le tarif dynamique ni sa base tarifaire', async () => {
     state.model = DYNAMIC_MODEL as unknown as Record<string, unknown>;
     state.estimateStatus = 200;
     state.estimateResponse = { cost: 1.87, currency: 'USD' };
@@ -1211,14 +1207,7 @@ describe('Devis fournisseur réel (action quote) — aucun prix inventé', () =>
     expect(r.status).toBe(200);
     const body = await bodyOf(r);
     const quote = body.quote as Record<string, unknown>;
-    expect(quote).toMatchObject({
-      available: true, cost_usd: 1.87, currency: 'USD',
-      source: 'provider_estimate', error_code: null,
-      estimate_endpoint_available: true,
-    });
-    expect(quote.checked_at).toEqual(expect.any(String));
-    expect(quote.pricing_basis).toMatchObject({ aspect_ratio: '9:16', resolution: '720p', duration: 5 });
-    expect(quote.billing_units).toEqual(expect.arrayContaining(['duration', 'resolution']));
+    expect(quote).toEqual({ available: true, error_code: null });
     expect(JSON.stringify(quote)).not.toContain(PROMPT);
     expect(JSON.stringify(quote)).not.toContain('seedance-lite-t2v');
     expect(JSON.stringify(body)).not.toContain(MUAPI_KEY);
@@ -1234,7 +1223,7 @@ describe('Devis fournisseur réel (action quote) — aucun prix inventé', () =>
       params: { aspect_ratio: '9:16' }, param_schema: SEEDANCE_T2V.param_schema,
     })));
     expect((body.quote as Record<string, unknown>)).toMatchObject({
-      available: false, cost_usd: null, currency: null, error_code: 'CURRENCY_UNSUPPORTED',
+      available: false, error_code: null,
     });
   });
 
@@ -1247,7 +1236,7 @@ describe('Devis fournisseur réel (action quote) — aucun prix inventé', () =>
       params: { aspect_ratio: '9:16' }, param_schema: SEEDANCE_T2V.param_schema,
     })));
     expect((body.quote as Record<string, unknown>)).toMatchObject({
-      available: false, cost_usd: null, error_code: 'PROVIDER_UNAVAILABLE',
+      available: false, error_code: null,
     });
     expect(JSON.stringify(body)).not.toContain('upstream down');
   });
@@ -1260,29 +1249,29 @@ describe('Devis fournisseur réel (action quote) — aucun prix inventé', () =>
       action: 'quote', model_id: PUBLIC_MODEL_ID, prompt: PROMPT,
     })));
     expect((body.quote as Record<string, unknown>)).toMatchObject({
-      available: false, error_code: 'MODEL_UNAVAILABLE',
+      available: false, error_code: null,
     });
     expect(muapiEstimateCalls()).toHaveLength(0);
   });
 
-  it('explique un tarif catalogue en devise non USD plutôt que d’inventer une conversion', async () => {
+  it('refuse un tarif catalogue non USD sans divulguer la devise', async () => {
     state.model = { ...SEEDANCE_T2V, cost_currency: 'EUR' } as unknown as Record<string, unknown>;
     const body = await bodyOf(await videoHandler(post(EDGE_URL, {
       action: 'quote', model_id: PUBLIC_MODEL_ID,
     })));
     expect((body.quote as Record<string, unknown>)).toMatchObject({
-      available: false, error_code: 'CURRENCY_UNSUPPORTED',
+      available: false, error_code: null,
     });
   });
 
-  it('retourne le tarif catalogue vérifié pour un modèle à prix fixe', async () => {
+  it('confirme la disponibilité pour un modèle à prix fixe', async () => {
     state.model = SEEDANCE_T2V as unknown as Record<string, unknown>;
     state.estimateStatus = 200;
     state.estimateResponse = { cost: 0.12, currency: 'USD' };
     const r = await videoHandler(post(EDGE_URL, { action: 'quote', model_id: PUBLIC_MODEL_ID, prompt: PROMPT }));
     const body = await bodyOf(r);
     expect((body.quote as Record<string, unknown>)).toMatchObject({
-      available: true, source: 'catalog_tariff', currency: 'USD',
+      available: true, error_code: null,
     });
   });
 });

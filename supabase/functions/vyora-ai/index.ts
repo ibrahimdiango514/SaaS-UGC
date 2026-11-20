@@ -501,8 +501,7 @@ async function callRpc(name: string, body: unknown, timeoutMs = 4_000): Promise<
 
 /**
  * Idempotence : réserve la clé d'appel. Refus = l'appel ne part PAS chez le
- * fournisseur (anti-double-facturation). Si la RPC est indisponible, on laisse
- * passer : la disponibilité du service prime, l'appel reste journalisé.
+ * fournisseur (anti-double-facturation). Si la RPC est indisponible, l'appel est bloqué.
  */
 async function claimAiCall(
   requestKey: string,
@@ -527,8 +526,7 @@ async function claimAiCall(
       };
     }
   }
-  // RPC indisponible : on ne bloque pas, on n'enregistre rien non plus.
-  return { claimed: true, status: "in_flight", providerKey: null, modelKey: null, outcomeCode: null };
+  throw new Error("AI_IDEMPOTENCY_UNAVAILABLE");
 }
 
 async function releaseAiCall(params: {
@@ -609,6 +607,8 @@ async function completeViaCore(
         costUsd: outcome.estimatedCostUsd,
       };
     }
+    // A hard budget rejection must never escape through the legacy fallback.
+    if (outcome.code === "BUDGET_EXHAUSTED") throw new Error("BUDGET_EXHAUSTED");
     // Rejeu d'un appel déjà en vol : aucune dépense, aucune seconde requête.
     if (outcome.code === "AI_DUPLICATE_IN_FLIGHT") {
       throw new Error("AI_DUPLICATE_IN_FLIGHT");
@@ -619,7 +619,8 @@ async function completeViaCore(
       const codes = outcome.attempts.map((a) => `${a.providerKey}:${a.errorCode ?? "?"}`).join(" · ");
       throw new Error(`${outcome.code ?? "AI_PROVIDER_ERROR"} · ${codes}`);
     }
-    // Registre indisponible ou aucun candidat : repli sur le chemin historique.
+    // Explicitly routed requests must not bypass registry, budget or idempotency.
+    throw new Error(outcome.code ?? "AI_ROUTING_UNAVAILABLE");
   }
   const result = await complete(messages, options);
   return { ...result, tokenUsage: null, costUsd: null };
@@ -800,7 +801,7 @@ export async function handler(req: Request): Promise<Response> {
         content: result.content,
         usage,
         ...(result.tokenUsage ? { token_usage: result.tokenUsage } : {}),
-        ...(result.costUsd !== null ? { cost_usd: result.costUsd } : {}),
+        ...(internal && result.costUsd !== null ? { cost_usd: result.costUsd } : {}),
       });
     }
 
@@ -818,7 +819,7 @@ export async function handler(req: Request): Promise<Response> {
     if (code === "AI_DUPLICATE_IN_FLIGHT") {
       return fail(code, "Cet appel IA est déjà en cours ou déjà terminé : aucune seconde requête n’a été envoyée au fournisseur.", status);
     }
-    return fail(code, `Le fournisseur IA n’a pas pu répondre : ${message}. Aucun texte n’a été inventé.`, status);
+    return fail(code, internal ? `Le fournisseur IA n’a pas pu répondre : ${message}. Aucun texte n’a été inventé.` : "Le service IA n’a pas pu répondre. Aucun texte n’a été inventé.", status);
   }
 }
 
