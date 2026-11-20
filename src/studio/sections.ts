@@ -24,6 +24,7 @@ export interface StudioSection {
  * implemented; the UI must never present it as operational.
  */
 export const STUDIO_SECTIONS: StudioSection[] = [
+  {id:'universal',label:'Studio universel',shortLabel:'Universel',icon:Sparkles,status:'live',route:'/app/studio/universel',group:'creation',description:'Catalogue complet, modèles vérifiés ou en attente, formulaires, crédits et historique.'},
   {
     id: 'video', label: 'Video Studio', shortLabel: 'Vidéo', icon: Clapperboard, status: 'live',
     route: '/app/studio', group: 'creation',

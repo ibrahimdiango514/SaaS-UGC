@@ -41,8 +41,8 @@ export const SLICES_TABLE = '_edge_function_artifact_slices';
 
 /** Fonctions publiées par chargeur (source longue). */
 export const LOADER_TARGETS = {
-  'vyora-ai': { migration: '20261115220000' },
-  'vyora-ai-providers': { migration: '20261115220100' },
+  'vyora-ai': { migration: '20261124110000' },
+  'vyora-ai-providers': { migration: '20261124110100' },
   'vyora-provider-health': { migration: '20261115220200' },
   'vyora-mcp': { migration: '20261120090200' },
 };

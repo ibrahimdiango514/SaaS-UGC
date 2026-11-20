@@ -279,6 +279,18 @@ function buildProviderQuote(input) {
   return availableQuote({ costUsd: catalogCost, source: "catalog_tariff", now, ...common });
 }
 
+// supabase/functions/_shared/customer-quote.ts
+function customerQuote(quote) {
+  if (!quote) return null;
+  return {
+    available: false,
+    verified: quote.available === true,
+    error_code: quote.error_code === "PROMPT_REQUIRED" ? "PROMPT_REQUIRED" : null,
+    error_message: "Consultez le co\xFBt en cr\xE9dits VYORA avant de confirmer.",
+    billing_units: []
+  };
+}
+
 // supabase/functions/reelora-video/index.ts
 var MUAPI_BASE = "https://api.muapi.ai";
 var BUCKET = "ugc-assets";
@@ -1440,7 +1452,7 @@ async function actionProviderQuote(body) {
     model_available: resolved.modelAvailable,
     model_status: resolved.modelStatus,
     model_reason: resolved.modelReason,
-    quote: resolved.quote
+    quote: customerQuote(resolved.quote)
   });
 }
 async function actionEstimate(body, userId) {
@@ -1460,11 +1472,11 @@ async function actionEstimate(body, userId) {
   if (!service?.active || !modelAvailable) {
     pricingError = "Ce mod\xE8le ou ce service n'est pas disponible pour le moment.";
   } else if (!quoteAvailable || providerCostUsd === null) {
-    pricingError = quote?.error_message ?? "Le tarif exact de cette g\xE9n\xE9ration n'est pas disponible.";
+    pricingError = quote?.error_code === "PROMPT_REQUIRED" ? "Renseignez une instruction vid\xE9o pour obtenir un devis." : "Le co\xFBt en cr\xE9dits est temporairement indisponible.";
   } else {
     const config = await loadVideoPricingConfig();
     if (!config?.enabled || config.usd_to_xof === null || config.credit_value_xof === null || config.markup_percent === null || config.additional_cost_usd === null || !config.updated_at) {
-      pricingError = "La tarification en cr\xE9dits n'est pas encore configur\xE9e. Le devis fournisseur en USD reste disponible, mais la r\xE9servation de cr\xE9dits est bloqu\xE9e.";
+      pricingError = "La tarification en cr\xE9dits n'est pas encore configur\xE9e. La r\xE9servation de cr\xE9dits est bloqu\xE9e.";
     } else {
       creditsCost = calculateVideoCredits(providerCostUsd, config);
       if (creditsCost === null) {
@@ -1507,7 +1519,7 @@ async function actionEstimate(body, userId) {
     pricing_error: pricingError,
     quote_id: quoteId,
     quote_expires_at: quoteId ? new Date(Date.now() + 10 * 60 * 1e3).toISOString() : null,
-    provider_quote: quote
+    provider_quote: customerQuote(quote)
   });
 }
 async function actionStart(jobId, userId) {
