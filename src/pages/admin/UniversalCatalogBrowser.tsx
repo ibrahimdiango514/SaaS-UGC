@@ -1,3 +1,4 @@
+import { UniversalIntegrationProgress } from './UniversalIntegrationProgress';
 import { useEffect, useState } from 'react';
 import { UniversalRuntimeConfig } from './UniversalRuntimeConfig';
 import { UniversalModelForm } from './UniversalModelForm';
@@ -53,7 +54,7 @@ export function UniversalCatalogBrowser() {
     return () => { active=false; };
   }, [modelId]);
   const resetPage = () => { setHistory(['']); setModelId(null); };
-  return <Card><CardHeader title="Explorer le registre universel" description="Consultation administrateur des références MuAPI, y compris celles non intégrées. Ce registre ne permet pas encore de lancer une génération." />
+  return <Card><UniversalIntegrationProgress /><CardHeader title="Explorer le registre universel" description="Consultation administrateur des références MuAPI, y compris celles non intégrées. Ce registre ne permet pas encore de lancer une génération." />
     <div className="space-y-4 p-5 pt-0 text-sm text-slate-300">
       <form className="flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); resetPage(); setQuery(queryInput.trim()); }}>
         <label className="sr-only" htmlFor="universal-admin-query">Rechercher un modèle</label>

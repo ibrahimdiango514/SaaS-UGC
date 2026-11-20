@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { UniversalCatalogBrowser } from '../src/pages/admin/UniversalCatalogBrowser';
 import { getUniversalAdminModelDetail, getUniversalAdminModels, getUniversalCatalogSummary } from '../src/lib/api';
 vi.mock('../src/lib/api', () => ({ universalRuntime:vi.fn(async()=>({config:null,plans:['pro'],limits:{enabled:false,daily_usd:0},assessment:{operational:false,blockers:['PAID_VALIDATION_PENDING']}})), getUniversalAdminModelDetail:vi.fn(), getUniversalAdminModels:vi.fn(), getUniversalCatalogSummary:vi.fn() }));
+vi.mock('../src/pages/admin/UniversalIntegrationProgress',()=>({UniversalIntegrationProgress:()=>null}));
 const model={provider_model_id:'model-a',provider_key:'muapi',display_name:'Modèle A',category:'Text to Text',public_catalog_present:true,account_access:'unverified',integration_status:'catalog_only',studio_enabled:false,adapter_key:null,detail_status:'ok',detail_http_status:200};
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 describe('explorateur admin universel', () => {
