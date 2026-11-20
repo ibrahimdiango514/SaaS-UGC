@@ -37,3 +37,23 @@ describe('fermeture sur les contraintes inconnues', () => {
     expect(validateMuapiInput(wrap({ type: 'string', maxLength: 1 }), { optional: '😀' }).ok).toBe(true);
   });
 });
+
+describe('contraintes MuAPI observées en production', () => {
+  const wrap = (properties: unknown) => ({schemas:{input_data:{type:'object',endpoint_url:'model', 'x-order-properties':[],properties}}});
+  it('accepte les annotations fournisseur et valide les types alias et pas numériques', () => {
+    const s=wrap({value:{type:'float',minValue:0.1,maxValue:1,step:0.1,name:'value',title:'Value',placeholder:'0.5'},prompt:{type:'text',format:'text'}});
+    expect(validateMuapiInput(s,{value:0.3,prompt:'Bonjour'}).ok).toBe(true);
+    expect(validateMuapiInput(s,{value:0.35})).toMatchObject({code:'PARAMETER_INVALID'});
+  });
+  it('valide les médias HTTPS et bloque schémas/URL mal formés sans téléchargement', () => {
+    const s=wrap({image:{type:'string',field:'image'},videos:{type:'array',field:'videos_list',items:{type:'string'},maxItems:2}});
+    expect(validateMuapiInput(s,{image:'https://cdn.example.com/image.png',videos:['https://cdn.example.com/video.mp4']}).ok).toBe(true);
+    for (const image of ['http://cdn.example.com/x','data:image/png,x','https://localhost/x','https://127.0.0.1/x','https://user:pass@cdn.example.com/x']) expect(validateMuapiInput(s,{image}).ok).toBe(false);
+    expect(validateMuapiInput(wrap({x:{type:'string',format:'unknown'}}),{})).toMatchObject({code:'SCHEMA_UNSUPPORTED'});
+  });
+  it('refuse les contraintes conditionnelles et les choix dynamiques non résolus', () => {
+    for (const extra of [{conditionalMaxItems:{}},{limitWhenFieldPresent:{}},{options_source:'remote'},{typing:'other'}]) {
+      expect(validateMuapiInput(wrap({x:{type:'string',...extra}}),{})).toMatchObject({code:'SCHEMA_UNSUPPORTED'});
+    }
+  });
+});

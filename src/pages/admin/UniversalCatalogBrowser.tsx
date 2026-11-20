@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { UniversalModelForm } from './UniversalModelForm';
 import { Button, Card, CardHeader } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
 import { getUniversalAdminModelDetail, getUniversalAdminModels, getUniversalCatalogSummary, type UniversalAdminModelDetail, type UniversalAdminPage } from '../../lib/api';
@@ -81,6 +82,7 @@ export function UniversalCatalogBrowser() {
         <p>Studio : {detail.studio_enabled ? 'activé' : 'désactivé'} · statut d’intégration : {detail.integration_status}. Activation et modification indisponibles tant que les contrôles serveur ne sont pas raccordés.</p>
         <p>Coût fournisseur, coût interne et marge : non enregistrés dans ce registre ; aucun montant déduit.</p>
         <h4 className="font-semibold text-white">Aperçu des paramètres du schéma</h4><p className="text-slate-400">Lecture seule : cet aperçu n’est pas un formulaire de génération validé.</p><SchemaPreview schema={detail.input_schema} />
+        <h4 className="font-semibold text-white">Formulaire de validation serveur (sans génération)</h4><UniversalModelForm key={detail.provider_model_id + String(detail.detail_checked_at)} modelId={detail.provider_model_id} schema={detail.input_schema} evidence={detail.endpoint_evidence} />
         <details><summary className="cursor-pointer">Schéma brut des entrées</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(detail.input_schema,null,2)}</pre></details>
         <details><summary className="cursor-pointer">Schéma brut des sorties</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(detail.output_schema,null,2)}</pre></details>
         <details><summary className="cursor-pointer">Changements récents du catalogue (20 maximum)</summary><ul>{detail.recent_changes.map(c => <li key={c.id}>{c.created_at} · {c.change_type}</li>)}</ul></details>
