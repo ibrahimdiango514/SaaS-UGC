@@ -30,6 +30,7 @@
     ]
   },
   "include": [
+    "supabase/functions/studio-runtime/*.ts",
     "supabase/functions/universal-catalog/*.ts",
     "supabase/functions/video-quote/index.ts",
     "supabase/functions/vyora-provider-discovery/index.ts",
