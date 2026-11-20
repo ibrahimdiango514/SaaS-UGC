@@ -112,7 +112,10 @@ export function createHandler(deps:Dependencies) {
   if(body.task==='integrations') {
    const documentation=await fetcher('https://api.muapi.ai/openapi.json',{method:'GET',redirect:'error',signal:AbortSignal.timeout(30000)});
    if(!documentation.ok)error('OFFICIAL_CONTRACT_UNAVAILABLE',503);
-   const openapi=record(await documentation.json());
+   const documentationText=await documentation.text();
+   if(documentationText.length>20000000)error('OFFICIAL_CONTRACT_TOO_LARGE',503);
+   const openapi=record(JSON.parse(documentationText));
+   openapi.__document_sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(documentationText)))).map(b=>b.toString(16).padStart(2,'0')).join('');
    if(!record(openapi.paths)['/api/v1/predictions/{id}/result']?.get)error('OFFICIAL_CONTRACT_UNAVAILABLE',503);
    let after='',assessed=0,prepared=0;
    let accountIds:Set<string>|null=null;

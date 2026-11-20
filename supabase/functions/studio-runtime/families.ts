@@ -60,16 +60,17 @@ export function integrationProgress(model:Obj,openapi:Obj={}) {
  const fileFields=(fields??[]).filter(f=>f.definition.field!==undefined||f.definition.format==='uri');
  const supportedMedia=['image','video','audio','images_list','videos_list','audios_list'];
  const uploadsReady=fileFields.every(f=>supportedMedia.includes(String(f.definition.field)));
+ const outputReady=['text-to-image','image-to-image','image-editing','image-enhancement','text-to-video','image-to-video','video-to-video','video-editing','lip-sync','avatar-animation','storyboard','audio-to-video','audio-generation'].includes(family);
  const schemaReady=fields!==null;
  // Required input tests are per-model, never just a count of adapter files.
  const invalid=validateMuapiInput(model.input_schema,{__unexpected_field:true});
  const tested=schemaReady&&!!protocol&&adapterSelfTest(protocol)&&!invalid.ok;
  const stages={catalogued:true,endpoint_confirmed:endpoint.status==='declared'&&!!operation,schema_confirmed:schemaReady,adapter_available:protocol!==null,
-  form_ready:schemaReady,server_validation_ready:schemaReady,upload_functional:uploadsReady,task_protocol_ready:protocol!==null,
+  form_ready:schemaReady,server_validation_ready:schemaReady,upload_functional:uploadsReady,task_protocol_ready:protocol!==null,output_media_supported:outputReady,
   technical_test_succeeded:tested,real_test_pending:true};
- const prepared=stages.endpoint_confirmed&&schemaReady&&protocol!==null&&uploadsReady&&tested;
+ const prepared=stages.endpoint_confirmed&&schemaReady&&protocol!==null&&uploadsReady&&outputReady&&tested;
  return {family,protocol,version:PROTOCOL_VERSION,stages,status:prepared?'integration_prepared':'blocked',
-  blockers:[...(!stages.endpoint_confirmed?[endpoint.status==='declared'?'OPENAPI_OPERATION_UNCONFIRMED':'ENDPOINT_'+endpoint.status.toUpperCase()]:[]),...(!schemaReady?['SCHEMA_UNSUPPORTED']:[]),...(!protocol?['RESPONSE_CONTRACT_UNSUPPORTED']:[]),...(!uploadsReady?['UPLOAD_FORMAT_UNSUPPORTED']:[]),'CONSTRAINT_REVIEW_REQUIRED','REAL_TEST_PENDING'],
-  openapi_evidence:{source:'https://api.muapi.ai/openapi.json',operation_id:operation?.operationId??null,tags,request_schema:operation?.requestBody?.content?.['application/json']?.schema??null},
+  blockers:[...(!stages.endpoint_confirmed?[endpoint.status==='declared'?'OPENAPI_OPERATION_UNCONFIRMED':'ENDPOINT_'+endpoint.status.toUpperCase()]:[]),...(!schemaReady?['SCHEMA_UNSUPPORTED']:[]),...(!protocol?['RESPONSE_CONTRACT_UNSUPPORTED']:[]),...(!uploadsReady?['UPLOAD_FORMAT_UNSUPPORTED']:[]),...(!outputReady?['OUTPUT_FORMAT_UNSUPPORTED']:[]),'CONSTRAINT_REVIEW_REQUIRED','REAL_TEST_PENDING'],
+  openapi_evidence:{source:'https://api.muapi.ai/openapi.json',document_sha256:openapi.__document_sha256??null,operation_id:operation?.operationId??null,tags,request_schema:operation?.requestBody?.content?.['application/json']?.schema??null},
   input_signature:JSON.stringify(fields?.map(f=>({key:f.key,definition:f.definition,required:f.required}))??null)};
 }
