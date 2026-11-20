@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { UniversalModelForm } from './UniversalModelForm';
+import { resolveMuapiEndpoint } from '../../../supabase/functions/universal-catalog/endpoint';
 import { Button, Card, CardHeader } from '../../components/ui';
 import { asAppError } from '../../lib/errors';
 import { getUniversalAdminModelDetail, getUniversalAdminModels, getUniversalCatalogSummary, type UniversalAdminModelDetail, type UniversalAdminPage } from '../../lib/api';
@@ -37,6 +39,7 @@ export function UniversalCatalogBrowser() {
   const [detail,setDetail] = useState<UniversalAdminModelDetail | null>(null);
   const [detailError,setDetailError] = useState('');
   const after = history[history.length-1];
+  const binding = detail ? resolveMuapiEndpoint(detail.provider_model_id, detail.input_schema, detail.endpoint_evidence) : null;
   useEffect(() => { let active=true; getUniversalCatalogSummary().then(x => { if (active) setCategories(Object.keys(x.categories).sort()); }).catch(() => { if (active) setCategories([]); }); return () => { active=false; }; }, []);
   useEffect(() => {
     let active=true; setLoading(true); setError(''); setPage(null);
@@ -75,12 +78,13 @@ export function UniversalCatalogBrowser() {
       {detail && <section aria-label="Fiche du modèle" className="space-y-3 rounded-xl border border-cyan-400/20 p-4 text-xs">
         <h3 className="text-base font-semibold text-white">{detail.display_name} <code className="text-xs">{detail.provider_model_id}</code></h3>
         <p>{detail.provider_key} · {detail.category} · {detail.public_catalog_present ? 'présent au catalogue' : 'absent du catalogue public'}</p>
-        <p>Endpoint déclaré dans la fiche : {typeof object(object(object(detail.input_schema).schemas).input_data).endpoint_url === 'string' ? String(object(object(object(detail.input_schema).schemas).input_data).endpoint_url) : 'absent — intégration incomplète'}. Ce champ n’est pas une preuve d’accès ou de fonctionnement.</p>
+        <p>Endpoint déclaré dans la fiche : {binding?.url ?? 'absent, invalide ou contradictoire — intégration bloquée'}. Ce champ n’est pas une preuve d’accès ou de fonctionnement.</p>
         {detail.description && <p>{detail.description}</p>}
         <ul className="space-y-1"><li>1. Catalogué : oui</li><li>2. Fiche technique : {detail.detail_status ?? 'non vérifiée'}{detail.detail_http_status ? ` (HTTP ${detail.detail_http_status})` : ''}</li><li>3. Accès au compte : {detail.account_access}</li><li>4. Clé d’adaptateur : {detail.adapter_key ?? 'non renseignée — adaptation non établie'}</li><li>5. Paramètres intégrés : non établis par la fiche</li><li>6. Test technique : non établi par la fiche</li><li>7. E2E : {detail.integration_status === 'e2e_verified' ? 'statut E2E enregistré' : 'non établi'}</li></ul>
         <p>Studio : {detail.studio_enabled ? 'activé' : 'désactivé'} · statut d’intégration : {detail.integration_status}. Activation et modification indisponibles tant que les contrôles serveur ne sont pas raccordés.</p>
         <p>Coût fournisseur, coût interne et marge : non enregistrés dans ce registre ; aucun montant déduit.</p>
         <h4 className="font-semibold text-white">Aperçu des paramètres du schéma</h4><p className="text-slate-400">Lecture seule : cet aperçu n’est pas un formulaire de génération validé.</p><SchemaPreview schema={detail.input_schema} />
+        <h4 className="font-semibold text-white">Formulaire de validation serveur (sans génération)</h4><UniversalModelForm key={detail.provider_model_id + String(detail.detail_checked_at)} modelId={detail.provider_model_id} schema={detail.input_schema} evidence={detail.endpoint_evidence} />
         <details><summary className="cursor-pointer">Schéma brut des entrées</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(detail.input_schema,null,2)}</pre></details>
         <details><summary className="cursor-pointer">Schéma brut des sorties</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(detail.output_schema,null,2)}</pre></details>
         <details><summary className="cursor-pointer">Changements récents du catalogue (20 maximum)</summary><ul>{detail.recent_changes.map(c => <li key={c.id}>{c.created_at} · {c.change_type}</li>)}</ul></details>

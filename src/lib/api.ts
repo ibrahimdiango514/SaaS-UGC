@@ -71,6 +71,7 @@ export interface UniversalAdminModel {
 }
 export interface UniversalAdminModelDetail extends UniversalAdminModel {
   description: string | null; input_fields: string[]; required_fields: string[];
+  endpoint_evidence?: unknown;
   input_schema: unknown; output_schema: unknown; metadata: Record<string, unknown>;
   provider_enabled: boolean | null; coming_soon: boolean | null; detail_checked_at: string | null;
   recent_changes: { id: number; change_type: string; created_at: string }[];
@@ -91,6 +92,19 @@ export async function getUniversalAdminModelDetail(modelId: string): Promise<Uni
   const data = await rpc<UniversalAdminModelDetail | null>('studio_catalog_admin_model_detail', { p_model_id: modelId });
   if (!data || data.provider_model_id !== modelId || !Array.isArray(data.input_fields) || !Array.isArray(data.required_fields) || !Array.isArray(data.recent_changes)) {
     throw new AppError('Fiche administrateur introuvable ou invalide.', 'CATALOG_INVALID_RESPONSE');
+  }
+  return data;
+}
+
+export interface UniversalInputValidation {
+  validation: { ok: true; fields: string[] } | { ok: false; code: string; field: string | null };
+  endpoint: { status: string; path: string | null; url: string | null; differs: boolean };
+  executable: false; mode: 'validation_only';
+}
+export async function validateUniversalModelInput(modelId: string, params: Record<string, unknown>): Promise<UniversalInputValidation> {
+  const data = await invokeEdge<UniversalInputValidation>('universal-catalog', { action: 'validate_muapi_input', model_id: modelId, params });
+  if (!data || data.mode !== 'validation_only' || data.executable !== false || typeof data.validation?.ok !== 'boolean' || !data.endpoint) {
+    throw new AppError('Réponse de validation invalide.', 'CATALOG_INVALID_RESPONSE');
   }
   return data;
 }

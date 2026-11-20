@@ -21,6 +21,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run typecheck:edge
+      - run: node scripts/build-universal-validation.mjs --check
       - run: npm run check:edge-imports
       - run: npm test
       - run: npm run build

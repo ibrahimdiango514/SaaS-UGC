@@ -7,6 +7,7 @@ export interface DetailResult {
   status: DetailStatus;
   http_status: number | null;
   input_schema: JsonObject | null;
+  endpoint_evidence?: JsonObject | null;
   output_schema: JsonObject | null;
 }
 const object = (x: unknown): x is JsonObject => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -26,6 +27,7 @@ export async function fetchMuapiDetail(fetcher: Fetcher, modelId: string): Promi
     const schemas = raw.input_schema.schemas;
     if (!object(schemas) || !object(schemas.input_data) || schemas.input_data.type !== 'object' || !object(schemas.input_data.properties)) return result;
     if (raw.output_schema != null && !object(raw.output_schema)) return result;
+    result.endpoint_evidence = { endpoint: raw.endpoint ?? null, endpoint_url: raw.endpoint_url ?? null, source_url: `https://api.muapi.ai/api/v1/models/${encodeURIComponent(modelId)}`, observed_at: new Date().toISOString(), http_status: response.status };
     result.status = 'ok';
     result.input_schema = raw.input_schema;
     result.output_schema = raw.output_schema == null ? null : raw.output_schema as JsonObject;
