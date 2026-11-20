@@ -5,13 +5,22 @@ import {muapiFormFields,validateMuapiInput,isHttpsInput} from '../universal-cata
 import {resolveMuapiEndpoint} from '../universal-catalog/endpoint.ts';
 type Obj=Record<string,any>;
 const obj=(x:unknown):Obj=>x&&typeof x==='object'&&!Array.isArray(x)?x as Obj:{};
-export const PROTOCOL_VERSION='muapi-families-1';
-export type Protocol='muapi_output_envelope_v1'|'muapi_output_urls_v1';
+export const PROTOCOL_VERSION='muapi-families-2';
+export type Protocol='muapi_output_envelope_v1'|'muapi_output_urls_v1'|'muapi_output_media_v1';
 export function classifyFamily(model:Obj):string {
  const categories:Record<string,string>={'Text to Image':'text-to-image','Image to Image':'image-to-image','Text to Video':'text-to-video','Image to Video':'image-to-video','Video to Video':'video-to-video','Text to Audio':'audio-generation','Audio to Video':'audio-to-video','Text to Text':'text','Image to 3D':'image-to-3d','Text to 3D':'text-to-3d','Training':'training','Lora Support':'lora'};
  // Distinct editing/upscale/TTS/lip-sync labels require provider capability
  // evidence. Do not relabel a model based on marketing words in its ID.
  return categories[model.category]??'other';
+}
+export function responseField(model:Obj):string|null {
+ const fields=obj(obj(obj(obj(model.output_schema).schemas).properties).output).properties;
+ const entries=Object.entries(obj(fields));
+ if(entries.length!==1)return null;
+ const [key,raw]=entries[0],def=obj(raw);
+ // URI format or an explicit provider URL title is evidence; never pick a
+ // field merely because its name resembles image_url/video/audio.
+ return /^[A-Za-z_][A-Za-z0-9_]{0,99}$/.test(key)&&def.type==='string'&&(def.format==='uri'||typeof def.title==='string'&&/ URL$/.test(def.title))?key:null;
 }
 export function protocolBinding(model:Obj):Protocol|null {
  const schema=obj(model.output_schema).schemas,props=obj(obj(schema).properties),output=obj(props.output);
@@ -22,6 +31,7 @@ export function protocolBinding(model:Obj):Protocol|null {
  if(output.type==='array'&&obj(output.items).type==='string'&&obj(output.items).format==='uri')return 'muapi_output_urls_v1';
  const inner=obj(output.properties),urls=obj(inner.outputs);
  if(output.type==='object'&&obj(inner.id).type==='string'&&obj(inner.status).type==='string'&&urls.type==='array'&&obj(urls.items).type==='string'&&obj(urls.items).format==='uri')return 'muapi_output_envelope_v1';
+ if(output.type==='object'&&responseField(model))return 'muapi_output_media_v1';
  return null;
 }
 export function submissionId(raw:unknown):string {
@@ -29,7 +39,7 @@ export function submissionId(raw:unknown):string {
  if(typeof id!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(id))throw new Error('SUBMISSION_UNRECOGNIZED');
  return id;
 }
-export function familyResult(protocol:Protocol,raw:unknown,expectedId:string):{state:'pending'|'failed'|'succeeded';media:string[];text:null} {
+export function familyResult(protocol:Protocol,raw:unknown,expectedId:string,resultField?:string|null):{state:'pending'|'failed'|'succeeded';media:string[];text:null} {
  const root=obj(raw);
  if(root.id!==expectedId)throw new Error('RESULT_ID_MISMATCH');
  const body=protocol==='muapi_output_envelope_v1'?obj(root.output):root;
@@ -39,15 +49,16 @@ export function familyResult(protocol:Protocol,raw:unknown,expectedId:string):{s
  if(['queued','pending','starting','processing'].includes(status))return {state:'pending',media:[],text:null};
  if(['failed','cancelled','canceled'].includes(status))return {state:'failed',media:[],text:null};
  if(!['completed','succeeded'].includes(status))throw new Error('RESULT_STATUS_UNRECOGNIZED');
- const urls=protocol==='muapi_output_envelope_v1'?body.outputs:root.output;
+ const urls=protocol==='muapi_output_envelope_v1'?body.outputs:protocol==='muapi_output_media_v1'&&resultField?[obj(root.output)[resultField]]:protocol==='muapi_output_urls_v1'?root.output:null;
  if(!Array.isArray(urls)||urls.length===0||urls.length>16||urls.some(u=>typeof u!=='string'||u.length>8192||!isHttpsInput(u)))throw new Error('RESULT_OUTPUT_UNRECOGNIZED');
  return {state:'succeeded',media:urls,text:null};
 }
 export function adapterSelfTest(protocol:Protocol):boolean {
- const payload=protocol==='muapi_output_envelope_v1'?{id:'fixture',status:'completed',output:{id:'fixture',status:'completed',outputs:['https://example.com/result.png']}}:{id:'fixture',status:'completed',output:['https://example.com/result.png']};
+ const field=protocol==='muapi_output_media_v1'?'declared_media':null;
+ const payload=protocol==='muapi_output_media_v1'?{id:'fixture',status:'completed',output:{declared_media:'https://example.com/result.png'}}:protocol==='muapi_output_envelope_v1'?{id:'fixture',status:'completed',output:{id:'fixture',status:'completed',outputs:['https://example.com/result.png']}}:{id:'fixture',status:'completed',output:['https://example.com/result.png']};
  try {
-  if(submissionId({request_id:'fixture'})!=='fixture'||familyResult(protocol,payload,'fixture').media.length!==1)return false;
-  try{familyResult(protocol,payload,'wrong');return false;}catch{/* Expected fail closed. */}
+  if(submissionId({request_id:'fixture'})!=='fixture'||familyResult(protocol,payload,'fixture',field).media.length!==1)return false;
+  try{familyResult(protocol,payload,'wrong',field);return false;}catch{/* Expected fail closed. */}
   return true;
  }catch{return false;}
 }
@@ -69,7 +80,7 @@ export function integrationProgress(model:Obj,openapi:Obj={}) {
   form_ready:schemaReady,server_validation_ready:schemaReady,upload_functional:uploadsReady,task_protocol_ready:protocol!==null,output_media_supported:outputReady,
   technical_test_succeeded:tested,real_test_pending:true};
  const prepared=stages.endpoint_confirmed&&schemaReady&&protocol!==null&&uploadsReady&&outputReady&&tested;
- return {family,protocol,version:PROTOCOL_VERSION,stages,status:prepared?'integration_prepared':'blocked',
+ return {family,protocol,result_field:protocol==='muapi_output_media_v1'?responseField(model):null,version:PROTOCOL_VERSION,stages,status:prepared?'integration_prepared':'blocked',
   blockers:[...(!stages.endpoint_confirmed?[endpoint.status==='declared'?'OPENAPI_OPERATION_UNCONFIRMED':'ENDPOINT_'+endpoint.status.toUpperCase()]:[]),...(!schemaReady?['SCHEMA_UNSUPPORTED']:[]),...(!protocol?['RESPONSE_CONTRACT_UNSUPPORTED']:[]),...(!uploadsReady?['UPLOAD_FORMAT_UNSUPPORTED']:[]),...(!outputReady?['OUTPUT_FORMAT_UNSUPPORTED']:[]),'CONSTRAINT_REVIEW_REQUIRED','REAL_TEST_PENDING'],
   openapi_evidence:{source:'https://api.muapi.ai/openapi.json',document_sha256:openapi.__document_sha256??null,operation_id:operation?.operationId??null,tags,request_schema:operation?.requestBody?.content?.['application/json']?.schema??null},
   input_signature:JSON.stringify(fields?.map(f=>({key:f.key,definition:f.definition,required:f.required}))??null)};

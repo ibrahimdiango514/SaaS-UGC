@@ -45,3 +45,14 @@ describe('evidence-bound family integrations',()=>{
   expect(()=>submissionId({request_id:'../x'})).toThrow();
  });
 });
+
+it('binds a direct media output only from explicit URL semantics and snapshots its declared key',()=>{
+ const direct={...model,output_schema:{schemas:{type:'object',properties:{id:{type:'string'},status:{type:'string'},output:{type:'object',properties:{provider_specific_field:{type:'string',format:'uri'}}}}}}};
+ expect(protocolBinding(direct)).toBe('muapi_output_media_v1');
+ expect(progress(direct).result_field).toBe('provider_specific_field');
+ expect(adapterSelfTest('muapi_output_media_v1')).toBe(true);
+ expect(familyResult('muapi_output_media_v1',{id:'request',status:'completed',output:{provider_specific_field:'https://example.com/image.png'}},'request','provider_specific_field').media).toHaveLength(1);
+ expect(()=>familyResult('muapi_output_media_v1',{id:'request',status:'completed',output:{other:'https://example.com/image.png'}},'request','provider_specific_field')).toThrow();
+ const guessed=structuredClone(direct);(guessed.output_schema.schemas.properties.output.properties.provider_specific_field as any)={type:'string'};
+ expect(protocolBinding(guessed)).toBeNull();
+});

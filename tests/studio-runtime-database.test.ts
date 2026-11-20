@@ -38,6 +38,7 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec(read('20261120035256_studio_runtime'));
  await db.exec(read('20261120035400_studio_runtime_claim_fix'));
  await db.exec(read('20261120041508_studio_family_progress'));
+ await db.exec(read('20261120044000_studio_direct_media_adapter'));
  await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,account_access,input_schema)
  values('muapi','real-model','Real','image',true,false,'available','{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
  set test.uid='${uid}';set test.role='authenticated';set test.admin='yes';`);
@@ -53,7 +54,7 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  const mid=(await db.query<{id:string}>('select id from saas_ugc.studio_ai_models')).rows[0].id;
  const revision=(await db.query<{revision:number}>('select revision from saas_ugc.studio_runtime_configs')).rows[0].revision;
  const quote=async()=> (await db.query<{q:{quote_id:string}}>(`select public.studio_runtime_issue_quote($1::uuid,$2::uuid,'{"prompt":"hello"}',0.3,$3,$4) as q`,[uid,mid,hash,revision])).rows[0].q.quote_id;
- const progress={family:'text-to-image',protocol:'muapi_output_envelope_v1',version:'muapi-families-1',status:'integration_prepared',stages:{technical_test_succeeded:true,real_test_pending:true},blockers:['REAL_TEST_PENDING'],input_signature:'[]'};
+ const progress={family:'text-to-image',protocol:'muapi_output_envelope_v1',version:'muapi-families-2',status:'integration_prepared',stages:{technical_test_succeeded:true,real_test_pending:true},blockers:['REAL_TEST_PENDING'],input_signature:'[]'};
  await db.query('select public.studio_save_integration($1,$2,$3)',[mid,hash,JSON.stringify(progress)]);
  expect((await db.query<{r:boolean}>('select public.studio_save_integration($1,$2,$3) r',[mid,'stale',JSON.stringify(progress)])).rows[0].r).toBe(false);
  const report=(await db.query<{r:{counts:{prepared:number};items:{operational:boolean}[]}}>('select public.studio_integration_progress() r')).rows[0].r;
