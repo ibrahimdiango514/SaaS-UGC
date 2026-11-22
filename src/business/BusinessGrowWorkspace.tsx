@@ -20,6 +20,8 @@ import CatalogWorkspace from './catalog/CatalogWorkspace';
 import CashWorkspace from './cash/CashWorkspace';
 import AutomationWorkspace from './automation/AutomationWorkspace';
 import MarketingWorkspace from './marketing/MarketingWorkspace';
+import SuppliersWorkspace from './suppliers/SuppliersWorkspace';
+import StorefrontWorkspace from './storefront/StorefrontWorkspace';
 import { IntegrationsCenter, type SubscriptionRefusal } from '../integrations/CatalogPage';
 import { GrowthOsLayout } from './os/GrowthOsLayout';
 import { GrowthOsOverview, GrowthOsReports } from './os/GrowthOsOverview';
@@ -478,7 +480,7 @@ function AssistantView({
   );
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]" data-testid="business-assistant-section">
+    <div className="space-y-3" data-testid="business-assistant-section">
       <div className="min-w-0 space-y-3">
         {/* AI Director : le routage reste visible et pilotable, comme avant.
             Ce bloc n'est pas décoratif — il change réellement le service
@@ -2503,6 +2505,14 @@ function ScopedBusinessGrowWorkspace() {
         />
       )}
       {workspaceId && osModule === 'catalog' && <CatalogWorkspace workspaceId={workspaceId} />}
+      {workspaceId && osModule === 'suppliers' && <SuppliersWorkspace workspaceId={workspaceId} />}
+      {workspaceId && osModule === 'storefront' && (
+        <StorefrontWorkspace
+          workspaceId={workspaceId}
+          workspaceName={workspace?.name ?? 'Mon entreprise'}
+          onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
+        />
+      )}
       {workspaceId && osModule === 'cash' && (
         <CashWorkspace workspaceId={workspaceId} onOpenFinance={() => go('finance')} />
       )}

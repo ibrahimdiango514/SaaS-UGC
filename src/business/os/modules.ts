@@ -1,6 +1,6 @@
 import {
   BarChart3, BellRing, Brain, Building2, ClipboardList, Landmark, LayoutDashboard, Mail,
-  Megaphone, Package, Plug, Shield, ShoppingCart, Target, Users, Wallet, Workflow, Zap,
+  Megaphone, Package, Plug, Shield, ShoppingCart, Store, Target, Truck, Users, Wallet, Workflow, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -12,7 +12,7 @@ import type { LucideIcon } from 'lucide-react';
  */
 export type GrowthOsModule =
   | 'overview' | 'crm' | 'pipeline' | 'tasks' | 'relances'
-  | 'sales' | 'catalog' | 'finance' | 'cash' | 'recouvrement' | 'reports'
+  | 'sales' | 'catalog' | 'suppliers' | 'storefront' | 'finance' | 'cash' | 'recouvrement' | 'reports'
   | 'automation' | 'marketing' | 'assistant'
   | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
 
@@ -81,6 +81,16 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         key: 'catalog', label: 'Produits et stock', shortLabel: 'Catalogue',
         description: 'Catalogue, mouvements et alertes de stock',
         path: '/app/business/catalog', icon: Package,
+      },
+      {
+        key: 'suppliers', label: 'Achats et fournisseurs', shortLabel: 'Achats',
+        description: 'Fournisseurs, commandes, réceptions et dépenses',
+        path: '/app/business/suppliers', icon: Truck,
+      },
+      {
+        key: 'storefront', label: 'Vitrine commerciale', shortLabel: 'Vitrine',
+        description: 'Catalogue partageable et demandes de commande',
+        path: '/app/business/storefront', icon: Store,
       },
     ],
   },

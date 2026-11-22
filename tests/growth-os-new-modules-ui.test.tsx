@@ -22,6 +22,8 @@ import CatalogWorkspace from '../src/business/catalog/CatalogWorkspace';
 import CashWorkspace from '../src/business/cash/CashWorkspace';
 import AutomationWorkspace from '../src/business/automation/AutomationWorkspace';
 import MarketingWorkspace from '../src/business/marketing/MarketingWorkspace';
+import SuppliersWorkspace from '../src/business/suppliers/SuppliersWorkspace';
+import StorefrontWorkspace from '../src/business/storefront/StorefrontWorkspace';
 
 function record(id: string, category: string, data: Record<string, unknown>): BusinessModuleRecord {
   return { id, category, data, created_at: '2026-10-01T00:00:00.000Z', updated_at: '2026-11-20T00:00:00.000Z' };
@@ -69,6 +71,24 @@ const store: Record<string, BusinessModuleRecord[]> = {
   bg_module_automation_rules: [],
   bg_module_automation_runs: [],
   bg_module_marketing_campaigns: [],
+  bg_module_suppliers: [
+    record('s1', 'bg_module_suppliers', { name: 'Grossiste Karité', status: 'actif', phone: '+223 70 00 00 00' }),
+  ],
+  bg_module_purchase_orders: [
+    record('po1', 'bg_module_purchase_orders', {
+      number: 'ACH-2026-0001', supplierId: 's1', status: 'confirme', orderedAt: '2026-11-01',
+      lines: [{ id: 'l1', productId: 'pr1', description: 'Savon brut', quantity: 10, unitPrice: 500, discountPct: 0, taxPct: 0 }],
+    }),
+  ],
+  bg_module_goods_receipts: [],
+  bg_module_storefront_requests: [
+    record('req1', 'bg_module_storefront_requests', {
+      customerName: 'Fatou Diarra', phone: '+223 66 00 00 00', email: 'fatou@example.com',
+      lines: [{ productId: 'pr1', name: 'Savon', quantity: 2, unitPrice: 1_500 }], status: 'nouveau', requestedAt: '2026-11-21',
+    }),
+  ],
+  bg_module_storefront_settings: [],
+  bg_module_sales_orders: [],
 };
 
 beforeEach(() => {
@@ -132,6 +152,44 @@ describe('Growth OS — nouveaux modules connectés', () => {
       'w1',
     ));
     store.bg_module_automation_rules = [];
+  });
+
+  it('réceptionne une commande fournisseur et crée les entrées de stock', async () => {
+    wrap(<SuppliersWorkspace workspaceId="w1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Commandes' }));
+    expect(await screen.findByText('ACH-2026-0001')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Réceptionner' }));
+    await waitFor(() => expect(api.createModuleRecord).toHaveBeenCalledWith(
+      'bg_module_goods_receipts',
+      expect.objectContaining({ purchaseOrderId: 'po1', supplierId: 's1' }),
+      'purchase:po1',
+      'w1',
+    ));
+    await waitFor(() => expect(api.createModuleRecord).toHaveBeenCalledWith(
+      'bg_module_stock_movements',
+      expect.objectContaining({ productId: 'pr1', type: 'entree', quantity: 10 }),
+      'receipt:new-id:line:l1',
+      'w1',
+    ));
+    expect(api.updateModuleRecord).toHaveBeenCalledWith(
+      'bg_module_purchase_orders', 'po1', expect.objectContaining({ status: 'recu' }), 'w1',
+    );
+  });
+
+  it('convertit une demande de vitrine en prospect CRM sans doublon', async () => {
+    wrap(<StorefrontWorkspace workspaceId="w1" workspaceName="Atelier VYORA" onOpenContact={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Demandes/ }));
+    expect(await screen.findByText('Fatou Diarra')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Prospect' }));
+    await waitFor(() => expect(api.createModuleRecord).toHaveBeenCalledWith(
+      'bg_module_crm_contacts',
+      expect.objectContaining({ firstName: 'Fatou', type: 'prospect', source: 'boutique' }),
+      'storefront:req1',
+      'w1',
+    ));
+    expect(api.updateModuleRecord).toHaveBeenCalledWith(
+      'bg_module_storefront_requests', 'req1', expect.objectContaining({ status: 'converti' }), 'w1',
+    );
   });
 
   it('prépare une campagne marketing à partir des contacts sans envoyer', async () => {

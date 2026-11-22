@@ -85,6 +85,8 @@ describe('Growth OS — routing réel', () => {
     expect(growthOsModuleFromPath('/app/business/cash')).toBe('cash');
     expect(growthOsModuleFromPath('/app/business/automation')).toBe('automation');
     expect(growthOsModuleFromPath('/app/business/marketing')).toBe('marketing');
+    expect(growthOsModuleFromPath('/app/business/suppliers')).toBe('suppliers');
+    expect(growthOsModuleFromPath('/app/business/storefront')).toBe('storefront');
     expect(growthOsModuleFromPath('/app/business/inconnu')).toBe('overview');
   });
 
@@ -118,8 +120,10 @@ describe('Growth OS — routing réel', () => {
     expect(screen.getByRole('link', { name: 'Trésorerie et dépenses' }).getAttribute('href')).toBe('/app/business/cash');
     expect(screen.getByRole('link', { name: 'Automatisations' }).getAttribute('href')).toBe('/app/business/automation');
     expect(screen.getByRole('link', { name: 'Marketing et fidélisation' }).getAttribute('href')).toBe('/app/business/marketing');
+    expect(screen.getByRole('link', { name: 'Achats et fournisseurs' }).getAttribute('href')).toBe('/app/business/suppliers');
+    expect(screen.getByRole('link', { name: 'Vitrine commerciale' }).getAttribute('href')).toBe('/app/business/storefront');
     expect(screen.queryByRole('link', { name: 'Croissance' })).toBeNull();
-    expect(GROWTH_OS_NAV.flatMap((group) => group.items)).toHaveLength(19);
+    expect(GROWTH_OS_NAV.flatMap((group) => group.items)).toHaveLength(21);
   });
 
   it('ouvre le menu mobile sans perdre la navigation', () => {
