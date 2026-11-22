@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, ArrowUpRight, Bot, CheckCircle2, Database, Plug, Search, ShieldCheck,
-  Sparkles, Users, X,
+  Sparkles, Users, Wallet, X,
 } from 'lucide-react';
 import { Badge, Button, Card } from '../../components/ui';
 import { SectionHeader } from '../../components/ui-premium';
@@ -10,7 +10,7 @@ import {
   FOUNDATION_MODULES, MODULE_DEFINITIONS, MODULE_GROUPS, isModuleKey,
 } from './registry';
 
-const FOUNDATION_ICONS = { 'ai-agent': Bot, 'integrations-hub': Plug, 'smart-crm': Users } as const;
+const FOUNDATION_ICONS = { 'ai-agent': Bot, 'integrations-hub': Plug, 'smart-crm': Users, 'finance-recovery': Wallet } as const;
 
 /** Accent par groupe : chaque catégorie garde une identité lisible. */
 const GROUP_ACCENT: Record<string, { text: string; border: string; bg: string; dot: string }> = {
@@ -140,7 +140,7 @@ export default function BusinessModules() {
           </div>
           <Badge tone="success">Disponible</Badge>
         </div>
-        <div className="mt-4 grid gap-2.5 md:grid-cols-3">
+        <div className="mt-4 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
           {FOUNDATION_MODULES.map((module) => {
             const Icon = FOUNDATION_ICONS[module.key as keyof typeof FOUNDATION_ICONS];
             return (

@@ -142,7 +142,7 @@ const STYLES = `
 describe('preuve de rendu — Business Grow', () => {
   it('monte la vraie page et produit un DOM vérifiable', async () => {
     const { container } = render(
-      <MemoryRouter initialEntries={['/app/business']}>
+      <MemoryRouter initialEntries={['/app/business/assistant']}>
         <BusinessGrow />
       </MemoryRouter>,
     );
@@ -158,11 +158,12 @@ describe('preuve de rendu — Business Grow', () => {
     expect(screen.queryByText('Espace Business')).toBeNull();
     expect(screen.queryByText('Explorer')).toBeNull();
 
-    // 3. La navigation métier de Business Grow est intacte : 7 rubriques.
-    expect(screen.getByRole('navigation', { name: 'Navigation Business Grow' })).toBeTruthy();
-    for (const section of ['Assistant', 'Croissance', 'Entreprise', 'Mémoire métier', 'Services IA', 'Contrôle IA', 'Intégrations']) {
-      expect(screen.getByRole('button', { name: section })).toBeTruthy();
+    // 3. La navigation réelle du Growth OS remplace l'ancien cockpit.
+    expect(screen.getByRole('navigation', { name: 'Navigation Growth OS' })).toBeTruthy();
+    for (const section of ['Vue générale', 'CRM', 'Pipeline commercial', 'Finance', 'Recouvrement', 'Assistant IA', 'Mémoire métier', 'Services IA', 'Contrôle IA', 'Intégrations']) {
+      expect(screen.getByRole('link', { name: section })).toBeTruthy();
     }
+    expect(screen.queryByRole('link', { name: 'Croissance' })).toBeNull();
 
     // 4. AI Director et quota conservés.
     expect(screen.getByLabelText('Rôle de la tâche IA')).toBeTruthy();
@@ -200,7 +201,7 @@ describe('preuve de rendu — Business Grow', () => {
 <div class="wrap">
   <div class="note">
     <strong>Preuve de rendu</strong> — DOM produit par le vrai composant <code>BusinessGrow</code>
-    (route <code>/app/business</code>), socle mocké répondant comme l'API.
+    (route <code>/app/business/assistant</code>), socle mocké répondant comme l'API.
     Généré par <code>tests/business-grow-rendu.test.tsx</code>.
     Ce n'est pas une capture d'écran : aucun binaire navigateur n'est disponible dans cet environnement.
   </div>

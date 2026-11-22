@@ -59,9 +59,10 @@ const STUDIO_QUICK: StudioQuickLink[] = [
 ];
 
 const BUSINESS_QUICK: BusinessQuickLink[] = [
-  { to: '/app/business?section=chat', icon: MessagesSquare, title: 'Agent métier', description: 'Poser une question à l’agent relié à votre contexte.', meta: 'Assistant' },
+  { to: '/app/business/assistant', icon: MessagesSquare, title: 'Agent métier', description: 'Poser une question à l’agent relié à votre contexte.', meta: 'Assistant' },
   { to: '/app/business/modules', icon: Brain, title: 'Modules métier', description: 'Catalogue complet des modules Business Growth.', meta: 'Modules' },
-  { to: '/app/business?section=growth&growthTab=crm', icon: ArrowUpRight, title: 'Smart CRM', description: 'Prospects, pipeline et valeur commerciale.', meta: 'Croissance' },
+  { to: '/app/business/crm', icon: ArrowUpRight, title: 'CRM intelligent', description: 'Contacts, pipeline, priorités et relances.', meta: 'Commercial' },
+  { to: '/app/business/finance', icon: ArrowUpRight, title: 'Finances & recouvrement', description: 'Créances, paiements et promesses.', meta: 'Finance' },
   { to: '/app/business/modules/finance-intelligence', icon: Wallet, title: 'Finance Intelligence', description: 'Revenus, dépenses et marge réels.', meta: 'Finance' },
 ];
 

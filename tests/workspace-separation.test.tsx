@@ -38,8 +38,13 @@ function declaredRoutes(): string[][] {
 /** Reconnaît les routes dynamiques (`:id`, `:moduleKey`). */
 function matchesAnyRoute(patterns: string[][], pathname: string): boolean {
   const segments = pathname.split('/').filter(Boolean);
-  return patterns.some((pattern) => pattern.length === segments.length
-    && pattern.every((segment, index) => segment.startsWith(':') || segment === segments[index]));
+  return patterns.some((pattern) => {
+    const wildcard = pattern[pattern.length - 1] === '*';
+    const expected = wildcard ? pattern.slice(0, -1) : pattern;
+    if (!wildcard && expected.length !== segments.length) return false;
+    if (wildcard && segments.length < expected.length) return false;
+    return expected.every((segment, index) => segment.startsWith(':') || segment === segments[index]);
+  });
 }
 
 describe('séparation des deux espaces', () => {
