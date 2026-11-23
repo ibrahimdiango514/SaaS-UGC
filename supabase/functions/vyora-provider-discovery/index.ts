@@ -54,7 +54,8 @@ async function registryDescriptors(base: string, service: string): Promise<Descr
     const row = rec(raw);
     const name = str(row.key, 40).toLowerCase();
     if (!name) continue;
-    const baseUrl = str(row.base_url, 300).replace(/\/+$/, "");
+    const baseUrlEnv = str(row.base_url_env, 80);
+    const baseUrl = ((baseUrlEnv ? env(baseUrlEnv) : "") || str(row.base_url, 300)).replace(/\/+$/, "");
     const modelsUrl = str(row.models_url, 300);
     const url = modelsUrl || (baseUrl ? `${baseUrl}/models` : "");
     if (!url) continue;

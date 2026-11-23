@@ -44,6 +44,7 @@ interface DescriptorRow {
   key: string;
   kind: string;
   baseUrl: string | null;
+  baseUrlEnv: string | null;
   modelsUrl: string | null;
   apiKeyEnv: string | null;
   transport: string | null;
@@ -133,6 +134,7 @@ async function loadDescriptors(): Promise<DescriptorRow[]> {
       key,
       kind: typeof row.adapter_kind === "string" ? row.adapter_kind : "openai",
       baseUrl: typeof row.base_url === "string" ? row.base_url : null,
+      baseUrlEnv: typeof row.base_url_env === "string" && row.base_url_env ? row.base_url_env : null,
       modelsUrl: typeof row.models_url === "string" ? row.models_url : null,
       apiKeyEnv: typeof row.api_key_env === "string" ? row.api_key_env : null,
       transport: typeof row.transport === "string" ? row.transport : "rest",
@@ -172,11 +174,17 @@ function failure(
   };
 }
 
-/** URL de catalogue effective, déduite du descripteur (jamais inventée). */
+/**
+ * URL de catalogue effective, déduite du descripteur (jamais inventée).
+ * Le secret `base_url_env` est prioritaire sur `default_base_url` : un
+ * fournisseur dont l'hôte n'existe qu'en secret (FreeLLMAPI) reste sondable.
+ */
 function catalogUrlFor(descriptor: DescriptorRow): string | null {
   if (descriptor.modelsUrl) return descriptor.modelsUrl;
-  if (!descriptor.baseUrl) return null;
-  return `${descriptor.baseUrl.replace(/\/+$/, "")}/models`;
+  const fromEnv = descriptor.baseUrlEnv ? env(descriptor.baseUrlEnv) : "";
+  const baseUrl = fromEnv || descriptor.baseUrl;
+  if (!baseUrl) return null;
+  return `${baseUrl.replace(/\/+$/, "")}/models`;
 }
 
 /** En-têtes de lecture du catalogue : Bearer, protocole OpenAI-compatible. */
