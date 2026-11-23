@@ -7,7 +7,7 @@
 
 import type { AiImageInput } from './types.ts';
 
-export const MAX_VISION_IMAGES = 4;
+export const MAX_VISION_IMAGES = 5;
 /** ~1,5 Mo de binaire : marge sous les limites de corps des Edge Functions. */
 export const MAX_IMAGE_BASE64_CHARS = 1_000_000;
 /** Plafond cumulé : le corps de la requête doit rester sous la limite Edge. */

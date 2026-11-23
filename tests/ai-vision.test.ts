@@ -28,7 +28,7 @@ describe('validation des images', () => {
 
   it('borne le nombre d’images', () => {
     const row = { mimeType: 'image/png', dataBase64: JPEG };
-    const result = parseImageInputs([row, row, row, row, row]);
+    const result = parseImageInputs([row, row, row, row, row, row]);
     expect(result.ok).toBe(false);
   });
 });
