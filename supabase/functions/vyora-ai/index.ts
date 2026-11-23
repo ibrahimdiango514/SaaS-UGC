@@ -1,10 +1,11 @@
-// VYORA — moteur IA central (Groq + Gemini) pour tous les espaces.
+// VYORA — moteur IA central (VYORA AI GATEWAY → FreeLLMAPI).
 //
-// Un seul endpoint serveur, une interface de fournisseur unifiée, un routage
-// explicite et un secours automatique. Les clés restent des secrets Edge :
-//   BUSINESS_GROW_GROQ_API_KEY / BUSINESS_GROW_GROQ_MODEL
-//   BUSINESS_GROW_GEMINI_API_KEY / BUSINESS_GROW_GEMINI_MODEL
-//   (repli : GROQ_API_KEY / GROQ_MODEL, GEMINI_API_KEY / GEMINI_MODEL)
+// Un seul endpoint serveur, un seul fournisseur central (FreeLLMAPI) déclaré
+// dans le registre : le routeur choisit le modèle compatible, le moteur applique
+// le secours plafonné et journalise chaque tentative. Aucun fournisseur n'est
+// nommé dans le code — seule la ligne de registre décrit protocole et secret :
+//   FREE_LLM_API_KEY      (secret Edge, jamais exposé)
+//   FREE_LLM_API_BASE_URL (URL de l'instance FreeLLMAPI)
 //
 // Actions : health | generate_script | improve_prompt | generate_hooks |
 //           generate_visual | generate_scenes | complete
@@ -19,6 +20,7 @@
 // Aucune réponse n'est fabriquée localement : un échec fournisseur est renvoyé
 // tel quel (code + message).
 
+import { parseImageInputs } from "../_shared/ai-core/images.ts";
 import {
   parseRegistrySnapshot,
   runAiCall,
@@ -45,10 +47,6 @@ function env(key: string): string {
 const SUPABASE_URL = () => env("SUPABASE_URL");
 const SERVICE_KEY = () => env("SUPABASE_SERVICE_ROLE_KEY");
 const ANON_KEY = () => env("SUPABASE_ANON_KEY") || env("SUPABASE_PUBLISHABLE_KEY");
-const GROQ_KEY = () => env("BUSINESS_GROW_GROQ_API_KEY") || env("GROQ_API_KEY");
-const GEMINI_KEY = () => env("BUSINESS_GROW_GEMINI_API_KEY") || env("GEMINI_API_KEY");
-const GROQ_MODEL = () => env("BUSINESS_GROW_GROQ_MODEL") || env("GROQ_MODEL") || "llama-3.3-70b-versatile";
-const GEMINI_MODEL = () => env("BUSINESS_GROW_GEMINI_MODEL") || env("GEMINI_MODEL") || "gemini-2.0-flash";
 // VYORA AI CORE — fournisseurs additionnels : AUCUNE liste en dur ici.
 // Le registre central (`saas_business.ai_providers`) déclare, pour chaque
 // fournisseur, le NOM de la variable d'environnement de sa clé
@@ -151,7 +149,11 @@ const SYSTEM = {
 export type ProviderName = string;
 export type MessageRole = "system" | "user" | "assistant";
 
-type ProviderMessage = { role: MessageRole; content: string };
+type ProviderMessage = {
+  role: MessageRole;
+  content: string;
+  images?: Array<{ mimeType: string; dataBase64: string }>;
+};
 
 interface ProviderResult {
   provider: ProviderName;
@@ -166,95 +168,35 @@ interface CompleteOptions {
   temperature?: number;
 }
 
-function joinSystem(messages: ProviderMessage[]): string {
-  return messages.filter((m) => m.role === "system").map((m) => m.content).join("\n");
-}
-
-async function callGroq(messages: ProviderMessage[], options: CompleteOptions): Promise<ProviderResult> {
-  const key = GROQ_KEY();
-  if (!key) throw new Error("GROQ_NOT_CONFIGURED");
-  const payload: Json = {
-    model: GROQ_MODEL(),
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    max_tokens: options.maxTokens ?? 2400,
-    temperature: options.temperature ?? 0.7,
-  };
-  if (options.jsonMode) payload.response_format = { type: "json_object" };
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(25000),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`GROQ_ERROR: ${text.slice(0, 300)}`);
-  const data = rec(JSON.parse(text || "{}"));
-  const choices = Array.isArray(data.choices) ? data.choices : [];
-  const content = str(rec(rec(choices[0]).message).content, 12000);
-  if (!content) throw new Error("AI_EMPTY_RESPONSE");
-  return { provider: "groq", model: GROQ_MODEL(), content };
-}
-
-async function callGemini(messages: ProviderMessage[], options: CompleteOptions): Promise<ProviderResult> {
-  const key = GEMINI_KEY();
-  if (!key) throw new Error("GEMINI_NOT_CONFIGURED");
-  const model = GEMINI_MODEL();
-  const system = joinSystem(messages);
-  const contents = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
-  if (!contents.length) throw new Error("AI_EMPTY_RESPONSE");
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: "POST",
-    headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-      contents,
-      generationConfig: {
-        maxOutputTokens: options.maxTokens ?? 2400,
-        temperature: options.temperature ?? 0.7,
-        ...(options.jsonMode ? { responseMimeType: "application/json" } : {}),
-      },
-    }),
-    signal: AbortSignal.timeout(25000),
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`GEMINI_ERROR: ${text.slice(0, 300)}`);
-  const data = rec(JSON.parse(text || "{}"));
-  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
-  const candidate = rec(candidates[0]);
-  const finish = str(candidate.finishReason, 40);
-  if (finish === "SAFETY" || finish === "RECITATION") throw new Error("PROVIDER_SAFETY_BLOCKED");
-  const parts = rec(candidate.content).parts;
-  const content = Array.isArray(parts)
-    ? parts.map((part) => str(rec(part).text, 12000)).filter(Boolean).join("\n").trim()
-    : "";
-  if (!content) throw new Error("AI_EMPTY_RESPONSE");
-  return { provider: "gemini", model, content };
-}
-
 /**
- * Routage : fournisseur demandé s'il est configuré, sinon Groq puis Gemini.
- * Le second fournisseur sert de secours sur erreur/timeout, jamais de simulation.
+ * Complétion via le routeur central (VYORA AI GATEWAY → FreeLLMAPI).
+ *
+ * Aucun fournisseur n'est nommé ici : le registre décide de la chaîne, le
+ * moteur applique le secours plafonné et journalise chaque tentative. Un échec
+ * remonte tel quel — aucune réponse n'est fabriquée localement.
  */
 export async function complete(messages: ProviderMessage[], options: CompleteOptions = {}): Promise<ProviderResult> {
-  const order: ProviderName[] = options.prefer === "gemini"
-    ? ["gemini", "groq"]
-    : options.prefer === "groq"
-      ? ["groq", "gemini"]
-      : GEMINI_KEY() && !GROQ_KEY() ? ["gemini", "groq"] : ["groq", "gemini"];
-  const errors: string[] = [];
-  for (const provider of order) {
-    if (provider === "groq" && !GROQ_KEY()) { errors.push("GROQ_NOT_CONFIGURED"); continue; }
-    if (provider === "gemini" && !GEMINI_KEY()) { errors.push("GEMINI_NOT_CONFIGURED"); continue; }
-    try {
-      return provider === "groq" ? await callGroq(messages, options) : await callGemini(messages, options);
-    } catch (error) {
-      const raw = redact(error instanceof Error ? error.message : String(error));
-      errors.push(/abort|timeout|timed out/i.test(raw) ? "PROVIDER_TIMEOUT" : raw);
-    }
+  const routed: ProviderMessage[] = options.jsonMode
+    ? messages.map((m) => m.role === "system"
+        ? { ...m, content: `${m.content}\n\nRéponds uniquement avec un objet JSON valide, sans texte autour.` }
+        : m)
+    : messages;
+  const outcome = await runAiCall(aiEngineDeps(), {
+    messages: routed,
+    options: {
+      ...(typeof options.temperature === "number" ? { temperature: options.temperature } : {}),
+      ...(typeof options.maxTokens === "number" ? { maxOutputTokens: options.maxTokens } : {}),
+    },
+    preferProvider: options.prefer ?? null,
+    space: "business",
+    userId: null,
+    taskKey: "central_complete",
+  });
+  if (outcome.ok && outcome.content && outcome.providerKey && outcome.providerModelKey) {
+    return { provider: outcome.providerKey, model: outcome.providerModelKey, content: outcome.content };
   }
-  throw new Error(errors.join(" · ") || "AI_PROVIDERS_UNAVAILABLE");
+  const codes = outcome.attempts.map((a) => `${a.providerKey}:${a.errorCode ?? "?"}`).join(" · ");
+  throw new Error(codes || outcome.code || "AI_PROVIDERS_UNAVAILABLE");
 }
 
 function parseJsonLoose(raw: string): Json {
@@ -352,9 +294,13 @@ function readHistory(body: Json): ProviderMessage[] {
     const item = rec(entry);
     const content = str(item.content, 8000);
     const role = str(item.role, 12);
-    if (!content) continue;
+    const parsedImages = parseImageInputs(item.images);
+    // Une image invalide ne doit pas faire croire qu'elle a été vue : on
+    // l'écarte et le texte du message reste la seule entrée transmise.
+    const images = parsedImages.ok ? parsedImages.images : [];
+    if (!content && images.length === 0) continue;
     if (role !== "system" && role !== "user" && role !== "assistant") continue;
-    history.push({ role, content });
+    history.push({ role, content, ...(images.length ? { images } : {}) });
   }
   return history;
 }
@@ -399,7 +345,15 @@ async function loadRegistrySnapshot(): Promise<AiRegistrySnapshot | null> {
     });
     if (!res.ok) return null;
     const parsed = parseRegistrySnapshot(await res.json());
-    if (parsed) { registryCache = { at: now, value: parsed }; }
+    if (parsed) {
+      // L'URL de base peut venir d'un secret (FREE_LLM_API_BASE_URL) : elle est
+      // alors prioritaire sur la valeur figée au registre, sans redéploiement.
+      for (const provider of parsed.providers) {
+        const override = provider.baseUrlEnv ? env(provider.baseUrlEnv) : "";
+        if (override) provider.baseUrl = override.replace(/\/+$/, "");
+      }
+      registryCache = { at: now, value: parsed };
+    }
     return parsed;
   } catch {
     return null;
@@ -584,7 +538,8 @@ async function completeViaCore(
   options: CompleteOptions,
   meta: { routeModel: string | null; roleKey: string | null; userId: string | null; requestKey: string | null },
 ): Promise<CompleteResultEx> {
-  if (meta.routeModel || meta.roleKey || meta.requestKey) {
+  // Une image impose le registre (capacité vision) même sans rôle explicite.
+  if (meta.routeModel || meta.roleKey || meta.requestKey || messages.some((m) => m.images?.length)) {
     const outcome = await runAiCall(aiEngineDeps(), {
       messages,
       options: {

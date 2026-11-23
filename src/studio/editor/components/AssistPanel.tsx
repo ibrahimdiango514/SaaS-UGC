@@ -87,7 +87,7 @@ export function AssistPanel({
   onChange,
   disabled,
   mediaItems = [],
-  groqConfigured = null,
+  aiConfigured = null,
   onProposeAiPlan,
   onSelectScene,
 }: {
@@ -95,7 +95,7 @@ export function AssistPanel({
   onChange: (p: EditorProject) => void;
   disabled?: boolean;
   mediaItems?: ProjectMediaItem[];
-  groqConfigured?: boolean | null;
+  aiConfigured?: boolean | null;
   onProposeAiPlan?: () => Promise<ProductionPlan | null>;
   onSelectScene?: (id: string) => void;
 }) {
@@ -166,7 +166,7 @@ export function AssistPanel({
   };
 
   const requestGroqSuggestion = async () => {
-    if (!onProposeAiPlan || groqConfigured !== true) return;
+    if (!onProposeAiPlan || aiConfigured !== true) return;
     setAiBusy(true);
     setAiError('');
     try {
@@ -371,12 +371,12 @@ export function AssistPanel({
             </span>
             <span className={cn(
               'rounded px-1.5 py-0.5 text-[9px] font-semibold',
-              groqConfigured === true ? 'bg-cyan-400/15 text-cyan-200' : 'bg-amber-400/10 text-amber-200',
+              aiConfigured === true ? 'bg-cyan-400/15 text-cyan-200' : 'bg-amber-400/10 text-amber-200',
             )}>
-              {groqConfigured === true ? 'Disponible' : 'Indisponible'}
+              {aiConfigured === true ? 'Disponible' : 'Indisponible'}
             </span>
           </div>
-          {groqConfigured !== true ? (
+          {aiConfigured !== true ? (
             <p className="mt-1.5 text-[10px] leading-relaxed text-amber-200/90">
               Les suggestions IA sont indisponibles pour le moment.
             </p>

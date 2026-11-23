@@ -85,7 +85,7 @@ export default function Scripts() {
       await refreshQuota(); await load();
     } catch (err) {
       const appErr = asAppError(err);
-      setError(appErr.code === 'GROQ_NOT_CONFIGURED'
+      setError(appErr.code === 'AI_NOT_CONFIGURED'
         ? 'La génération IA est indisponible pour le moment. Réessayez plus tard.'
         : appErr.message);
     } finally { setGenerating(false); }
@@ -117,7 +117,7 @@ export default function Scripts() {
       setHooks(data.hooks || []); await refreshQuota();
     } catch (err) {
       const e = asAppError(err);
-      setError(e.code === 'GROQ_NOT_CONFIGURED' ? 'La génération IA est indisponible pour le moment.' : e.message);
+      setError(e.code === 'AI_NOT_CONFIGURED' ? 'La génération IA est indisponible pour le moment.' : e.message);
     } finally { setGenerating(false); }
   };
 

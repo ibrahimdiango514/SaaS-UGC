@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, ArrowUpRight, Brain, Building2, ExternalLink, FileText, Gauge, Lightbulb,
-  MessageSquare, Package, Pencil, Plug, RefreshCw, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, Zap,
+  MessageSquare, Package, Pencil, RefreshCw, ShieldCheck, SlidersHorizontal, Sparkles, TrendingUp, Trash2, Zap,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, LoadingState, Toggle, cn } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -12,10 +12,21 @@ import {
   buildStudioLocationStateFromBrief,
   parseBusinessGrowEntryIntent,
   type BusinessGrowEntryIntent,
-  type BusinessGrowGrowthTab,
 } from '../contracts/business-grow';
+import CrmWorkspace from './crm/CrmWorkspace';
+import FinanceWorkspace from './finance/FinanceWorkspace';
+import SalesWorkspace from './sales/SalesWorkspace';
+import CatalogWorkspace from './catalog/CatalogWorkspace';
+import CashWorkspace from './cash/CashWorkspace';
+import AutomationWorkspace from './automation/AutomationWorkspace';
+import MarketingWorkspace from './marketing/MarketingWorkspace';
+import SuppliersWorkspace from './suppliers/SuppliersWorkspace';
+import StorefrontWorkspace from './storefront/StorefrontWorkspace';
 import { IntegrationsCenter, type SubscriptionRefusal } from '../integrations/CatalogPage';
-import GrowthWorkspace from './growth/GrowthWorkspace';
+import { GrowthOsLayout } from './os/GrowthOsLayout';
+import { GrowthOsOverview, GrowthOsReports } from './os/GrowthOsOverview';
+import { growthOsModule, growthOsModuleFromPath, legacyGrowthOsPath, type GrowthOsModule } from './os/modules';
+import { readProspects } from './growth/model';
 import AgentReports from './agent/AgentReports';
 import { BusinessAssistant } from '../ai/BusinessAssistant';
 import type { Brand, Product, Workspace } from '../lib/types';
@@ -30,18 +41,6 @@ import {
   BUSINESS_ROLES, capabilitiesOf,
   type BusinessRoleKey, type RoutingSelectionMode,
 } from './ai/registry';
-
-type BusinessSection = 'chat' | 'growth' | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
-
-const SECTIONS: { id: BusinessSection; label: string; icon: typeof MessageSquare }[] = [
-  { id: 'chat', label: 'Assistant', icon: MessageSquare },
-  { id: 'growth', label: 'Croissance', icon: TrendingUp },
-  { id: 'company', label: 'Entreprise', icon: Building2 },
-  { id: 'memory', label: 'Mémoire métier', icon: Building2 },
-  { id: 'providers', label: 'Services IA', icon: Zap },
-  { id: 'ai', label: 'Contrôle IA', icon: Brain },
-  { id: 'integrations', label: 'Intégrations', icon: Plug },
-];
 
 const AGENT_MEMORY_CATEGORY_LABELS: Record<string, string> = {
   company: 'Entreprise',
@@ -481,7 +480,7 @@ function AssistantView({
   );
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]" data-testid="business-assistant-section">
+    <div className="space-y-3" data-testid="business-assistant-section">
       <div className="min-w-0 space-y-3">
         {/* AI Director : le routage reste visible et pilotable, comme avant.
             Ce bloc n'est pas décoratif — il change réellement le service
@@ -1486,18 +1485,22 @@ function AiControlCenterView({
 
 export default function BusinessGrowWorkspace() {
   const { user, workspaceId } = useAuth();
-  const [section, setSection] = useState<BusinessSection>('chat');
   // Remonter tout l'état métier à chaque changement de compte/entreprise : une
   // réponse tardive ne peut jamais réafficher le périmètre précédent.
-  return <ScopedBusinessGrowWorkspace key={`${user?.id ?? ''}:${workspaceId ?? ''}`} section={section} setSection={setSection} />;
+  return <ScopedBusinessGrowWorkspace key={`${user?.id ?? ''}:${workspaceId ?? ''}`} />;
 }
 
-function ScopedBusinessGrowWorkspace({ section, setSection }: { section: BusinessSection; setSection: (value: BusinessSection) => void }) {
+function ScopedBusinessGrowWorkspace() {
   // Texte préparé par un rapport d'agent, transmis au composeur de l'assistant.
-  // Texte préparé par un rapport d'agent OU par le contexte transmis à l'arrivée.
   const [reportDraft, setReportDraft] = useState<string | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, session, workspace, workspaceId } = useAuth();
+  /** Le module Growth OS est dérivé de l'URL : rechargement et bouton retour fiables. */
+  const osModule = useMemo<GrowthOsModule>(() => growthOsModuleFromPath(location.pathname), [location.pathname]);
+  const go = useCallback((module: GrowthOsModule) => { navigate(growthOsModule(module).path); }, [navigate]);
+  const [crmContactId, setCrmContactId] = useState<string | null>(null);
+  const [financeContactId, setFinanceContactId] = useState<string | null>(null);
   const accountScope = `${user?.id ?? ''}:${workspaceId ?? ''}`;
   const hasSession = Boolean(user && session);
   const sessionToken = session?.access_token ?? null;
@@ -1565,32 +1568,24 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
   useEffect(() => {
     if (!parsedIntent) return;
     setEntryIntent(parsedIntent);
-    if (parsedIntent.section) setSection(parsedIntent.section);
+    if (parsedIntent.section) {
+      const target = legacyGrowthOsPath(parsedIntent.section, parsedIntent.growthTab ?? null);
+      if (target) navigate(target);
+    }
     if (parsedIntent.roleKey) setRoleKey(parsedIntent.roleKey);
     // Le contexte transmis pré-remplit le composeur de l'assistant. Sans cela,
     // arriver depuis un projet ouvrirait une conversation vide — le contexte
     // serait affiché mais inutilisable.
     if (parsedIntent.initialDraft) setReportDraft((current) => current ?? parsedIntent.initialDraft ?? null);
-  }, [parsedIntent]);
+  }, [parsedIntent, navigate]);
 
-  // Les liens de découverte (Integrations Hub, Smart CRM) peuvent cibler une
-  // section précise sans dépendre d'un état de navigation perdu au rechargement.
+  // Anciennes URL (`?section=chat`, `?section=growth&growthTab=relations`…) :
+  // redirection vers le module réel du Growth OS, sans perdre le lien profond.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const requestedSection = params.get('section');
-    const requestedTab = params.get('growthTab');
-    const validSections: BusinessSection[] = ['chat', 'growth', 'company', 'memory', 'providers', 'integrations', 'ai'];
-    const sectionValue = validSections.find((value) => value === requestedSection);
-    const validTabs = ['overview', 'company', 'goals', 'catalog', 'market', 'crm', 'strategy', 'activity', 'settings'];
-    const growthTab = validTabs.find((value) => value === requestedTab) as BusinessGrowGrowthTab | undefined;
-    if (!sectionValue && !growthTab) return;
-    if (sectionValue) setSection(sectionValue);
-    setEntryIntent((current) => current ?? {
-      version: 'reelora-bg-entry-v1',
-      ...(sectionValue ? { section: sectionValue } : {}),
-      ...(growthTab ? { growthTab } : {}),
-    });
-  }, [location.search]);
+    const target = legacyGrowthOsPath(params.get('section'), params.get('growthTab'));
+    if (target) navigate(target, { replace: true });
+  }, [location.search, navigate]);
 
   useEffect(() => {
     accountScopeRef.current = accountScope;
@@ -1865,8 +1860,8 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
   }, [accountScope, workspaceId]);
 
   useEffect(() => {
-    if ((section === 'memory' || section === 'growth') && backendReady) void loadMemory();
-  }, [backendReady, loadMemory, section]);
+    if (['overview', 'reports', 'crm', 'pipeline', 'tasks', 'relances', 'finance', 'recouvrement', 'company', 'memory'].includes(osModule) && backendReady) void loadMemory();
+  }, [backendReady, loadMemory, osModule]);
 
   const loadAgentMemories = useCallback(async () => {
     const requestId = ++agentMemoryLoadSequence.current;
@@ -1888,8 +1883,8 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
   }, [accountScope]);
 
   useEffect(() => {
-    if (section === 'ai' && backendReady) void loadAgentMemories();
-  }, [backendReady, loadAgentMemories, section]);
+    if (osModule === 'ai' && backendReady) void loadAgentMemories();
+  }, [backendReady, loadAgentMemories, osModule]);
 
   const searchAgentMemory = useCallback(async (query: string) => {
     const requestId = ++agentMemoryLoadSequence.current;
@@ -2379,80 +2374,53 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
     } finally { if (accountScopeRef.current === requestScope) setBusy(false); }
   }, [accountScope, loadMemory, workspaceId]);
 
-  const activeSection = useMemo(() => SECTIONS.find((item) => item.id === section) ?? SECTIONS[0], [section]);
-  const ActiveIcon = activeSection.icon;
   const availableProviderCount = (providers ?? []).filter((provider) => isVerifiedProvider(provider)).length;
   // Un contrôle fournisseur expire au bout de 24 h côté SQL : sans nouveau
   // sondage explicite, l'envoi de messages échoue en NO_VERIFIED_PROVIDER.
   const staleProviders = providersNeedingVerification(providers);
   const showStaleNotice = backendReady && staleProviders.length > 0;
   const noVerifiedProvider = availableProviderCount === 0;
-  const providerStatusTone = !backendLoading && providers !== null && availableProviderCount
-    ? 'border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-100'
-    : !backendLoading && providers !== null
-      ? 'border-amber-400/20 bg-amber-400/[0.06] text-amber-100'
-      : 'border-white/10 bg-white/[0.04] text-slate-300';
-  const providerStatusDot = !backendLoading && providers !== null && availableProviderCount
-    ? 'bg-emerald-300'
-    : !backendLoading && providers !== null
-      ? 'bg-amber-300'
-      : 'bg-slate-500';
+
+  const legacyProspects = useMemo(() => readProspects(memory).map((prospect) => ({
+    id: prospect.id,
+    name: prospect.name,
+    company: prospect.company,
+    email: prospect.email,
+    phone: prospect.phone,
+    stage: prospect.stage,
+    value: prospect.value,
+    currency: prospect.currency,
+    nextAction: prospect.nextAction,
+    nextActionAt: prospect.nextActionAt,
+    notes: prospect.notes,
+  })), [memory]);
 
   return (
-    <div className="animate-fadeUp space-y-5" data-testid="business-grow">
-      <header className="relative overflow-hidden rounded-[1.6rem] border border-violet-200/[0.14] bg-[#080a12] px-5 py-6 sm:px-7">
-        <img src="/brand/vyora-growth.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 [mask-image:linear-gradient(to_right,transparent,black)]" />
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#080d15_20%,rgba(8,13,21,0.4))]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-violet-500/25 blur-[90px]" />
-        <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 right-0 h-56 w-56 rounded-full bg-cyan-400/15 blur-[90px]" />
-        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/50 to-transparent" />
-        <div className="relative flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-400/15 text-violet-200 ring-1 ring-violet-300/25"><Brain size={14} /></span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-200/90">VYORA · Business Grow</span>
-              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-slate-400">Espace pilotage</span>
-            </div>
-            <h1 className="vy-title text-[1.75rem] leading-tight sm:text-[2.15rem]">Votre copilote business</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
-              Intelligence, stratégie et croissance, reliées à votre contexte métier.
-            </p>
-          </div>
-          <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium', providerStatusTone)} data-testid="business-overall-status">
-            <span className={cn('h-1.5 w-1.5 rounded-full', providerStatusDot)} />
-            {backendLoading
-              ? 'Connexion…'
-              : providers === null
-                ? 'Statut IA indisponible'
-                : availableProviderCount
-                  ? `${availableProviderCount} service(s) IA vérifié(s)`
-                  : 'IA non disponible'}
-          </span>
-        </div>
-      </header>
-
-      <Link
-        to="/app/business/modules"
-        className="group flex flex-col gap-3 rounded-2xl border border-violet-300/20 bg-violet-400/[0.06] px-4 py-4 transition hover:border-violet-300/40 hover:bg-violet-400/[0.1] sm:flex-row sm:items-center sm:justify-between"
+    <div data-testid="business-grow">
+    <GrowthOsLayout active={osModule} workspaceName={workspace?.name ?? 'Aucune entreprise active'}>
+      <section
+        aria-label="État des services IA"
+        data-testid="business-overall-status"
+        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2 text-[10.5px] text-slate-300"
       >
-        <span className="flex min-w-0 items-start gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-violet-300/25 bg-violet-400/12 text-violet-200"><Package size={19} /></span>
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-white">13 modules métier opérationnels</span>
-            <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
-              Récupération des revenus, intelligence commerciale, opérations et protection, reliées à vos données Business Growth.
-            </span>
-          </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={cn('h-1.5 w-1.5 rounded-full', backendLoading ? 'bg-slate-500' : providers === null ? 'bg-slate-500' : availableProviderCount ? 'bg-emerald-300' : 'bg-amber-300')} />
+          {backendLoading
+            ? 'Connexion…'
+            : providers === null
+              ? 'Statut IA indisponible'
+              : availableProviderCount
+                ? `${availableProviderCount} service(s) IA vérifié(s)`
+                : 'IA non disponible'}
         </span>
-        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-violet-200">
-          Ouvrir les modules <ArrowUpRight size={15} className="transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-        </span>
-      </Link>
-
+        <Link to="/app/business/providers" className="text-slate-500 transition hover:text-violet-200">
+          Gérer les services IA
+        </Link>
+      </section>
       {showStaleNotice && (
         <section
           className={cn(
-            'flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-3 text-xs leading-relaxed',
+            'flex flex-wrap items-center justify-between gap-2 rounded-2xl border px-4 py-3 text-[11.5px] leading-relaxed',
             noVerifiedProvider
               ? 'border-amber-400/25 bg-amber-400/[0.06] text-amber-100'
               : 'border-white/[0.08] bg-white/[0.02] text-slate-300',
@@ -2463,211 +2431,240 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
           <span className="min-w-0">
             {noVerifiedProvider
               ? 'Le contrôle de disponibilité de vos services IA a expiré (validité serveur : 24 h). Aucune réponse ne sera simulée tant qu’un service n’aura pas été re-vérifié.'
-              : `Le secours automatique est dégradé : ${staleProviders.length} service(s) configuré(s) n’a plus de contrôle valide (24 h). Vérifiez-le pour garantir les réponses en cas d’indisponibilité du service principal.`}
+              : `Le secours automatique est dégradé : ${staleProviders.length} service(s) configuré(s) n’a plus de contrôle valide (24 h).`}
           </span>
-          <Button size="sm" variant="outline" icon={<RefreshCw size={12} />} onClick={() => setSection('providers')}>
+          <Button size="sm" variant="outline" icon={<RefreshCw size={12} />} onClick={() => go('providers')}>
             Ouvrir les services IA
           </Button>
         </section>
       )}
 
-      <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
-        <div className="vy-surface vy-halo p-4">
-          <div className="flex items-start justify-between gap-2">
-            <p className="vy-metric-label">Conversations</p>
-            <span className="vy-icon-tile h-8 w-8"><MessageSquare size={14} /></span>
-          </div>
-          <p className="vy-metric-value mt-2">{conversationsLoaded ? conversations.length : '—'}</p>
-          <p className="mt-1 text-[11px] text-slate-500">Historique de votre espace métier</p>
-        </div>
-        <div className="vy-surface vy-halo p-4">
-          <div className="flex items-start justify-between gap-2">
-            <p className="vy-metric-label">Services vérifiés</p>
-            <span className="vy-icon-tile h-8 w-8"><Zap size={14} /></span>
-          </div>
-          <p className="vy-metric-value mt-2">
-            {providers ? availableProviderCount : '—'}
-            <span className="ml-1 text-[11px] font-normal text-slate-500">service(s)</span>
-          </p>
-          <p className="mt-1 text-[11px] text-slate-500">Disponibilité contrôlée côté serveur</p>
-        </div>
-        <div className="vy-surface vy-halo p-4">
-          <div className="flex items-start justify-between gap-2">
-            <p className="vy-metric-label">Quota métier</p>
-            <span className="vy-icon-tile h-8 w-8"><Brain size={14} /></span>
-          </div>
-          <p className="vy-metric-value mt-2">{quota?.available_units ?? '—'}</p>
-          <p className="mt-1 text-[11px] text-slate-500">
-            {quota
-              ? `Unités disponibles · crédits Studio ${quota.studio_ugc_untouched ? 'intacts' : 'distincts'}`
-              : 'Quota distinct des crédits Studio UGC'}
-          </p>
-        </div>
-      </section>
+      {osModule === 'overview' && <GrowthOsOverview workspaceId={workspaceId} onNavigate={go} />}
+      {osModule === 'reports' && <GrowthOsReports workspaceId={workspaceId} />}
 
-      <div className="grid gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
-        <nav aria-label="Navigation Business Grow" className="no-scrollbar flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
-          {SECTIONS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setSection(id)}
-              aria-current={section === id ? 'page' : undefined}
-              className={cn(
-                'relative flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
-                section === id
-                  ? 'bg-gradient-to-r from-violet-400/20 to-cyan-400/[0.06] text-white shadow-[inset_0_0_0_1px_rgba(196,181,253,0.18)]'
-                  : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
-              )}
-            >
-              <Icon size={16} /> {label}
-            </button>
-          ))}
-          <div className="hidden border-t border-white/[0.07] px-2 pt-3 lg:block">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Historique</p>
-            <p className="text-xs leading-relaxed text-slate-500">{conversationsLoaded ? `${conversations.length} conversation(s) dans VYORA.` : 'Historique non chargé.'}</p>
-          </div>
-        </nav>
+      {workspaceId && osModule === 'crm' && (
+        <CrmWorkspace
+          key="crm"
+          workspaceId={workspaceId}
+          legacyProspects={legacyProspects}
+          initialContactId={crmContactId}
+          onInitialContactHandled={() => setCrmContactId(null)}
+          onCreateReceivable={(contactId) => { setFinanceContactId(contactId); go('finance'); }}
+          onOpenFinance={() => go('finance')}
+          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+        />
+      )}
+      {workspaceId && osModule === 'pipeline' && (
+        <CrmWorkspace
+          key="pipeline"
+          workspaceId={workspaceId}
+          legacyProspects={legacyProspects}
+          initialTab="pipeline"
+          lockTab
+          initialContactId={crmContactId}
+          onInitialContactHandled={() => setCrmContactId(null)}
+          onCreateReceivable={(contactId) => { setFinanceContactId(contactId); go('finance'); }}
+          onOpenFinance={() => go('finance')}
+          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+        />
+      )}
+      {workspaceId && osModule === 'tasks' && (
+        <CrmWorkspace
+          key="tasks"
+          workspaceId={workspaceId}
+          legacyProspects={legacyProspects}
+          initialTab="tasks"
+          lockTab
+          initialContactId={crmContactId}
+          onInitialContactHandled={() => setCrmContactId(null)}
+          onCreateReceivable={(contactId) => { setFinanceContactId(contactId); go('finance'); }}
+          onOpenFinance={() => go('finance')}
+          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+        />
+      )}
+      {workspaceId && osModule === 'relances' && (
+        <CrmWorkspace
+          key="relances"
+          workspaceId={workspaceId}
+          legacyProspects={legacyProspects}
+          initialTab="relances"
+          lockTab
+          initialContactId={crmContactId}
+          onInitialContactHandled={() => setCrmContactId(null)}
+          onCreateReceivable={(contactId) => { setFinanceContactId(contactId); go('finance'); }}
+          onOpenFinance={() => go('finance')}
+          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+        />
+      )}
 
-        <div className="min-w-0 space-y-4">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <ActiveIcon size={14} className="text-brand-300" /> {activeSection.label}
-          </div>
-          {!workspaceId && ['chat', 'growth', 'company', 'memory', 'integrations'].includes(section) && (
-            <section role="status" className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.05] p-5 text-sm text-amber-100">
-              Aucune entreprise active. Créez ou sélectionnez une entreprise pour accéder à son assistant et à ses données. Les données personnelles historiques ne sont pas chargées automatiquement.
-            </section>
-          )}
-          {workspaceId && section === 'chat' && (
-            <AssistantView
-              workspaceId={workspaceId}
-              backendReady={backendReady}
-              backendLoading={backendLoading}
-              providers={providers}
-              models={models}
-              quota={quota}
-              tools={tools}
-              conversations={conversations}
-              conversationsLoaded={conversationsLoaded}
-              selectedConversationId={selectedConversationId}
-              messages={messages}
-              loading={loadingMessages}
-              error={error}
-              busy={busy}
-              roleKey={roleKey}
-              routingMode={routingMode}
-              preferredProviderKey={preferredProviderKey}
-              preferredModelKey={preferredModelKey}
-              manualAllowFallback={manualAllowFallback}
-              entryIntent={entryIntent}
-              onChangeRole={handleChangeRole}
-              onChangeRoutingMode={setRoutingMode}
-              onChangePreferredProvider={handleChangePreferredProvider}
-              onChangePreferredModel={setPreferredModelKey}
-              onChangeManualAllowFallback={setManualAllowFallback}
-              onDismissEntryIntent={() => setEntryIntent(null)}
-              onResolveTool={resolveTool}
-              onProposeTask={proposeTask}
-              onNewConversation={() => { void createConversation(); }}
-              onRenameConversation={renameConversation}
-              onDeleteConversation={deleteConversation}
-              onSelectConversation={(id) => { if (selectedConversationRef.current === id) return; selectionRevision.current++; messageLoadSequence.current++; toolLoadSequence.current++; selectedConversationRef.current = id; setSelectedConversationId(id); setMessages([]); setTools([]); }}
-              onSend={sendMessage}
-              onRetry={() => { void refreshWorkspace(); void loadMessages(); }}
-              draftFromReport={reportDraft}
-              onDraftConsumed={() => setReportDraft(null)}
-              onReportDraft={setReportDraft}
-              onOpenIntegrations={() => setSection('integrations')}
-            />
-          )}
-          {workspaceId && section === 'growth' && (
-            <GrowthWorkspace
-              workspace={workspace}
-              workspaceId={workspaceId}
-              memory={memory}
-              loadingMemory={loadingMemory}
-              memoryError={memoryError}
-              onReloadMemory={loadMemory}
-              onOpenAssistant={() => setSection('chat')}
-              onOpenIntegrations={() => setSection('integrations')}
-              onOpenProviders={() => setSection('providers')}
-              initialTab={entryIntent?.growthTab ?? null}
-            />
-          )}
-          {workspaceId && section === 'company' && <CompanyContextView workspace={workspace} />}
-          {workspaceId && section === 'memory' && (
-            <MemoryView
-              workspaceId={workspaceId}
-              memory={memory}
-              loading={loadingMemory}
-              busy={busy}
-              error={memoryError}
-              onConsent={saveMemoryConsent}
-              onSaveProfile={saveMemoryProfile}
-              onPutItem={(category, content, itemId) => mutateMemoryItem(() => { if (!workspaceId) throw new Error('Aucune entreprise active.'); return businessGrowApi.putMemoryItem(category, content, itemId ?? null, workspaceId); })}
-              onDeleteItem={(id) => mutateMemoryItem(() => { if (!workspaceId) throw new Error('Aucune entreprise active.'); return businessGrowApi.deleteMemoryItem(id, workspaceId); })}
-              onImportLegacy={importLegacyMemory}
-              onRetry={() => { void loadMemory(); }}
-            />
-          )}
-          {section === 'providers' && (
-            <ProvidersView
-              backendReady={backendReady}
-              backendLoading={backendLoading}
-              statuses={providers}
-              models={models}
-              requests={requests}
-              savedRouting={savedRouting}
-              quota={quota}
-              verifyingKey={verifyingKey}
-              verifyBanner={verifyBanner}
-              onVerifyProvider={verifyProvider}
-              onSaveRouting={saveRouting}
-            />
-          )}
-          {section === 'ai' && (
-            <AiControlCenterView
-              memories={agentMemories}
-              loading={agentMemoriesLoading}
-              searching={agentSearching}
-              error={agentMemoriesError}
-              consent={memory?.consent === true}
-              consentBusy={agentConsentBusy}
-              savedRouting={savedRouting}
-              requests={requests}
-              onToggleConsent={toggleAgentMemoryConsent}
-              onSearch={searchAgentMemory}
-              onForget={forgetAgentMemory}
-              onRetry={() => { void loadAgentMemories(); }}
-              onOpenProviders={() => setSection('providers')}
-            />
-          )}
-          {workspaceId && section === 'integrations' && (
-            /*
-             * Même composant que `/app/connect`, même source de vérité : un
-             * seul catalogue. Business Grow fournit ici l'entreprise active et
-             * son contrôleur d'état (compteurs de séquence, verrou de mutation).
-             */
-            <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">
-              <IntegrationsCenter
-                workspaceId={workspaceId}
-                embedded
-                controller={{
-                  connections: integrations,
-                  loadError: integrationLoadError,
-                  subscriptionRefusal: integrationRefusal,
-                  busyKey: integrationBusyKey,
-                  notice: integrationNotice,
-                  onRetry: () => { void loadIntegrations().catch(() => {}); },
-                  onRequest: (connectorKey) => { void handleIntegrationAction('request', connectorKey); },
-                  onCancel: (connectorKey) => { void handleIntegrationAction('cancel', connectorKey); },
-                  onDisconnect: (connectorKey) => { void handleIntegrationAction('disconnect', connectorKey); },
-                }}
-              />
-            </section>
-          )}
-        </div>
-      </div>
+      {workspaceId && osModule === 'sales' && (
+        <SalesWorkspace
+          workspaceId={workspaceId}
+          onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
+          onOpenFinance={(contactId) => { if (contactId) setFinanceContactId(contactId); go('finance'); }}
+        />
+      )}
+      {workspaceId && osModule === 'catalog' && <CatalogWorkspace workspaceId={workspaceId} />}
+      {workspaceId && osModule === 'suppliers' && <SuppliersWorkspace workspaceId={workspaceId} />}
+      {workspaceId && osModule === 'storefront' && (
+        <StorefrontWorkspace
+          workspaceId={workspaceId}
+          workspaceName={workspace?.name ?? 'Mon entreprise'}
+          onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
+        />
+      )}
+      {workspaceId && osModule === 'cash' && (
+        <CashWorkspace workspaceId={workspaceId} onOpenFinance={() => go('finance')} />
+      )}
+      {workspaceId && osModule === 'automation' && (
+        <AutomationWorkspace
+          workspaceId={workspaceId}
+          onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
+        />
+      )}
+      {workspaceId && osModule === 'marketing' && (
+        <MarketingWorkspace
+          workspaceId={workspaceId}
+          onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
+        />
+      )}
+
+      {workspaceId && osModule === 'finance' && (
+        <FinanceWorkspace
+          key="finance"
+          workspaceId={workspaceId}
+          initialContactId={financeContactId}
+          onInitialContactHandled={() => setFinanceContactId(null)}
+          onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
+        />
+      )}
+      {workspaceId && osModule === 'recouvrement' && (
+        <FinanceWorkspace
+          key="recouvrement"
+          workspaceId={workspaceId}
+          initialTab="recouvrement"
+          lockTab
+          initialContactId={financeContactId}
+          onInitialContactHandled={() => setFinanceContactId(null)}
+          onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
+        />
+      )}
+
+      {workspaceId && osModule === 'assistant' && (
+        <AssistantView
+          workspaceId={workspaceId}
+          backendReady={backendReady}
+          backendLoading={backendLoading}
+          providers={providers}
+          models={models}
+          quota={quota}
+          tools={tools}
+          conversations={conversations}
+          conversationsLoaded={conversationsLoaded}
+          selectedConversationId={selectedConversationId}
+          messages={messages}
+          loading={loadingMessages}
+          error={error}
+          busy={busy}
+          roleKey={roleKey}
+          routingMode={routingMode}
+          preferredProviderKey={preferredProviderKey}
+          preferredModelKey={preferredModelKey}
+          manualAllowFallback={manualAllowFallback}
+          entryIntent={entryIntent}
+          onChangeRole={handleChangeRole}
+          onChangeRoutingMode={setRoutingMode}
+          onChangePreferredProvider={handleChangePreferredProvider}
+          onChangePreferredModel={setPreferredModelKey}
+          onChangeManualAllowFallback={setManualAllowFallback}
+          onDismissEntryIntent={() => setEntryIntent(null)}
+          onResolveTool={resolveTool}
+          onProposeTask={proposeTask}
+          onNewConversation={() => { void createConversation(); }}
+          onRenameConversation={renameConversation}
+          onDeleteConversation={deleteConversation}
+          onSelectConversation={(id) => { if (selectedConversationRef.current === id) return; selectionRevision.current++; messageLoadSequence.current++; toolLoadSequence.current++; selectedConversationRef.current = id; setSelectedConversationId(id); setMessages([]); setTools([]); }}
+          onSend={sendMessage}
+          onRetry={() => { void refreshWorkspace(); void loadMessages(); }}
+          draftFromReport={reportDraft}
+          onDraftConsumed={() => setReportDraft(null)}
+          onReportDraft={setReportDraft}
+          onOpenIntegrations={() => go('integrations')}
+        />
+      )}
+
+      {workspaceId && osModule === 'company' && <CompanyContextView workspace={workspace} />}
+
+      {workspaceId && osModule === 'memory' && (
+        <MemoryView
+          workspaceId={workspaceId}
+          memory={memory}
+          loading={loadingMemory}
+          busy={busy}
+          error={memoryError}
+          onConsent={saveMemoryConsent}
+          onSaveProfile={saveMemoryProfile}
+          onPutItem={(category, content, itemId) => mutateMemoryItem(() => { if (!workspaceId) throw new Error('Aucune entreprise active.'); return businessGrowApi.putMemoryItem(category, content, itemId ?? null, workspaceId); })}
+          onDeleteItem={(id) => mutateMemoryItem(() => { if (!workspaceId) throw new Error('Aucune entreprise active.'); return businessGrowApi.deleteMemoryItem(id, workspaceId); })}
+          onImportLegacy={importLegacyMemory}
+          onRetry={() => { void loadMemory(); }}
+        />
+      )}
+
+      {osModule === 'providers' && (
+        <ProvidersView
+          backendReady={backendReady}
+          backendLoading={backendLoading}
+          statuses={providers}
+          models={models}
+          requests={requests}
+          savedRouting={savedRouting}
+          quota={quota}
+          verifyingKey={verifyingKey}
+          verifyBanner={verifyBanner}
+          onVerifyProvider={verifyProvider}
+          onSaveRouting={saveRouting}
+        />
+      )}
+
+      {osModule === 'ai' && (
+        <AiControlCenterView
+          memories={agentMemories}
+          loading={agentMemoriesLoading}
+          searching={agentSearching}
+          error={agentMemoriesError}
+          consent={memory?.consent === true}
+          consentBusy={agentConsentBusy}
+          savedRouting={savedRouting}
+          requests={requests}
+          onToggleConsent={toggleAgentMemoryConsent}
+          onSearch={searchAgentMemory}
+          onForget={forgetAgentMemory}
+          onRetry={() => { void loadAgentMemories(); }}
+          onOpenProviders={() => go('providers')}
+        />
+      )}
+
+      {workspaceId && osModule === 'integrations' && (
+        <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">
+          <IntegrationsCenter
+            workspaceId={workspaceId}
+            embedded
+            controller={{
+              connections: integrations,
+              loadError: integrationLoadError,
+              subscriptionRefusal: integrationRefusal,
+              busyKey: integrationBusyKey,
+              notice: integrationNotice,
+              onRetry: () => { void loadIntegrations().catch(() => {}); },
+              onRequest: (connectorKey) => { void handleIntegrationAction('request', connectorKey); },
+              onCancel: (connectorKey) => { void handleIntegrationAction('cancel', connectorKey); },
+              onDisconnect: (connectorKey) => { void handleIntegrationAction('disconnect', connectorKey); },
+            }}
+          />
+        </section>
+      )}
+    </GrowthOsLayout>
     </div>
   );
 }

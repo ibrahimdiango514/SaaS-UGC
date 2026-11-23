@@ -77,7 +77,7 @@ const DB_MESSAGES: Array<[RegExp, string]> = [
   [/MUAPI_SUBMIT_ERROR/i, 'La génération n’a pas pu être lancée. Vérifiez les paramètres et réessayez.'],
   [/MUAPI_NO_REQUEST_ID/i, 'La génération n’a pas pu être confirmée. Vos crédits ont été restitués.'],
   [/timeout/i, 'Le service vidéo n’a pas répondu à temps. Vos crédits ont été restitués.'],
-  [/GROQ_NOT_CONFIGURED/i, 'L’assistance IA est indisponible pour le moment. Saisissez votre script ou votre prompt manuellement.'],
+  [/AI_NOT_CONFIGURED/i, 'L’assistance IA est indisponible pour le moment. Saisissez votre script ou votre prompt manuellement.'],
   [/AI_PROVIDERS_NOT_CONFIGURED/i, 'Aucun service IA n’est disponible pour le moment. Aucune réponse n’est simulée.'],
   [/BG_INSUFFICIENT_CREDITS|bg_insufficient_credits/i, 'Crédits Business Grow épuisés. Vos crédits Studio UGC ne sont jamais utilisés dans Business Grow.'],
   [/BG_INSUFFICIENT_QUOTA|bg_insufficient_quota/i, 'Quota Business Grow atteint pour cette période. Vos crédits Studio UGC restent totalement séparés.'],

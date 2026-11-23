@@ -388,7 +388,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                 className="min-h-[190px]" placeholder="Générez un script ou collez le vôtre…"
                 hint={`${scriptText.length} caractères · minimum 20 pour lancer une vidéo`} />
               <Button variant="outline" size="sm" onClick={() => void onPersist()} disabled={!projectId}>Enregistrer dans le projet</Button>
-              {!health?.groq && <Banner tone="info" title="Assistance IA indisponible">Vous pouvez toujours saisir ou modifier votre script manuellement.</Banner>}
+              {!health?.ai && <Banner tone="info" title="Assistance IA indisponible">Vous pouvez toujours saisir ou modifier votre script manuellement.</Banner>}
             </div>
           </Card>}
 

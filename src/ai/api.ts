@@ -44,6 +44,11 @@ export interface AiAttachment {
   note?: string;
   /** Identifiant en base, une fois le fichier téléversé et enregistré. */
   fileId?: string;
+  /**
+   * Image redimensionnée, transmise au modèle vision (Gemini). Le binaire
+   * n'est jamais placé dans le texte du message ni dans un log.
+   */
+  visionImage?: { mimeType: string; dataBase64: string };
 }
 
 const HISTORY_KEY = 'vyora.ai.history.v1';
@@ -96,14 +101,20 @@ export async function sendMessage(params: {
   workspaceId?: string | null;
 }): Promise<{ providerAvailable: boolean; provider?: { key: string; model: string } }> {
   const body = composeMessageBody(params.content, params.mode, params.attachments);
+  const images = params.attachments.flatMap((attachment) => (
+    attachment.visionImage ? [attachment.visionImage] : []
+  ));
   const result = await businessGrowApi.sendMessage(
     params.conversationId,
     body,
     crypto.randomUUID(),
-    // `workspaceId` rattache l'échange à l'entreprise active quand l'interface
-    // est hébergée dans Business Grow. Absent pour l'assistant autonome, le
-    // socle retombe sur son comportement d'origine.
-    params.workspaceId ? { workspaceId: params.workspaceId } : undefined,
+    {
+      // `workspaceId` rattache l'échange à l'entreprise active quand l'interface
+      // est hébergée dans Business Grow. Absent pour l'assistant autonome, le
+      // socle retombe sur son comportement d'origine.
+      ...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+      ...(images.length ? { images } : {}),
+    },
   );
   return { providerAvailable: result.providerAvailable, provider: result.provider };
 }
@@ -132,12 +143,21 @@ export function composeMessageBody(content: string, mode: AiMode, attachments: A
   parts.push(content.trim());
 
   const lisibles = attachments.filter((a) => a.excerpt);
-  const muettes = attachments.filter((a) => !a.excerpt);
+  const vision = attachments.filter((a) => a.visionImage);
+  const muettes = attachments.filter((a) => !a.excerpt && !a.visionImage);
 
   if (lisibles.length > 0) {
     parts.push(
       '--- Documents joints ---',
       ...lisibles.map((a) => `### ${a.name}\n${a.excerpt}`),
+    );
+  }
+  if (vision.length > 0) {
+    parts.push(
+      '--- Images jointes (transmises au modèle vision) ---',
+      ...vision.map((a) => `- ${a.name} (${a.mimeType})`),
+      'Analyse réellement le contenu visuel de ces images. Si une image est '
+        + 'illisible ou ambiguë, dis-le au lieu d’inventer.',
     );
   }
   if (muettes.length > 0) {

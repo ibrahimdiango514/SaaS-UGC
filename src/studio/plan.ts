@@ -5,8 +5,9 @@
  * instruction into a structured plan (objective, sector, narrative scenes,
  * visual instructions). It is explicitly NOT an AI response and is labelled as
  * such in the UI. The optional AI path (`mapAiScriptToPlan`) uses the EXISTING
- * `reelora-ai` Edge function and is only reachable when Groq is configured;
- * otherwise the UI shows an explicit unavailability state and never simulates.
+ * `vyora-ai` Edge function (VYORA AI GATEWAY → FreeLLMAPI) and is only reachable
+ * when the central provider is configured; otherwise the UI shows an explicit
+ * unavailability state and never simulates.
  *
  * Every plan — local or AI — passes `validateProductionPlan` before anything is
  * sent to a provider. No model answer is forwarded blindly.
@@ -211,7 +212,7 @@ export function validateProductionPlan(raw: unknown): { ok: true; plan: Producti
   return errors.length ? { ok: false, errors } : { ok: true, plan };
 }
 
-/** Map the EXISTING `reelora-ai generate_script` answer, then validate it. */
+/** Map the EXISTING `vyora-ai generate_script` answer, then validate it. */
 export function mapAiScriptToPlan(raw: unknown, fallback: ProductionPlan): ReturnType<typeof validateProductionPlan> {
   if (!raw || typeof raw !== 'object') return { ok: false, errors: ['Réponse IA vide.'] };
   const r = raw as Record<string, unknown>;

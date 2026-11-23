@@ -92,13 +92,17 @@ async function rpc(name: string, body: Json, token = SERVICE_KEY()): Promise<{ o
 /** Descripteur de registre → descripteur de sonde (aucun secret ici). */
 function toProbeDescriptor(row: Json): AiProbeDescriptor {
   const kindRaw = str(row.adapter_kind, 20);
-  const kind = (['openai', 'gemini', 'cloudflare', 'none'] as const).includes(kindRaw as never)
+  const kind = (['openai', 'none'] as const).includes(kindRaw as never)
     ? (kindRaw as AiProbeDescriptor['kind'])
     : 'openai';
+  // `base_url_env` prioritaire : un fournisseur dont l'hôte n'existe QUE dans
+  // un secret Edge (FreeLLMAPI) reste sondable et cataloguable. Sans cela la
+  // sonde partirait sur une URL vide et conclurait à un endpoint manquant.
+  const baseUrlEnv = str(row.base_url_env, 80);
   return {
     key: str(row.key, 40),
     kind,
-    baseUrl: str(row.base_url, 300),
+    baseUrl: str(row.base_url, 300) || (baseUrlEnv ? env(baseUrlEnv) : ''),
     modelsUrl: str(row.models_url, 300) || null,
     apiKeyEnv: str(row.api_key_env, 80) || null,
     accountIdEnv: str(row.account_id_env, 80) || null,

@@ -138,7 +138,7 @@ beforeEach(() => {
   apiMocks.listAssets.mockResolvedValue([]);
   apiMocks.listJobs.mockResolvedValue([]);
   apiMocks.signedStorageUrl.mockResolvedValue('https://signed.example/clip.mp4');
-  apiMocks.healthCheck.mockResolvedValue({ configured: { groq: false, muapi: true, supabase: true, worker: true } });
+  apiMocks.healthCheck.mockResolvedValue({ configured: { ai: false, muapi: true, supabase: true, worker: true } });
 });
 
 afterEach(() => {

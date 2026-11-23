@@ -176,69 +176,6 @@ function fromOpenAiStyle(payload: unknown): AiCatalogResult {
   };
 }
 
-/** Gabarit Google : `models[]` avec `supportedGenerationMethods`. */
-function fromGeminiStyle(payload: unknown): AiCatalogResult {
-  const rows = Array.isArray(rec(payload).models) ? (rec(payload).models as unknown[]) : [];
-  const models: AiCatalogModel[] = [];
-  for (const raw of rows) {
-    const item = rec(raw);
-    const name = str(item.name);
-    if (!name) continue;
-    const methods = Array.isArray(item.supportedGenerationMethods)
-      ? item.supportedGenerationMethods.map((v) => String(v))
-      : [];
-    if (methods.length > 0 && !methods.includes('generateContent')) continue;
-    const id = name.replace(/^models\//, '');
-    if (isEmbeddingId(id) && !methods.includes('embedContent')) continue;
-    const caps: Record<string, boolean> = { writing: true, reasoning: true };
-    if (methods.includes('embedContent')) caps.embeddings = true;
-    models.push({
-      modelKey: catalogModelKey(id),
-      providerModel: id,
-      displayName: str(item.displayName) ?? id,
-      capabilities: caps,
-      contextIn: positiveInt(item.inputTokenLimit),
-      maxOut: positiveInt(item.outputTokenLimit),
-      costIn: null,
-      costOut: null,
-      tier: 'standard',
-      note: 'Prix non publié par l’API : coût inconnu (jamais estimé).',
-    });
-  }
-  return { models: dedupe(models), warning: rows.length === 0 ? 'catalogue vide' : null };
-}
-
-/** Gabarit Workers AI : `result[]` de modèles `@cf/...`. */
-function fromCloudflareStyle(payload: unknown): AiCatalogResult {
-  const root = rec(payload);
-  const container = rec(root.result);
-  const rows = Array.isArray(root.result)
-    ? (root.result as unknown[])
-    : Array.isArray(container.models)
-      ? (container.models as unknown[])
-      : [];
-  const models: AiCatalogModel[] = [];
-  for (const raw of rows) {
-    const item = rec(raw);
-    const id = str(item.id) ?? str(item.name);
-    if (!id) continue;
-    const embedding = isEmbeddingId(id);
-    models.push({
-      modelKey: catalogModelKey(id),
-      providerModel: id,
-      displayName: str(item.name) ?? str(item.id) ?? id,
-      capabilities: embedding ? { embeddings: true } : { writing: true },
-      contextIn: null,
-      maxOut: null,
-      costIn: null,
-      costOut: null,
-      tier: embedding ? 'specialized' : 'standard',
-      note: 'Catalogue Cloudflare : capacités par modèle non publiées dans la liste — à confirmer modèle par modèle.',
-    });
-  }
-  return { models: dedupe(models), warning: rows.length === 0 ? 'catalogue vide' : null };
-}
-
 /** Gabarit Ollama natif : `models[]` avec `name` / `details`. */
 function fromOllamaStyle(payload: unknown): AiCatalogResult {
   const rows = Array.isArray(rec(payload).models) ? (rec(payload).models as unknown[]) : [];
@@ -282,8 +219,7 @@ export function normalizeCatalog(kind: AiAdapterKind, payload: unknown): AiCatal
   if (payload === null || payload === undefined) {
     return { models: [], warning: 'réponse vide' };
   }
-  if (kind === 'gemini') return fromGeminiStyle(payload);
-  if (kind === 'cloudflare') return fromCloudflareStyle(payload);
+  if (kind === 'none') return { models: [], warning: 'protocole non supporté' };
   const root = rec(payload);
   // Ollama natif (`/api/tags`) et gabarit OpenAI se distinguent par la forme.
   if (Array.isArray(root.models) && !Array.isArray(root.data)) return fromOllamaStyle(payload);

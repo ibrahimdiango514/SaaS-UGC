@@ -692,7 +692,7 @@ export default function GenerationStudio() {
   };
 
   const onAiPlan = async () => {
-    if (health?.groq !== true) {
+    if (health?.ai !== true) {
       const message = 'Assistance IA indisponible pour le moment. Réessayez plus tard.';
       setAiMessage(message);
       toast.warning(message);

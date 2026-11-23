@@ -8,10 +8,12 @@ export interface AiRegistryProvider {
   name: string;
   status: string;
   aggregator: boolean;
-  /** Gabarit de protocole (`openai` | `gemini` | `cloudflare` | `none`). */
+  /** Gabarit de protocole (`openai` | `none`) : un seul protocole servi. */
   adapterKind: AiAdapterKind;
   /** URL de base de l'API, fournie par le registre (jamais par le code). */
   baseUrl: string | null;
+  /** Variable d'environnement portant l'URL de base (prioritaire si définie). */
+  baseUrlEnv?: string | null;
   /** URL de la liste des modèles (facultative). */
   modelsUrl: string | null;
   /** Nom de la variable d'environnement portant la clé (jamais la valeur). */
@@ -147,6 +149,7 @@ export function parseRegistrySnapshot(raw: unknown): AiRegistrySnapshot | null {
           aggregator: r.aggregator === true,
           adapterKind: adapterKindOf(r.adapter_kind),
           baseUrl: strOrNull(r.base_url),
+          baseUrlEnv: strOrNull(r.base_url_env),
           modelsUrl: strOrNull(r.models_url),
           apiKeyEnv: strOrNull(r.api_key_env),
           accountIdEnv: strOrNull(r.account_id_env),

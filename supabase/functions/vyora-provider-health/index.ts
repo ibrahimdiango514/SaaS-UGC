@@ -1,4 +1,4 @@
-// VYORA — surveillance planifiée des fournisseurs IA (descripteurs du registre).
+// VYORA — surveillance planifiée du fournisseur IA central (FreeLLMAPI).
 //
 // Appelée uniquement par le job pg_cron `vyora-provider-health-*` via pg_net.
 // Deux protections, dans cet ordre :
@@ -12,12 +12,13 @@
 // AUCUNE GÉNÉRATION : ce service ne lit que le catalogue du fournisseur
 // (GET /models) pour vérifier la clé et le modèle configuré. Il n'appelle jamais
 // un endpoint de complétion, ne consomme aucun quota, n'écrit aucun crédit.
-// Le prix éventuel d'un GET catalogue est documenté dans
-// docs/surveillance-fournisseurs-cron.md.
+//
+// AUCUN FOURNISSEUR EN DUR : les cibles viennent des descripteurs du registre
+// (`vyora_ai_provider_descriptors()`), protocole `openai` uniquement. Un
+// fournisseur ajouté au registre est surveillé sans modification de ce fichier.
 //
 // Le verdict est écrit par la RPC `vyora_record_provider_verification`
-// (service_role) qui réutilise les fonctions de santé existantes : le routage
-// Business Grow voit exactement le même état que via `providers.verify`.
+// (service_role) : le routage voit exactement le même état que via `providers.verify`.
 
 type Json = Record<string, unknown>;
 
@@ -39,36 +40,16 @@ function env(name: string): string {
 const SUPABASE_URL = () => env("SUPABASE_URL");
 const SERVICE_KEY = () => env("SUPABASE_SERVICE_ROLE_KEY");
 
-// VYORA AI CORE — AUCUNE liste de fournisseurs ici.
-//
-// La surveillance interroge les DESCRIPTEURS du registre
-// (`public.vyora_ai_provider_descriptors()`) : clé, gabarit de protocole, URL
-// de base, URL de catalogue, noms des variables de secret. Un fournisseur
-// ajouté au registre est donc surveillé sans modification de ce fichier.
-//
-// La sonde reste « catalogue only » : une lecture de la liste des modèles,
-// aucune complétion, aucun contenu généré, coût nul. Les fournisseurs
-// historiques (sans descripteur de phase) gardent leur sonde dédiée pour ne
-// pas casser la surveillance en production.
-
 interface DescriptorRow {
   key: string;
   kind: string;
   baseUrl: string | null;
+  baseUrlEnv: string | null;
   modelsUrl: string | null;
   apiKeyEnv: string | null;
-  accountIdEnv: string | null;
   transport: string | null;
   headers: Record<string, string>;
 }
-
-/** Sondes historiques : conservées telles quelles (compatibilité production). */
-const LEGACY_PROVIDERS = {
-  groq: { keyVar: "BUSINESS_GROW_GROQ_API_KEY", modelVar: "BUSINESS_GROW_GROQ_MODEL" },
-  gemini: { keyVar: "BUSINESS_GROW_GEMINI_API_KEY", modelVar: "BUSINESS_GROW_GEMINI_MODEL" },
-} as const;
-
-type LegacyProviderKey = keyof typeof LEGACY_PROVIDERS;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -123,7 +104,7 @@ async function recordVerification(payload: Json): Promise<{ ok: boolean; detail:
   return { ok: res.ok, detail };
 }
 
-/** Lecture des descripteurs de phase (fournisseurs récemment intégrés). */
+/** Lecture des descripteurs du registre central (source de vérité unique). */
 async function loadDescriptors(): Promise<DescriptorRow[]> {
   const res = await fetch(`${SUPABASE_URL()}/rest/v1/rpc/vyora_ai_provider_descriptors`, {
     method: "POST",
@@ -153,9 +134,9 @@ async function loadDescriptors(): Promise<DescriptorRow[]> {
       key,
       kind: typeof row.adapter_kind === "string" ? row.adapter_kind : "openai",
       baseUrl: typeof row.base_url === "string" ? row.base_url : null,
+      baseUrlEnv: typeof row.base_url_env === "string" && row.base_url_env ? row.base_url_env : null,
       modelsUrl: typeof row.models_url === "string" ? row.models_url : null,
       apiKeyEnv: typeof row.api_key_env === "string" ? row.api_key_env : null,
-      accountIdEnv: typeof row.account_id_env === "string" ? row.account_id_env : null,
       transport: typeof row.transport === "string" ? row.transport : "rest",
       headers,
     });
@@ -193,41 +174,27 @@ function failure(
   };
 }
 
-/** URL de catalogue effective, déduite du descripteur (jamais inventée). */
-function catalogUrlFor(descriptor: DescriptorRow, accountId: string): string | null {
+/**
+ * URL de catalogue effective, déduite du descripteur (jamais inventée).
+ * Le secret `base_url_env` est prioritaire sur `default_base_url` : un
+ * fournisseur dont l'hôte n'existe qu'en secret (FreeLLMAPI) reste sondable.
+ */
+function catalogUrlFor(descriptor: DescriptorRow): string | null {
   if (descriptor.modelsUrl) return descriptor.modelsUrl;
-  if (!descriptor.baseUrl) return null;
-  const base = descriptor.baseUrl.replace(/\/+$/, "");
-  if (descriptor.kind === "gemini") return `${base}/models`;
-  if (descriptor.kind === "cloudflare") {
-    return accountId ? `${base}/accounts/${encodeURIComponent(accountId)}/ai/models` : null;
-  }
-  return `${base}/models`;
+  const fromEnv = descriptor.baseUrlEnv ? env(descriptor.baseUrlEnv) : "";
+  const baseUrl = fromEnv || descriptor.baseUrl;
+  if (!baseUrl) return null;
+  return `${baseUrl.replace(/\/+$/, "")}/models`;
 }
 
-/** En-têtes de lecture du catalogue, par gabarit de protocole. */
+/** En-têtes de lecture du catalogue : Bearer, protocole OpenAI-compatible. */
 function catalogHeaders(descriptor: DescriptorRow, apiKey: string): Record<string, string> {
-  const headers: Record<string, string> = { ...descriptor.headers };
-  if (descriptor.kind === "gemini") headers["x-goog-api-key"] = apiKey;
-  else headers.Authorization = `Bearer ${apiKey}`;
-  return headers;
+  return { ...descriptor.headers, Authorization: `Bearer ${apiKey}` };
 }
 
-/** Identifiants d'une ligne de catalogue, quel que soit le gabarit. */
-function listModelIds(descriptor: DescriptorRow, payload: Json): string[] {
+/** Identifiants de modèles d'un catalogue OpenAI-compatible. */
+function listModelIds(payload: Json): string[] {
   const out: string[] = [];
-  const push = (id: unknown) => {
-    if (typeof id === "string" && id.length > 0 && !out.includes(id)) out.push(id);
-  };
-  if (descriptor.kind === "gemini") {
-    const rows = Array.isArray(payload.models) ? payload.models : [];
-    for (const row of rows) {
-      const item = (row ?? {}) as Json;
-      const name = typeof item.name === "string" ? item.name.replace(/^models\//, "") : null;
-      push(name);
-    }
-    return out.sort();
-  }
   const root = payload.result && typeof payload.result === "object" ? (payload.result as Json) : payload;
   const rows = Array.isArray(root.data)
     ? (root.data as unknown[])
@@ -238,48 +205,31 @@ function listModelIds(descriptor: DescriptorRow, payload: Json): string[] {
         : [];
   for (const row of rows) {
     const item = (row ?? {}) as Json;
-    push(typeof item.id === "string" ? item.id : typeof item.name === "string" ? item.name : null);
+    const id = typeof item.id === "string" ? item.id : typeof item.name === "string" ? item.name : null;
+    if (id && !out.includes(id)) out.push(id);
   }
   return out.sort();
 }
 
-/** Sonde d'un fournisseur HISTORIQUE (Groq, Gemini) — comportement inchangé. */
-async function checkLegacyProvider(providerKey: LegacyProviderKey): Promise<CheckResult> {
-  const provider = LEGACY_PROVIDERS[providerKey];
-  const apiKey = env(provider.keyVar);
-  const model = env(provider.modelVar);
-  if (!apiKey || !model) return failure(providerKey, model || "", "PROVIDER_NOT_CONFIGURED");
-
-  const descriptor: DescriptorRow = providerKey === "gemini"
-    ? {
-      key: "gemini", kind: "gemini",
-      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-      modelsUrl: "https://generativelanguage.googleapis.com/v1beta/models",
-      apiKeyEnv: provider.keyVar, accountIdEnv: null, transport: "rest", headers: {},
-    }
-    : {
-      key: "groq", kind: "openai",
-      baseUrl: "https://api.groq.com/openai/v1",
-      modelsUrl: "https://api.groq.com/openai/v1/models",
-      apiKeyEnv: provider.keyVar, accountIdEnv: null, transport: "rest", headers: {},
-    };
-  return await probeCatalog(descriptor, model, apiKey);
+/**
+ * Modèle attendu : conventions `<PRÉFIXE>_MODEL` et `<PRÉFIXE>_DEFAULT_MODEL`
+ * DÉRIVÉES du nom de la variable de clé (ex. FREE_LLM_API_KEY → FREE_LLM_MODEL,
+ * FREE_LLM_DEFAULT_MODEL). Un nom non standard ne fait jamais lire la clé
+ * comme un modèle.
+ */
+function configuredModel(descriptor: DescriptorRow): string {
+  const apiKeyEnv = descriptor.apiKeyEnv ?? "";
+  const prefix = apiKeyEnv.replace(/_API_KEY$|_API_TOKEN$/, "");
+  if (!prefix || prefix === apiKeyEnv) return "";
+  return env(`${prefix}_MODEL`) || env(`${prefix}_DEFAULT_MODEL`);
 }
 
 /** Sonde d'un fournisseur du REGISTRE, pilotée par son descripteur. */
 async function checkDescriptorProvider(descriptor: DescriptorRow): Promise<CheckResult> {
   const apiKey = descriptor.apiKeyEnv ? env(descriptor.apiKeyEnv) : "";
-  const accountId = descriptor.accountIdEnv ? env(descriptor.accountIdEnv) : "";
-  if (!apiKey) return failure(descriptor.key, "", "PROVIDER_NOT_CONFIGURED");
-  // Modèle attendu : convention `<préfixe>_MODEL` DÉRIVÉE du nom de la clé,
-  // jamais lue depuis la variable de clé elle-même (un nom de variable fourni
-  // par le registre ne doit jamais faire lire une valeur de secret).
-  const modelVar = /_API_KEY$|_API_TOKEN$/.test(descriptor.apiKeyEnv ?? "")
-    ? (descriptor.apiKeyEnv as string).replace(/_API_KEY$|_API_TOKEN$/, "_MODEL")
-    : "";
-  const model = modelVar ? env(modelVar) : "";
-  // Cloudflare sans identifiant de compte : aucune URL de catalogue, aucun appel.
-  return await probeCatalog(descriptor, model, apiKey, accountId);
+  const model = configuredModel(descriptor);
+  if (!apiKey) return failure(descriptor.key, model, "PROVIDER_NOT_CONFIGURED");
+  return await probeCatalog(descriptor, model, apiKey);
 }
 
 /** Lecture du catalogue : la seule requête envoyée (aucune génération). */
@@ -287,11 +237,10 @@ async function probeCatalog(
   descriptor: DescriptorRow,
   model: string,
   apiKey: string,
-  accountId = "",
 ): Promise<CheckResult> {
-  const url = catalogUrlFor(descriptor, accountId);
-  if (!url) return failure(descriptor.key, model, "PROVIDER_NOT_CONFIGURED", {
-    detail: { missing: ["identifiant de compte requis pour l'URL de catalogue"] },
+  const url = catalogUrlFor(descriptor);
+  if (!url) return failure(descriptor.key, model, "PROVIDER_ENDPOINT_MISSING", {
+    detail: { missing: ["URL de catalogue absente du descripteur"] },
   });
 
   const startedAt = Date.now();
@@ -316,7 +265,7 @@ async function probeCatalog(
       });
     }
     const payload = (await res.json()) as Json;
-    const availableModels = listModelIds(descriptor, payload);
+    const availableModels = listModelIds(payload);
     const attribution = Object.keys(descriptor.headers).length > 0 ? descriptor.headers : null;
     const modelPresent = model ? availableModels.includes(model) : null;
     return {
@@ -374,31 +323,21 @@ export async function handler(req: Request): Promise<Response> {
   try { body = (await req.json()) as Json; } catch { return fail("INVALID_BODY", "Corps JSON invalide.", 400); }
   const requested = typeof body.providerKey === "string" ? body.providerKey.toLowerCase() : "";
 
-  // Cibles : descripteurs du registre (source de vérité) + historiques.
   const descriptors = await loadDescriptors();
-  const legacyKeys = Object.keys(LEGACY_PROVIDERS) as LegacyProviderKey[];
-
-  const checks: Array<{ key: string; run: () => Promise<CheckResult> }> = [];
-  for (const descriptor of descriptors) {
-    checks.push({ key: descriptor.key, run: () => checkDescriptorProvider(descriptor) });
-  }
-  for (const key of legacyKeys) {
-    if (descriptors.some((descriptor) => descriptor.key === key)) continue;
-    checks.push({ key, run: () => checkLegacyProvider(key) });
-  }
+  const checks = descriptors.map((descriptor) => ({
+    key: descriptor.key,
+    descriptor,
+    run: () => checkDescriptorProvider(descriptor),
+  }));
 
   // Un fournisseur sans clé n'est pas sondé par défaut (il reste inactif) ;
   // une demande EXPLICITE le sonde pour obtenir un diagnostic lisible.
-  const config = (key: string): string | null => {
-    const descriptor = descriptors.find((row) => row.key === key);
-    if (descriptor) return descriptor.apiKeyEnv ? env(descriptor.apiKeyEnv) || null : null;
-    if (key in LEGACY_PROVIDERS) return env(LEGACY_PROVIDERS[key as LegacyProviderKey].keyVar) || null;
-    return null;
-  };
+  const configured = (descriptor: DescriptorRow): boolean =>
+    Boolean(descriptor.apiKeyEnv && env(descriptor.apiKeyEnv));
 
   const targets = checks.filter((check) => {
     if (requested) return check.key === requested;
-    return Boolean(config(check.key));
+    return configured(check.descriptor);
   });
   if (requested && targets.length === 0) {
     return fail("PROVIDER_UNKNOWN", `Fournisseur « ${requested} » inconnu du registre.`, 404);

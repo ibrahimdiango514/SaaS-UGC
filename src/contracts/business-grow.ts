@@ -15,7 +15,7 @@ export const REELORA_DOMAIN_BOUNDARIES = {
   businessGrowSchema: 'saas_business',
   studioUgcSchema: 'saas_ugc',
   businessGrowEdgeFunction: 'business-grow',
-  studioAiEdgeFunction: 'reelora-ai',
+  studioAiEdgeFunction: 'vyora-ai',
   studioVideoEdgeFunction: 'reelora-video',
   studioCreditsNeverDebitedByBusinessGrow: true,
 } as const;
@@ -65,12 +65,15 @@ export type BusinessGrowGrowthTab =
   | 'catalog'
   | 'market'
   | 'crm'
+  | 'relations'
+  | 'finance'
   | 'strategy'
   | 'activity'
   | 'settings';
 
 const VALID_GROWTH_TABS = new Set<BusinessGrowGrowthTab>([
-  'overview', 'company', 'goals', 'catalog', 'market', 'crm', 'strategy', 'activity', 'settings',
+  'overview', 'company', 'goals', 'catalog', 'market', 'crm', 'relations', 'finance',
+  'strategy', 'activity', 'settings',
 ]);
 
 export interface BusinessGrowEntryIntent {

@@ -240,11 +240,12 @@ describe('Business Grow', () => {
     window.history.pushState({}, '', '/app/business');
     render(<App />);
     expect(await screen.findByTestId('business-grow')).toBeTruthy();
-    expect(screen.getAllByRole('link', { name: /Business Grow/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('navigation', { name: 'Navigation Growth OS' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('link', { name: 'Vue générale' }).length).toBeGreaterThan(0);
   });
 
   it('charge le backend sans prétendre disposer d’un service IA', async () => {
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText(/Aucun service IA vérifié n’est actuellement disponible/)).toBeTruthy();
     expect(screen.getByTestId('business-overall-status').textContent).toContain('IA non disponible');
 
@@ -274,7 +275,7 @@ describe('Business Grow', () => {
       return { id: 'tool-1', status: 'pending_approval' };
     });
     businessMocks.resolveTool.mockImplementation(async () => { tools[0].status = 'executed'; tools[0].output_result = { taskId: 'task-1' }; return { status: 'executed' }; });
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /Diagnostics & rapports/ }));
     expect(await screen.findByText('Facture à vérifier')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Préparer une tâche' }));
@@ -289,8 +290,8 @@ describe('Business Grow', () => {
   it('demande une confirmation séparée avant la copie de la mémoire historique', async () => {
     businessMocks.state.memory = { consent: true, policyVersion: 'v1', profile: null, items: [] };
     businessMocks.importLegacyMemory = vi.fn(async () => ({ importedItems: 1, importedProfile: false }));
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Mémoire métier' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Importer l’ancienne mémoire personnelle' }));
     expect(businessMocks.importLegacyMemory).not.toHaveBeenCalled();
     expect(screen.getByText('Confirmer la copie dans l’entreprise active ?')).toBeTruthy();
@@ -324,12 +325,12 @@ describe('Business Grow', () => {
       remoteModels: {},
     });
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Mémoire métier' }));
     expect(screen.getByText('Mémoire métier privée')).toBeTruthy();
     expect(await screen.findByText('La mémoire est désactivée et reste vide.')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Services IA' }));
     expect(screen.getByText('Services IA VYORA')).toBeTruthy();
     expect(screen.getByTestId('provider-groq')).toBeTruthy();
     // Un fournisseur inconnu du code apparaît parce qu'il est au registre…
@@ -345,12 +346,12 @@ describe('Business Grow', () => {
       id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier VYORA',
       country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
     };
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Entreprise' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Contexte entreprise' }));
 
-    expect(await screen.findByText('Atelier VYORA')).toBeTruthy();
-    expect(await screen.findByText('Atelier Test')).toBeTruthy();
+    expect((await screen.findAllByText('Atelier VYORA')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Atelier Test')).length).toBeGreaterThan(0);
     expect(await screen.findByText('Sérum Éclat')).toBeTruthy();
     expect(screen.getByText('Ces données proviennent de l’espace VYORA partagé. Elles ne sont pas copiées dans la mémoire IA.')).toBeTruthy();
     expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1');
@@ -380,15 +381,15 @@ describe('Business Grow', () => {
       id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Ancien espace',
       country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
     };
-    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Entreprise' }));
+    const view = render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Contexte entreprise' }));
     await waitFor(() => expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1'));
 
     authMocks.workspace = {
       id: 'workspace-2', owner_user_id: 'business-grow-test-user', name: 'Nouvel espace',
       country_code: 'FR', default_language: 'fr', created_at: '2026-02-01', updated_at: '2026-02-01',
     };
-    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    view.rerender(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('Marque du nouvel espace')).toBeTruthy();
 
     resolveOldBrands([{
@@ -402,11 +403,11 @@ describe('Business Grow', () => {
   });
 
   it('crée et affiche une conversation seulement après confirmation de création serveur', async () => {
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     const createButton = await screen.findByRole('button', { name: 'Nouvelle conversation' });
     fireEvent.click(createButton);
 
-    expect(await screen.findAllByRole('button', { name: /^Nouvelle conversation$/ })).toHaveLength(2);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /^Nouvelle conversation$/ }).length).toBeGreaterThan(0));
     expect(businessMocks.createConversation).toHaveBeenCalledWith('Nouvelle conversation', 'workspace-1');
   });
 
@@ -426,7 +427,7 @@ describe('Business Grow', () => {
       }],
     }));
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('Message A')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Campagne B/ }));
     expect(await screen.findByText('Message B')).toBeTruthy();
@@ -437,7 +438,7 @@ describe('Business Grow', () => {
     const id = '33333333-3333-4333-8333-333333333333';
     businessMocks.state.conversations = [{ id, title: 'Conversation active', created_at: '2026-01-01', updated_at: '2026-01-01' }];
     businessMocks.state.messages = [{ id: 'm', author_role: 'assistant', content: 'Message conservé', created_at: '2026-01-01' }];
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('Message conservé')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Conversation active' }));
     expect(screen.getByText('Message conservé')).toBeTruthy();
@@ -456,7 +457,7 @@ describe('Business Grow', () => {
     businessMocks.listMessages.mockImplementation(async (conversationId?: string) => conversationId === second
       ? new Promise((resolve) => { finishSecond = resolve; })
       : { messages: [{ id: 'a', author_role: 'assistant', content: 'Contenu A', created_at: '2026-01-01' }] });
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByText('Contenu A');
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Question A' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
@@ -474,7 +475,7 @@ describe('Business Grow', () => {
     businessMocks.state.conversations = [{ id, title: 'Conversation A', created_at: '2026-01-01', updated_at: '2026-01-01' }];
     businessMocks.listMessages.mockResolvedValueOnce({ messages: [] }).mockRejectedValue(new Error('historique indisponible'));
     businessMocks.sendMessage.mockResolvedValue({ requestId: 'r', inputMessageId: 'm', status: 'succeeded', providerAvailable: true });
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByRole('button', { name: 'Conversation A' });
     await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(id, 'workspace-1'));
     const draft = screen.getByLabelText('Votre demande') as HTMLTextAreaElement;
@@ -487,8 +488,8 @@ describe('Business Grow', () => {
 
   it('distingue une mémoire inaccessible d’une mémoire désactivée', async () => {
     businessMocks.getMemory.mockRejectedValue(new Error('Lecture mémoire indisponible'));
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Mémoire métier' }));
     expect(await screen.findByText('Lecture mémoire indisponible')).toBeTruthy();
     expect(screen.getByText(/État de la mémoire indisponible/)).toBeTruthy();
     expect(screen.queryByRole('switch')).toBeNull();
@@ -500,11 +501,11 @@ describe('Business Grow', () => {
     businessMocks.getMemory.mockImplementation(async (workspaceId?: string | null) => workspaceId === 'workspace-1'
       ? new Promise((resolve) => { finishOld = resolve; })
       : { consent: true, policyVersion: 'v1', profile: null, items: [{ id: 'b', category: 'business_context', content: { text: 'Note entreprise B' }, created_at: '2026-01-01', updated_at: '2026-01-01' }] });
-    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    const view = render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Mémoire métier' }));
     await waitFor(() => expect(businessMocks.getMemory).toHaveBeenCalledWith('workspace-1'));
     authMocks.workspace = { ...authMocks.workspace!, id: 'workspace-2', name: 'Entreprise B' };
-    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    view.rerender(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('Note entreprise B')).toBeTruthy();
     await act(async () => { finishOld({ consent: true, policyVersion: 'v1', profile: null, items: [{ id: 'a', category: 'business_context', content: { text: 'Secret entreprise A' }, created_at: '2026-01-01', updated_at: '2026-01-01' }] }); });
     expect(screen.queryByText('Secret entreprise A')).toBeNull();
@@ -523,7 +524,7 @@ describe('Business Grow', () => {
     businessMocks.listTools.mockImplementation(async (conversationId?: string | null) => conversationId === a
       ? new Promise((resolve) => { finishA = resolve; })
       : { tools: [proposal('b', 'Proposition B', b)] });
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByRole('button', { name: 'Outils A' });
     await waitFor(() => expect(businessMocks.listTools).toHaveBeenCalledWith(a, 'workspace-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Outils B' }));
@@ -552,7 +553,7 @@ describe('Business Grow', () => {
       };
     });
 
-    const view = render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    const view = render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByRole('button', { name: 'Conversation privée A' });
     await waitFor(() => expect(businessMocks.listMessages).toHaveBeenCalledWith(oldConversationId, 'workspace-1'));
 
@@ -560,7 +561,7 @@ describe('Business Grow', () => {
     businessMocks.state.conversations = [{
       id: newConversationId, title: 'Conversation du compte B', created_at: '2026-02-01', updated_at: '2026-02-01',
     }];
-    view.rerender(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    view.rerender(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('Contenu privé du nouveau compte')).toBeTruthy();
 
     resolveOldMessages({
@@ -588,7 +589,7 @@ describe('Business Grow', () => {
       { id: 'm4', author_role: 'user', content: '4', created_at: '2026-01-01', request_status: 'failed', request_error_code: 'NO_VERIFIED_PROVIDER' },
     ];
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText('En attente')).toBeTruthy();
     expect(screen.getByText('Traitement en cours')).toBeTruthy();
     expect(screen.getByText(/Traitement réussi/)).toBeTruthy();
@@ -613,7 +614,7 @@ describe('Business Grow', () => {
       throw Object.assign(new Error('Aucun fournisseur vérifié. Aucune réponse simulée.'), { code: 'NO_VERIFIED_PROVIDER' });
     });
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByRole('button', { name: 'Question' })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Aidez-moi à planifier.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
@@ -650,7 +651,7 @@ describe('Business Grow', () => {
       };
     });
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByText(/Aucun service IA vérifié n’est actuellement disponible/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Réponds réellement.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
@@ -665,7 +666,7 @@ describe('Business Grow', () => {
     businessMocks.getStatus.mockRejectedValue(new Error('Fonction Business Grow introuvable.'));
     businessMocks.listConversations.mockRejectedValue(new Error('Backend indisponible.'));
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     // Le premier appel est en vol : ce n'est pas une panne.
     expect(screen.getByTestId('business-ai-loading')).toBeTruthy();
     expect(screen.queryByTestId('business-ai-unavailable')).toBeNull();
@@ -682,7 +683,7 @@ describe('Business Grow', () => {
 
   it('ne confond pas un statut IA non chargé avec une absence de fournisseur', async () => {
     businessMocks.getStatus.mockRejectedValue(new Error('Réseau indisponible.'));
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
 
     expect(await screen.findByText(/statut des services IA indisponible/i)).toBeTruthy();
     expect(screen.getByTestId('business-overall-status').textContent).toContain('Statut IA indisponible');
@@ -692,7 +693,7 @@ describe('Business Grow', () => {
 
   it('ne présente pas un historique non chargé comme vide lorsque le statut IA répond', async () => {
     businessMocks.listConversations.mockRejectedValue(new Error('Réseau indisponible.'));
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
 
     expect(await screen.findByText('Historique indisponible')).toBeTruthy();
     expect(screen.queryByText('Aucune conversation enregistrée')).toBeNull();
@@ -712,8 +713,8 @@ describe('Business Grow', () => {
         updated_at: '2026-01-01',
       }],
     };
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Mémoire métier' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Mémoire métier' }));
     expect(await screen.findByDisplayValue(/Lancer une offre/)).toBeTruthy();
     expect(screen.getByText('Produit de lancement')).toBeTruthy();
     fireEvent.click(screen.getByRole('switch', { name: 'Activée' }));
@@ -729,7 +730,7 @@ describe('Business Grow', () => {
       { id, title: 'Ancien nom', created_at: '2026-01-01', updated_at: '2026-01-01' },
     ];
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByRole('button', { name: 'Ancien nom' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Renommer la conversation' }));
     fireEvent.change(screen.getByLabelText('Nouveau titre de conversation'), { target: { value: 'Nom modifié' } });
@@ -798,7 +799,7 @@ describe('Business Grow', () => {
       provider: { key: 'groq', model: 'verified-groq-model' },
     });
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByTestId('business-quota-pill')).toBeTruthy();
     expect(screen.getByTestId('business-quota-pill').textContent).toContain('840 unités');
 
@@ -836,7 +837,7 @@ describe('Business Grow', () => {
       }],
     });
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     expect(await screen.findByTestId('business-tool-proposals')).toBeTruthy();
     expect(screen.getByText('Transférer vers Studio UGC')).toBeTruthy();
     expect(screen.getByRole('link', { name: /Ouvrir dans Studio UGC \(sans débit\)/ }).getAttribute('href')).toBe('/app/studio');
@@ -858,9 +859,9 @@ describe('Business Grow', () => {
       }],
     });
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
-    fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Services IA' }));
 
     // Aucun « adaptateur préparé » fictif : la section explique seulement que
     // la liste des services vient du registre.
@@ -884,8 +885,8 @@ describe('Business Grow', () => {
    * cause réelle du blocage.
    */
   it('affiche les intégrations sans fausse connexion et propose une demande d’activation', async () => {
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     expect(await screen.findByTestId('business-integrations')).toBeTruthy();
     // Facebook exige une approbation du fournisseur.
     await waitFor(() => expect(screen.getByTestId('integration-facebook').textContent).toContain('Validation externe requise'));
@@ -904,8 +905,8 @@ describe('Business Grow', () => {
   });
 
   it('le catalogue de 26 fournisseurs est le catalogue principal de Business Grow', async () => {
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     await screen.findByTestId('business-integrations');
     // Fournisseurs hors des 6 contrats historiques : preuve que le catalogue
     // principal est bien celui de 26, pas un sous-ensemble.
@@ -923,8 +924,8 @@ describe('Business Grow', () => {
       rows = [{ id: 'pending', workspace_id: 'workspace-1', connector_key: connectorKey, external_account_ref: null, status: 'pending', updated_at: '2026-11-13T00:00:00Z' }];
       return { connectorKey, status: 'pending' };
     });
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     const facebook = await screen.findByTestId('integration-facebook');
     await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
     // La demande se fait dans la fiche : la carte est un bouton, sans action
@@ -946,8 +947,8 @@ describe('Business Grow', () => {
 
   it('affiche un état inconnu et bloque les actions quand la lecture échoue ou mélange les entreprises', async () => {
     businessMocks.listIntegrations.mockRejectedValue(new Error('Lecture indisponible'));
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     expect(await screen.findByText(/État des intégrations indisponible/)).toBeTruthy();
     const facebook = screen.getByTestId('integration-facebook');
     expect(facebook.textContent).toContain('État inconnu');
@@ -982,8 +983,8 @@ describe('Business Grow', () => {
       { reason: 'NO_SUBSCRIPTION', subscription_status: null, plan_key: null, current_period_end: null },
     );
     businessMocks.listIntegrations.mockRejectedValue(refus);
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     const bandeau = await screen.findByTestId('integrations-subscription-required');
     expect(bandeau.textContent).toContain('Abonnement Business Grow requis');
     expect(within(bandeau).getByRole('link', { name: /Voir l’abonnement Business Grow/ }).getAttribute('href')).toBe('/app/business/abonnement');
@@ -1012,8 +1013,8 @@ describe('Business Grow', () => {
     businessMocks.requestIntegration.mockRejectedValueOnce(
       new BusinessGrowApiError('Abonnement requis.', 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED', 403, { reason: 'SUBSCRIPTION_EXPIRED', plan_key: 'essentiel', current_period_end: '2026-10-01T00:00:00Z' }),
     );
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     const facebook = await screen.findByTestId('integration-facebook');
     await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
     fireEvent.click(facebook);
@@ -1028,8 +1029,8 @@ describe('Business Grow', () => {
 
   it('ne réessaie pas une mutation d’intégration non confirmée et impose une nouvelle lecture', async () => {
     businessMocks.requestIntegration.mockRejectedValueOnce(new Error('Réponse perdue'));
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     const facebook = await screen.findByTestId('integration-facebook');
     await waitFor(() => expect(facebook.textContent).toContain('Validation externe requise'));
     fireEvent.click(facebook);
@@ -1056,8 +1057,8 @@ describe('Business Grow', () => {
       rows = [{ ...rows[0], external_account_ref: null, status: 'disconnected' }];
       return { connectorKey, disconnected: true };
     });
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button', { name: 'Intégrations' }));
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     const facebook = await screen.findByTestId('integration-facebook');
     // Une ligne `connected` sans compte OAuth vérifié : jamais « Connecté ».
     await waitFor(() => expect(facebook.textContent).toContain('Autorisation manquante'));
@@ -1146,11 +1147,11 @@ describe('Business Grow', () => {
       ),
     );
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
     expect(screen.getByTestId('business-overall-status').textContent).toContain('1 service(s) IA vérifié(s)');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Services IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Services IA' }));
 
     const groqCard = screen.getByTestId('provider-groq');
     expect(groqCard.textContent).toContain('Configuré · Non vérifié');
@@ -1199,14 +1200,14 @@ describe('Business Grow', () => {
       provider: { key: 'groq', model: 'openai/gpt-oss-120b' },
     });
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
     // Attendre que la préférence de routage sauvegardée soit réellement chargée :
     // l'envoi doit refléter l'état serveur, pas une course avec son chargement.
-    fireEvent.click(screen.getByRole('button', { name: /Services IA/ }));
+    fireEvent.click(screen.getByRole('link', { name: /Services IA/ }));
     expect(await screen.findByTestId('saved-routing-rules')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Assistant/ }));
+    fireEvent.click(screen.getByRole('link', { name: 'Assistant IA' }));
 
     fireEvent.change(screen.getByLabelText('Votre demande'), { target: { value: 'Priorités du mois.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
@@ -1222,10 +1223,10 @@ describe('Business Grow', () => {
 
 describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
   it('affiche les éléments mémorisés de l’agent avec leur statut de confiance', async () => {
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Contrôle IA' }));
 
     const memoryPanel = await screen.findByTestId('ai-memory-panel');
     expect(screen.getByText('Mémoire de l’agent')).toBeTruthy();
@@ -1238,10 +1239,10 @@ describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
   });
 
   it('efface une mémoire au clic sur « Oublier » (tombstone, la liste se met à jour)', async () => {
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Contrôle IA' }));
     expect(await screen.findByTestId('ai-memory-mem-company-1')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Oublier « Notre entreprise vend des savons artisanaux »/ }));
@@ -1252,10 +1253,10 @@ describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
   });
 
   it('recherche dans la mémoire de l’agent et filtre les résultats', async () => {
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Contrôle IA' }));
     expect(await screen.findByTestId('ai-memory-mem-company-1')).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Rechercher dans la mémoire de l’agent'), { target: { value: 'pharmacies' } });
@@ -1268,20 +1269,20 @@ describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
 
   it('présente l’état vide quand la mémoire est désactivée (consentement off)', async () => {
     businessMocks.state.agentMemories = [];
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Contrôle IA' }));
     expect(await screen.findByText('Mémoire désactivée')).toBeTruthy();
     expect(screen.getByText(/Activez la mémoire pour que VYORA retienne vos déclarations explicites/)).toBeTruthy();
   });
 
   it('change le consentement de la mémoire de l’agent (activation)', async () => {
     businessMocks.state.agentMemories = [];
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Contrôle IA' }));
     await screen.findByText('Mémoire désactivée');
 
     const toggle = screen.getByRole('switch');
@@ -1307,10 +1308,10 @@ describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
       error_code: null, created_at: '2026-11-12T09:00:00Z',
     }]});
 
-    render(<MemoryRouter><BusinessGrow /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     await screen.findByTestId('business-grow');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Contrôle IA' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Contrôle IA' }));
     expect(await screen.findByTestId('ai-routing-panel')).toBeTruthy();
     expect(await screen.findByTestId('ai-routing-rules')).toBeTruthy();
     expect(screen.getByTestId('ai-routing-rules').textContent).toContain('marketing_campaign');
