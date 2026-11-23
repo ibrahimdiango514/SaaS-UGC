@@ -458,10 +458,16 @@ function chatHistory(
   return [{ role: 'system', content: systemInstruction }, ...history];
 }
 
+/**
+ * Validation d'un fournisseur : la FORME de la clé, jamais une liste blanche.
+ *
+ * VYORA n'a plus qu'un fournisseur central (FreeLLMAPI), déclaré au registre ;
+ * la liste n'est donc plus écrite dans le code. Une clé inconnue du registre
+ * n'est pas servie : elle n'a ni configuration ni secret, et le moteur renvoie
+ * un code explicite (`NO_CONFIGURED_PROVIDER`).
+ */
 function isProvider(value: string): value is BusinessProvider {
-  return value === 'groq' || value === 'gemini'
-    || value === 'deepseek' || value === 'mistral' || value === 'grok'
-    || value === 'cloudflare' || value === 'openrouter';
+  return /^[a-z][a-z0-9_-]{1,39}$/.test(value);
 }
 
 function parseRoutingOptions(raw: unknown): RoutingOptions {

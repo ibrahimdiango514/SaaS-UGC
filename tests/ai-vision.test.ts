@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseImageInputs } from '../supabase/functions/_shared/ai-core/images';
-import { NATIVE_ADAPTERS } from '../supabase/functions/_shared/ai-core/adapters';
+import { createOpenAiCompatibleAdapter } from '../supabase/functions/_shared/ai-core/adapters';
 import { buildAiChain } from '../supabase/functions/_shared/ai-core/router';
 import type { AiRegistrySnapshot } from '../supabase/functions/_shared/ai-core/registry';
 import { buildCentralRequest } from '../supabase/functions/business-grow/providers';
@@ -36,21 +36,9 @@ describe('validation des images', () => {
 describe('format multimodal des adaptateurs', () => {
   const image = { mimeType: 'image/jpeg', dataBase64: JPEG };
 
-  it('Gemini utilise inlineData', () => {
-    const transport = NATIVE_ADAPTERS.gemini.buildRequest({
-      credentials: { apiKey: 'test-key' },
-      model: 'gemini-2.5-flash',
-      messages: [{ role: 'user', content: 'Décris cette image', images: [image] }],
-    });
-    const body = transport.body as { contents: Array<{ parts: Array<Record<string, unknown>> }> };
-    expect(body.contents[0].parts).toEqual([
-      { text: 'Décris cette image' },
-      { inlineData: { mimeType: 'image/jpeg', data: JPEG } },
-    ]);
-  });
 
   it('le protocole OpenAI utilise image_url avec une data URL', () => {
-    const transport = NATIVE_ADAPTERS.groq.buildRequest({
+    const transport = createOpenAiCompatibleAdapter('vision', 'https://api.free-llm.test/v1/chat/completions').buildRequest({
       credentials: { apiKey: 'test-key' },
       model: 'modele-vision',
       messages: [{ role: 'user', content: 'Décris', images: [image] }],
@@ -77,7 +65,7 @@ describe('routage vision', () => {
     version: 1,
     providers: [
       { key: 'groq', name: 'Groq', status: 'available', aggregator: false, adapterKind: 'openai', baseUrl: null, modelsUrl: null, apiKeyEnv: null, accountIdEnv: null, gatewayIdEnv: null, headers: {}, transport: 'rest' },
-      { key: 'gemini', name: 'Gemini', status: 'available', aggregator: false, adapterKind: 'gemini', baseUrl: null, modelsUrl: null, apiKeyEnv: null, accountIdEnv: null, gatewayIdEnv: null, headers: {}, transport: 'rest' },
+      { key: 'gemini', name: 'Gemini', status: 'available', aggregator: false, adapterKind: 'openai', baseUrl: null, modelsUrl: null, apiKeyEnv: null, accountIdEnv: null, gatewayIdEnv: null, headers: {}, transport: 'rest' },
     ],
     models: [
       { provider: 'groq', key: 'texte', providerModel: 'openai/gpt-oss-120b', name: 'Texte', verified: true, tier: 'fast', capabilities: { writing: true }, contextIn: 131072, maxOut: 8192, costIn: 0.15, costOut: 0.6, rpm: null, tpm: null },

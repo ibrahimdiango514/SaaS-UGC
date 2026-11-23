@@ -6,8 +6,8 @@
 // dont la clé API vit dans les secrets Edge (`api_key_env`). Ajouter un
 // fournisseur = une ligne de registre + un secret, sans toucher à ce fichier.
 //
-// Le module ne connaît donc que des GABARITS de protocole (`openai`, `gemini`,
-// `cloudflare`, `none`), exactement comme le moteur central, dont il réutilise
+// Le module ne connaît donc qu'un PROTOCLE (`openai`) ou son refus explicite
+// (`none`), exactement comme le moteur central, dont il réutilise
 // l'implémentation (`_shared/ai-core`).
 export type BusinessProvider = string;
 export type ExtensibleProviderId = string;
@@ -28,10 +28,10 @@ export interface ChatMessage {
 export interface ProviderConfig {
   apiKey: string;
   model: string;
-  /** Cloudflare Workers AI : identifiant de compte (nécessaire à l'URL d'appel). */
+  /** Identifiant de compte éventuel (protocoles à URL par compte). */
   accountId?: string | null;
   /** Gabarit de protocole fourni par le registre. */
-  adapterKind?: 'openai' | 'gemini' | 'cloudflare' | 'none';
+  adapterKind?: AiAdapterKind;
   /** URL de base fournie par le registre (jamais écrite en dur). */
   baseUrl?: string | null;
   /** URL de la liste des modèles (facultative). */
@@ -147,7 +147,7 @@ function envPrefix(providerId: string): string {
 function descriptorFor(providerId: string, config?: ProviderConfig | null): AiProviderDescriptor {
   const prefix = envPrefix(providerId);
   const kindRaw = (config?.adapterKind ?? envValue(`BUSINESS_GROW_${prefix}_ADAPTER_KIND`) ?? '').toLowerCase();
-  const kind = (['openai', 'gemini', 'cloudflare', 'none'] as const).includes(kindRaw as never)
+  const kind = (['openai', 'none'] as const).includes(kindRaw as never)
     ? (kindRaw as AiAdapterKind)
     : 'openai';
   const baseUrl = (config?.baseUrl ?? envValue(`BUSINESS_GROW_${prefix}_BASE_URL`) ?? '').trim();
@@ -185,6 +185,7 @@ type RegistryRow = {
   name: string;
   kind: AiAdapterKind;
   baseUrl: string | null;
+  baseUrlEnv: string | null;
   modelsUrl: string | null;
   headers: Record<string, string>;
   accountIdEnv: string | null;
@@ -209,10 +210,11 @@ export function primeProviderRegistry(rows: unknown[]): void {
     const headers = asRecord(row.default_headers);
     next.set(key, {
       name: typeof row.display_name === 'string' && row.display_name ? row.display_name : key,
-      kind: (['openai', 'gemini', 'cloudflare', 'none'] as const).includes(kindRaw as never)
+      kind: (['openai', 'none'] as const).includes(kindRaw as never)
         ? (kindRaw as AiAdapterKind)
         : 'openai',
       baseUrl: typeof row.default_base_url === 'string' && row.default_base_url ? row.default_base_url : null,
+      baseUrlEnv: typeof row.base_url_env === 'string' && row.base_url_env ? row.base_url_env : null,
       modelsUrl: typeof row.models_url === 'string' && row.models_url ? row.models_url : null,
       headers: Object.fromEntries(
         Object.entries(headers).filter(([, value]) => typeof value === 'string'),
@@ -236,7 +238,12 @@ export function providerConfigFor(providerId: string, provided?: Partial<Provide
   const accountId = provided?.accountId
     ?? (row?.accountIdEnv ? envValue(row.accountIdEnv) : null)
     ?? envValue(envName('BUSINESS_GROW', providerId, 'ACCOUNT_ID'));
-  const baseUrl = provided?.baseUrl ?? row?.baseUrl ?? envValue(envName('BUSINESS_GROW', providerId, 'BASE_URL'));
+  // Priorité : appelant, puis secret désigné par le registre, puis valeur du
+  // registre, puis convention historique. Jamais d'URL inventée.
+  const baseUrl = provided?.baseUrl
+    || (row?.baseUrlEnv ? envValue(row.baseUrlEnv) : '')
+    || row?.baseUrl
+    || envValue(envName('BUSINESS_GROW', providerId, 'BASE_URL'));
   if (!apiKey && !model && !baseUrl) return null;
   return {
     apiKey,

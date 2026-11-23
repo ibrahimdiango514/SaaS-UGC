@@ -392,6 +392,7 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
           key: provider.key,
           kind: provider.adapterKind,
           baseUrl: provider.baseUrl ?? '',
+          baseUrlEnv: provider.baseUrlEnv,
           apiKeyEnv: provider.apiKeyEnv,
           accountIdEnv: provider.accountIdEnv,
           gatewayIdEnv: provider.gatewayIdEnv,

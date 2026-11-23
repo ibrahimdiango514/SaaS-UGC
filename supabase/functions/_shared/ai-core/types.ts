@@ -85,26 +85,25 @@ export interface AiParsedResult {
  */
 /**
  * Gabarit de protocole d'un fournisseur, stocké DANS LE REGISTRE
- * (`ai_providers.adapter_kind` + `default_base_url`).
+ * (`ai_providers.adapter_kind`).
  *
- * Conséquence : ajouter un fournisseur compatible OpenAI ne demande AUCUN code
- * — une ligne de registre et un secret suffisent. Le code ne contient aucune
- * liste fermée de fournisseurs : il ne connaît que des protocoles.
+ * Décision d'architecture : VYORA ne parle plus qu'un protocole, `openai`
+ * (/chat/completions + /models). Les fournisseurs sont centralisés derrière
+ * FreeLLMAPI et exposés par ce protocole ; aucun adaptateur natif par
+ * fournisseur ne subsiste (ni Groq, ni Gemini, ni Cloudflare).
  *
- *  - `openai`     : /chat/completions au format OpenAI (le plus courant) ;
- *  - `gemini`     : protocole natif Google (generateContent) ;
- *  - `cloudflare` : conversation par compte + liste `result[]` ;
- *  - `none`       : protocole exotique → adaptateur dédié à écrire (le moteur
- *                   refuse proprement le fournisseur en attendant).
+ *  - `openai` : /chat/completions + /models au format OpenAI ;
+ *  - `none`   : protocole non supporté → listé mais jamais appelé (le moteur
+ *               refuse proprement le fournisseur).
  */
-export type AiAdapterKind = 'openai' | 'gemini' | 'cloudflare' | 'none';
+export type AiAdapterKind = 'openai' | 'none';
 
 /** Voie d'accès à un fournisseur (registre), pas son identité. */
 export type AiProviderTransport = 'rest' | 'gateway';
 
 export const AI_PROVIDER_TRANSPORTS: readonly AiProviderTransport[] = ['rest', 'gateway'];
 
-export const AI_ADAPTER_KINDS: readonly AiAdapterKind[] = ['openai', 'gemini', 'cloudflare', 'none'];
+export const AI_ADAPTER_KINDS: readonly AiAdapterKind[] = ['openai', 'none'];
 
 /** Décrit UN fournisseur sans figer son identité dans le code. */
 export interface AiProviderDescriptor {
@@ -112,6 +111,12 @@ export interface AiProviderDescriptor {
   kind: AiAdapterKind;
   /** URL de base, ex. `https://api.exemple.com/v1`. */
   baseUrl: string;
+  /**
+   * Nom de la variable d'environnement qui porte l'URL de base (jamais la
+   * valeur). Utilisée quand le registre ne fige pas l'URL : FreeLLMAPI peut
+   * ainsi changer d'hôte sans modification du registre ni du code.
+   */
+  baseUrlEnv?: string | null;
   /** Nom de la variable d'environnement qui porte la clé (jamais la valeur). */
   apiKeyEnv: string | null;
   /** Variable portant l'identifiant de compte (Cloudflare), si nécessaire. */

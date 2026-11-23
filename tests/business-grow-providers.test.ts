@@ -60,57 +60,7 @@ describe('Business Grow provider clients', () => {
     expect(result).toEqual({ content: 'Réponse Groq.', inputTokens: 7, outputTokens: 4 });
   });
 
-  it('calls Gemini REST v1beta with the key in a server-side header and system instruction', async () => {
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify({
-        candidates: [{ content: { parts: [{ text: 'Réponse Gemini.' }] } }],
-        usageMetadata: { promptTokenCount: 6, candidatesTokenCount: 5 },
-      }), { status: 200 }),
-    );
 
-    const result = await callProvider(
-      'gemini',
-      { apiKey: 'test-gemini-secret', model: 'configured-gemini-model' },
-      [...messages, { role: 'assistant', content: 'Précédent.' }],
-      fetcher,
-    );
-
-    const [url, init] = fetcher.mock.calls[0];
-    expect(String(url)).toBe('https://generativelanguage.googleapis.com/v1beta/models/configured-gemini-model:generateContent');
-    expect(new Headers(init?.headers).get('x-goog-api-key')).toBe('test-gemini-secret');
-    expect(String(url)).not.toContain('test-gemini-secret');
-    expect(JSON.parse(String(init?.body))).toMatchObject({
-      systemInstruction: { parts: [{ text: 'Réponds en français.' }] },
-      contents: [{ role: 'user' }, { role: 'model' }],
-    });
-    expect(result).toEqual({ content: 'Réponse Gemini.', inputTokens: 6, outputTokens: 5 });
-  });
-
-  it('merges consecutive Gemini turns with the same role into one content entry', async () => {
-    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify({
-        candidates: [{ content: { parts: [{ text: 'Réponse.' }] } }],
-      }), { status: 200 }),
-    );
-
-    await callProvider(
-      'gemini',
-      { apiKey: 'test-gemini-secret', model: 'configured-gemini-model' },
-      [
-        { role: 'system', content: 'Réponds en français.' },
-        { role: 'user', content: 'Question précédente.' },
-        { role: 'user', content: 'Question actuelle.' },
-        { role: 'assistant', content: 'Réponse.' },
-      ],
-      fetcher,
-    );
-
-    const [, init] = fetcher.mock.calls[0];
-    expect(JSON.parse(String(init?.body)).contents).toEqual([
-      { role: 'user', parts: [{ text: 'Question précédente.' }, { text: 'Question actuelle.' }] },
-      { role: 'model', parts: [{ text: 'Réponse.' }] },
-    ]);
-  });
 
   it('does not make a provider request when the secret or model is missing', async () => {
     const fetcher = vi.fn();
@@ -189,54 +139,14 @@ describe('Business Grow provider clients', () => {
     }
   });
 
-  it('Cloudflare Workers AI : URL par compte ; sans compte, aucun appel réseau', async () => {
-    const ok = {
-      choices: [{ message: { role: 'assistant', content: 'Réponse CF.' } }],
-      usage: { prompt_tokens: 2, completion_tokens: 4 },
-    };
-    let cfUrl = '';
-    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
-      cfUrl = String(input);
-      return new Response(JSON.stringify(ok), { status: 200 });
-    });
-    const result = await callProvider(
-      'cloudflare',
-      { apiKey: 'cf-token', model: '@cf/qwen/qwen3.8-27b', accountId: 'acct-42' },
-      messages,
-      fetcher,
-    );
-    // Endpoint OpenAI-compatible DOCUMENTÉ par Cloudflare (Workers AI) :
-    // `/ai/v1/chat/completions` — et non `/ai/v1/chat`, qui n'existe pas.
-    expect(cfUrl).toBe('https://api.cloudflare.com/client/v4/accounts/acct-42/ai/v1/chat/completions');
-    expect(result.content).toBe('Réponse CF.');
 
-    const noAccount = vi.fn();
-    await expect(
-      callProvider('cloudflare', { apiKey: 'cf-token', model: '@cf/qwen/qwen3.8-27b', accountId: null }, messages, noAccount),
-    ).rejects.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
-    expect(noAccount).not.toHaveBeenCalled();
-  });
+  it('discovers remote models through the OpenAI-compatible catalogue', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'glm-5.2' }, { id: 'qwen3.8-max-preview' }],
+    }), { status: 200 }));
 
-  it('discovers remote models for Groq and Gemini from official endpoints', async () => {
-    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('api.groq.com')) {
-        return new Response(JSON.stringify({
-          data: [{ id: 'llama-3.3-70b-versatile' }, { id: 'mixtral-8x7b-32768' }],
-        }), { status: 200 });
-      }
-      return new Response(JSON.stringify({
-        models: [
-          { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
-          { name: 'models/embedding-001', supportedGenerationMethods: ['embedContent'] },
-        ],
-      }), { status: 200 });
-    });
-
-    await expect(listRemoteModels('groq', { apiKey: 'groq-secret', model: 'llama-3.3-70b-versatile' }, fetcher))
-      .resolves.toEqual(['llama-3.3-70b-versatile', 'mixtral-8x7b-32768']);
-    await expect(listRemoteModels('gemini', { apiKey: 'gemini-secret', model: 'gemini-2.5-flash' }, fetcher))
-      .resolves.toEqual(['gemini-2.5-flash']);
+    await expect(listRemoteModels('freellmapi', { apiKey: 'freellm-secret', model: 'auto', baseUrl: 'https://api.freellmapi.test/v1' }, fetcher))
+      .resolves.toEqual(['glm-5.2', 'qwen3.8-max-preview']);
   });
 
   it('performs real server-side probe checks and never reports healthy on failure', async () => {

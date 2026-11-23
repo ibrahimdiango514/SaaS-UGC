@@ -5,8 +5,8 @@
 // Le code métier est lu dans public._edge_function_artifact_slices (nom + SHA-256), recomposé,
 // puis vérifié AVANT exécution : un artefact absent ou modifié n'est jamais exécuté.
 const NAME = "vyora-ai";
-const SHA256 = "2260637076a2e3dfa2aa3a6db19f71ca17b71d287a9c21e6e96d08d95f5aafa6";
-const CHARS = 38353;
+const SHA256 = "47c85e9a05f792535e10ea0ca9c648dd13cce93d38897b8a1f441975a8b618a5";
+const CHARS = 32621;
 
 function env(name: string): string {
   const g = globalThis as unknown as {
