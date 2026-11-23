@@ -4,10 +4,10 @@ import {
   receiptFromRecord, receiptStockMovements, supplierFromRecord,
 } from '../src/business/suppliers/model';
 import {
-  catalogHtml, computeStorefrontSummary, requestFromRecord, requestToContactData,
-  requestToOrderLines, requestTotal, settingsFromRecord, settingsToData, slugify, visibleProducts,
+  catalogHtml, computeStorefrontSummary, findDuplicateContact, requestFromRecord, requestToContactData,
+  requestToOrderLines, requestTotal, settingsFromRecord, settingsToData, slugify, toggleVisibleSelection, visibleProducts,
 } from '../src/business/storefront/model';
-import { productFromRecord } from '../src/business/catalog/model';
+import { findProductDuplicate, productFromRecord } from '../src/business/catalog/model';
 
 const purchase = purchaseFromRecord({
   id: 'po1',
@@ -101,6 +101,20 @@ describe('Lot K — vitrine commerciale', () => {
     expect(duplicate).toEqual({ duplicate: true, data: null });
   });
 
+  it('retrouve le contact existant avec la même normalisation que la conversion', () => {
+    const existing = { id: 'c1', phone: '+223 76 12 34 56', email: 'awa@example.com' };
+    expect(findDuplicateContact(request, [existing])).toEqual(existing);
+    expect(findDuplicateContact({ phone: '+223 99 99 99 99', email: 'AWA@example.com' }, [existing])).toEqual(existing);
+    expect(findDuplicateContact({ phone: '', email: 'inconnu@example.com' }, [existing])).toBeNull();
+  });
+
+  it('conserve les autres produits visibles au premier retrait', () => {
+    const allVisible = { ...settings, visibleProductIds: [] };
+    expect(toggleVisibleSelection(products, allVisible, 'p1')).toEqual(['p2']);
+    expect(toggleVisibleSelection(products, { ...settings, visibleProductIds: ['p2'] }, 'p1')).toEqual([]);
+    expect(toggleVisibleSelection(products, settings, 'p1')).toEqual([]);
+  });
+
   it('crée les lignes de commande depuis la demande', () => {
     const lines = requestToOrderLines(request);
     expect(lines[0]).toMatchObject({ productId: 'p1', quantity: 2, unitPrice: 1_500 });
@@ -118,5 +132,12 @@ describe('Lot K — vitrine commerciale', () => {
   it('résume la vitrine et ses demandes', () => {
     const summary = computeStorefrontSummary(products, settings, [request]);
     expect(summary).toMatchObject({ visibleProducts: 1, requests: 1, newRequests: 1, potentialValue: 3_000 });
+  });
+
+  it('détecte les doublons d’import par SKU ou par nom normalisé', () => {
+    const existing = [{ id: 'p1', name: 'Savon brut', sku: 'SAV-01' }];
+    expect(findProductDuplicate({ name: 'Autre', sku: 'sav-01' }, existing)).toEqual({ id: 'p1', reason: 'sku' });
+    expect(findProductDuplicate({ name: '  SAVON   BRUT ', sku: '' }, existing)).toEqual({ id: 'p1', reason: 'nom' });
+    expect(findProductDuplicate({ name: 'Nouveau', sku: 'NEW-01' }, existing)).toBeNull();
   });
 });

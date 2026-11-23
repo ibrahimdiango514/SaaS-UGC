@@ -289,6 +289,27 @@ export interface ProductImportResult {
   errors: string[];
 }
 
+/**
+ * Doublon d'import : même SKU (insensible à la casse) ou même nom normalisé.
+ * Le SKU est prioritaire ; le nom sert aux fichiers sans référence.
+ */
+export function findProductDuplicate(
+  data: Record<string, unknown>,
+  existing: readonly Pick<Product, 'id' | 'name' | 'sku'>[],
+): { id: string; reason: 'sku' | 'nom' } | null {
+  const sku = normalize(String(data.sku ?? ''));
+  if (sku) {
+    const sameSku = existing.find((product) => normalize(product.sku) === sku);
+    if (sameSku) return { id: sameSku.id, reason: 'sku' };
+  }
+  const name = normalize(String(data.name ?? ''));
+  if (name) {
+    const sameName = existing.find((product) => normalize(product.name) === name);
+    if (sameName) return { id: sameName.id, reason: 'nom' };
+  }
+  return null;
+}
+
 export function buildProductsFromRows(rows: readonly string[][], mapping: Record<number, ProductCsvField>): ProductImportResult[] {
   return rows.map((cells, index) => {
     const errors: string[] = [];

@@ -11,8 +11,8 @@ import { CATALOG_CATEGORIES, productFromRecord } from '../catalog/model';
 import { SALES_CATEGORIES, nextNumber, orderFromRecord } from '../sales/model';
 import {
   STOREFRONT_CATEGORIES, STOREFRONT_REQUEST_STATUSES, catalogHtml, computeStorefrontSummary,
-  requestFromRecord, requestToContactData, requestToData, requestToOrderLines,
-  settingsFromRecord, settingsToData, slugify, visibleProducts,
+  findDuplicateContact, requestFromRecord, requestToContactData, requestToData, requestToOrderLines,
+  settingsFromRecord, settingsToData, slugify, toggleVisibleSelection, visibleProducts,
   type StorefrontRequest, type StorefrontSettings,
 } from './model';
 
@@ -66,9 +66,7 @@ export default function StorefrontWorkspace({ workspaceId, workspaceName, onOpen
     if (busy) return;
     setBusy(productId);
     try {
-      const ids = draft.visibleProductIds.includes(productId)
-        ? draft.visibleProductIds.filter((id) => id !== productId)
-        : [...draft.visibleProductIds, productId];
+      const ids = toggleVisibleSelection(products, draft, productId);
       await saveSettings({ ...settingsToData(draft), visibleProductIds: ids });
     } catch (cause) { toast.error(asAppError(cause).message); } finally { setBusy(null); }
   };
@@ -79,12 +77,10 @@ export default function StorefrontWorkspace({ workspaceId, workspaceName, onOpen
       if (request.contactId) { toast.info('Cette demande est déjà reliée à un contact.'); return; }
       const result = requestToContactData(request, contacts);
       if (result.duplicate) {
-        const existing = contacts.find((contact) =>
-          (request.phone && contact.phone === request.phone) || (request.email && contact.email === request.email));
-        if (existing) {
-          await requestsStore.update(request.id, { ...requestToData(request), status: 'converti', contactId: existing.id });
-          toast.info('Contact existant retrouvé : aucun doublon créé.');
-        }
+        const existing = findDuplicateContact(request, contacts);
+        if (!existing) throw new Error('Un doublon a été détecté mais le contact correspondant est introuvable. Rechargez la page avant de réessayer.');
+        await requestsStore.update(request.id, { ...requestToData(request), status: 'converti', contactId: existing.id });
+        toast.info('Contact existant retrouvé : aucun doublon créé.');
         return;
       }
       const contactId = await contactsStore.create(result.data as Record<string, unknown>, `storefront:${request.id}`);

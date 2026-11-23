@@ -131,16 +131,55 @@ export function visibleProducts(products: readonly Product[], settings: Storefro
   return products.filter((product) => product.active && (selected.size === 0 || selected.has(product.id)));
 }
 
+/**
+ * Nouvelle sélection après un clic sur un produit.
+ *
+ * Une liste vide signifie « tous les produits actifs ». Sans cette conversion,
+ * le premier clic sur un produit dans cet état enregistrait `[id]` et masquait
+ * silencieusement tous les autres. On matérialise donc la sélection complète
+ * avant de retirer le produit, et on revient à `[]` quand tout est visible.
+ */
+export function toggleVisibleSelection(
+  products: readonly Product[],
+  settings: Pick<StorefrontSettings, 'visibleProductIds'>,
+  productId: string,
+): string[] {
+  const activeIds = products.filter((product) => product.active).map((product) => product.id);
+  if (!activeIds.includes(productId)) return settings.visibleProductIds;
+  const current = settings.visibleProductIds.length
+    ? activeIds.filter((id) => settings.visibleProductIds.includes(id))
+    : activeIds;
+  const next = current.includes(productId)
+    ? current.filter((id) => id !== productId)
+    : [...current, productId];
+  return next.length === activeIds.length ? [] : next;
+}
+
 export function requestTotal(request: StorefrontRequest): number | null {
   if (!request.lines.length || request.lines.some((line) => line.unitPrice === null)) return null;
   return request.lines.reduce((sum, line) => sum + (line.unitPrice ?? 0) * line.quantity, 0);
 }
 
 /** Conversion explicite en prospect : aucun doublon téléphone/e-mail. */
+/**
+ * Retrouve un contact déjà présent, avec la MÊME règle que la conversion :
+ * téléphone normalisé (indicatifs, espaces, ponctuation) ou e-mail insensible
+ * à la casse. L'interface doit utiliser cette fonction plutôt qu'une égalité
+ * de chaînes, sinon un doublon détecté par le modèle n'est pas retrouvé et la
+ * demande reste bloquée sans conversion ni message explicite.
+ */
+export function findDuplicateContact<T extends { phone: string; email: string }>(
+  request: Pick<StorefrontRequest, 'phone' | 'email'>,
+  existing: readonly T[],
+): T | null {
+  const email = request.email.trim().toLowerCase();
+  return existing.find((contact) =>
+    (request.phone && contact.phone && phonesMatch(contact.phone, request.phone))
+    || (email && contact.email.trim().toLowerCase() === email)) ?? null;
+}
+
 export function requestToContactData(request: StorefrontRequest, existing: ReadonlyArray<{ phone: string; email: string }>) {
-  const email = request.email.toLowerCase();
-  const duplicate = existing.find((contact) =>
-    (request.phone && phonesMatch(contact.phone, request.phone)) || (email && contact.email.toLowerCase() === email));
+  const duplicate = findDuplicateContact(request, existing);
   if (duplicate) return { duplicate: true as const, data: null };
   const [firstName, ...rest] = request.customerName.split(/\s+/);
   return {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  Building2, Download, PackageCheck, Plus, Truck,
+  Building2, Download, PackageCheck, Plus, Trash2, Truck,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
@@ -37,8 +37,9 @@ function emptySupplier() {
   return { name: '', contactName: '', phone: '', email: '', address: '', city: '', country: '', category: '', notes: '', status: 'actif' };
 }
 
-function SupplierForm({ open, initial, onClose, onSubmit }: {
+function SupplierForm({ open, initial, onClose, onSubmit, onDelete }: {
   open: boolean; initial: Supplier | null; onClose: () => void; onSubmit: (data: Record<string, unknown>) => Promise<void>;
+  onDelete?: () => Promise<void>;
 }) {
   const [form, setForm] = useState(() => initial ? {
     name: initial.name, contactName: initial.contactName, phone: initial.phone, email: initial.email,
@@ -55,7 +56,9 @@ function SupplierForm({ open, initial, onClose, onSubmit }: {
   };
   return (
     <Modal open={open} onClose={onClose} title={initial ? 'Modifier le fournisseur' : 'Nouveau fournisseur'} size="lg"
-      footer={<><Button variant="ghost" onClick={onClose}>Annuler</Button><Button loading={busy} onClick={() => void submit()}>{initial ? 'Enregistrer' : 'Créer'}</Button></>}>
+      footer={<>{initial && onDelete && (
+        <Button variant="danger" icon={<Trash2 size={13} />} disabled={busy} onClick={() => void onDelete()}>Supprimer</Button>
+      )}<span className="flex-1" /><Button variant="ghost" onClick={onClose}>Annuler</Button><Button loading={busy} onClick={() => void submit()}>{initial ? 'Enregistrer' : 'Créer'}</Button></>}>
       <div className="space-y-3">
         {error && <p role="alert" className="rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{error}</p>}
         <div className="grid gap-3 sm:grid-cols-2">
@@ -177,6 +180,19 @@ export default function SuppliersWorkspace({ workspaceId }: { workspaceId: strin
     toast.success('Fournisseur enregistré.');
   };
 
+  const deleteSupplier = async (supplier: Supplier) => {
+    if (purchases.some((order) => order.supplierId === supplier.id)) {
+      toast.error('Ce fournisseur a des commandes liées : annulez-les avant de le supprimer.');
+      return;
+    }
+    if (!window.confirm(`Supprimer le fournisseur « ${supplier.name} » ?`)) return;
+    try {
+      await suppliersStore.remove(supplier.id);
+      setSupplierEditor(null);
+      toast.success('Fournisseur supprimé.');
+    } catch (cause) { toast.error(asAppError(cause).message); }
+  };
+
   const savePurchase = async (data: Record<string, unknown>) => {
     if (purchaseEditor && purchaseEditor !== 'new') await purchasesStore.update(purchaseEditor.id, data);
     else await purchasesStore.create(data, `number:${String(data.number)}`);
@@ -185,18 +201,36 @@ export default function SuppliersWorkspace({ workspaceId }: { workspaceId: strin
 
   const receive = async (order: PurchaseOrder) => {
     setBusy(order.id);
+    const createdMovements: string[] = [];
+    let receiptId: string | null = null;
     try {
+      if (receipts.some((receipt) => receipt.purchaseOrderId === order.id)) {
+        toast.info('Cette commande a déjà une réception enregistrée.');
+        return;
+      }
       const draft = buildReceipt(order);
       if (!draft.lines.length) { toast.error('Aucune ligne liée à un produit : rien à entrer en stock.'); return; }
-      const receiptId = await receiptsStore.create(draft as unknown as Record<string, unknown>, `purchase:${order.id}`);
+      receiptId = await receiptsStore.create(draft as unknown as Record<string, unknown>, `purchase:${order.id}`);
       const receipt: GoodsReceipt = { ...draft, id: receiptId, createdAt: '' };
       const movements = receiptStockMovements(receipt);
       for (const movement of movements) {
-        await movementsStore.create(movement.data, movement.dedupeKey);
+        const movementId = await movementsStore.create(movement.data, movement.dedupeKey);
+        createdMovements.push(movementId);
       }
       await purchasesStore.update(order.id, { ...purchaseToData(order), status: 'recu', receivedAt: draft.receivedAt });
       toast.success(`Réception enregistrée : ${movements.length} entrée(s) de stock.`);
-    } catch (cause) { toast.error(asAppError(cause).message); } finally { setBusy(null); }
+    } catch (cause) {
+      // Le stockage générique n'offre pas de transaction multi-enregistrements :
+      // si une étape échoue, on retire les écritures créées par CETTE tentative
+      // pour ne pas laisser une réception sans stock (ou un stock sans réception).
+      for (const movementId of createdMovements) {
+        try { await movementsStore.remove(movementId); } catch { /* nettoyage best-effort */ }
+      }
+      if (receiptId) {
+        try { await receiptsStore.remove(receiptId); } catch { /* nettoyage best-effort */ }
+      }
+      toast.error(`${asAppError(cause).message} La réception a été annulée pour éviter des données partielles.`);
+    } finally { setBusy(null); }
   };
 
   const createExpense = async (order: PurchaseOrder, paid: boolean) => {
@@ -301,7 +335,7 @@ export default function SuppliersWorkspace({ workspaceId }: { workspaceId: strin
           </div>
       )}
 
-      {supplierEditor && <SupplierForm open initial={supplierEditor === 'new' ? null : supplierEditor} onClose={() => setSupplierEditor(null)} onSubmit={saveSupplier} />}
+      {supplierEditor && <SupplierForm open initial={supplierEditor === 'new' ? null : supplierEditor} onClose={() => setSupplierEditor(null)} onSubmit={saveSupplier} onDelete={supplierEditor === 'new' ? undefined : () => deleteSupplier(supplierEditor)} />}
       {purchaseEditor && (
         <PurchaseForm open suppliers={suppliers} products={products.map((product) => ({ id: product.id, name: product.name, cost: product.cost }))}
           existingNumbers={purchases.map((order) => order.number)} initial={purchaseEditor === 'new' ? null : purchaseEditor}

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  Boxes, Download, Package, Plus, Search, Upload,
+  Boxes, Download, Package, Plus, Search, Trash2, Upload,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
@@ -8,7 +8,7 @@ import { asAppError } from '../../lib/errors';
 import { useRecords } from '../records/useRecords';
 import {
   CATALOG_CATEGORIES, MOVEMENT_TYPES, PRODUCT_KINDS, STOCK_LEVEL_LABELS, buildProductsFromRows,
-  computeCatalogSummary, guessProductMapping, movementFromRecord, movementsToCsv,
+  computeCatalogSummary, findProductDuplicate, guessProductMapping, movementFromRecord, movementsToCsv,
   parseCsv, productFromRecord, productsToCsv, stockLevel, stockOf, validateMovement,
   type MovementType, type Product, type ProductKind, type StockMovement,
 } from './model';
@@ -36,11 +36,12 @@ function emptyProduct() {
   };
 }
 
-function ProductForm({ open, initial, onClose, onSubmit }: {
+function ProductForm({ open, initial, onClose, onSubmit, onDelete }: {
   open: boolean;
   initial: Product | null;
   onClose: () => void;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
+  onDelete?: () => Promise<void>;
 }) {
   const [form, setForm] = useState(() => initial ? {
     name: initial.name, sku: initial.sku, category: initial.category, kind: initial.kind,
@@ -71,7 +72,9 @@ function ProductForm({ open, initial, onClose, onSubmit }: {
 
   return (
     <Modal open={open} onClose={onClose} title={initial ? 'Modifier le produit' : 'Nouveau produit ou service'} size="lg"
-      footer={<><Button variant="ghost" onClick={onClose}>Annuler</Button><Button loading={busy} onClick={() => void submit()}>{initial ? 'Enregistrer' : 'Créer'}</Button></>}>
+      footer={<>{initial && onDelete && (
+        <Button variant="danger" icon={<Trash2 size={13} />} disabled={busy} onClick={() => void onDelete()}>Supprimer</Button>
+      )}<span className="flex-1" /><Button variant="ghost" onClick={onClose}>Annuler</Button><Button loading={busy} onClick={() => void submit()}>{initial ? 'Enregistrer' : 'Créer'}</Button></>}>
       <div className="space-y-3">
         {error && <p role="alert" className="rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{error}</p>}
         <div className="grid gap-3 sm:grid-cols-2">
@@ -180,7 +183,8 @@ export default function CatalogWorkspace({ workspaceId }: { workspaceId: string 
   const [importRows, setImportRows] = useState<string[][] | null>(null);
   const [importMapping, setImportMapping] = useState<Record<number, string>>({});
   const [importBusy, setImportBusy] = useState(false);
-  const [importReport, setImportReport] = useState<{ created: number; errors: string[] } | null>(null);
+  const [importMode, setImportMode] = useState<'ignorer' | 'mettre_a_jour'>('ignorer');
+  const [importReport, setImportReport] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const filtered = products.filter((product) => {
@@ -205,6 +209,15 @@ export default function CatalogWorkspace({ workspaceId }: { workspaceId: string 
     toast.success('Mouvement enregistré ; le stock est recalculé.');
   };
 
+  const deleteProduct = async (product: Product) => {
+    if (!window.confirm(`Supprimer « ${product.name} » ? Son historique de mouvements restera visible.`)) return;
+    try {
+      await productsStore.remove(product.id);
+      setEditor(null);
+      toast.success('Produit supprimé.');
+    } catch (cause) { toast.error(asAppError(cause).message); }
+  };
+
   const readImport = async (file: File) => {
     try {
       const rows = parseCsv(await file.text());
@@ -216,24 +229,52 @@ export default function CatalogWorkspace({ workspaceId }: { workspaceId: string 
     } catch (cause) { toast.error(asAppError(cause).message); }
   };
 
+  const importResults = useMemo(
+    () => importRows
+      ? buildProductsFromRows(importRows.slice(1), importMapping as Parameters<typeof buildProductsFromRows>[1])
+      : [],
+    [importRows, importMapping],
+  );
+  const importDuplicateCount = useMemo(
+    () => importResults.filter((result) => result.data && findProductDuplicate(result.data, products)).length,
+    [importResults, products],
+  );
+
   const runImport = async () => {
     if (!importRows) return;
     const results = buildProductsFromRows(importRows.slice(1), importMapping as Parameters<typeof buildProductsFromRows>[1]);
     const errors = results.flatMap((result) => result.data ? [] : result.errors.map((error) => `Ligne ${result.row} : ${error}`));
-    let created = 0;
+    let created = 0; let updated = 0; let skipped = 0;
+    // L'état local sert à détecter les doublons DANS le fichier aussi, pas
+    // seulement contre les produits déjà en base.
+    const known = products.map((product) => ({ id: product.id, name: product.name, sku: product.sku }));
     setImportBusy(true);
     try {
       for (const result of results) {
         if (!result.data) continue;
+        const duplicate = findProductDuplicate(result.data, known);
+        if (duplicate) {
+          if (importMode === 'ignorer') { skipped += 1; continue; }
+          try {
+            await productsStore.update(duplicate.id, result.data);
+            updated += 1;
+            const index = known.findIndex((entry) => entry.id === duplicate.id);
+            if (index >= 0) known[index] = { ...known[index], name: String(result.data.name ?? known[index].name), sku: String(result.data.sku ?? known[index].sku) };
+          } catch (cause) {
+            errors.push(`Ligne ${result.row} : ${asAppError(cause).message}`);
+          }
+          continue;
+        }
         try {
-          await productsStore.create(result.data, result.data.sku ? `sku:${String(result.data.sku).toLowerCase()}` : null);
+          const recordId = await productsStore.create(result.data, result.data.sku ? `sku:${String(result.data.sku).toLowerCase()}` : null);
           created += 1;
+          known.push({ id: recordId, name: String(result.data.name ?? ''), sku: String(result.data.sku ?? '') });
         } catch (cause) {
           errors.push(`Ligne ${result.row} : ${asAppError(cause).message}`);
         }
       }
-      setImportReport({ created, errors });
-      toast.success(`${created} produit(s) importé(s).`);
+      setImportReport({ created, updated, skipped, errors });
+      toast.success(`${created} créé(s), ${updated} mis à jour, ${skipped} doublon(s) ignoré(s).`);
     } finally { setImportBusy(false); }
   };
 
@@ -345,7 +386,7 @@ export default function CatalogWorkspace({ workspaceId }: { workspaceId: string 
         </div>
       )}
 
-      {editor && <ProductForm open initial={editor === 'new' ? null : editor} onClose={() => setEditor(null)} onSubmit={saveProduct} />}
+      {editor && <ProductForm open initial={editor === 'new' ? null : editor} onClose={() => setEditor(null)} onSubmit={saveProduct} onDelete={editor === 'new' ? undefined : () => deleteProduct(editor)} />}
       {movementFor !== null && <MovementForm open products={products} movements={movements} initialProductId={movementFor || undefined} onClose={() => setMovementFor(null)} onSubmit={saveMovement} />}
 
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Importer un catalogue CSV" size="lg"
@@ -363,6 +404,13 @@ export default function CatalogWorkspace({ workspaceId }: { workspaceId: string 
                 </label>
               ))}
             </div>
+            <Select label="Doublons (même SKU ou même nom)" value={importMode} onChange={(event) => setImportMode(event.target.value as typeof importMode)}>
+              <option value="ignorer">Ignorer les lignes en doublon</option>
+              <option value="mettre_a_jour">Mettre à jour le produit existant</option>
+            </Select>
+            <p className="text-[10px] text-slate-400">
+              {importResults.filter((result) => result.data).length} ligne(s) valide(s) · {importDuplicateCount} doublon(s) détecté(s) · {importResults.filter((result) => !result.data).length} ligne(s) en erreur
+            </p>
             <div className="max-h-56 overflow-auto rounded-lg border border-white/[0.06]">
               <table className="w-full text-left text-[10.5px]">
                 <thead className="bg-white/[0.03] text-slate-500"><tr>{importRows[0].map((header, index) => <th key={index} className="px-2 py-1">{header}</th>)}</tr></thead>
@@ -371,7 +419,7 @@ export default function CatalogWorkspace({ workspaceId }: { workspaceId: string 
             </div>
             {importReport && (
               <div className="rounded-lg border border-white/[0.07] p-3 text-[11px]">
-                <p className="font-medium text-white">{importReport.created} produit(s) importé(s).</p>
+                <p className="font-medium text-white">{importReport.created} créé(s) · {importReport.updated} mis à jour · {importReport.skipped} doublon(s) ignoré(s)</p>
                 {importReport.errors.length > 0 && <ul className="mt-1 list-inside list-disc text-rose-200">{importReport.errors.slice(0, 12).map((error) => <li key={error}>{error}</li>)}</ul>}
               </div>
             )}

@@ -311,6 +311,20 @@ export default function SalesWorkspace({
     win.print();
   };
 
+  const deleteDraft = async (kind: SalesTab, document: Quote | SalesOrder | Invoice) => {
+    const label = kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture';
+    if (!window.confirm(`Supprimer définitivement le ${label} ${document.number} ? Cette action n’efface aucun paiement ni créance déjà liés.`)) return;
+    setBusyId(document.id);
+    try {
+      const store = kind === 'devis' ? quotesStore : kind === 'commandes' ? ordersStore : invoicesStore;
+      await store.remove(document.id);
+      setDetail(null);
+      toast.success(`${document.number} supprimé.`);
+    } catch (cause) {
+      toast.error(asAppError(cause).message);
+    } finally { setBusyId(null); }
+  };
+
   const setStatus = async (kind: SalesTab, document: Quote | SalesOrder | Invoice, status: string) => {
     setBusyId(document.id);
     try {
@@ -437,6 +451,9 @@ export default function SalesWorkspace({
         description={detailRecord ? contactName(detailRecord.contactId) : undefined}
         footer={detailRecord && detail ? (
           <>
+            {detailRecord.status === 'brouillon' && (
+              <Button variant="danger" icon={<Trash2 size={13} />} loading={busyId === detailRecord.id} onClick={() => void deleteDraft(detail.kind, detailRecord)}>Supprimer</Button>
+            )}
             <Button variant="ghost" icon={<Printer size={13} />} onClick={() => openPrint(detail.kind, detailRecord)}>Imprimer</Button>
             <Button variant="outline" onClick={() => { setEditor({ kind: detail.kind, document: detailRecord }); setDetail(null); }}>Modifier</Button>
             {detail.kind === 'devis' && detailRecord.status !== 'converti' && (
