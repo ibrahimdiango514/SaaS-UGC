@@ -15,7 +15,7 @@ export const REELORA_DOMAIN_BOUNDARIES = {
   businessGrowSchema: 'saas_business',
   studioUgcSchema: 'saas_ugc',
   businessGrowEdgeFunction: 'business-grow',
-  studioAiEdgeFunction: 'reelora-ai',
+  studioAiEdgeFunction: 'vyora-ai',
   studioVideoEdgeFunction: 'reelora-video',
   studioCreditsNeverDebitedByBusinessGrow: true,
 } as const;

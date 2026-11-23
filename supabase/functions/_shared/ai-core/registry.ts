@@ -8,7 +8,7 @@ export interface AiRegistryProvider {
   name: string;
   status: string;
   aggregator: boolean;
-  /** Gabarit de protocole (`openai` | `gemini` | `cloudflare` | `none`). */
+  /** Gabarit de protocole (`openai` | `none`) : un seul protocole servi. */
   adapterKind: AiAdapterKind;
   /** URL de base de l'API, fournie par le registre (jamais par le code). */
   baseUrl: string | null;

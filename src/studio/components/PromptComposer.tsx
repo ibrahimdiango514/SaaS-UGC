@@ -7,7 +7,7 @@ import { PROMPT_FIELDS, composeStructuredPrompt, type StructuredPrompt } from '.
 
 export { EMPTY_STRUCTURE, type StructuredPrompt } from '../prompt';
 
-export function PromptComposer({ prompt, onPrompt, structure, onStructure, scriptText, onScript, productName, onProductName, groqConfigured }: {
+export function PromptComposer({ prompt, onPrompt, structure, onStructure, scriptText, onScript, productName, onProductName, aiConfigured }: {
   prompt: string;
   onPrompt: (value: string) => void;
   structure: StructuredPrompt;
@@ -16,7 +16,7 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
   onScript: (value: string) => void;
   productName: string;
   onProductName: (value: string) => void;
-  groqConfigured: boolean | null;
+  aiConfigured: boolean | null;
 }) {
   const toast = useToast();
   const [busy, setBusy] = useState<'prompt' | 'script' | null>(null);
@@ -75,7 +75,7 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
 
       <div className="mt-3 flex flex-wrap gap-2">
         <Button variant="outline" size="sm" icon={<WandSparkles size={13} />} loading={busy === 'prompt'}
-          disabled={!groqConfigured || busy !== null} onClick={() => void onImprove()}>
+          disabled={!aiConfigured || busy !== null} onClick={() => void onImprove()}>
           Améliorer le prompt avec l’IA
         </Button>
         <Button variant="ghost" size="sm" icon={<ChevronDown size={13} className={cn('transition-transform', open && 'rotate-180')} />} onClick={() => setOpen((v) => !v)}>
@@ -84,7 +84,7 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
         <Button variant="ghost" size="sm" icon={<Eraser size={13} />} onClick={() => onPrompt('')} disabled={!prompt}>Effacer</Button>
       </div>
 
-      {groqConfigured === false && (
+      {aiConfigured === false && (
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-200"><Lightbulb size={12} /> L’aide IA est indisponible pour le moment.</p>
       )}
 
@@ -109,7 +109,7 @@ export function PromptComposer({ prompt, onPrompt, structure, onStructure, scrip
         <div className="border-t border-white/[0.06] p-3.5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <Input label="Produit / marque" value={productName} onChange={(e) => onProductName(e.target.value)} placeholder="Ex. Sérum Éclat" className="flex-1" />
-            <Button variant="outline" size="sm" loading={busy === 'script'} disabled={!groqConfigured || busy !== null} onClick={() => void onGenerateScript()}>Générer un script</Button>
+            <Button variant="outline" size="sm" loading={busy === 'script'} disabled={!aiConfigured || busy !== null} onClick={() => void onGenerateScript()}>Générer un script</Button>
           </div>
           <Textarea label="Script (contexte UGC, non écrit à l’écran)" value={scriptText} onChange={(e) => onScript(e.target.value.slice(0, 4000))}
             placeholder="Collez ou générez un script. Il enrichit le contexte du prompt sans ajouter de texte à l’image."

@@ -92,7 +92,7 @@ async function rpc(name: string, body: Json, token = SERVICE_KEY()): Promise<{ o
 /** Descripteur de registre → descripteur de sonde (aucun secret ici). */
 function toProbeDescriptor(row: Json): AiProbeDescriptor {
   const kindRaw = str(row.adapter_kind, 20);
-  const kind = (['openai', 'gemini', 'cloudflare', 'none'] as const).includes(kindRaw as never)
+  const kind = (['openai', 'none'] as const).includes(kindRaw as never)
     ? (kindRaw as AiProbeDescriptor['kind'])
     : 'openai';
   return {

@@ -107,7 +107,7 @@ export default function Prompts() {
       toast.success('Prompt enrichi par l’IA.'); await refreshQuota();
     } catch (err) {
       const e = asAppError(err);
-      toast.error(e.code === 'GROQ_NOT_CONFIGURED' ? 'L’assistance IA est indisponible pour le moment.' : e.message);
+      toast.error(e.code === 'AI_NOT_CONFIGURED' ? 'L’assistance IA est indisponible pour le moment.' : e.message);
     } finally { setImproving(false); }
   };
 

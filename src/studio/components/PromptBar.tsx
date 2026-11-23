@@ -512,20 +512,20 @@ export function PromptBar({
                   size="sm"
                   variant="outline"
                   loading={aiBusy}
-                  disabled={health?.groq !== true}
+                  disabled={health?.ai !== true}
                   onClick={() => void onAiPlan()}
                   icon={<Sparkles size={11} />}
                 >
                   Proposer un plan avec l’IA
                 </Button>
               </div>
-              {health?.groq === false && (
+              {health?.ai === false && (
                 <p className="mt-2 text-[11px] leading-relaxed text-amber-200">
                   <Info size={10} className="mr-1 inline" /> Assistance IA indisponible pour le moment.
                   Aucune réponse IA n’est simulée. Le plan local déterministe reste disponible et construit vos scènes à partir de votre seule instruction.
                 </p>
               )}
-              {health?.groq !== true && health?.groq !== false && (
+              {health?.ai !== true && health?.ai !== false && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-amber-200" role={healthError ? 'alert' : 'status'}>
                   <span>{healthBusy ? 'Vérification de la disponibilité de l’aide IA…' : 'Aide IA indisponible. Réessayez plus tard.'}</span>
                   {!healthBusy && (

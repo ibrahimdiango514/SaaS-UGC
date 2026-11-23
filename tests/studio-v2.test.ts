@@ -21,7 +21,7 @@ import {
 } from '../src/studio/editor/render';
 import {
   PLANNER_PROMPT_VERSION, PLANNER_SYSTEM_PROMPT, PLAN_OUTPUT_CONTRACT,
-} from '../supabase/functions/reelora-ai/planner-prompt';
+} from '../supabase/functions/vyora-ai/planner-prompt';
 
 const api = vi.hoisted(() => ({
   createProject: vi.fn(),
@@ -286,7 +286,7 @@ describe('System prompt interne, routes et ressources de démonstration', () => 
     for (const f of readdirSync(join(process.cwd(), 'src'), { recursive: true }).filter((n) => String(n).endsWith('.ts') || String(n).endsWith('.tsx'))) {
       expect(read(`src/${f}`)).not.toContain('PLANNER_SYSTEM_PROMPT');
     }
-    expect(read('supabase/functions/reelora-ai/planner-prompt.ts')).toContain('NOT deployed');
+    expect(read('supabase/functions/vyora-ai/planner-prompt.ts')).toContain('NOT deployed');
   });
 
   it('câble les routes du nouveau studio et de l’éditeur sans supprimer les parcours existants', () => {

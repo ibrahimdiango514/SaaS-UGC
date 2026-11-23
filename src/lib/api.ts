@@ -877,10 +877,8 @@ export async function adminOverview(): Promise<AdminOverview> {
 export interface AiEngineHealth {
   service?: string;
   status?: string;
-  providers: {
-    groq?: { configured: boolean; model: string };
-    gemini?: { configured: boolean; model: string };
-  };
+  /** Fournisseurs du registre central (clé = provider_key, aucun nom en dur). */
+  providers: Record<string, { configured: boolean; model: string | null }>;
 }
 
 /** Real server-side probe of the central AI engine (model names, no keys). */
@@ -1117,7 +1115,7 @@ export function adminAiCoreCalls(limit = 50): Promise<AiCoreCallEntry[]> {
 export function adminAiCoreProviderUpsert(args: {
   provider_key: string;
   display_name: string;
-  adapter_kind: 'openai' | 'gemini' | 'cloudflare' | 'none';
+  adapter_kind: 'openai' | 'none';
   base_url: string;
   models_url?: string | null;
   api_key_env?: string | null;
@@ -1206,20 +1204,16 @@ export async function adminListAuditLogs() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI (Groq via Edge Function)                                                 */
+/* AI (VYORA AI GATEWAY -> FreeLLMAPI)                                        */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Moteur IA central VYORA (Groq + Gemini, routage et secours côté serveur).
- * Repli sur l'ancienne passerelle uniquement si le service central n'est pas déployé.
+ * Moteur IA central VYORA : point d'entrée unique de toutes les fonctions IA.
+ * Le fournisseur central (FreeLLMAPI), le modèle et le secours sont décidés
+ * côté serveur par le registre ; aucune passerelle de secours n'est nommée ici.
  */
 async function invokeAi<T>(body: Record<string, unknown>): Promise<T> {
-  try {
-    return await invokeEdge<T>('vyora-ai', body);
-  } catch (error) {
-    if (!(error instanceof AppError) || (error.code !== 'EDGE_ERROR' && error.code !== 'FUNCTION_NOT_FOUND')) throw error;
-    return invokeEdge<T>('reelora-ai', body);
-  }
+  return invokeEdge<T>('vyora-ai', body);
 }
 
 export async function generateScript(payload: {

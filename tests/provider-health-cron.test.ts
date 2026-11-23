@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 /*
- * Surveillance planifiée des fournisseurs IA (job pg_cron -> pg_net).
+ * Surveillance planifiée du fournisseur IA central (job pg_cron -> pg_net).
  *
  * Ces tests appellent le vrai handler avec un `fetch` simulé : aucune requête
  * réseau réelle, aucune clé utilisée. Ils verrouillent les garanties demandées :
  * authentification serveur, contrôle catalogue uniquement (aucune génération),
- * enregistrement des verdicts et refus des appelants non autorisés.
+ * cibles issues du SEUL registre (aucun fournisseur en dur), enregistrement des
+ * verdicts et refus des appelants non autorisés.
  */
 
 const TOKEN = 'a'.repeat(64);
@@ -25,14 +26,19 @@ type DescriptorStub = {
   headers?: Record<string, string>;
 };
 
+const FREELLM_DESCRIPTOR: DescriptorStub = {
+  key: 'freellmapi',
+  adapter_kind: 'openai',
+  base_url: 'https://api.test/v1',
+  models_url: 'https://api.test/v1/models',
+  api_key_env: 'FREE_LLM_API_KEY',
+};
+
 function stubFetch(options: {
   token?: string;
-  groqStatus?: number;
-  geminiStatus?: number;
   recordOk?: boolean;
-  /** Fournisseurs de la phase d'intégration (descripteurs du registre). */
   descriptors?: DescriptorStub[];
-  /** Statut HTTP renvoyé par le catalogue d'un fournisseur (`api.test`). */
+  /** Statut HTTP renvoyé par le catalogue du fournisseur. */
   catalogStatus?: number;
 } = {}) {
   const calls: Call[] = [];
@@ -42,7 +48,7 @@ function stubFetch(options: {
     calls.push({ url, method: init?.method ?? 'GET', headers, body: init?.body as string | undefined });
 
     if (url.endsWith('/rpc/vyora_ai_provider_descriptors')) {
-      return new Response(JSON.stringify(options.descriptors ?? []), { status: 200 });
+      return new Response(JSON.stringify(options.descriptors ?? [FREELLM_DESCRIPTOR]), { status: 200 });
     }
     if (url.endsWith('/rpc/vyora_provider_health_cron_token')) {
       return new Response(JSON.stringify(options.token ?? TOKEN), { status: 200 });
@@ -52,26 +58,12 @@ function stubFetch(options: {
         status: options.recordOk === false ? 500 : 200,
       });
     }
-    if (url.includes('api.groq.com')) {
-      const status = options.groqStatus ?? 200;
-      return new Response(
-        JSON.stringify(status === 200 ? { data: [{ id: 'openai/gpt-oss-120b' }, { id: 'openai/gpt-oss-20b' }] } : { error: 'nope' }),
-        { status },
-      );
-    }
-    if (url.includes('generativelanguage.googleapis.com')) {
-      const status = options.geminiStatus ?? 200;
-      return new Response(
-        JSON.stringify(status === 200
-          ? { models: [{ name: 'models/gemini-2.5-flash' }, { name: 'models/gemini-3.5-flash' }] }
-          : { error: 'nope' }),
-        { status },
-      );
-    }
     if (url.includes('api.test')) {
       const status = options.catalogStatus ?? 200;
       return new Response(
-        JSON.stringify(status === 200 ? { data: [{ id: 'test/fast-model' }, { id: 'test/big-model' }] } : { error: 'nope' }),
+        JSON.stringify(status === 200
+          ? { data: [{ id: 'auto' }, { id: 'auto:fast' }] }
+          : { error: 'nope' }),
         { status },
       );
     }
@@ -86,23 +78,23 @@ async function loadHandler(env: Record<string, string> = {}) {
   Object.assign(process.env, {
     SUPABASE_URL: 'https://project.supabase.co',
     SUPABASE_SERVICE_ROLE_KEY: 'service-key',
-    BUSINESS_GROW_GROQ_API_KEY: 'groq-key',
-    BUSINESS_GROW_GROQ_MODEL: 'openai/gpt-oss-120b',
-    BUSINESS_GROW_GEMINI_API_KEY: 'gemini-key',
-    BUSINESS_GROW_GEMINI_MODEL: 'gemini-2.5-flash',
+    FREE_LLM_API_KEY: 'freellm-key',
+    FREE_LLM_MODEL: 'auto',
     ...env,
   });
   const mod = await import('../supabase/functions/vyora-provider-health/index');
   return mod.handler as (req: Request) => Promise<Response>;
 }
 
-function request(headers: Record<string, string>, body: unknown = { providerKey: 'groq' }) {
+function request(headers: Record<string, string>, body: unknown = { providerKey: 'freellmapi' }) {
   return new Request('https://edge.test/vyora-provider-health', {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
   });
 }
+
+const cronHeaders = { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' };
 
 describe('surveillance fournisseur — authentification serveur', () => {
   it('refuse un appel sans en-tête de surveillance sans lire le Vault', async () => {
@@ -118,10 +110,10 @@ describe('surveillance fournisseur — authentification serveur', () => {
   it('refuse un jeton invalide et ne contacte aucun fournisseur', async () => {
     const { calls } = stubFetch({ token: 'b'.repeat(64) });
     const handler = await loadHandler();
-    const res = await handler(request({ Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' }));
+    const res = await handler(request(cronHeaders));
     expect(res.status).toBe(401);
     expect((await res.json()).error.code).toBe('SERVICE_TOKEN_INVALID');
-    expect(calls.some((call) => call.url.includes('api.groq.com'))).toBe(false);
+    expect(calls.some((call) => call.url.includes('api.test'))).toBe(false);
   });
 
   it('refuse un jeton absent ou trop court', async () => {
@@ -134,58 +126,37 @@ describe('surveillance fournisseur — authentification serveur', () => {
 });
 
 describe('surveillance fournisseur — contrôle sans génération', () => {
-  it('ne lit que le catalogue Groq (GET) et n’appelle jamais de complétion', async () => {
+  it('ne lit que le catalogue du fournisseur central (GET), jamais une complétion', async () => {
     const { calls } = stubFetch();
     const handler = await loadHandler();
-    const res = await handler(request({ Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' }));
+    const res = await handler(request(cronHeaders));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.catalog_only).toBe(true);
-    expect(body.results[0]).toMatchObject({ providerKey: 'groq', status: 'healthy', recorded: true });
+    expect(body.results[0]).toMatchObject({ providerKey: 'freellmapi', status: 'healthy', recorded: true });
 
-    const providerCalls = calls.filter((call) => call.url.includes('api.groq.com'));
+    const providerCalls = calls.filter((call) => call.url.includes('api.test'));
     expect(providerCalls).toHaveLength(1);
     expect(providerCalls[0].method).toBe('GET');
-    expect(providerCalls[0].url).toContain('/openai/v1/models');
+    expect(providerCalls[0].url).toContain('/v1/models');
+    expect(providerCalls[0].headers.authorization).toBe('Bearer freellm-key');
     // Garantie centrale : aucun endpoint de complétion, donc aucune génération.
     expect(calls.some((call) => call.url.includes('chat/completions'))).toBe(false);
   });
 
-  it('vérifie Gemini sur le catalogue et signale la latence réelle', async () => {
-    const { calls } = stubFetch();
-    const handler = await loadHandler();
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      { providerKey: 'gemini' },
-    ));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.results[0]).toMatchObject({
-      providerKey: 'gemini', modelKey: 'gemini-2.5-flash', status: 'healthy',
-    });
-    expect(typeof body.results[0].latencyMs).toBe('number');
-    const providerCalls = calls.filter((call) => call.url.includes('generativelanguage'));
-    expect(providerCalls).toHaveLength(1);
-    expect(providerCalls[0].method).toBe('GET');
-    expect(calls.some((call) => call.url.includes(':generateContent'))).toBe(false);
-  });
-
   it('signale un modèle configuré absent du catalogue sans inventer de succès', async () => {
     stubFetch();
-    const handler = await loadHandler({ BUSINESS_GROW_GEMINI_MODEL: 'modele-inexistant' });
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      { providerKey: 'gemini' },
-    ));
+    const handler = await loadHandler({ FREE_LLM_MODEL: 'modele-inexistant' });
+    const res = await handler(request(cronHeaders));
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.results[0]).toMatchObject({ status: 'failed', errorCode: 'PROVIDER_MODEL_MISSING' });
   });
 
   it('transmet l’erreur fournisseur réelle (401) et enregistre l’échec', async () => {
-    const { calls } = stubFetch({ groqStatus: 401 });
+    const { calls } = stubFetch({ catalogStatus: 401 });
     const handler = await loadHandler();
-    const res = await handler(request({ Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' }));
+    const res = await handler(request(cronHeaders));
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.results[0]).toMatchObject({ status: 'failed', errorCode: 'PROVIDER_AUTH_FAILED' });
@@ -196,147 +167,55 @@ describe('surveillance fournisseur — contrôle sans génération', () => {
 
   it('signale une configuration absente sans appel réseau au fournisseur', async () => {
     const { calls } = stubFetch();
-    const handler = await loadHandler({ BUSINESS_GROW_GROQ_API_KEY: '' });
-    const res = await handler(request({ Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' }));
+    const handler = await loadHandler({ FREE_LLM_API_KEY: '' });
+    const res = await handler(request(cronHeaders));
     expect(res.status).toBe(502);
     expect((await res.json()).results[0]).toMatchObject({ errorCode: 'PROVIDER_NOT_CONFIGURED' });
-    expect(calls.some((call) => call.url.includes('api.groq.com'))).toBe(false);
-  });
-});
-
-describe('surveillance fournisseur — fournisseurs du registre (dynamiques)', () => {
-  it('sonde un fournisseur déclaré au registre via son descripteur, sans complétion', async () => {
-    const { calls } = stubFetch({
-      descriptors: [{
-        key: 'openrouter',
-        adapter_kind: 'openai',
-        base_url: 'https://api.test/v1',
-        models_url: 'https://api.test/v1/models',
-        api_key_env: 'BUSINESS_GROW_OPENROUTER_API_KEY',
-        headers: { 'X-Title': 'VYORA' },
-      }],
-    });
-    const handler = await loadHandler({
-      BUSINESS_GROW_OPENROUTER_API_KEY: 'or-key',
-      BUSINESS_GROW_OPENROUTER_MODEL: 'test/fast-model',
-    });
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      {},
-    ));
-    const body = await res.json();
-    const row = body.results.find((r: { providerKey: string }) => r.providerKey === 'openrouter');
-    expect(row).toMatchObject({ status: 'healthy', errorCode: null, transport: 'rest' });
-    expect(row.modelKey).toBe('test/fast-model');
-
-    const catalog = calls.filter((call) => call.url.includes('api.test'));
-    expect(catalog).toHaveLength(1);
-    expect(catalog[0].method).toBe('GET');
-    // Les en-têtes d'attribution du registre sont bien envoyés au fournisseur
-    // (la valeur n'est pas journalisée : elle apparaît ici dans le test).
-    expect(catalog[0].headers['x-title']).toBe('VYORA');
-    expect(catalog[0].headers.authorization).toBe('Bearer or-key');
-    // Toujours aucune génération.
-    expect(calls.some((call) => call.url.includes('chat/completions'))).toBe(false);
-  });
-
-  it('fournisseur du registre sans clé : non sondé par défaut, aucun appel réseau', async () => {
-    const { calls } = stubFetch({
-      descriptors: [{
-        key: 'gonka',
-        adapter_kind: 'openai',
-        base_url: 'https://api.test/v1',
-        api_key_env: 'BUSINESS_GROW_GONKA_API_KEY',
-      }],
-    });
-    const handler = await loadHandler({ BUSINESS_GROW_GONKA_API_KEY: '' });
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      {},
-    ));
-    const body = await res.json();
-    expect(body.results.some((r: { providerKey: string }) => r.providerKey === 'gonka')).toBe(false);
     expect(calls.some((call) => call.url.includes('api.test'))).toBe(false);
-  });
-
-  it('demande explicite sans clé : diagnostic PROVIDER_NOT_CONFIGURED, aucun appel réseau', async () => {
-    const { calls } = stubFetch({
-      descriptors: [{
-        key: 'ollama',
-        adapter_kind: 'openai',
-        base_url: 'https://api.test/v1',
-        api_key_env: 'BUSINESS_GROW_OLLAMA_API_KEY',
-      }],
-    });
-    const handler = await loadHandler({ BUSINESS_GROW_OLLAMA_API_KEY: '' });
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      { providerKey: 'ollama' },
-    ));
-    expect(res.status).toBe(502);
-    const body = await res.json();
-    expect(body.results[0]).toMatchObject({ providerKey: 'ollama', errorCode: 'PROVIDER_NOT_CONFIGURED' });
-    expect(calls.some((call) => call.url.includes('api.test'))).toBe(false);
-  });
-
-  it('Cloudflare sans ACCOUNT_ID : configuration signalée, aucun appel au fournisseur', async () => {
-    const { calls } = stubFetch({
-      descriptors: [{
-        key: 'cloudflare',
-        adapter_kind: 'cloudflare',
-        base_url: 'https://api.cloudflare.com/client/v4',
-        api_key_env: 'BUSINESS_GROW_CLOUDFLARE_API_TOKEN',
-        account_id_env: 'BUSINESS_GROW_CLOUDFLARE_ACCOUNT_ID',
-        gateway_id_env: 'BUSINESS_GROW_CLOUDFLARE_GATEWAY_ID',
-      }],
-    });
-    const handler = await loadHandler({
-      BUSINESS_GROW_CLOUDFLARE_API_TOKEN: 'cfut-token',
-      BUSINESS_GROW_CLOUDFLARE_ACCOUNT_ID: '',
-      BUSINESS_GROW_CLOUDFLARE_GATEWAY_ID: '',
-    });
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      { providerKey: 'cloudflare' },
-    ));
-    const body = await res.json();
-    expect(body.results[0]).toMatchObject({ providerKey: 'cloudflare', errorCode: 'PROVIDER_NOT_CONFIGURED' });
-    expect(calls.some((call) => call.url.includes('api.cloudflare.com'))).toBe(false);
-  });
-
-  it('fournisseur inconnu du registre : 404 explicite, aucun appel', async () => {
-    const { calls } = stubFetch({ descriptors: [] });
-    const handler = await loadHandler();
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      { providerKey: 'cohere' },
-    ));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe('PROVIDER_UNKNOWN');
-    expect(calls.some((call) => call.url.includes('cohere'))).toBe(false);
   });
 
   it('500 du catalogue : échec réel transmis et enregistré (jamais de faux succès)', async () => {
-    const { calls } = stubFetch({
-      catalogStatus: 500,
-      descriptors: [{
-        key: 'llm7',
-        adapter_kind: 'openai',
-        base_url: 'https://api.test/v1',
-        api_key_env: 'BUSINESS_GROW_LLM7_API_KEY',
-      }],
-    });
-    const handler = await loadHandler({ BUSINESS_GROW_LLM7_API_KEY: 'llm7-key' });
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      { providerKey: 'llm7' },
-    ));
+    const { calls } = stubFetch({ catalogStatus: 500 });
+    const handler = await loadHandler();
+    const res = await handler(request(cronHeaders));
     expect(res.status).toBe(502);
     expect((await res.json()).results[0]).toMatchObject({
-      providerKey: 'llm7', status: 'failed', errorCode: 'PROVIDER_UNAVAILABLE',
+      providerKey: 'freellmapi', status: 'failed', errorCode: 'PROVIDER_UNAVAILABLE',
     });
     const record = calls.find((call) => call.url.includes('vyora_record_provider_verification'));
     expect(JSON.parse(record!.body!)).toMatchObject({ p_status: 'failed', p_error_code: 'PROVIDER_UNAVAILABLE' });
+  });
+});
+
+describe('surveillance fournisseur — plus aucun fournisseur historique', () => {
+  it('un fournisseur supprimé (groq, gemini) est inconnu : 404, aucun appel réseau', async () => {
+    for (const legacy of ['groq', 'gemini', 'cloudflare']) {
+      const { calls } = stubFetch({ descriptors: [FREELLM_DESCRIPTOR] });
+      const handler = await loadHandler();
+      const res = await handler(request(cronHeaders, { providerKey: legacy }));
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe('PROVIDER_UNKNOWN');
+      expect(calls.some((call) => call.url.includes('api.groq.com') || call.url.includes('generativelanguage') || call.url.includes('cloudflare'))).toBe(false);
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('sans descripteur configuré, aucun fournisseur n’est sondé implicitement', async () => {
+    const { calls } = stubFetch({ descriptors: [] });
+    const handler = await loadHandler();
+    const res = await handler(request(cronHeaders, {}));
+    expect(res.status).toBe(200);
+    expect((await res.json()).results).toEqual([]);
+    expect(calls.some((call) => call.url.includes('api.test'))).toBe(false);
+  });
+
+  it('un fournisseur du registre sans clé n’est pas sondé par défaut', async () => {
+    const { calls } = stubFetch();
+    const handler = await loadHandler({ FREE_LLM_API_KEY: '' });
+    const res = await handler(request(cronHeaders, {}));
+    expect(res.status).toBe(200);
+    expect((await res.json()).results).toEqual([]);
+    expect(calls.some((call) => call.url.includes('api.test'))).toBe(false);
   });
 });
 
@@ -344,25 +223,19 @@ describe('surveillance fournisseur — aucun secret dans le verdict', () => {
   it('le nom de variable du registre ne fait jamais lire une clé comme modèle', async () => {
     const { calls } = stubFetch({
       descriptors: [{
-        key: 'gonka',
+        key: 'custom',
         adapter_kind: 'openai',
         base_url: 'https://api.test/v1',
         // Nom de variable volontairement non standard : aucune convention
         // `<préfixe>_MODEL` ne doit être déduite, et surtout pas la valeur lue.
-        api_key_env: 'GONKA_TOKEN',
+        api_key_env: 'CUSTOM_TOKEN',
       }],
     });
-    const handler = await loadHandler({ GONKA_TOKEN: 'secret-value-0123456789' });
-    const res = await handler(request(
-      { Authorization: `Bearer ${TOKEN}`, 'x-vyora-cron': 'provider-health' },
-      { providerKey: 'gonka' },
-    ));
+    const handler = await loadHandler({ CUSTOM_TOKEN: 'secret-value-0123456789' });
+    const res = await handler(request(cronHeaders, { providerKey: 'custom' }));
     const text = await res.text();
     expect(text).not.toContain('secret-value-0123456789');
     const body = JSON.parse(text);
-    // Sans modèle configuré, la présence n'est pas exigée : le catalogue est
-    // lisible, donc le fournisseur est « healthy » — mais aucun identifiant
-    // de modèle n'est inventé.
     expect(body.results[0].modelKey).toBe('');
     const record = calls.find((call) => call.url.includes('vyora_record_provider_verification'));
     expect(record!.body).not.toContain('secret-value-0123456789');
