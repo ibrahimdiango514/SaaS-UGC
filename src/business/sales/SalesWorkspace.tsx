@@ -7,7 +7,9 @@ import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { CRM_CATEGORIES, FINANCE_CATEGORIES, useRecords } from '../records/useRecords';
 import { contactDisplayName, contactFromRecord, todayIso, type Contact } from '../crm/model';
-import { CATALOG_CATEGORIES, productFromRecord } from '../catalog/model';
+import {
+  CATALOG_CATEGORIES, movementFromRecord, orderReturnMovements, orderStockMovements, productFromRecord,
+} from '../catalog/model';
 import { paymentFromRecord } from '../finance/model';
 import {
   INVOICE_STATUSES, ORDER_STATUSES, QUOTE_STATUSES, SALES_CATEGORIES, addDays, computeInvoiceView,
@@ -213,6 +215,7 @@ export default function SalesWorkspace({
   const paymentsStore = useRecords(FINANCE_CATEGORIES.payments, workspaceId);
   const receivablesStore = useRecords(FINANCE_CATEGORIES.receivables, workspaceId);
   const productsStore = useRecords(CATALOG_CATEGORIES.products, workspaceId);
+  const movementsStore = useRecords(CATALOG_CATEGORIES.movements, workspaceId);
 
   const contacts = useMemo(() => contactsStore.records.map(contactFromRecord), [contactsStore.records]);
   const quotes = useMemo(() => quotesStore.records.map(quoteFromRecord), [quotesStore.records]);
@@ -220,6 +223,7 @@ export default function SalesWorkspace({
   const invoices = useMemo(() => invoicesStore.records.map(invoiceFromRecord), [invoicesStore.records]);
   const payments = useMemo(() => paymentsStore.records.map(paymentFromRecord), [paymentsStore.records]);
   const products = useMemo(() => productsStore.records.map(productFromRecord).filter((product) => product.active), [productsStore.records]);
+  const movements = useMemo(() => movementsStore.records.map(movementFromRecord), [movementsStore.records]);
   const contactById = useMemo(() => new Map(contacts.map((contact) => [contact.id, contact])), [contacts]);
   const contactName = (id: string) => contactById.get(id) ? contactDisplayName(contactById.get(id)!) : 'Client non relié';
   const invoiceViews = useMemo(() => invoices.map((invoice) => computeInvoiceView(invoice, payments)), [invoices, payments]);
@@ -228,8 +232,8 @@ export default function SalesWorkspace({
   const [editor, setEditor] = useState<{ kind: SalesTab; document: Quote | SalesOrder | Invoice | null } | null>(null);
   const [detail, setDetail] = useState<{ kind: SalesTab; id: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const loading = contactsStore.loading || quotesStore.loading || ordersStore.loading || invoicesStore.loading;
-  const loadError = quotesStore.error || ordersStore.error || invoicesStore.error || contactsStore.error;
+  const loading = contactsStore.loading || quotesStore.loading || ordersStore.loading || invoicesStore.loading || movementsStore.loading;
+  const loadError = quotesStore.error || ordersStore.error || invoicesStore.error || contactsStore.error || movementsStore.error;
 
   const detailRecord = useMemo(() => {
     if (!detail) return null;
@@ -238,16 +242,61 @@ export default function SalesWorkspace({
     return invoices.find((entry) => entry.id === detail.id) ?? null;
   }, [detail, invoices, orders, quotes]);
 
+  /** Crée les sorties de stock d'une commande, ou explique pourquoi c'est impossible. */
+  const applyOrderStock = async (order: { id: string; number: string; lines: SalesOrder['lines'] }): Promise<string[]> => {
+    const { movements: drafts, shortages } = orderStockMovements(order, products, movements);
+    if (shortages.length) throw new Error(`Stock insuffisant : ${shortages.join(' ')}`);
+    const created: string[] = [];
+    try {
+      for (const movement of drafts) created.push(await movementsStore.create(movement.data, movement.dedupeKey));
+      return created;
+    } catch (cause) {
+      for (const id of created) { try { await movementsStore.remove(id); } catch { /* nettoyage best-effort */ } }
+      throw cause;
+    }
+  };
+
+  const returnOrderStock = async (order: SalesOrder) => {
+    const drafts = orderReturnMovements(order, movements);
+    for (const movement of drafts) {
+      try { await movementsStore.create(movement.data, movement.dedupeKey); }
+      catch { /* une entrée en double est déjà bloquée par la clé serveur */ }
+    }
+  };
+
+  const keepsStock = (status: string) => status === 'expedie' || status === 'livre';
+
   const save = async (kind: SalesTab, record: Quote | SalesOrder | Invoice | null, payload: Record<string, unknown>) => {
     const store = kind === 'devis' ? quotesStore : kind === 'commandes' ? ordersStore : invoicesStore;
     const existingNumbers = (kind === 'devis' ? quotes.map((entry) => entry.number) : kind === 'commandes' ? orders.map((entry) => entry.number) : invoices.map((entry) => entry.number));
     const number = String(payload.number || '').trim() || nextNumber(kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture', existingNumbers);
     const data = { ...payload, number };
+    const nextStatus = String(payload.status ?? '');
     if (record) {
-      await store.update(record.id, data);
-      toast.success(`${statusLabel(kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture', String(payload.status))} — ${number}`);
+      let createdStock: string[] = [];
+      try {
+        if (kind === 'commandes' && !keepsStock(record.status) && keepsStock(nextStatus)) {
+          createdStock = await applyOrderStock({ id: record.id, number, lines: (payload.lines ?? []) as SalesOrder['lines'] });
+        }
+        await store.update(record.id, data);
+      } catch (cause) {
+        for (const id of createdStock) { try { await movementsStore.remove(id); } catch { /* nettoyage best-effort */ } }
+        throw cause;
+      }
+      if (kind === 'commandes' && keepsStock(record.status) && nextStatus === 'annule') {
+        await returnOrderStock({ ...(record as SalesOrder), number });
+      }
+      toast.success(`${statusLabel(kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture', nextStatus)} — ${number}`);
     } else {
-      await store.create(data, `number:${number}`);
+      const recordId = await store.create(data, `number:${number}`);
+      if (kind === 'commandes' && keepsStock(nextStatus)) {
+        try {
+          await applyOrderStock({ id: recordId, number, lines: (payload.lines ?? []) as SalesOrder['lines'] });
+        } catch (cause) {
+          try { await store.remove(recordId); } catch { /* la commande reste, l'erreur est affichée */ }
+          throw cause;
+        }
+      }
       toast.success(`${number} créé.`);
     }
   };
@@ -269,13 +318,23 @@ export default function SalesWorkspace({
 
   const convertOrder = async (order: SalesOrder) => {
     setBusyId(order.id);
+    let createdStock: string[] = [];
     try {
+      // Facturer une commande non expédiée doit tout de même constater la
+      // sortie de stock : sinon la vente existe et le stock reste faux.
+      if (!keepsStock(order.status)) createdStock = await applyOrderStock(order);
       const number = nextNumber('facture', invoices.map((entry) => entry.number));
       const invoiceId = await invoicesStore.create(orderToInvoiceDraft(order, number) as unknown as Record<string, unknown>, `order:${order.id}`);
-      await ordersStore.update(order.id, { ...orderToData(order), invoiceId });
-      toast.success(`Facture ${number} créée depuis ${order.number}.`);
+      try {
+        await ordersStore.update(order.id, { ...orderToData(order), invoiceId, status: keepsStock(order.status) ? order.status : 'livre' });
+      } catch (cause) {
+        try { await invoicesStore.remove(invoiceId); } catch { /* la facture reste visible */ }
+        throw cause;
+      }
+      toast.success(`Facture ${number} créée depuis ${order.number}${createdStock.length ? ' ; stock mis à jour' : ''}.`);
       setTab('factures');
     } catch (cause) {
+      for (const id of createdStock) { try { await movementsStore.remove(id); } catch { /* nettoyage best-effort */ } }
       toast.error(asAppError(cause).message);
     } finally {
       setBusyId(null);
@@ -327,12 +386,19 @@ export default function SalesWorkspace({
 
   const setStatus = async (kind: SalesTab, document: Quote | SalesOrder | Invoice, status: string) => {
     setBusyId(document.id);
+    let createdStock: string[] = [];
     try {
       const store = kind === 'devis' ? quotesStore : kind === 'commandes' ? ordersStore : invoicesStore;
       const data = kind === 'devis' ? quoteToData(document as Quote) : kind === 'commandes' ? orderToData(document as SalesOrder) : invoiceToData(document as Invoice);
+      if (kind === 'commandes' && !keepsStock(document.status) && keepsStock(status)) {
+        createdStock = await applyOrderStock(document as SalesOrder);
+      }
       await store.update(document.id, { ...data, status });
-      toast.success('Statut mis à jour.');
+      toast.success(status === 'expedie' && kind === 'commandes'
+        ? 'Commande expédiée ; le stock a été mis à jour.'
+        : 'Statut mis à jour.');
     } catch (cause) {
+      for (const id of createdStock) { try { await movementsStore.remove(id); } catch { /* nettoyage best-effort */ } }
       toast.error(asAppError(cause).message);
     } finally {
       setBusyId(null);
@@ -417,6 +483,9 @@ export default function SalesWorkspace({
                       {document.status === 'brouillon' && <Button size="sm" variant="ghost" onClick={() => void setStatus('devis', document, 'envoye')} disabled={busyId === document.id}>Marquer envoyé</Button>}
                       {['accepte', 'envoye', 'brouillon'].includes(document.status) && <Button size="sm" variant="outline" icon={<ArrowRight size={12} />} onClick={() => void convertQuote(document as Quote)} disabled={busyId === document.id}>Commande</Button>}
                     </>
+                  )}
+                  {tab === 'commandes' && ['confirme', 'en_preparation'].includes(document.status) && (
+                    <Button size="sm" variant="ghost" onClick={() => void setStatus('commandes', document, 'expedie')} disabled={busyId === document.id}>Expédier</Button>
                   )}
                   {tab === 'commandes' && ['confirme', 'en_preparation', 'expedie', 'livre'].includes(document.status) && (
                     <Button size="sm" variant="outline" icon={<Receipt size={12} />} onClick={() => void convertOrder(document as SalesOrder)} disabled={busyId === document.id || Boolean((document as SalesOrder).invoiceId)}>Facturer</Button>

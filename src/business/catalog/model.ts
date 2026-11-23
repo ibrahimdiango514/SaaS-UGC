@@ -36,6 +36,10 @@ export interface StockMovement {
   reason: string;
   reference: string;
   occurredAt: string;
+  /** Commande de vente à l'origine du mouvement, si applicable. */
+  orderId: string;
+  /** Ligne de commande à l'origine du mouvement, si applicable. */
+  lineId: string;
   createdAt: string;
 }
 
@@ -114,6 +118,8 @@ export function movementFromRecord(record: { id: string; data: Record<string, un
     reason: str(data.reason, 300),
     reference: str(data.reference, 120),
     occurredAt: dateOnly(data.occurredAt) || (record.created_at ?? '').slice(0, 10),
+    orderId: str(data.orderId, 64),
+    lineId: str(data.lineId, 64),
     createdAt: typeof record.created_at === 'string' ? record.created_at : '',
   };
 }
@@ -122,6 +128,8 @@ export function movementToData(movement: StockMovement): Record<string, unknown>
   return {
     productId: movement.productId, type: movement.type, quantity: movement.quantity,
     reason: movement.reason, reference: movement.reference, occurredAt: movement.occurredAt,
+    ...(movement.orderId ? { orderId: movement.orderId } : {}),
+    ...(movement.lineId ? { lineId: movement.lineId } : {}),
   };
 }
 
@@ -342,6 +350,79 @@ export function buildProductsFromRows(rows: readonly string[][], mapping: Record
 /** Lien commande → stock : une sortie par ligne, jamais deux fois la même. */
 export function orderStockDedupeKey(orderId: string, lineId: string): string {
   return `order:${orderId}:line:${lineId}`;
+}
+
+export interface OrderStockLine {
+  id: string;
+  productId: string;
+  quantity: number;
+  description?: string;
+}
+
+/**
+ * Prépare les sorties de stock d'une commande expédiée ou livrée.
+ *
+ * - une ligne sans produit ou dont le produit ne suit pas de stock est ignorée ;
+ * - les quantités d'un même produit sont agrégées avant le contrôle, sinon deux
+ *   lignes de 6 sur un stock de 10 passeraient chacune séparément ;
+ * - si un mouvement existe déjà pour la commande, rien n'est recréé : la
+ *   fonction est idempotente et ne dépend pas de la clé côté serveur ;
+ * - `shortages` décrit les produits insuffisants AVANT toute écriture.
+ */
+export function orderStockMovements(
+  order: { id: string; number: string; lines: readonly OrderStockLine[] },
+  products: readonly Product[],
+  existingMovements: readonly StockMovement[],
+  occurredAt = todayIso(),
+): { movements: Array<{ data: Record<string, unknown>; dedupeKey: string; lineId: string }>; shortages: string[] } {
+  if (existingMovements.some((movement) => movement.orderId === order.id)) {
+    return { movements: [], shortages: [] };
+  }
+  const byProduct = new Map<string, { quantity: number; lineId: string }>();
+  for (const line of order.lines) {
+    const product = products.find((entry) => entry.id === line.productId);
+    if (!product?.trackStock || !(line.quantity > 0)) continue;
+    const current = byProduct.get(product.id) ?? { quantity: 0, lineId: line.id };
+    current.quantity += line.quantity;
+    byProduct.set(product.id, current);
+  }
+  const shortages: string[] = [];
+  const movements: Array<{ data: Record<string, unknown>; dedupeKey: string; lineId: string }> = [];
+  for (const [productId, entry] of byProduct) {
+    const product = products.find((candidate) => candidate.id === productId)!;
+    const available = stockOf(product, existingMovements);
+    if (entry.quantity > available) {
+      shortages.push(`${product.name} : ${entry.quantity} demandé(s), ${available} disponible(s).`);
+      continue;
+    }
+    movements.push({
+      lineId: entry.lineId,
+      dedupeKey: orderStockDedupeKey(order.id, entry.lineId),
+      data: {
+        productId, type: 'sortie', quantity: entry.quantity, reason: `Vente ${order.number}`,
+        reference: order.number, occurredAt, orderId: order.id, lineId: entry.lineId,
+      },
+    });
+  }
+  return { movements, shortages };
+}
+
+/** Entrées de retour lors de l'annulation d'une commande déjà sortie du stock. */
+export function orderReturnMovements(
+  order: { id: string; number: string },
+  existingMovements: readonly StockMovement[],
+  occurredAt = todayIso(),
+): Array<{ data: Record<string, unknown>; dedupeKey: string }> {
+  return existingMovements
+    .filter((movement) => movement.orderId === order.id && movement.type === 'sortie' && movement.quantity < 0)
+    .map((movement) => ({
+      dedupeKey: `order:${order.id}:return:${movement.lineId}`,
+      data: {
+        productId: movement.productId, type: 'entree', quantity: Math.abs(movement.quantity),
+        reason: `Annulation vente ${order.number}`, reference: order.number,
+        occurredAt, orderId: order.id, lineId: movement.lineId,
+      },
+    }));
 }
 
 export function defaultStockDate(): string {

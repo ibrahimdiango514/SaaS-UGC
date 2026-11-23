@@ -6,7 +6,7 @@ import {
 } from '../src/business/sales/model';
 import {
   buildProductsFromRows, computeCatalogSummary, guessProductMapping, movementFromRecord,
-  productFromRecord, stockLevel, stockOf, validateMovement,
+  orderReturnMovements, orderStockMovements, productFromRecord, stockLevel, stockOf, validateMovement,
 } from '../src/business/catalog/model';
 import {
   cashMovements, computeCashSummary, detectUnusualExpenses, expenseFromRecord,
@@ -19,6 +19,46 @@ const lines = [
   { id: 'l1', productId: '', description: 'Savon', quantity: 2, unitPrice: 10_000, discountPct: 10, taxPct: 18 },
   { id: 'l2', productId: '', description: 'Livraison', quantity: 1, unitPrice: 5_000, discountPct: 0, taxPct: 0 },
 ];
+
+describe('Vente → stock', () => {
+  const tracked = productFromRecord({ id: 'p1', data: { name: 'Savon', trackStock: true, initialStock: 10 } });
+  const service = productFromRecord({ id: 'p2', data: { name: 'Pose', kind: 'service', price: 5000 } });
+
+  it('crée une sortie par produit et agrège les lignes avant contrôle', () => {
+    const order = { id: 'o1', number: 'CMD-2026-0001', lines: [
+      { id: 'l1', productId: 'p1', quantity: 4 },
+      { id: 'l2', productId: 'p1', quantity: 4 },
+      { id: 'l3', productId: 'p2', quantity: 1 },
+    ] };
+    const result = orderStockMovements(order, [tracked, service], [], '2026-11-23');
+    expect(result.shortages).toEqual([]);
+    expect(result.movements).toHaveLength(1);
+    expect(result.movements[0].data).toMatchObject({ productId: 'p1', type: 'sortie', quantity: 8, orderId: 'o1' });
+  });
+
+  it('refuse une sortie supérieure au stock disponible', () => {
+    const result = orderStockMovements(
+      { id: 'o1', number: 'CMD-2026-0001', lines: [{ id: 'l1', productId: 'p1', quantity: 11 }] },
+      [tracked], [], '2026-11-23',
+    );
+    expect(result.movements).toEqual([]);
+    expect(result.shortages[0]).toContain('11 demandé');
+  });
+
+  it('ne recrée pas une sortie déjà enregistrée et prépare le retour à l’annulation', () => {
+    const movement = movementFromRecord({ id: 'm1', data: {
+      productId: 'p1', type: 'sortie', quantity: 3, orderId: 'o1', lineId: 'l1', reference: 'CMD-2026-0001', occurredAt: '2026-11-23',
+    } });
+    expect(orderStockMovements(
+      { id: 'o1', number: 'CMD-2026-0001', lines: [{ id: 'l1', productId: 'p1', quantity: 3 }] },
+      [tracked], [movement],
+    ).movements).toEqual([]);
+    expect(orderReturnMovements({ id: 'o1', number: 'CMD-2026-0001' }, [movement])[0]).toMatchObject({
+      dedupeKey: 'order:o1:return:l1',
+      data: { productId: 'p1', type: 'entree', quantity: 3 },
+    });
+  });
+});
 
 describe('Lot E — devis, commandes et factures', () => {
   it('calcule sous-total, remise, taxes et total au centime', () => {

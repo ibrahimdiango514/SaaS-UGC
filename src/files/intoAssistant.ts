@@ -13,12 +13,13 @@
  * peut pas lire.
  *
  * ## Capacités réelles, par genre
- *   * **texte** (TXT, CSv, MD…) : lu localement, transmis tel quel ;
+ *   * **texte** (TXT, CSV, MD…) : lu localement, transmis tel quel ;
+ *   * **PDF** : texte extrait localement par pdf.js, transmis au modèle ; un
+ *     PDF scanné sans couche texte est annoncé, sans OCR inventé ;
+ *   * **XLSX** : première feuille convertie en tableau texte, transmise ;
  *   * **image** : seul le NOM et le format partent dans le message. Le binaire
  *     reste privé et n'est pas analysé par un modèle de texte. C'est annoncé ;
- *   * **PDF, DOCX, XLSX** : non extraits (aucune bibliothèque d'analyse n'est
- *     embarquée). Annoncé comme tel, avec la raison ;
- *   * **vidéo** : jamais lue par un modèle de texte. Annoncé explicitement.
+ *   * **DOCX** : non extrait ; **vidéo** : jamais lue par un modèle de texte.
  *
  * Ce choix évite deux mensonges symétriques : faire croire qu'une vidéo a été
  * « comprise », ou ignorer silencieusement une pièce jointe.
@@ -26,6 +27,7 @@
 import type { AiAttachment } from '../ai/api';
 import { MAX_EXCERPT_CHARS } from '../ai/attachments';
 import { upload, validate, type VyoraFile } from './api';
+import { readXlsxRows } from '../business/importer/files';
 import { asAppError } from '../lib/errors';
 
 /** Ce que le modèle peut faire d'un fichier, dit à l'utilisateur. */
@@ -66,6 +68,68 @@ export function readCapability(kind: VyoraFile['kind'], previewKind: VyoraFile['
       };
     default:
       return { transmitted: false, note: 'Fichier enregistré. Son contenu n’est pas lisible par l’assistant.' };
+  }
+}
+
+/**
+ * Extrait le texte d'un PDF dans le navigateur.
+ *
+ * pdf.js est chargé à la demande : l'analyse PDF n'alourdit pas le premier
+ * écran de l'assistant. Un PDF scanné ne contient pas de couche texte : on le
+ * dit explicitement au lieu d'envoyer un extrait vide. Aucun OCR n'est simulé.
+ */
+export async function extractPdfText(file: File): Promise<{ text?: string; reason?: string }> {
+  try {
+    const [pdfjs, worker] = await Promise.all([
+      import('pdfjs-dist'),
+      import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+    ]);
+    pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const document = await pdfjs.getDocument({ data: bytes, isEvalSupported: false }).promise;
+    const pages: string[] = [];
+    const maxPages = Math.min(document.numPages, 30);
+    for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items
+        .map((item) => ('str' in item ? item.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (text) pages.push(`--- Page ${pageNumber} ---\n${text}`);
+      if (pages.join('\n').length >= MAX_EXCERPT_CHARS) break;
+    }
+    await document.destroy();
+    if (!pages.length) {
+      return { reason: 'PDF sans texte sélectionnable (document scanné ou image). Aucun OCR n’est exécuté.' };
+    }
+    const joined = pages.join('\n\n');
+    return {
+      text: joined.length <= MAX_EXCERPT_CHARS
+        ? joined
+        : `${joined.slice(0, MAX_EXCERPT_CHARS)}\n\n[… extrait PDF borné à ${MAX_EXCERPT_CHARS} caractères.]`,
+    };
+  } catch (error) {
+    return { reason: `PDF non extrait : ${error instanceof Error ? error.message : 'lecture impossible'}.` };
+  }
+}
+
+/** Convertit la première feuille XLSX en tableau texte lisible par le modèle. */
+export async function extractXlsxText(file: File): Promise<{ text?: string; reason?: string }> {
+  try {
+    const table = await readXlsxRows(new Uint8Array(await file.arrayBuffer()));
+    if (!table.ok) return { reason: `Classeur non extrait : ${table.error}` };
+    if (table.rows.length === 0) return { reason: 'Classeur vide : aucun contenu à analyser.' };
+    const rows = table.rows.slice(0, 500);
+    const text = rows.map((row) => row.map((cell) => {
+      const value = cell.replace(/\s+/g, ' ').trim();
+      return /[;,"\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+    }).join(';')).join('\n');
+    const bounded = text.length <= MAX_EXCERPT_CHARS ? text : `${text.slice(0, MAX_EXCERPT_CHARS)}\n\n[… extrait XLSX borné.]`;
+    return { text: `${bounded}${table.rows.length > rows.length ? `\n\n[${table.rows.length - rows.length} ligne(s) supplémentaire(s) non transmise(s).]` : ''}` };
+  } catch (error) {
+    return { reason: `Classeur non extrait : ${error instanceof Error ? error.message : 'lecture impossible'}.` };
   }
 }
 
@@ -112,13 +176,25 @@ export async function prepareAttachment(
     onProgress: options.onProgress,
   });
 
-  const capability = readCapability(stored.kind, stored.preview_kind);
-  const excerpt = capability.transmitted ? await extractText(file) : undefined;
+  const isPdf = stored.mime_type === 'application/pdf' || /\\.pdf$/i.test(stored.original_name);
+  const isXlsx = stored.mime_type.includes('spreadsheetml') || /\\.xlsx$/i.test(stored.original_name);
+  const pdf = isPdf ? await extractPdfText(file) : null;
+  const xlsx = isXlsx ? await extractXlsxText(file) : null;
+  const capability: ReadCapability = isPdf
+    ? (pdf?.text
+      ? { transmitted: true, note: 'Texte du PDF extrait localement et transmis à l’assistant.' }
+      : { transmitted: false, note: pdf?.reason ?? 'PDF enregistré, mais son texte n’a pas pu être extrait.' })
+    : isXlsx
+      ? (xlsx?.text
+        ? { transmitted: true, note: 'Données de la première feuille XLSX extraites et transmises à l’assistant.' }
+        : { transmitted: false, note: xlsx?.reason ?? 'Classeur enregistré, mais son contenu n’a pas pu être extrait.' })
+      : readCapability(stored.kind, stored.preview_kind);
+  const excerpt = isPdf ? pdf?.text : isXlsx ? xlsx?.text : capability.transmitted ? await extractText(file) : undefined;
 
   // Si l'extrait échoue alors que le format est lisible, on ne prétend pas
   // l'avoir transmis : la note le dit.
   const effective: ReadCapability = capability.transmitted && !excerpt
-    ? { transmitted: false, note: 'Fichier texte enregistré, mais son contenu n’a pas pu être lu localement.' }
+    ? { transmitted: false, note: 'Fichier enregistré, mais son contenu n’a pas pu être lu localement.' }
     : capability;
 
   const attachment: AiAttachment = {
