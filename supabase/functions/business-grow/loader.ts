@@ -12,9 +12,9 @@
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "a488d8951e5fe9abebd67a0c4deaa7c45234101c";
+const COMMIT = "641060ad8e6c11e26c60bd7ea94ae0f0779e1a82";
 const PATH = "supabase/functions/business-grow.edge.js";
-const ARTIFACT_SHA256 = "0f49b0700173af225935989cef175a0f739ce6330b24e89d273a704f72501bd7";
+const ARTIFACT_SHA256 = "472e8a16f74b43cacf833b85882392d7566f60cfb56c802668464666a71f48f4";
 const ARTIFACT_CHARS = 90063;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
