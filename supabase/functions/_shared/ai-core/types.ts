@@ -6,9 +6,20 @@
 
 export type AiChatRole = 'system' | 'user' | 'assistant';
 
+/** Image transmise au modèle pour analyse visuelle (base64 sans préfixe data:). */
+export interface AiImageInput {
+  mimeType: string;
+  dataBase64: string;
+}
+
 export interface AiChatMessage {
   role: AiChatRole;
   content: string;
+  /**
+   * Images jointes à CE message. Elles ne sont jamais fusionnées dans le texte :
+   * chaque adaptateur les place dans le format multimodal natif du fournisseur.
+   */
+  images?: AiImageInput[];
 }
 
 export interface AiCallOptions {

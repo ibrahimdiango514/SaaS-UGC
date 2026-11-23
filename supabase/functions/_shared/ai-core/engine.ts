@@ -343,12 +343,19 @@ export async function runAiCall(deps: AiEngineDeps, request: AiCallRequest): Pro
   }
 
   const contextTokens = estimatePromptTokens(request.messages);
+  // Une image exige un modèle vision : sans ce filtre, le routeur pourrait
+  // envoyer la demande à un modèle texte qui ne verrait pas l'image.
+  const hasImages = request.messages.some((message) => (message.images?.length ?? 0) > 0);
+  const requiredCapabilities = [
+    ...(request.requireCapabilities ?? []),
+    ...(hasImages ? ['vision'] : []),
+  ];
   const { steps, skipReason } = buildAiChain(
     snapshot,
     {
       role: request.role ?? null,
       level: request.level ?? null,
-      requireCapabilities: request.requireCapabilities,
+      requireCapabilities: requiredCapabilities,
       preferProvider: request.preferProvider ?? null,
       avoidProviders: request.avoidProviders,
       minContextTokens: request.minContextTokens ?? contextTokens,

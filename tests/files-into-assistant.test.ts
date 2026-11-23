@@ -57,10 +57,10 @@ describe('capacité de lecture annoncée', () => {
     expect(cap.note).toMatch(/aucun modèle de texte ne peut la lire/i);
   });
 
-  it('ne prétend pas lire une image', () => {
+  it('transmet une image au modèle vision', () => {
     const cap = readCapability('image', 'image');
-    expect(cap.transmitted).toBe(false);
-    expect(cap.note).toMatch(/ne voit pas le contenu visuel/i);
+    expect(cap.transmitted).toBe(true);
+    expect(cap.note).toMatch(/modèle vision/i);
   });
 
   it('annonce l’absence d’extraction pour PDF/DOCX/XLSX', () => {

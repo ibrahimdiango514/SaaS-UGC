@@ -17,8 +17,9 @@
  *   * **PDF** : texte extrait localement par pdf.js, transmis au modèle ; un
  *     PDF scanné sans couche texte est annoncé, sans OCR inventé ;
  *   * **XLSX** : première feuille convertie en tableau texte, transmise ;
- *   * **image** : seul le NOM et le format partent dans le message. Le binaire
- *     reste privé et n'est pas analysé par un modèle de texte. C'est annoncé ;
+ *   * **image** : redimensionnée localement puis transmise à un modèle vision
+ *     (Gemini). Le binaire n'est jamais mis dans le texte ni journalisé ; si
+ *     aucun modèle vision n'est disponible, l'envoi échoue explicitement ;
  *   * **DOCX** : non extrait ; **vidéo** : jamais lue par un modèle de texte.
  *
  * Ce choix évite deux mensonges symétriques : faire croire qu'une vidéo a été
@@ -50,8 +51,8 @@ export function readCapability(kind: VyoraFile['kind'], previewKind: VyoraFile['
   switch (kind) {
     case 'image':
       return {
-        transmitted: false,
-        note: 'Image enregistrée. Le texte du message ne transmet que son nom : l’assistant ne voit pas le contenu visuel de l’image.',
+        transmitted: true,
+        note: 'Image transmise au modèle vision (Gemini) pour une analyse réelle.',
       };
     case 'video':
       return {
@@ -133,6 +134,86 @@ export async function extractXlsxText(file: File): Promise<{ text?: string; reas
   }
 }
 
+/** Plafond du base64 envoyé au serveur (le client reste sous la limite Edge). */
+export const MAX_VISION_BASE64_CHARS = 900_000;
+
+function base64FromBytes(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function fileDataBase64(file: File): Promise<string> {
+  return base64FromBytes(new Uint8Array(await file.arrayBuffer()));
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('image illisible'));
+    image.src = url;
+  });
+}
+
+/**
+ * Prépare une image pour le modèle vision.
+ *
+ * Réduction à 1280 px et JPEG qualité 0,82 : une photo de téléphone de 8 Mo
+ * tombe sous la limite de corps de l'Edge Function. Si le navigateur ne peut
+ * pas redimensionner (canvas absent, format exotique), l'original n'est
+ * envoyé que s'il tient dans la limite — sinon la raison est annoncée.
+ */
+export async function imageForVision(file: File): Promise<{
+  image?: { mimeType: string; dataBase64: string };
+  reason?: string;
+}> {
+  const supported = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!supported.includes(file.type)) {
+    return { reason: 'Format d’image non pris en charge par le modèle vision (JPEG, PNG ou WebP).' };
+  }
+
+  try {
+    const url = URL.createObjectURL(file);
+    try {
+      const image = await loadImage(url);
+      // 1024 px suffit pour lire un document ou identifier un produit, et
+      // garde plusieurs images sous la limite de corps de l'Edge Function.
+      const maxSide = 1024;
+      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+      canvas.height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('canvas indisponible');
+      // Fond blanc : une PNG transparente ne doit pas devenir noire en JPEG.
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+      const dataBase64 = dataUrl.replace(/^data:image\/jpeg;base64,/i, '');
+      if (!dataBase64 || dataBase64.length > MAX_VISION_BASE64_CHARS) {
+        return { reason: 'Image trop volumineuse après compression pour être transmise.' };
+      }
+      return { image: { mimeType: 'image/jpeg', dataBase64 } };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    // Repli sans redimensionnement, uniquement si le fichier est déjà petit.
+    if (file.size <= 650_000) {
+      const dataBase64 = await fileDataBase64(file);
+      if (dataBase64.length <= MAX_VISION_BASE64_CHARS) {
+        return { image: { mimeType: file.type, dataBase64 } };
+      }
+    }
+    return { reason: 'Image non préparée : le navigateur n’a pas pu la redimensionner et elle dépasse la limite d’envoi.' };
+  }
+}
+
 /** Lit un fichier texte (TXT, CSV, MD) en s'arrêtant au plafond d'extrait. */
 async function extractText(file: File): Promise<string | undefined> {
   try {
@@ -178,8 +259,10 @@ export async function prepareAttachment(
 
   const isPdf = stored.mime_type === 'application/pdf' || /\\.pdf$/i.test(stored.original_name);
   const isXlsx = stored.mime_type.includes('spreadsheetml') || /\\.xlsx$/i.test(stored.original_name);
+  const isImage = stored.kind === 'image' || stored.mime_type.startsWith('image/');
   const pdf = isPdf ? await extractPdfText(file) : null;
   const xlsx = isXlsx ? await extractXlsxText(file) : null;
+  const vision = isImage ? await imageForVision(file) : null;
   const capability: ReadCapability = isPdf
     ? (pdf?.text
       ? { transmitted: true, note: 'Texte du PDF extrait localement et transmis à l’assistant.' }
@@ -188,8 +271,12 @@ export async function prepareAttachment(
       ? (xlsx?.text
         ? { transmitted: true, note: 'Données de la première feuille XLSX extraites et transmises à l’assistant.' }
         : { transmitted: false, note: xlsx?.reason ?? 'Classeur enregistré, mais son contenu n’a pas pu être extrait.' })
-      : readCapability(stored.kind, stored.preview_kind);
-  const excerpt = isPdf ? pdf?.text : isXlsx ? xlsx?.text : capability.transmitted ? await extractText(file) : undefined;
+      : isImage
+        ? (vision?.image
+          ? { transmitted: true, note: 'Image transmise au modèle vision (Gemini) pour une analyse réelle.' }
+          : { transmitted: false, note: vision?.reason ?? 'Image enregistrée, mais elle n’a pas pu être préparée pour l’analyse visuelle.' })
+        : readCapability(stored.kind, stored.preview_kind);
+  const excerpt = isPdf ? pdf?.text : isXlsx ? xlsx?.text : capability.transmitted && !isImage ? await extractText(file) : undefined;
 
   // Si l'extrait échoue alors que le format est lisible, on ne prétend pas
   // l'avoir transmis : la note le dit.
@@ -203,6 +290,7 @@ export async function prepareAttachment(
     sizeBytes: Number(stored.size_bytes),
     mimeType: stored.mime_type,
     ...(excerpt ? { excerpt } : {}),
+    ...(vision?.image ? { visionImage: vision.image } : {}),
     // La note est jointe au message : le modèle sait ce qu'il ne voit pas, et
     // l'utilisateur reçoit la même information dans le fil.
     note: effective.note,

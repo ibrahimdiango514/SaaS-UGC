@@ -13,9 +13,16 @@ export type BusinessProvider = string;
 export type ExtensibleProviderId = string;
 export type ChatRole = 'system' | 'user' | 'assistant';
 
+export interface ChatImage {
+  mimeType: string;
+  dataBase64: string;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  /** Images jointes au message, transmises au modèle vision choisi par le registre. */
+  images?: ChatImage[];
 }
 
 export interface ProviderConfig {
@@ -481,7 +488,11 @@ export function buildCentralRequest(
   return {
     action: 'complete',
     prefer: provider,
-    messages: messages.map(({ role, content }) => ({ role, content })),
+    messages: messages.map(({ role, content, images }) => ({
+      role,
+      content,
+      ...(images?.length ? { images } : {}),
+    })),
     ...(meta?.model ? { model: meta.model } : {}),
     ...(meta?.roleKey ? { role_key: meta.roleKey } : {}),
     ...(typeof options?.temperature === 'number' ? { temperature: options.temperature } : {}),

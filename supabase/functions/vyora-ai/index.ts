@@ -19,6 +19,7 @@
 // Aucune réponse n'est fabriquée localement : un échec fournisseur est renvoyé
 // tel quel (code + message).
 
+import { parseImageInputs } from "../_shared/ai-core/images.ts";
 import {
   parseRegistrySnapshot,
   runAiCall,
@@ -151,7 +152,11 @@ const SYSTEM = {
 export type ProviderName = string;
 export type MessageRole = "system" | "user" | "assistant";
 
-type ProviderMessage = { role: MessageRole; content: string };
+type ProviderMessage = {
+  role: MessageRole;
+  content: string;
+  images?: Array<{ mimeType: string; dataBase64: string }>;
+};
 
 interface ProviderResult {
   provider: ProviderName;
@@ -352,9 +357,13 @@ function readHistory(body: Json): ProviderMessage[] {
     const item = rec(entry);
     const content = str(item.content, 8000);
     const role = str(item.role, 12);
-    if (!content) continue;
+    const parsedImages = parseImageInputs(item.images);
+    // Une image invalide ne doit pas faire croire qu'elle a été vue : on
+    // l'écarte et le texte du message reste la seule entrée transmise.
+    const images = parsedImages.ok ? parsedImages.images : [];
+    if (!content && images.length === 0) continue;
     if (role !== "system" && role !== "user" && role !== "assistant") continue;
-    history.push({ role, content });
+    history.push({ role, content, ...(images.length ? { images } : {}) });
   }
   return history;
 }
@@ -584,7 +593,8 @@ async function completeViaCore(
   options: CompleteOptions,
   meta: { routeModel: string | null; roleKey: string | null; userId: string | null; requestKey: string | null },
 ): Promise<CompleteResultEx> {
-  if (meta.routeModel || meta.roleKey || meta.requestKey) {
+  // Une image impose le registre (capacité vision) même sans rôle explicite.
+  if (meta.routeModel || meta.roleKey || meta.requestKey || messages.some((m) => m.images?.length)) {
     const outcome = await runAiCall(aiEngineDeps(), {
       messages,
       options: {

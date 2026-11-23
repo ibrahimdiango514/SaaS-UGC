@@ -48,7 +48,7 @@ function cleanContent(raw: unknown): string {
 
 function requireConfigured(credentials: AiCredentials, model: string, messages: AiChatMessage[]): void {
   if (!credentials.apiKey || !model) throw new AiProviderError('AI_NOT_CONFIGURED', false);
-  if (!messages.length || messages.some((m) => !m.content.trim())) {
+  if (!messages.length || messages.some((m) => !m.content.trim() && !m.images?.length)) {
     throw new AiProviderError('AI_INVALID_RESPONSE', false);
   }
 }
@@ -56,7 +56,20 @@ function requireConfigured(credentials: AiCredentials, model: string, messages: 
 function openAiBody(model: string, messages: AiChatMessage[], options?: AiCallOptions): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    // Format multimodal OpenAI : `content` devient un tableau de parties. Un
+    // message sans image garde une chaîne simple (compatibilité maximale).
+    messages: messages.map((m) => ({
+      role: m.role,
+      content: m.images?.length
+        ? [
+            ...(m.content.trim() ? [{ type: 'text', text: m.content }] : []),
+            ...m.images.map((image) => ({
+              type: 'image_url',
+              image_url: { url: `data:${image.mimeType};base64,${image.dataBase64}` },
+            })),
+          ]
+        : m.content,
+    })),
     max_tokens: options?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
   };
   if (typeof options?.temperature === 'number') body.temperature = options.temperature;
@@ -133,13 +146,20 @@ const groqAdapter: AiProviderAdapter = {
 // ---------------------------------------------------------------------------
 function buildGeminiTurns(messages: AiChatMessage[]) {
   const systemText = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
-  const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+  type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
+  const contents: Array<{ role: 'user' | 'model'; parts: Part[] }> = [];
+  const partsFor = (message: AiChatMessage): Part[] => [
+    ...(message.content.trim() ? [{ text: message.content }] : []),
+    ...(message.images ?? []).map((image) => ({
+      inlineData: { mimeType: image.mimeType, data: image.dataBase64 },
+    })),
+  ];
   for (const message of messages) {
     if (message.role === 'system') continue;
     const role = message.role === 'assistant' ? 'model' : 'user';
     const previous = contents[contents.length - 1];
-    if (previous?.role === role) previous.parts.push({ text: message.content });
-    else contents.push({ role, parts: [{ text: message.content }] });
+    if (previous?.role === role) previous.parts.push(...partsFor(message));
+    else contents.push({ role, parts: partsFor(message) });
   }
   while (contents[0]?.role === 'model') contents.shift();
   return { systemText, contents };

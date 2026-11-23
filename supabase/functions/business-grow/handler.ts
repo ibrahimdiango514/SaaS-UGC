@@ -12,6 +12,7 @@ import {
   type MemorySnapshot,
   type WorkspaceCompanyContext,
 } from './intelligence.ts';
+import { parseImageInputs } from '../_shared/ai-core/images.ts';
 import {
   listRemoteModels,
   probeProvider,
@@ -1094,6 +1095,10 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           if (!conversationId || !idempotencyKey || !content) {
             return response(failure('INVALID_MESSAGE', 'Conversation, demande et clé d’idempotence sont obligatoires.'), 400, origin, dependencies.allowedOrigins);
           }
+          const parsedImages = parseImageInputs(body.images);
+          if (!parsedImages.ok) {
+            return response(failure('INVALID_IMAGE', parsedImages.error), 400, origin, dependencies.allowedOrigins);
+          }
           const roleKey = normalizeRoleKey(body.roleKey);
           const explicitRouting = body.routing && typeof body.routing === 'object' && !Array.isArray(body.routing)
             ? body.routing
@@ -1186,7 +1191,11 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             maxHistoryCharacters - content.length,
             systemInstruction,
           );
-          history.push({ role: 'user', content });
+          history.push({
+            role: 'user',
+            content,
+            ...(parsedImages.images.length ? { images: parsedImages.images } : {}),
+          });
 
           const submitted = roleKey === 'business_advisor'
             ? await dependencies.store.submitUserMessage(
@@ -1506,11 +1515,15 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             await dependencies.store.releaseQuota(userId, submitted.requestId, reserveAmount, lastErrorCode);
           }
           await dependencies.store.failRequest(userId, submitted.requestId, lastErrorCode);
+          const visionBlocked = parsedImages.images.length > 0
+            && (lastErrorCode === 'NO_VERIFIED_PROVIDER' || lastErrorCode === 'NO_MATCHING_MODEL');
           return response(failure(
             lastErrorCode,
-            lastErrorCode === 'NO_VERIFIED_PROVIDER'
-              ? 'Aucun fournisseur configuré, vérifié et disponible pour cette demande. Le message utilisateur a été conservé; aucune réponse n’a été simulée.'
-              : `Les fournisseurs configurés n’ont pas pu traiter la demande (code : ${lastErrorCode}). Le message est conservé; consultez le statut et réessayez.`,
+            visionBlocked
+              ? 'Aucun modèle vision vérifié n’est disponible pour analyser cette image. Le message et l’image sont conservés côté interface ; aucune analyse n’a été simulée.'
+              : lastErrorCode === 'NO_VERIFIED_PROVIDER'
+                ? 'Aucun fournisseur configuré, vérifié et disponible pour cette demande. Le message utilisateur a été conservé; aucune réponse n’a été simulée.'
+                : `Les fournisseurs configurés n’ont pas pu traiter la demande (code : ${lastErrorCode}). Le message est conservé; consultez le statut et réessayez.`,
           ), 503, origin, dependencies.allowedOrigins);
         }
         case 'memory.get': {
