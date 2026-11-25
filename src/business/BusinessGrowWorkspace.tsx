@@ -497,7 +497,7 @@ function AssistantView({
                 aria-label="Rôle de la tâche IA"
                 value={roleKey}
                 onChange={(event) => onChangeRole(event.target.value as BusinessRoleKey)}
-                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
+                className="min-h-11 rounded-lg border border-white/10 bg-[#0c111b] px-2 text-xs text-slate-200 outline-none focus:border-violet-300/40 sm:min-h-8"
               >
                 {BUSINESS_ROLES.map((role) => (
                   <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
@@ -510,7 +510,7 @@ function AssistantView({
                 aria-label="Mode de routage"
                 value={routingMode}
                 onChange={(event) => onChangeRoutingMode(event.target.value as RoutingSelectionMode)}
-                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
+                className="min-h-11 rounded-lg border border-white/10 bg-[#0c111b] px-2 text-xs text-slate-200 outline-none focus:border-violet-300/40 sm:min-h-8"
               >
                 <option value="auto">Automatique</option>
                 <option value="manual">Manuel</option>
@@ -2413,7 +2413,7 @@ function ScopedBusinessGrowWorkspace() {
                 ? `${availableProviderCount} service(s) IA vérifié(s)`
                 : 'IA non disponible'}
         </span>
-        <Link to="/app/business/providers" className="text-slate-500 transition hover:text-violet-200">
+        <Link to="/app/business/providers" className="inline-flex min-h-11 items-center rounded-lg px-2 text-slate-400 transition hover:bg-white/[0.04] hover:text-violet-200">
           Gérer les services IA
         </Link>
       </section>

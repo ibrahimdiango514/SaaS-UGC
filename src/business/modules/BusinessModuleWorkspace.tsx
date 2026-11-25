@@ -471,8 +471,8 @@ function ScopedModuleWorkspace() {
         </Link>
         <span className="text-slate-600">/</span>
         <Link to="/app/business/modules" className="inline-flex min-h-11 items-center rounded-lg px-2 text-slate-400 hover:text-white">Modules</Link>
-        <span className="text-slate-600">/</span>
-        <span className="inline-flex min-h-11 items-center px-2 text-slate-300">{definition.title}</span>
+        <span className="hidden text-slate-600 sm:inline">/</span>
+        <span className="hidden min-h-11 items-center px-2 text-slate-300 sm:inline-flex">{definition.title}</span>
       </div>
 
       <section className="relative isolate overflow-hidden rounded-2xl border border-line bg-panel px-5 py-5 sm:px-6">
@@ -488,17 +488,31 @@ function ScopedModuleWorkspace() {
               <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">{definition.description}</p>
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
+          {/* Sur téléphone, l'action principale passe au-dessus : le pouce
+              atteint d'abord « Nouvel enregistrement », l'agent reste juste
+              en dessous. Sur ordinateur, l'ordre secondaire → principal revient. */}
+          <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row sm:flex-wrap">
             <Button variant="secondary" disabled={!workspaceId || loading || Boolean(error)} onClick={prepareAgentBrief} icon={<Wand2 size={16} />} className="min-h-11">
               Demander à l’agent
             </Button>
             <Button onClick={openCreate} disabled={!workspaceId} icon={<Plus size={16} />} className="min-h-11">Nouvel enregistrement</Button>
           </div>
         </div>
-        <div className="relative mt-4 grid gap-2 border-t border-line pt-4 text-xs text-slate-500 sm:grid-cols-2">
+        <div className="relative mt-4 hidden gap-2 border-t border-line pt-4 text-xs text-slate-500 sm:grid sm:grid-cols-2">
           <span className="inline-flex items-start gap-2"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-400" /> Données SORAHNEX Grow isolées, aucun crédit Studio consommé.</span>
           <span className="inline-flex items-start gap-2"><Database size={14} className="mt-0.5 shrink-0 text-brand-300" /> Le brouillon agent contient des indicateurs, pas les noms ni messages clients. Relisez-le avant envoi au fournisseur IA.</span>
         </div>
+        {/* Sur téléphone, ces garanties restent accessibles mais ne poussent plus
+            les enregistrements sous la ligne de flottaison. */}
+        <details className="relative mt-4 border-t border-line pt-3 text-xs text-slate-500 sm:hidden">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-[11.5px] font-medium text-slate-400">
+            <ShieldCheck size={14} className="shrink-0 text-emerald-400" /> Données isolées · ce que fait l’agent
+          </summary>
+          <div className="space-y-2 pb-1 pt-1 leading-relaxed">
+            <p>Données SORAHNEX Grow isolées, aucun crédit Studio consommé.</p>
+            <p className="flex items-start gap-2"><Database size={14} className="mt-0.5 shrink-0 text-brand-300" /> Le brouillon agent contient des indicateurs, pas les noms ni messages clients. Relisez-le avant envoi au fournisseur IA.</p>
+          </div>
+        </details>
       </section>
 
       <div className="grid gap-3 sm:grid-cols-3">

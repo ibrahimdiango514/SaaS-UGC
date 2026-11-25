@@ -168,8 +168,10 @@ export function GrowthOsLayout({
             </div>
           </header>
 
-          {/* Actions du quotidien : visibles, sans encombrer la navigation. */}
-          <div className="-mx-1 mt-3 flex snap-x gap-2 overflow-x-auto px-1 pb-1 no-scrollbar" aria-label="Actions rapides">
+          {/* Actions du quotidien : sur ordinateur et tablette, où elles ne
+              doublonnent pas la barre basse ; masquées sur téléphone pour ne pas
+              répéter quatre fois les mêmes destinations avant le contenu. */}
+          <div className="-mx-1 mt-3 hidden snap-x gap-2 overflow-x-auto px-1 pb-1 no-scrollbar md:flex" aria-label="Actions rapides">
             {GROWTH_OS_QUICK_ACTIONS.map((action) => {
               const Icon = action.icon;
               return (
@@ -177,7 +179,7 @@ export function GrowthOsLayout({
                   key={action.to}
                   to={action.to}
                   title={action.hint}
-                  className="inline-flex min-h-11 shrink-0 snap-start items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 text-[11.5px] font-medium text-slate-300 transition hover:border-violet-300/30 hover:bg-violet-400/[0.07] hover:text-white"
+                  className="inline-flex min-h-12 shrink-0 snap-start items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 text-[11.5px] font-medium text-slate-300 transition hover:border-violet-300/30 hover:bg-violet-400/[0.07] hover:text-white"
                 >
                   <Icon size={14} className="text-violet-200" />
                   {action.label}
