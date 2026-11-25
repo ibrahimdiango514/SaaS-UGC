@@ -1,5 +1,17 @@
 # Migration SORAHNEX vers un nouveau compte Netlify
 
+> **Statut de ce document.** Il conserve l'historique des incidents et le détail
+> du raisonnement. Pour AGIR, utiliser, dans cet ordre :
+> 1. `docs/NETLIFY_DEPLOYMENT_CHECKLIST.md` — la procédure ordonnée.
+> 2. `docs/NETLIFY_ENVIRONMENT_CHECKLIST.md` — l'inventaire des variables.
+> 3. `docs/bascule-nouveau-netlify.md` — le changement de domaine et d'origines.
+> 4. `docs/NETLIFY_POST_DEPLOY_SMOKE_TEST.md` — les vérifications après publication.
+>
+> L'identité du site autorisé ne se configure plus ici ni dans `netlify.toml` :
+> elle vit dans **`netlify.site.conf`**, seule source de vérité lue par les deux
+> rideaux de la garde.
+
+
 Date de préparation : 2026-11-18. Source unique à importer : branche **`main`** du dépôt
 `ibrahimdiango514/SaaS-UGC`. Le backend Supabase (`xbuuhfwobrafcbgtdgjx`) **ne change pas** :
 seule l'origine qui sert le frontend change.
@@ -117,7 +129,7 @@ Toutes sont **publiques** (compilées dans le bundle ou lues par le build). Aucu
 | `VYORA_BUILD_ENABLED` | `true` (exactement, minuscules, sans espace ni guillemets) | Opt-in technique de la garde de `netlify.toml`. **Absente** (cas de `ca410d5`) ou toute autre valeur (`false`, `TRUE`, `1`) = build annulé. |
 | `SORAHNEX_DEPLOY_AUTHORIZED` | `true` (exactement) — **à ne déclarer qu'au moment voulu** | **Autorisation humaine de publier.** Absente = aucun déploiement, même sur `main` avec tout le reste correct. C'est le verrou de crédits du 2026-11-25 : voir §3bis. |
 | `VITE_SUPABASE_URL` | `https://xbuuhfwobrafcbgtdgjx.supabase.co` | Projet Supabase (inchangé). |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz` | Clé publiable (publique, livrée au navigateur). |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | clé `sb_publishable_…` du projet (Supabase › Settings › API) | Clé publiable (publique, livrée au navigateur). La recopier depuis Supabase, jamais depuis un document. |
 | `VITE_SITE_URL` | `<NOUVELLE_URL_NETLIFY>` sans `/` final | Adresse de retour après connexion / lien magique. Si absente, le code se replie sur `window.location.origin` ; la renseigner évite toute ambiguïté. |
 
 Laisser la portée par défaut (*All scopes*, ou au minimum *Builds*) : la garde et Vite lisent ces

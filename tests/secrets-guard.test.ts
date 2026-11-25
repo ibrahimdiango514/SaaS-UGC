@@ -120,8 +120,25 @@ describe('sécurité — aucun secret dans le dépôt', () => {
     for (const [, , value] of example.matchAll(/^([A-Z0-9_]+)=(.*)$/gm)) {
       const cleaned = stripAllowed(value.trim());
       if (!cleaned) continue;
-      // Les valeurs admises sont des URL publiques ou vides.
-      expect(/^https?:\/\//.test(cleaned) || cleaned === '<public>' || cleaned === '', `Valeur suspecte dans .env.example : ${cleaned}`).toBe(true);
+      // Valeurs admises : URL publique, vide, ou PLACEHOLDER BORNÉ `<MAJUSCULES>`.
+      // Un placeholder ne peut pas être une vraie valeur : les clés réelles
+      // contiennent des minuscules, des chiffres collés et des tirets. Tout le
+      // reste est refusé — coller une vraie clé ici échoue au test.
+      const estPlaceholder = /^<[A-Za-z0-9_|]+>$/.test(cleaned);
+      // Valeurs littérales PUBLIQUES par conception, documentées et vérifiables
+      // ailleurs dans le dépôt. Le jeton d'autorisation de déploiement n'est pas
+      // un secret : c'est le second facteur d'un verrou, écrit en clair dans
+      // netlify.site.conf et dans la garde (scripts/netlify-guard-lib.sh).
+      const estValeurPublique = cleaned === 'sorahnex-deploy';
+      expect(
+        /^https?:\/\//.test(cleaned) || cleaned === '<public>' || cleaned === '' || estPlaceholder || estValeurPublique,
+        `Valeur suspecte dans .env.example : ${cleaned}`,
+      ).toBe(true);
+      if (estPlaceholder) {
+        // Un placeholder ne doit pas contenir de suite assez longue pour être un
+        // secret copié puis entouré de chevrons (`<sk_live_abc123…>`).
+        expect(cleaned).not.toMatch(/[A-Za-z0-9]{16,}/);
+      }
     }
   });
 });
