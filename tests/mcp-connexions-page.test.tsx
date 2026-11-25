@@ -110,13 +110,13 @@ describe('Page « Connexions MCP » — deux sections', () => {
   it('présente les deux sens du protocole sous deux titres distincts', async () => {
     render(<ConnexionsMcpPage />);
     expect(screen.getByRole('heading', { name: 'Connexions MCP', level: 1 })).toBeTruthy();
-    expect(await screen.findByRole('heading', { name: 'Connecter VYORA à mes IA' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Connecter mes applications à VYORA' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Connecter SORAHNEX à mes IA' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Connecter mes applications à SORAHNEX' })).toBeTruthy();
   });
 
   it('n’affiche qu’une seule fois l’en-tête de page (pas de titre imbriqué)', async () => {
     render(<ConnexionsMcpPage />);
-    await screen.findByRole('heading', { name: 'Connecter mes applications à VYORA' });
+    await screen.findByRole('heading', { name: 'Connecter mes applications à SORAHNEX' });
     // Les deux composants embarqués reçoivent `sansEnTete` : aucun second h1.
     expect(screen.queryAllByRole('heading', { level: 1 })).toHaveLength(1);
   });

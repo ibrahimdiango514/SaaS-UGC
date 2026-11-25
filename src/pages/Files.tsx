@@ -1,5 +1,5 @@
 /**
- * VYORA FILES — page de gestion des fichiers de l'entreprise.
+ * SORAHNEX FILES — page de gestion des fichiers de l'entreprise.
  *
  * ## Pourquoi cette page existe
  * Le panneau `FilesPanel` savait déjà importer, lister, prévisualiser,

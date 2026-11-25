@@ -88,7 +88,7 @@ describe('champs pilotés par les exigences du connecteur', () => {
   it('Chariow ne demande PAS d’adresse de boutique', () => {
     monter('chariow');
     // L'API vit chez l'éditeur : exiger une URL serait un champ inutile qui
-    // laisserait croire que VYORA contacte la vitrine.
+    // laisserait croire que SORAHNEX contacte la vitrine.
     expect(screen.queryByTestId('chariow-field-url')).toBeNull();
     expect((screen.getByTestId('chariow-field-apiKey') as HTMLInputElement).type).toBe('password');
   });

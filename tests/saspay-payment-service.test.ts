@@ -497,7 +497,7 @@ describe('paiement SasPay — page de paiement hébergée (checkout)', () => {
     ctx.clock.now += 5_000;
     result = await ctx.service.refresh(alice, { product: 'studio', order_id: orderId });
     expect(result).toMatchObject({ credited: true, order: { state: 'confirmed', charged_amount: '15000.00' } });
-    // Frais déduits : le net reçu par VYORA et les frais ne sont pas transmis au client…
+    // Frais déduits : le net reçu par SORAHNEX et les frais ne sont pas transmis au client…
     expect(result.order).not.toHaveProperty('net_amount');
     expect(result.order).not.toHaveProperty('fee_amount');
     // … mais ils sont bien enregistrés côté serveur.

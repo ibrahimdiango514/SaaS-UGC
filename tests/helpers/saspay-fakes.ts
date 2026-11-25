@@ -751,7 +751,7 @@ export function createFakeSasPay() {
     dropSoftpayRequests(n = 1) { droppedRequests = n; },
     /** Force l'adresse de page suivante renvoyée par la liste (curseur hostile). */
     setNextPage(next: string | null) { nextOverride = next; },
-    /** Paiement encaissé chez SasPay sans que VYORA en ait eu connaissance. */
+    /** Paiement encaissé chez SasPay sans que SORAHNEX en ait eu connaissance. */
     addTransaction(patch: Record<string, unknown>) {
       sequence += 1;
       const id = String(patch.id ?? `tx-${String(sequence).padStart(8, '0')}`);

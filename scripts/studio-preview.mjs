@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Captures de preview du Studio VYORA (desktop + mobile) — harnais de
+ * Captures de preview du Studio SORAHNEX (desktop + mobile) — harnais de
  * vérification VISUELLE, exécuté dans un Chromium sans interface.
  *
  * ## Ce que ce script fait
@@ -63,7 +63,7 @@ const SESSION = {
     created_at: iso(-86400000 * 30),
     updated_at: iso(),
     app_metadata: { provider: 'email', providers: ['email'] },
-    user_metadata: { full_name: 'Preview VYORA' },
+    user_metadata: { full_name: 'Preview SORAHNEX' },
     identities: [],
   },
 };
@@ -154,12 +154,12 @@ const quota = {
 };
 
 const profile = {
-  user_id: USER_ID, display_name: 'Preview VYORA', country_code: 'ML',
+  user_id: USER_ID, display_name: 'Preview SORAHNEX', country_code: 'ML',
   preferred_language: 'fr', created_at: iso(-86400000 * 30),
 };
 
 const workspace = {
-  id: WORKSPACE_ID, name: 'Studio VYORA (démo)', owner_id: USER_ID,
+  id: WORKSPACE_ID, name: 'Studio SORAHNEX (démo)', owner_id: USER_ID,
   default_language: 'fr', country_code: 'ML', created_at: iso(-86400000 * 30),
 };
 
@@ -475,7 +475,7 @@ async function main() {
     Array.from(document.querySelectorAll('.studio-bar-tab')).map((el) => el.textContent?.trim()));
   record('Coque immersive : hero + navigation par catégories', Boolean(hero) && categories.length >= 4,
     { categories });
-  await shot('01-studio-desktop.png', 'Studio VYORA — canvas immersif, hero et barre de prompt dockée');
+  await shot('01-studio-desktop.png', 'Studio SORAHNEX — canvas immersif, hero et barre de prompt dockée');
 
   // 2. Devis serveur après saisie d'un prompt
   const prompt = 'Présentation d’une crème hydratante bio filmée en lumière naturelle, plan vertical TikTok.';

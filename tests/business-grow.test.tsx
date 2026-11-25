@@ -331,7 +331,7 @@ describe('Business Grow', () => {
     expect(await screen.findByText('La mémoire est désactivée et reste vide.')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('link', { name: 'Services IA' }));
-    expect(screen.getByText('Services IA VYORA')).toBeTruthy();
+    expect(screen.getByText('Services IA SORAHNEX')).toBeTruthy();
     expect(screen.getByTestId('provider-groq')).toBeTruthy();
     // Un fournisseur inconnu du code apparaît parce qu'il est au registre…
     expect(screen.getByTestId('provider-fournisseur-nouveau')).toBeTruthy();
@@ -341,19 +341,19 @@ describe('Business Grow', () => {
     await waitFor(() => expect(screen.getByText(/Rédaction/)).toBeTruthy());
   });
 
-  it('affiche les marques et produits persistés dans le même espace VYORA', async () => {
+  it('affiche les marques et produits persistés dans le même espace SORAHNEX', async () => {
     authMocks.workspace = {
-      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier VYORA',
+      id: 'workspace-1', owner_user_id: 'business-grow-test-user', name: 'Atelier SORAHNEX',
       country_code: 'ML', default_language: 'fr', created_at: '2026-01-01', updated_at: '2026-01-01',
     };
     render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole('link', { name: 'Contexte entreprise' }));
 
-    expect((await screen.findAllByText('Atelier VYORA')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Atelier SORAHNEX')).length).toBeGreaterThan(0);
     expect((await screen.findAllByText('Atelier Test')).length).toBeGreaterThan(0);
     expect(await screen.findByText('Sérum Éclat')).toBeTruthy();
-    expect(screen.getByText('Ces données proviennent de l’espace VYORA partagé. Elles ne sont pas copiées dans la mémoire IA.')).toBeTruthy();
+    expect(screen.getByText('Ces données proviennent de l’espace SORAHNEX partagé. Elles ne sont pas copiées dans la mémoire IA.')).toBeTruthy();
     expect(businessMocks.listBrands).toHaveBeenCalledWith('workspace-1');
     expect(businessMocks.listProducts).toHaveBeenCalledWith('workspace-1');
     expect(screen.getByRole('link', { name: /Gérer les informations/ }).getAttribute('href')).toBe('/app/parametres');
@@ -593,7 +593,7 @@ describe('Business Grow', () => {
     expect(await screen.findByText('En attente')).toBeTruthy();
     expect(screen.getByText('Traitement en cours')).toBeTruthy();
     expect(screen.getByText(/Traitement réussi/)).toBeTruthy();
-    expect(screen.getByText(/Réponse générée par l’assistant VYORA/)).toBeTruthy();
+    expect(screen.getByText(/Réponse générée par l’assistant SORAHNEX/)).toBeTruthy();
     expect(screen.getByText('Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.')).toBeTruthy();
   });
 
@@ -657,7 +657,7 @@ describe('Business Grow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer' }));
 
     expect(await screen.findByText('Réponse issue du fournisseur.')).toBeTruthy();
-    expect(screen.getByTestId('business-message-assistant').textContent).toContain('Réponse générée par l’assistant VYORA');
+    expect(screen.getByTestId('business-message-assistant').textContent).toContain('Réponse générée par l’assistant SORAHNEX');
     expect(screen.getByTestId('business-message-assistant').textContent).not.toContain('gemini');
     expect(screen.getByTestId('business-message-assistant').textContent).not.toContain('verified-gemini-model');
   });
@@ -865,7 +865,7 @@ describe('Business Grow', () => {
 
     // Aucun « adaptateur préparé » fictif : la section explique seulement que
     // la liste des services vient du registre.
-    expect(screen.getByText('Comment VYORA choisit un service IA')).toBeTruthy();
+    expect(screen.getByText('Comment SORAHNEX choisit un service IA')).toBeTruthy();
     expect(screen.queryByTestId('adapter-openai')).toBeNull();
 
     const groqCard = screen.getByTestId('provider-groq');
@@ -1169,7 +1169,7 @@ describe('Business Grow', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Impossible de vérifier la connexion au service IA.');
     // Le détail technique reste masqué et l'aide affichée est celle du code réel.
-    expect(alert.textContent).toContain('contactez le support VYORA');
+    expect(alert.textContent).toContain('contactez le support SORAHNEX');
     expect(alert.textContent).not.toContain('PROVIDER_AUTH_FAILED');
     expect(alert.textContent).not.toContain('Supabase Edge Functions Secrets');
   });
@@ -1274,7 +1274,7 @@ describe('Contrôle IA (A6) — centre de contrôle de l’AI CORE', () => {
 
     fireEvent.click(screen.getByRole('link', { name: 'Contrôle IA' }));
     expect(await screen.findByText('Mémoire désactivée')).toBeTruthy();
-    expect(screen.getByText(/Activez la mémoire pour que VYORA retienne vos déclarations explicites/)).toBeTruthy();
+    expect(screen.getByText(/Activez la mémoire pour que SORAHNEX retienne vos déclarations explicites/)).toBeTruthy();
   });
 
   it('change le consentement de la mémoire de l’agent (activation)', async () => {

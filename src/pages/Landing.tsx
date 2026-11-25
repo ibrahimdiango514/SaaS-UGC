@@ -11,7 +11,7 @@ const DIMENSIONS = [
   {
     key: 'studio',
     eyebrow: '01 · Créer',
-    title: 'VYORA Studio',
+    title: 'SORAHNEX Studio',
     text: 'Brief, script, storyboard, paramètres vérifiés, devis réel, génération suivie et montage. Un studio de production relié à de vrais outils.',
     image: '/studio-examples/cosmetique.jpg',
     icon: Clapperboard,
@@ -22,9 +22,9 @@ const DIMENSIONS = [
   {
     key: 'business',
     eyebrow: '02 · Développer',
-    title: 'VYORA Business',
+    title: 'SORAHNEX Grow',
     text: 'Un cerveau commercial qui connaît votre entreprise, vos objectifs, vos produits et vos marchés — et transforme ces données en actions.',
-    image: '/brand/vyora-growth.jpg',
+    image: '/brand/sorahnex-growth.jpg',
     icon: Brain,
     points: ['Mémoire par entreprise', 'Objectifs et priorités', 'Veille marché et concurrence', 'Prospects et opportunités'],
     accent: 'violet',
@@ -42,7 +42,7 @@ const FEATURES = [
 ];
 
 const STEPS = [
-  { n: '01', title: 'Décrivez votre entreprise', text: 'Offre, cible, marché, objectifs et produits : VYORA construit le contexte.' },
+  { n: '01', title: 'Décrivez votre entreprise', text: 'Offre, cible, marché, objectifs et produits : SORAHNEX construit le contexte.' },
   { n: '02', title: 'L’IA analyse et propose', text: 'Diagnostic, priorités et angles d’acquisition appuyés sur vos données réelles.' },
   { n: '03', title: 'Produisez vos contenus', text: 'Scripts, publicités et vidéos UGC avec devis vérifié avant chaque génération.' },
   { n: '04', title: 'Mesurez et ajustez', text: 'Suivez vos résultats, vos prospects et vos actions, puis adaptez la stratégie.' },
@@ -80,8 +80,8 @@ const PAINS = [
 ];
 
 const FAQ = [
-  { q: 'VYORA génère-t-il réellement des vidéos ?', a: 'Oui. Les créations finalisées sont enregistrées dans votre bibliothèque privée. Le lecteur ne s’affiche qu’une fois le fichier vidéo réellement disponible.' },
-  { q: 'Comment le devis fonctionne-t-il ?', a: 'Le devis est calculé côté serveur. Pour les modèles à tarification dynamique, VYORA interroge l’endpoint de devis officiel du fournisseur et affiche le montant exact en USD. Si ce montant ne peut pas être vérifié, le devis est indiqué comme indisponible : aucun prix n’est inventé.' },
+  { q: 'SORAHNEX génère-t-il réellement des vidéos ?', a: 'Oui. Les créations finalisées sont enregistrées dans votre bibliothèque privée. Le lecteur ne s’affiche qu’une fois le fichier vidéo réellement disponible.' },
+  { q: 'Comment le devis fonctionne-t-il ?', a: 'Le devis est calculé côté serveur. Pour les modèles à tarification dynamique, SORAHNEX interroge l’endpoint de devis officiel du fournisseur et affiche le montant exact en USD. Si ce montant ne peut pas être vérifié, le devis est indiqué comme indisponible : aucun prix n’est inventé.' },
   { q: 'Que se passe-t-il si un service est indisponible ?', a: 'La génération est bloquée tant que le service n’est pas rétabli. Les crédits réservés sont restitués en cas d’échec ou d’annulation autorisée.' },
   { q: 'Mes données sont-elles isolées ?', a: 'Chaque espace de travail est isolé et les clés techniques restent sécurisées côté serveur. Vos contenus et votre mémoire métier ne sont pas exposés aux autres espaces.' },
   { q: 'Les réseaux sociaux sont-ils connectés ?', a: 'Les connecteurs Facebook, Instagram, WhatsApp, YouTube, TikTok et Shopify sont préparés côté architecture. Ils restent désactivés tant que vous n’avez pas autorisé la connexion et que les secrets serveur ne sont pas configurés.' },
@@ -129,8 +129,8 @@ function HeroVisual() {
 
   const staticImage = (
     <img
-      src="/brand/vyora-hero.jpg"
-      alt="Direction artistique VYORA : lumière, matière et profondeur"
+      src="/brand/sorahnex-hero.jpg"
+      alt="Direction artistique SORAHNEX : lumière, matière et profondeur"
       className={cn('object-cover object-center', HERO_HEIGHT_CLASSES)}
     />
   );
@@ -142,7 +142,7 @@ function HeroVisual() {
   return (
     <div className={`relative ${HERO_HEIGHT_CLASSES}`}>
       <img
-        src="/brand/vyora-hero.jpg"
+        src="/brand/sorahnex-hero.jpg"
         alt=""
         aria-hidden="true"
         className="absolute inset-0 h-full w-full object-cover object-center"
@@ -171,7 +171,7 @@ export default function Landing() {
       {/* Nav */}
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#05080e]/70 backdrop-blur-2xl">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
-          <Link to="/" aria-label="VYORA, accueil" className="flex items-center gap-2.5">
+          <Link to="/" aria-label="SORAHNEX, accueil" className="flex items-center gap-2.5">
             <BrandLockup tagline />
           </Link>
           <nav className="ml-8 hidden items-center gap-7 text-[13px] text-slate-300 lg:flex">
@@ -209,10 +209,10 @@ export default function Landing() {
                 <span className="bg-gradient-to-r from-cyan-200 via-white to-violet-300 bg-clip-text text-transparent">Votre activité prend de l’ampleur.</span>
               </h1>
               <p className="mt-6 max-w-xl text-[15px] leading-7 text-slate-300 sm:text-base sm:leading-8">
-                VYORA réunit la création de contenus UGC et le pilotage de votre croissance dans une même plateforme. Deux espaces spécialisés, une seule intelligence nourrie par les données de votre entreprise.
+                SORAHNEX réunit la création de contenus UGC et le pilotage de votre croissance dans une même plateforme. Deux espaces spécialisés, une seule intelligence nourrie par les données de votre entreprise.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link to="/inscription" className="btn btn-primary btn-lg vyora-btn-sheen">Découvrir VYORA <ArrowRight size={17} /></Link>
+                <Link to="/inscription" className="btn btn-primary btn-lg vyora-btn-sheen">Découvrir SORAHNEX <ArrowRight size={17} /></Link>
                 <a href="#dimensions" className="btn btn-outline btn-lg"><Play size={15} /> Explorer la plateforme</a>
               </div>
               <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs text-slate-300">
@@ -232,7 +232,7 @@ export default function Landing() {
                 </span>
                 <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
                   <div className="rounded-2xl border border-white/10 bg-[#05080e]/85 p-3.5 backdrop-blur-xl">
-                    <p className="text-[10px] uppercase tracking-[0.22em] text-cyan-200">VYORA · Studio &amp; Business</p>
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-cyan-200">SORAHNEX · Studio &amp; Business</p>
                     <p className="mt-1 text-sm font-semibold text-white">Une seule mémoire, deux espaces de travail.</p>
                   </div>
                 </div>
@@ -442,7 +442,7 @@ export default function Landing() {
             <div className="mx-auto max-w-2xl text-center">
               <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-violet-200">Les défis que vous connaissez</p>
               <h2 className="vyora-display mt-3 text-3xl text-white sm:text-4xl">Chaque jour, les mêmes obstacles</h2>
-              <p className="mt-3 text-sm leading-relaxed text-slate-400">VYORA est construit pour les résoudre — pas pour vous en donner une autre liste de fonctionnalités.</p>
+              <p className="mt-3 text-sm leading-relaxed text-slate-400">SORAHNEX est construit pour les résoudre — pas pour vous en donner une autre liste de fonctionnalités.</p>
             </div>
             <div className="mt-11 grid gap-4 lg:grid-cols-2">
               {PAINS.map((block) => {
@@ -505,12 +505,12 @@ export default function Landing() {
         {/* ---------------------------------------------------------------- */}
         <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-24">
           <div className="relative isolate overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-[#070d16] p-8 text-center sm:p-16">
-            <img src="/brand/vyora-hero.jpg" alt="" aria-hidden="true" className="absolute inset-0 -z-10 h-full w-full object-cover opacity-25" />
+            <img src="/brand/sorahnex-hero.jpg" alt="" aria-hidden="true" className="absolute inset-0 -z-10 h-full w-full object-cover opacity-25" />
             <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-br from-[#05080e]/90 via-[#05080e]/70 to-violet-900/40" />
             <div aria-hidden="true" className="vyora-glow-ring left-1/4 top-0 h-56 w-56 animate-pulseGlow bg-cyan-400/25" />
             <Zap className="mx-auto text-cyan-200" size={26} />
             <h2 className="vyora-display mx-auto mt-5 max-w-2xl text-3xl text-white sm:text-4xl">Prêt à faire grandir votre activité ?</h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-300">Un seul espace pour créer vos contenus, comprendre votre marché et développer vos ventes avec VYORA.</p>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-300">Un seul espace pour créer vos contenus, comprendre votre marché et développer vos ventes avec SORAHNEX.</p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Link to="/inscription" className="btn btn-primary btn-lg vyora-btn-sheen">Créer mon compte <ArrowRight size={17} /></Link>
               <Link to="/connexion" className="btn btn-outline btn-lg">J’ai déjà un compte</Link>
@@ -535,7 +535,7 @@ export default function Landing() {
           </div>
         </div>
         <div className="mx-auto mt-5 flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 text-[10px] text-slate-600 sm:px-6">
-          <span>© {new Date().getFullYear()} VYORA — Create. Evolve. Grow.</span>
+          <span>© {new Date().getFullYear()} SORAHNEX — Create. Evolve. Grow.</span>
           <Link to="/proprietaire" className="transition-colors hover:text-slate-400">Espace propriétaire</Link>
         </div>
       </footer>

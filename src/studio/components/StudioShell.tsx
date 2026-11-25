@@ -29,7 +29,7 @@ export function StudioShell({ children, title, eyebrow, actions }: {
 
   return (
     <div className="animate-fadeUp">
-      {/* Identité VYORA Studio — composition cyan, profondeur et grille discrète. */}
+      {/* Identité SORAHNEX Studio — composition cyan, profondeur et grille discrète. */}
       <div className="relative mb-5 overflow-hidden rounded-[1.6rem] border border-cyan-200/[0.14] bg-[#080d15] px-5 py-6 sm:px-7 sm:py-7">
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-28 h-64 w-64 rounded-full bg-cyan-400/[0.18] blur-[90px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-32 right-0 h-64 w-64 rounded-full bg-sky-400/[0.12] blur-[100px]" />
@@ -39,7 +39,7 @@ export function StudioShell({ children, title, eyebrow, actions }: {
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-cyan-400/15 text-cyan-200 ring-1 ring-cyan-300/25"><Sparkles size={14} /></span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200/90">VYORA · Studio UGC</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200/90">SORAHNEX · Studio UGC</span>
               <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-slate-400">Espace création</span>
             </div>
             <h1 className="vy-title text-[1.65rem] leading-tight sm:text-[2rem]">{title}</h1>

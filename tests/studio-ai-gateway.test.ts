@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { humanizeError } from '../src/lib/errors';
 
 /*
- * Une seule passerelle IA pour Studio : VYORA AI GATEWAY -> FreeLLMAPI.
+ * Une seule passerelle IA pour Studio : SORAHNEX AI -> FreeLLMAPI.
  *
  * L'ancienne passerelle Groq (`reelora-ai`) est supprimée : ses actions
  * (script, prompt, accroches, visuel, scènes) sont servies par `vyora-ai`, qui

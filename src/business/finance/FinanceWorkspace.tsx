@@ -371,7 +371,7 @@ export default function FinanceWorkspace({
         <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-16 h-40 w-40 rounded-full bg-emerald-400/15 blur-[70px]" />
         <div className="relative flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200">VYORA · Finances & recouvrement</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200">SORAHNEX · Finances & recouvrement</p>
             <h2 className="mt-1 font-display text-xl font-semibold text-white sm:text-2xl">Chaque créance, chaque encaissement, sans double comptage</h2>
             <p className="mt-1 max-w-2xl text-xs text-slate-400">Les soldes sont recalculés depuis les paiements validés. Les relances restent préparées : aucun message n’est envoyé automatiquement.</p>
           </div>

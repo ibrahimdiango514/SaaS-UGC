@@ -1,9 +1,9 @@
 {
-  "name": "vyora",
+  "name": "sorahnex",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "VYORA — SaaS de création de contenus UGC et de croissance assistée par IA",
+  "description": "SORAHNEX — Studio (vidéos UGC, contenus, avatars) et Grow (prospects, ventes, stocks, trésorerie) assistés par IA",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",

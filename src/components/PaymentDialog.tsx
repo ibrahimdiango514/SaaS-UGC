@@ -399,7 +399,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="flex items-center gap-1.5 text-[10.5px] text-slate-500">
-                <ShieldCheck size={12} className="text-emerald-400/70" /> Paiement traité par SasPay. VYORA ne voit ni votre code ni votre solde.
+                <ShieldCheck size={12} className="text-emerald-400/70" /> Paiement traité par SasPay. SORAHNEX ne voit ni votre code ni votre solde.
               </p>
               <Button
                 type="submit"

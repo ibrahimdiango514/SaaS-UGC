@@ -20,7 +20,7 @@ const IDENTITY: Record<Exclude<DockScope, 'hub'>, {
   overviewLabel: string;
 }> = {
   studio: {
-    label: 'VYORA Studio',
+    label: 'SORAHNEX Studio',
     detail: 'Création & production UGC',
     icon: Clapperboard,
     home: '/app/studio',
@@ -28,7 +28,7 @@ const IDENTITY: Record<Exclude<DockScope, 'hub'>, {
     overviewLabel: 'Tableau de bord',
   },
   business: {
-    label: 'VYORA Business Growth',
+    label: 'SORAHNEX Grow',
     detail: 'Pilotage, revenus & opérations',
     icon: Brain,
     home: '/app/business',
@@ -36,7 +36,7 @@ const IDENTITY: Record<Exclude<DockScope, 'hub'>, {
     overviewLabel: 'Vue d’ensemble',
   },
   admin: {
-    label: 'Administration VYORA',
+    label: 'Administration SORAHNEX',
     detail: 'Console propriétaire',
     icon: LayoutDashboard,
     home: '/admin',

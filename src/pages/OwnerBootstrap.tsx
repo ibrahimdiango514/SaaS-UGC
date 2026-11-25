@@ -65,7 +65,7 @@ export default function OwnerBootstrap() {
         email: email.trim(),
         password,
         options: {
-          data: { full_name: 'Propriétaire VYORA', app_scope: 'vyora_owner' },
+          data: { full_name: 'Propriétaire SORAHNEX', app_scope: 'vyora_owner' },
           emailRedirectTo: `${SITE_URL}/proprietaire/confirmation`,
         },
       });

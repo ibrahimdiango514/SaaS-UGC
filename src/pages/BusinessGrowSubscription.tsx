@@ -15,7 +15,7 @@ import {
  * Abonnement Business Grow — catalogue PROPRE au produit Business Grow.
  *
  * Ce que cette page NE fait pas :
- * - elle n'affiche aucun crédit, pack ou portefeuille VYORA Studio ;
+ * - elle n'affiche aucun crédit, pack ou portefeuille SORAHNEX Studio ;
  * - elle ne montre aucun prix non fixé : une formule sans prix n'est jamais
  *   présentée comme achetable ;
  * - elle ne prétend pas encaisser un paiement : le bouton de souscription n'est
@@ -106,7 +106,7 @@ export default function BusinessGrowSubscription() {
           <h1 className="mt-2 text-2xl font-bold tracking-tight text-white">Abonnement Business Grow</h1>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-400">
             Formules, quotas et unités de consommation propres à Business Grow.
-            Ce catalogue est indépendant de VYORA Studio&nbsp;: aucun crédit, aucun
+            Ce catalogue est indépendant de SORAHNEX Studio&nbsp;: aucun crédit, aucun
             portefeuille et aucune règle de marge ne sont partagés entre les deux produits.
           </p>
         </div>
@@ -254,7 +254,7 @@ export default function BusinessGrowSubscription() {
           Ouvrir Business Grow <ArrowRight size={11} />
         </Link>
         <Link to="/app/credits" className="inline-flex items-center gap-1 text-cyan-400/70 hover:text-cyan-300">
-          <Sparkles size={11} /> Crédits VYORA Studio (produit distinct)
+          <Sparkles size={11} /> Crédits SORAHNEX Studio (produit distinct)
         </Link>
       </div>
 

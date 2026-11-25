@@ -1,4 +1,4 @@
-# Migration VYORA vers un nouveau compte Netlify
+# Migration SORAHNEX vers un nouveau compte Netlify
 
 Date de préparation : 2026-11-18. Source unique à importer : branche **`main`** du dépôt
 `ibrahimdiango514/SaaS-UGC`. Le backend Supabase (`xbuuhfwobrafcbgtdgjx`) **ne change pas** :
@@ -195,7 +195,7 @@ Fournisseurs OAuth tiers (Google, Facebook, etc.) : aucun n'est activé dans GoT
 (`external_*_enabled = false`, mesuré le 2026-11-18) ; rien à mettre à jour. Le projet Supabase
 héberge aussi d'autres produits (entrées `lovable.app`, `sbc-ai-agency-dashbord.netlify.app` dans la
 liste) : ne pas les retirer sans vérification, et noter que `Site URL` est global au projet — il
-désignait déjà VYORA (`vyora-ugc`), le passer à la nouvelle URL ne change rien pour les autres. Les OAuth gérés par VYORA (MCP sortant via `mcp-client`, connecteurs via
+désignait déjà SORAHNEX (`vyora-ugc`), le passer à la nouvelle URL ne change rien pour les autres. Les OAuth gérés par SORAHNEX (MCP sortant via `mcp-client`, connecteurs via
 `vyora-oauth`) utilisent des URL de retour **côté Supabase**
 (`https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/mcp-client/oauth/callback`, dérivée de
 `SUPABASE_URL`) : elles ne dépendent pas de Netlify.

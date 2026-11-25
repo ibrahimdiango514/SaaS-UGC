@@ -1,5 +1,5 @@
 /**
- * Phase D — mapping déclaratif d'une API tierce vers le modèle VYORA.
+ * Phase D — mapping déclaratif d'une API tierce vers le modèle SORAHNEX.
  *
  * Le risque principal de ce module est silencieux : un prix faux d'un facteur
  * 100 ne lève aucune erreur, il se vend. Ces tests portent donc massivement sur

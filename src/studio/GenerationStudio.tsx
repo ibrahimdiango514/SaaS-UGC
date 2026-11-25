@@ -835,7 +835,7 @@ export default function GenerationStudio() {
               <div className="mt-3 space-y-2 text-[11px]">
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Qualité</span><span className="text-white">{QUALITY_TIERS.find((q) => q.id === form.quality)?.label}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Modèle</span><span className="text-right text-white">{model ? (MODE_LABELS[modeFromModel(model)] ?? 'Vidéo') : '—'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Type de création</span><span className="text-right text-white">Vidéo VYORA</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Type de création</span><span className="text-right text-white">Vidéo SORAHNEX</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Coût en crédits</span><span className="font-bold text-cyan-300">{cost ?? '…'}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Solde après réservation</span><span className="text-white">{summary.remaining ?? '—'}</span></div>
               </div>

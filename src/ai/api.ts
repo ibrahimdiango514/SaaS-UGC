@@ -1,5 +1,5 @@
 /**
- * VYORA AI — accès aux conversations de l'assistant personnel.
+ * SORAHNEX AI — accès aux conversations de l'assistant personnel.
  *
  * ## Pourquoi ce module plutôt qu'un nouvel appel
  *

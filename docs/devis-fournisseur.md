@@ -1,4 +1,4 @@
-# Devis fournisseur VYORA Studio (MyAPI / MuAPI)
+# Devis fournisseur SORAHNEX Studio (MyAPI / MuAPI)
 
 Objectif : afficher un devis en USD, calculé côté serveur à partir des tarifs réels du fournisseur,
 avant tout lancement de génération. Aucun prix inventé, aucune valeur de repli.

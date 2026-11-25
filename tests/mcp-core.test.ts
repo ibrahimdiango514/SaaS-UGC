@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Serveur MCP VYORA — tests de protocole.
+ * Serveur MCP SORAHNEX — tests de protocole.
  *
  * Ces tests exercent le VRAI moteur JSON-RPC (`core.ts`), celui que le handler
  * Edge branche sur HTTP. Ce ne sont pas des mocks du protocole : on envoie des
@@ -200,7 +200,7 @@ describe('tools/list', () => {
     for (const outil of vue.tools) {
       const attendu = OUTILS_LECTURE.some((o) => o.name === outil.name);
       expect(outil.annotations.readOnlyHint, outil.name).toBe(attendu);
-      // Aucun outil MCP VYORA n'est destructeur, et aucun n'appelle un tiers.
+      // Aucun outil MCP SORAHNEX n'est destructeur, et aucun n'appelle un tiers.
       expect(outil.annotations.destructiveHint).toBe(false);
       expect(outil.annotations.openWorldHint).toBe(false);
     }

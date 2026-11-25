@@ -97,13 +97,13 @@ describe('preuve de rendu — import universel', () => {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VYORA — Import universel de catalogue (preuve de rendu)</title>
+<title>SORAHNEX — Import universel de catalogue (preuve de rendu)</title>
 <style>${css}</style>
 <style>${STYLES}</style>
 </head>
 <body>
 <div class="wrap">
-  <p class="capture-title">VYORA · Business Grow → Croissance → Catalogue</p>
+  <p class="capture-title">SORAHNEX · Business Grow → Croissance → Catalogue</p>
   <p class="capture-sub">Aperçu renvoyé par le serveur pour un CSV de 4 lignes. Rien n’a été enregistré.</p>
   ${container.innerHTML}
   <p class="capture-note">

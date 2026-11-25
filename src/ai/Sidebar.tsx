@@ -105,7 +105,7 @@ export function Sidebar({
         <Link
           to={embedded ? '/app/business' : '/app/ai'}
           className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1"
-          aria-label={embedded ? 'VYORA Business — assistant' : 'VYORA AI — accueil'}
+          aria-label={embedded ? 'SORAHNEX Business — assistant' : 'SORAHNEX AI — accueil'}
         >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-accent shadow-glow">
             <Sparkles size={17} className="text-ink" />
@@ -113,7 +113,7 @@ export function Sidebar({
           {!collapsed && (
             <span className="min-w-0">
               <span className="block font-display text-sm font-semibold tracking-tight text-white">
-                VYORA<span className="text-brand-300"> AI</span>
+                SORAHNEX<span className="text-brand-300"> AI</span>
               </span>
               <span className="block text-[0.62rem] uppercase tracking-[0.18em] text-slate-500">
                 {embedded ? 'business' : 'assistant'}

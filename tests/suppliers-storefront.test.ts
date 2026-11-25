@@ -122,7 +122,7 @@ describe('Lot K — vitrine commerciale', () => {
   });
 
   it('exporte un catalogue HTML échappé, sans paiement', () => {
-    const html = catalogHtml({ ...settings, headline: 'Savons & <soins>' }, products, 'Atelier VYORA');
+    const html = catalogHtml({ ...settings, headline: 'Savons & <soins>' }, products, 'Atelier SORAHNEX');
     expect(html).toContain('Savons &amp; &lt;soins&gt;');
     expect(html).toContain('Savon');
     expect(html).toContain('aucune commande ni paiement en ligne');

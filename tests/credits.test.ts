@@ -241,7 +241,7 @@ describe('Mise à jour des catalogues métier', () => {
   });
 });
 
-describe('Persistance vérifiée du compte et de l’espace Reelora', () => {
+describe('Persistance vérifiée du compte et de l’espace SORAHNEX Studio', () => {
   it('vérifie que la mise à jour du profil a affecté le profil authentifié', async () => {
     const maybeSingle = vi.fn().mockResolvedValue({ data: { user_id: 'user-1' }, error: null });
     const select = vi.fn(() => ({ maybeSingle }));

@@ -1,4 +1,4 @@
-# VYORA — Architecture du moteur IA multi-fournisseurs
+# SORAHNEX — Architecture du moteur IA multi-fournisseurs
 
 > Document d'architecture, vérifié sur le code présent dans ce dépôt (2026-11-14).
 > Il décrit **ce qui existe déjà** et **ce qu'il reste à faire** pour accueillir les

@@ -1,5 +1,5 @@
 /**
- * VYORA — section « Variantes » d'une fiche produit.
+ * SORAHNEX — section « Variantes » d'une fiche produit.
  *
  * ## Ce que cette section est, et n'est pas
  * Les variantes sont des déclinaisons de LEUR produit parent. Cette section ne

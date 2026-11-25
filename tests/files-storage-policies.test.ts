@@ -1,5 +1,5 @@
 /**
- * Politiques Storage des fichiers VYORA — garde-fous statiques.
+ * Politiques Storage des fichiers SORAHNEX — garde-fous statiques.
  *
  * Ces tests ne remplacent pas les sondes exécutées en base (elles ont prouvé
  * l'isolation entre entreprises, cf. `20261116150000_grant_storage_policy_functions.sql`).

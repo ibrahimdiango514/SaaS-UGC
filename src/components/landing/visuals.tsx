@@ -76,7 +76,7 @@ function HeroConsoleCompact() {
             decoding="async"
           />
           <span className="min-w-0 flex-1">
-            <span className="block text-[8.5px] font-bold uppercase tracking-[0.16em] text-cyan-200">VYORA Studio</span>
+            <span className="block text-[8.5px] font-bold uppercase tracking-[0.16em] text-cyan-200">SORAHNEX Studio</span>
             <span className="mt-1 block text-[12px] font-semibold leading-snug text-white">Créer des vidéos qui attirent</span>
             <span className="mt-1 block text-[10px] leading-snug text-slate-400">UGC, publicités, produits mis en scène, montage.</span>
             <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-cyan-200">
@@ -126,7 +126,7 @@ function StudioMiniPanel() {
         <span className="grid h-5 w-5 place-items-center rounded-md bg-cyan-400/15 text-cyan-200">
           <Clapperboard size={11} />
         </span>
-        <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-cyan-100">VYORA Studio</span>
+        <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-cyan-100">SORAHNEX Studio</span>
         <span className="ml-auto rounded-full border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[8.5px] font-semibold text-cyan-100">CRÉER</span>
       </div>
 
@@ -288,7 +288,7 @@ export function StudioShowcase() {
         <div className="flex flex-wrap items-center gap-2 px-1 pb-2.5">
           <BrandSymbol size={28} />
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-white">VYORA Studio</p>
+            <p className="text-[11px] font-semibold text-white">SORAHNEX Studio</p>
             <p className="text-[8px] uppercase tracking-[0.18em] text-cyan-200/75">Création vidéo assistée</p>
           </div>
           <span className="ml-auto rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[8px] font-semibold text-cyan-100">
@@ -420,7 +420,7 @@ export function GrowthShowcase() {
           <div className="flex flex-wrap items-center gap-2 px-1 pb-2.5">
             <BrandSymbol size={28} />
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold text-white">VYORA Business Growth</p>
+              <p className="text-[11px] font-semibold text-white">SORAHNEX Grow</p>
               <p className="text-[8px] uppercase tracking-[0.18em] text-violet-200/75">Pilotage & croissance</p>
             </div>
             <span className="ml-auto rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-[8px] font-medium text-slate-300">
@@ -565,7 +565,7 @@ export function EcosystemFlow() {
             </span>
             <div>
               <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Espace 01</p>
-              <h3 className="text-sm font-semibold text-white">VYORA Studio</h3>
+              <h3 className="text-sm font-semibold text-white">SORAHNEX Studio</h3>
             </div>
           </div>
           <p className="relative mt-3 text-xs leading-relaxed text-slate-300">
@@ -601,7 +601,7 @@ export function EcosystemFlow() {
             </span>
             <div>
               <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-violet-200/80">Espace 02</p>
-              <h3 className="text-sm font-semibold text-white">VYORA Business Growth</h3>
+              <h3 className="text-sm font-semibold text-white">SORAHNEX Grow</h3>
             </div>
           </div>
           <p className="relative mt-3 text-xs leading-relaxed text-slate-300">

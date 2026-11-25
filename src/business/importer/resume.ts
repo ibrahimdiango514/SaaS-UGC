@@ -1,5 +1,5 @@
 /**
- * VYORA — reprise d'un import interrompu.
+ * SORAHNEX — reprise d'un import interrompu.
  *
  * ## Le problème, concrètement
  * Un import écrit produit par produit, dans une transaction par produit. Si la

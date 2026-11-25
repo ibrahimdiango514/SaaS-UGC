@@ -108,7 +108,7 @@ function Bubble({ message, testIdPrefix }: { message: AiMessage; testIdPrefix: s
   /**
    * Synthèse vocale.
    *
-   * C'est la voix du navigateur (`speechSynthesis`), pas un service VYORA.
+   * C'est la voix du navigateur (`speechSynthesis`), pas un service SORAHNEX.
    * Disponible hors ligne, sans clé. Si l'API manque, le bouton n'est pas rendu.
    */
   const parler = () => {
@@ -172,7 +172,7 @@ function Bubble({ message, testIdPrefix }: { message: AiMessage; testIdPrefix: s
             </span>
           )}
           {assistant && message.request_status === 'succeeded' && (
-            <span className="mr-1">Réponse générée par l’assistant VYORA</span>
+            <span className="mr-1">Réponse générée par l’assistant SORAHNEX</span>
           )}
           <span>{heure(message.created_at)}</span>
 

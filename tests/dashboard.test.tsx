@@ -44,7 +44,7 @@ vi.mock('../src/context/AuthContext', () => ({
 
 import Dashboard from '../src/pages/Dashboard';
 
-describe('espace client Reelora', () => {
+describe('espace client SORAHNEX Studio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listProjects.mockResolvedValue([]);

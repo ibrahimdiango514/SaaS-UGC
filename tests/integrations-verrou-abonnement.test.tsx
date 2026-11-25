@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * VYORA Integrations — verrou Business Grow sur le parcours d'accès.
+ * SORAHNEX Integrations — verrou Business Grow sur le parcours d'accès.
  *
  * ## Constat de production (2026-11-18)
  * Abonnement inactif : les 28 fiches affichaient « Abonnement requis » (exact),

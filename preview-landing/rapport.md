@@ -1,4 +1,4 @@
-# VYORA — Refonte de la page d’accueil
+# SORAHNEX — Refonte de la page d’accueil
 
 Rapport final · 13 novembre 2026 · branche `arena/ada94e4c-saas-ugc` (base `5b6bc24`)
 
@@ -21,16 +21,16 @@ Aucune route, aucun fichier d’API, aucun secret, aucun réglage SasPay n’a �
 ## 2. Sections créées
 
 1. Header fixe (5 ancres, Connexion, Créer mon compte, menu mobile).
-2. Hero : « VYORA — L’intelligence artificielle qui fait grandir vos ambitions. », texte, rotation d’expressions, deux CTA, double console Studio / Business Growth.
+2. Hero : « SORAHNEX — L’intelligence artificielle qui fait grandir vos ambitions. », texte, rotation d’expressions, deux CTA, double console Studio / Business Growth.
 3. Deux univers : « Un compte. Deux espaces spécialisés. ».
-4. VYORA Studio : visuel de création + 6 capacités + CTA `Découvrir VYORA Studio` / `Créer mon compte` / formules.
-5. VYORA Business Growth : dashboard illustratif + 6 capacités + CTA `Découvrir Business Growth` / `Voir les formules`.
-6. Douleurs résolues : six cartes (prospect, dossier, client, commande, visibilité, tâches) + « Ce que VYORA apporte ».
+4. SORAHNEX Studio : visuel de création + 6 capacités + CTA `Découvrir SORAHNEX Studio` / `Créer mon compte` / formules.
+5. SORAHNEX Grow : dashboard illustratif + 6 capacités + CTA `Découvrir Business Growth` / `Voir les formules`.
+6. Douleurs résolues : six cartes (prospect, dossier, client, commande, visibilité, tâches) + « Ce que SORAHNEX apporte ».
 7. Écosystème : « Studio crée. Business Growth prépare. Vous décidez. », hub central, cinq étapes, note de périmètre.
 8. Démarrage : quatre étapes.
 9. Tarifs Studio : formules lues via `listPlans()` depuis le serveur, limites réelles, `Gratuit` pour Découverte, `Le plus choisi` aligné, encart Business Growth séparé.
 10. FAQ : sept questions, accordéon accessible.
-11. Conversion finale : « Votre prochaine étape commence avec VYORA. » + 3 CTA.
+11. Conversion finale : « Votre prochaine étape commence avec SORAHNEX. » + 3 CTA.
 12. Footer : logo, deux espaces (liens vers #studio / #business), navigation Studio, Business Growth, informations légales, espace propriétaire.
 
 ## 3. Visuels

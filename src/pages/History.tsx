@@ -66,7 +66,7 @@ function JobRow({ job, onCancel, onRefresh }: { job: GenerationJob; onCancel: (i
       {open && (
         <div className="grid gap-3 bg-white/[0.02] px-5 pb-4 pt-1 text-xs sm:grid-cols-2">
           <div><p className="text-slate-500">Identifiant</p><p className="break-all font-mono text-slate-300">{job.id}</p></div>
-          <div><p className="text-slate-500">Type de création</p><p className="text-slate-300">Vidéo VYORA</p></div>
+          <div><p className="text-slate-500">Type de création</p><p className="text-slate-300">Vidéo SORAHNEX</p></div>
           <div><p className="text-slate-500">Coût / date</p><p className="text-slate-300">{job.credits_charged || job.credits_reserved} crédits · {formatDate(job.created_at, true)}</p></div>
           <div><p className="text-slate-500">Mode / qualité</p><p className="text-slate-300">{mode} · {quality}</p></div>
           <div><p className="text-slate-500">Projet</p><p className="truncate text-slate-300">{job.project_id ? <Link className="text-cyan-300 hover:underline" to={`/app/projets/${job.project_id}`}>Ouvrir le projet</Link> : '—'}</p></div>

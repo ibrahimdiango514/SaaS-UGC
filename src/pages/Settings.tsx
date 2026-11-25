@@ -346,7 +346,7 @@ export default function Settings() {
 
       {tab === 'integrations' && (
         <div className="max-w-3xl space-y-5">
-          <Card><CardHeader title="État des services" description="Disponibilité actuelle des fonctionnalités VYORA." />
+          <Card><CardHeader title="État des services" description="Disponibilité actuelle des fonctionnalités SORAHNEX." />
             <div className="space-y-3 p-5">
               {health === null && <Banner tone="warning" title="État indisponible">Impossible de vérifier les services pour le moment. Réessayez plus tard.</Banner>}
               {health && [
@@ -365,7 +365,7 @@ export default function Settings() {
           <Card>
             <CardHeader
               title="Connecteurs sociaux et e-commerce"
-              description="Architecture préparée pour les futurs comptes de ce même espace VYORA."
+              description="Architecture préparée pour les futurs comptes de ce même espace SORAHNEX."
             />
             <div className="grid gap-3 p-5 sm:grid-cols-2">
               {INTEGRATION_DEFINITIONS.map((integration) => (

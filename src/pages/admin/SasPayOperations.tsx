@@ -2,9 +2,9 @@
  * Administration — remboursements et exploitation des paiements SasPay.
  *
  * Règles tenues par l'interface comme par la base :
- *  - VYORA n'envoie AUCUN argent. SasPay n'offre pas de remboursement par API :
+ *  - SORAHNEX n'envoie AUCUN argent. SasPay n'offre pas de remboursement par API :
  *    « rembourser » consiste à reprendre ce qui a été livré (crédits Studio ou
- *    jours d'abonnement Business Grow), puis à rendre l'argent hors de VYORA et à
+ *    jours d'abonnement Business Grow), puis à rendre l'argent hors de SORAHNEX et à
  *    l'attester ici avec la référence du versement ;
  *  - le plafond du montant à rendre est calculé par le serveur, au prorata de ce
  *    qui est effectivement repris ;
@@ -134,7 +134,7 @@ export function RefundDialog({ order, onClose, onDone }: {
       )}
     >
       <div className="space-y-4">
-        <Banner tone="warning" title="VYORA n’envoie pas d’argent">
+        <Banner tone="warning" title="SORAHNEX n’envoie pas d’argent">
           SasPay ne propose pas de remboursement automatique. Cette action reprend ce qui a été livré et clôt la commande ;
           vous rendez ensuite l’argent au client par vos propres moyens, puis vous attestez le versement. Elle est définitive.
         </Banner>
@@ -214,7 +214,7 @@ export function SettleRefundDialog({ order, onClose, onDone }: {
       <div className="space-y-4">
         <p className="text-[12.5px] leading-relaxed text-slate-300">
           À remplir <strong className="text-white">après</strong> avoir rendu l’argent au client (transfert Mobile Money, décaissement
-          depuis le tableau de bord SasPay…). VYORA ne vérifie pas ce versement : la référence saisie fait foi et ne pourra plus être changée.
+          depuis le tableau de bord SasPay…). SORAHNEX ne vérifie pas ce versement : la référence saisie fait foi et ne pourra plus être changée.
         </p>
         <Input
           label="Référence du versement" value={reference} maxLength={120}

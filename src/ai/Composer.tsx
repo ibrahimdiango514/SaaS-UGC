@@ -308,7 +308,7 @@ export function Composer({
       </div>
 
       <p className="mt-1.5 text-center text-[0.68rem] text-slate-600">
-        VYORA peut se tromper. Vérifiez les informations importantes.
+        SORAHNEX peut se tromper. Vérifiez les informations importantes.
       </p>
     </div>
   );

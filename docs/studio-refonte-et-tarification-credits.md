@@ -1,4 +1,4 @@
-# Studio VYORA — refonte immersive et tarification par crédits
+# Studio SORAHNEX — refonte immersive et tarification par crédits
 
 > Rapport de livraison · branche `arena/323bad30-saas-ugc`
 > Commit `9327e4d` (précédé de `e4d1007`), base `ff49e4e`, `main` inchangée à `1a572be`.
@@ -41,7 +41,7 @@ Les onglets annoncent désormais deux niveaux distincts :
 - Image, Audio Studio → badge **« À venir »** (« Aucun modèle image intégré »,
   « Aucun moteur audio / TTS connecté ») ;
 - Lip Sync → badge **« Démo »** (la capacité existe côté fournisseur mais n'est
-  pas exécutable sans source audio produite par VYORA).
+  pas exécutable sans source audio produite par SORAHNEX).
 
 ### 1.3 Anomalies d'interface corrigées pendant la vérification visuelle
 
@@ -51,7 +51,7 @@ Les onglets annoncent désormais deux niveaux distincts :
 | Composer collé sous le contenu au lieu du bas de l'écran | `.studio-canvas` n'était pas une colonne flex | `.studio-canvas` en `flex flex-col min-h-dvh`, nouvelle zone `.studio-stage` en `flex-1`, composer en `mt-auto` |
 | `mt-3` annulait le `margin-top:auto` du composer | les utilitaires Tailwind sont émis après `@layer components` | la marge est portée uniquement par `.studio-composer-dock` quand le canvas est actif |
 | Barre de prompt qui disparaissait derrière le footer | `overflow-hidden` + hauteur de canvas dépassée | `overflow-x-hidden` |
-| Deuxième logo VYORA vide (barre de studio, panneau crédits) | `<linearGradient id="vyora-mark">` dupliqué | identifiant de dégradé unique par instance (`useId`) |
+| Deuxième logo SORAHNEX vide (barre de studio, panneau crédits) | `<linearGradient id="vyora-mark">` dupliqué | identifiant de dégradé unique par instance (`useId`) |
 | Bouton « Générer » coupé sur mobile | ligne de paramètres et ligne d'action partagées | paramètres sur une ligne défilante, devis + bouton sur la ligne suivante |
 
 ---

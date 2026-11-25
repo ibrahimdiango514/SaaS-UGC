@@ -288,9 +288,9 @@ describe('Lot I — marketing', () => {
   ] as never;
 
   it('personnalise le message par contact et filtre par canal', () => {
-    const recipients = buildRecipients(campaign, contacts, 'VYORA', null);
+    const recipients = buildRecipients(campaign, contacts, 'SORAHNEX', null);
     expect(recipients).toHaveLength(1);
-    expect(recipients[0].message).toBe('Bonjour Awa Traoré, VYORA vous attend.');
+    expect(recipients[0].message).toBe('Bonjour Awa Traoré, SORAHNEX vous attend.');
   });
 
   it('génère un lien WhatsApp sans envoi automatique', () => {
@@ -298,7 +298,7 @@ describe('Lot I — marketing', () => {
   });
 
   it('remplace les variables connues sans laisser de gabarit', () => {
-    expect(renderCampaignMessage('{{contact}} · {{ville}} · {{produit}}', { firstName: 'Awa', lastName: '', company: '', city: 'Bamako' }, 'VYORA', { produit: 'Savon' }))
+    expect(renderCampaignMessage('{{contact}} · {{ville}} · {{produit}}', { firstName: 'Awa', lastName: '', company: '', city: 'Bamako' }, 'SORAHNEX', { produit: 'Savon' }))
       .toBe('Awa · Bamako · Savon');
   });
 });

@@ -374,7 +374,7 @@ export default function Admin() {
       {tab === 'video-pricing' && (
         <div className="space-y-5">
           <Card>
-            <CardHeader title="Tarification interne — VYORA Studio" description="Les coûts fournisseur et les conversions restent visibles uniquement dans cette console." />
+            <CardHeader title="Tarification interne — SORAHNEX Studio" description="Les coûts fournisseur et les conversions restent visibles uniquement dans cette console." />
             <form onSubmit={(e) => void onVideoPricing(e)} className="space-y-4 p-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <Input label="Taux USD → FCFA (XOF)" type="number" min="0.0001" step="0.0001" required

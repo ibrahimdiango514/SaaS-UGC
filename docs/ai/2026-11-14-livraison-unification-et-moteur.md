@@ -26,7 +26,7 @@ dérivés, jamais saisis :
 | Connecté | compte OAuth réel, statut `connected` |
 | Non connecté | connecteur écrit, aucun compte |
 | Activation demandée | demande `pending` sans compte externe |
-| Configuration requise | connecteur absent, identifiants VYORA manquants |
+| Configuration requise | connecteur absent, identifiants SORAHNEX manquants |
 | Validation externe requise | connecteur absent, approbation fournisseur requise |
 | Autorisation manquante | ligne `connected` sans compte OAuth vérifié |
 | Erreur de connexion | compte ou demande en erreur |

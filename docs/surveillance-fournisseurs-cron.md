@@ -39,7 +39,7 @@ Fonction : `supabase/functions/vyora-provider-health/index.ts`
    `saas_business.provider_health_cron_runs` (statut, latence, code d'erreur, HTTP, id pg_net, horodatage).
    `saas_business.provider_health_cron_state` conserve l'état courant par fournisseur.
 6. **Échecs et alertes** — alerte `saas_immobilier.admin_alerts` (console admin, dédupliquée) **et**
-   notification in-app aux administrateurs (rôle VYORA `admin` + administrateurs plateforme), avec
+   notification in-app aux administrateurs (rôle SORAHNEX `admin` + administrateurs plateforme), avec
    déduplication 12 h ; l'alerte est refermée automatiquement au premier contrôle réussi. Cas couverts :
    fournisseur en échec (3 échecs consécutifs ⇒ ré-alerte), HTTP 401/403 du job (critique), 404/5xx,
    absence de réponse après 5 min, état périmé > 26 h, jeton Vault manquant.

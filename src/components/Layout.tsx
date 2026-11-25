@@ -22,7 +22,7 @@ const ADMIN_NAV = [{ to: '/admin', label: 'Administration', icon: Shield }];
 
 function Logo({ compact = false, to = '/app' }: { compact?: boolean; to?: string }) {
   return (
-    <NavLink to={to} aria-label="VYORA, tableau de bord" className="flex min-h-11 min-w-11 items-center gap-2.5">
+    <NavLink to={to} aria-label="SORAHNEX, tableau de bord" className="flex min-h-11 min-w-11 items-center gap-2.5">
       {compact ? <BrandSymbol size={36} /> : <BrandLockup />}
     </NavLink>
   );
@@ -90,6 +90,17 @@ export default function Layout() {
 
   useEffect(() => { setDrawerOpen(false); setNotifOpen(false); setUserOpen(false); }, [location.pathname]);
 
+  // Tiroir mobile : verrouille le défilement de la page derrière et se ferme
+  // avec Échap (clavier Android inclus).
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawerOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => { document.body.style.overflow = previous; document.removeEventListener('keydown', onKey); };
+  }, [drawerOpen]);
+
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
@@ -142,7 +153,7 @@ export default function Layout() {
 
   return (
     <div
-      className={cn('min-h-screen lg:flex', scope === 'business' && 'vy-scope-business', scope === 'studio' && 'vy-scope-studio')}
+      className={cn('min-h-screen overflow-x-hidden lg:flex', scope === 'business' && 'vy-scope-business', scope === 'studio' && 'vy-scope-studio')}
       data-vy-scope={scope === 'admin' ? 'admin' : scope}
     >
       {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}
@@ -313,7 +324,7 @@ export default function Layout() {
       {/* Mobile drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm lg:hidden" onMouseDown={() => setDrawerOpen(false)}>
-          <div className="flex h-full w-[min(88vw,300px)] flex-col border-r border-line bg-panel px-3 py-5" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="flex h-full w-[min(88vw,300px)] max-w-full flex-col overflow-y-auto overscroll-contain border-r border-line bg-panel px-3 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-5" onMouseDown={(e) => e.stopPropagation()}>
             <div className="mb-6 flex items-center justify-between px-2"><Logo to={isAdmin ? '/admin' : '/app'} /><button onClick={() => setDrawerOpen(false)} className="btn btn-ghost btn-icon"><X size={18} /></button></div>
             {!isAdmin && (
               <Link to="/app" onClick={() => setDrawerOpen(false)} className="mb-3 flex min-h-11 items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.06] px-3 py-2 text-xs font-semibold text-slate-200">
@@ -349,11 +360,24 @@ export default function Layout() {
       {/* Mobile bottom nav */}
       <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', isHub ? 'hidden' : 'lg:hidden')}>
         {mobileNav.map((item) => {
+          const itemClass =
+            'flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition';
+          // « Plus » n'est pas une destination : il ouvre le tiroir complet, sans
+          // jamais rester marqué actif (sinon il volerait l'état de l'écran courant).
+          if ('opensDrawer' in item && item.opensDrawer) {
+            return (
+              <button key={item.label} type="button" onClick={() => setDrawerOpen(true)}
+                aria-label="Plus d’options" aria-expanded={drawerOpen}
+                className={cn(itemClass, 'text-slate-500')}>
+                <item.icon size={19} /> <span className="truncate">{item.label}</span>
+              </button>
+            );
+          }
           const active = mobileItemActive(item);
           return (
             <Link key={item.to} to={item.to}
               aria-current={active ? 'page' : undefined}
-              className={cn('flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition', active ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500')}>
+              className={cn(itemClass, active ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500')}>
               <item.icon size={19} /> <span className="truncate">{item.label.split(' ')[0]}</span>
             </Link>
           );

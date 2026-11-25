@@ -57,13 +57,13 @@ const createBody = {
 };
 
 describe('Edge Function vyora-payments', () => {
-  it('lit ses secrets côté serveur ; le secret de webhook VYORA est distinct de tout autre', () => {
+  it('lit ses secrets côté serveur ; le secret de webhook SORAHNEX est distinct de tout autre', () => {
     const values: Record<string, string> = {
       SUPABASE_URL: 'u', SUPABASE_ANON_KEY: 'a', SUPABASE_SERVICE_ROLE_KEY: 's',
       SASPAY_SECRET_KEY: ' sk_test_shared ', SASPAY_WEBHOOK_SECRET: 'secret-autre-produit',
     };
     const read = readPaymentsEnv((key) => values[key] ?? '');
-    // Ni la clé ni le secret de webhook d'un autre produit ne sont réutilisés pour VYORA.
+    // Ni la clé ni le secret de webhook d'un autre produit ne sont réutilisés pour SORAHNEX.
     expect(read.sasPaySecretKey).toBe('');
     expect(read.webhookSecret).toBe('');
     values.VYORA_SASPAY_SECRET_KEY = 'sk_test_vyora';

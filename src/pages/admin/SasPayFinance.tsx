@@ -109,7 +109,7 @@ function PolicyCard({ overview, onSaved }: { overview: PricingOverview; onSaved:
         </div>
         <p className="text-[11.5px] leading-relaxed text-slate-400">
           {strategy === 'cover_fees'
-            ? 'Si les frais confirmés au barème dépassent la provision, le prix est relevé juste assez pour que VYORA reçoive au moins le prix de base.'
+            ? 'Si les frais confirmés au barème dépassent la provision, le prix est relevé juste assez pour que SORAHNEX reçoive au moins le prix de base.'
             : 'Le prix final est toujours « prix de base + provision ». Si les frais dépassent la provision, la vente est déficitaire et une alerte est émise.'}
           {' '}Mode de frais demandé à SasPay : <strong className="text-slate-200">déduits</strong> (le client paie exactement le prix affiché).
         </p>
@@ -308,7 +308,7 @@ function TariffCard({ overview, onChanged }: { overview: PricingOverview; onChan
         )}
         {overview.account_add_on_lines > 0 && (
           <Banner tone="warning" title="Le compte SasPay ajoute les frais au client par défaut">
-            {overview.account_add_on_lines} ligne(s) importée(s) indiquent le mode « frais ajoutés ». VYORA demande le mode « déduits »
+            {overview.account_add_on_lines} ligne(s) importée(s) indiquent le mode « frais ajoutés ». SORAHNEX demande le mode « déduits »
             à chaque paiement, mais SasPay ne l’applique que si l’option « Autoriser le choix du mode de frais par l’API » est activée
             (tableau de bord SasPay, Paramètres → Frais). Sinon le client paierait plus que le prix affiché : une alerte serait émise.
           </Banner>
@@ -427,7 +427,7 @@ function SimulatorCard() {
             <Row label="Provision" value="Aucune (la provision ne s’applique qu’aux encaissements)" />
             <Row label="Frais de décaissement estimés"
               value={payout.tariff_status === 'confirmed' ? formatCents(payout.estimated_fee_cents) : 'Non confirmés (aucun tarif de décaissement au barème)'} />
-            <p className="mt-2 text-[11.5px] text-slate-400">Estimation seulement : VYORA n’exécute aucun décaissement.</p>
+            <p className="mt-2 text-[11.5px] text-slate-400">Estimation seulement : SORAHNEX n’exécute aucun décaissement.</p>
           </dl>
         )}
       </div>
@@ -576,7 +576,7 @@ function ReportCard({ missing, onBackfilled }: { missing: number; onBackfilled: 
     <Card data-testid="finance-report">
       <CardHeader
         title="Chiffre d’affaires, frais et marge"
-        description="Rapprochement de chaque paiement confirmé : ce que le client a payé, ce que SasPay a prélevé, ce que VYORA a reçu."
+        description="Rapprochement de chaque paiement confirmé : ce que le client a payé, ce que SasPay a prélevé, ce que SORAHNEX a reçu."
         action={<Button size="sm" variant="outline" icon={<RefreshCw size={13} />} loading={busy} onClick={() => void load(filters)}>Actualiser</Button>}
       />
       <div className="space-y-4 p-5">

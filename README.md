@@ -1,8 +1,8 @@
-# VYORA — Create. Evolve. Grow.
+# SORAHNEX — Create. Evolve. Grow.
 
 SaaS francophone de création de contenus UGC et de croissance d'activité. Le Studio vidéo utilise MuAPI côté serveur ; Business Grow dispose de son schéma Supabase et de son Edge Function. Les fournisseurs sont présentés comme opérationnels uniquement lorsque leurs secrets et modèles sont effectivement vérifiés. Ce dépôt contient le frontend, les migrations SQL, les Edge Functions et les tests.
 
-> **État de production vérifié le 12 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour VYORA sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Les corrections de redirection et d'interface admin sont présentes dans le bundle de production ; une connexion navigateur avec les identifiants du propriétaire n'a pas été effectuée. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur. Groq et Gemini sont configurés et vérifiés en santé (dernier contrôle réussi le 12 novembre 2026 à 23:46 UTC : `groq/openai-gpt-oss-120b` priorité 1, repli `gemini/gemini-2.5-flash`), et la fonction Edge `business-grow` est en version 13 ACTIVE (voir `docs/incident-business-grow-prod-20261112.md`). La surveillance `pg_cron` est rétablie : l'ambiguïté de `vyora_provider_health_dispatch` est corrigée (migration `20261112001000_vyora_provider_health_dispatch_ambiguity.sql` appliquée) et les jobs `vyora-provider-health-daily` (11) et `vyora-provider-health-fresh-guard` (12) appellent explicitement `dispatch(false)` ; un cycle forcé a renouvelé les contrôles Groq et Gemini (`healthy`, 164 ms / 78 ms). Aucune génération payante n'a été lancée.
+> **État de production vérifié le 12 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour SORAHNEX sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Les corrections de redirection et d'interface admin sont présentes dans le bundle de production ; une connexion navigateur avec les identifiants du propriétaire n'a pas été effectuée. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur. Groq et Gemini sont configurés et vérifiés en santé (dernier contrôle réussi le 12 novembre 2026 à 23:46 UTC : `groq/openai-gpt-oss-120b` priorité 1, repli `gemini/gemini-2.5-flash`), et la fonction Edge `business-grow` est en version 13 ACTIVE (voir `docs/incident-business-grow-prod-20261112.md`). La surveillance `pg_cron` est rétablie : l'ambiguïté de `vyora_provider_health_dispatch` est corrigée (migration `20261112001000_vyora_provider_health_dispatch_ambiguity.sql` appliquée) et les jobs `vyora-provider-health-daily` (11) et `vyora-provider-health-fresh-guard` (12) appellent explicitement `dispatch(false)` ; un cycle forcé a renouvelé les contrôles Groq et Gemini (`healthy`, 164 ms / 78 ms). Aucune génération payante n'a été lancée.
 
 ---
 
@@ -26,9 +26,9 @@ SaaS francophone de création de contenus UGC et de croissance d'activité. Le S
 | Administration | Vue d'ensemble, utilisateurs/rôles, suspension, formule, ajustement de crédits, recharges, catalogue, paramètres, audit. Le rôle est vérifié côté serveur ; les changements de redirection et d'isolation sont publiés. |
 | Transverse | Interface 100 % française, mobile-first, responsive, états de chargement/erreur/vide, notifications, error boundary |
 
-## 1bis. Nouvelle expérience « VYORA Video Studio »
+## 1bis. Nouvelle expérience « SORAHNEX Video Studio »
 
-L'entrée principale `/app/studio` est une refonte originale, premium et mobile-first : identité VYORA (aurora violet/cyan, grain discret, animations `fadeUp`), grande prévisualisation centrale, navigation modulaire horizontale, barre d'action collante et hiérarchie claire. Elle s'inspire fonctionnellement de la section vidéo MuAPI sans en copier l'interface.
+L'entrée principale `/app/studio` est une refonte originale, premium et mobile-first : identité SORAHNEX (aurora violet/cyan, grain discret, animations `fadeUp`), grande prévisualisation centrale, navigation modulaire horizontale, barre d'action collante et hiérarchie claire. Elle s'inspire fonctionnellement de la section vidéo MuAPI sans en copier l'interface.
 
 | Espace | Route | État |
 | --- | --- | --- |
@@ -49,10 +49,10 @@ Avant le lancement, une confirmation explicite avec case à cocher reprend le mo
 
 - **Frontend** : React 18 + TypeScript strict + Vite 6 + Tailwind CSS 3 + React Router 6 + lucide-react
 - **Backend** : Supabase (PostgreSQL 17, Auth, Storage, PostgREST, Edge Functions Deno, **pg_cron + pg_net + Vault**)
-- **Schéma** : `saas_ugc` existant **conservé et réutilisé** (32 tables, 31 vues `security_invoker`) + 8 tables VYORA + 1 table `ugc_video_models` + 9 vues `public.reelora_*`
+- **Schéma** : `saas_ugc` existant **conservé et réutilisé** (32 tables, 31 vues `security_invoker`) + 8 tables SORAHNEX + 1 table `ugc_video_models` + 9 vues `public.reelora_*`
 - **IA textuelle** : Groq (`llama-3.3-70b-versatile`) — scripts, accroches, dialogues, contenus publicitaires
 - **IA vidéo** : **MuAPI uniquement** (`https://api.muapi.ai/api/v1`, en-tête `x-api-key`). HeyGen et fal.ai ne sont **pas** utilisés.
-- **Tests** : Vitest — 362 tests, 33 fichiers (dont isolation des comptes VYORA, routage admin, contexte d'authentification, MuAPI, sécurité et parité d'intégration)
+- **Tests** : Vitest — 362 tests, 33 fichiers (dont isolation des comptes SORAHNEX, routage admin, contexte d'authentification, MuAPI, sécurité et parité d'intégration)
 - **Déploiement** : frontend de production [`https://vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app), route `/admin` servie par le SPA ; projet Supabase `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Les fonctions vidéo et leurs migrations sont déployées. L'accès admin, les paiements de bout en bout et une génération vidéo réelle restent à valider avec un compte propriétaire et des paramètres commerciaux autorisés.
 
 Projet Supabase cible : `xbuuhfwobrafcbgtdgjx` (`eu-central-1`). Le projet Sofia Immobilier Lab (`yswsildmbeomjlyofnrk`) n'est **jamais** modifié.
@@ -102,7 +102,7 @@ pg_cron '* * * * *' ── pg_net.http_post ─────────┴──
 | `seedance-lite-i2v` | `POST /api/v1/seedance-lite-i2v` | `prompt`, `image_url` | `resolution`, `duration`, `camera_fixed` | 0,100 USD |
 | `kling-o1-standard-image-to-video` | `POST /api/v1/kling-o1-standard-image-to-video` | `prompt`, `image_url` | `duration` (5/10) | 0,500 USD |
 
-Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models`, `/api/v1/models`, `https://muapi.ai/playground/<model>/llms.txt`. Les modèles `group_of:"avatar"` du catalogue exigent `audio_url` ; VYORA n'a pas de pipeline TTS et ne les expose donc pas. Aucune capacité « script → lipsync » n'est annoncée.
+Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models`, `/api/v1/models`, `https://muapi.ai/playground/<model>/llms.txt`. Les modèles `group_of:"avatar"` du catalogue exigent `audio_url` ; SORAHNEX n'a pas de pipeline TTS et ne les expose donc pas. Aucune capacité « script → lipsync » n'est annoncée.
 
 ### Migrations
 
@@ -116,7 +116,7 @@ Sources : `https://muapi.ai/docs/api-reference`, `/docs/webhooks`, `/docs/models
 | `20261108233629_reelora_studio_library.sql` | RPC RLS `reelora_attach_asset_to_project` : rattacher une création existante à un projet, sans nouvelle architecture de crédits |
 | `20261111150407_vyora_owner_admin_provider_breakdown.sql` | Rôle admin propriétaire unique, verrouillage des paramètres budget génériques et agrégats de dépenses par fournisseur |
 | `20261111160505_vyora_owner_bootstrap_status_20261111.sql` | Statut public booléen du premier bootstrap, sans possibilité d’attribuer un rôle |
-| `20261111165732_vyora_customer_isolation_and_admin_entitlement.sql` | Registre privé des clients VYORA, exclusion des autres apps, garde du provisioning et des RPC clients, séparation des droits/crédits admin |
+| `20261111165732_vyora_customer_isolation_and_admin_entitlement.sql` | Registre privé des clients SORAHNEX, exclusion des autres apps, garde du provisioning et des RPC clients, séparation des droits/crédits admin |
 | `20261108000014…00015_reelora_avatar_provider_*.sql` | Alias `muapi`/`custom`/`legacy` pour les fiches d'avatar, valeurs historiques conservées, aucun fournisseur retiré nommé dans l'application |
 
 Versions live correspondantes : `20261108223923 reelora_muapi_v1`, `20261108224022 reelora_muapi_sync`, `20261108224047 reelora_muapi_catalog_cast`, `20261108231047 reelora_muapi_progress`, puis `reelora_studio_library`, `reelora_avatar_provider_alias` et `reelora_avatar_provider_generic`. **Aucune table, vue ni donnée préexistante n'a été supprimée** (test automatisé).
@@ -182,7 +182,7 @@ supabase secrets set MUAPI_API_KEY=... GROQ_API_KEY=... --project-ref xbuuhfwobr
 
 Business Grow utilise des secrets Edge séparés du Studio : `BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, `BUSINESS_GROW_GROQ_MODEL`, `BUSINESS_GROW_GEMINI_MODEL`, `BUSINESS_GROW_PROVIDER_ORDER` et `BUSINESS_GROW_DATABASE_URL`. Ils ne sont pas à ajouter à `.env.local`, à un fichier suivi par Git ou à une variable `VITE_*`. Le schéma et la fonction sont déployés sur le projet existant ; la disponibilité effective de chaque fournisseur doit être vérifiée par une sonde côté serveur avant de l'annoncer comme utilisable.
 
-Pour un développement local futur, `VITE_BUSINESS_GROW_FUNCTION_URL=http://127.0.0.1:54321/functions/v1/business-grow` (dans `.env.local`, jamais dans un fichier suivi) dirige uniquement le navigateur de développement vers l'Edge Function locale; le code refuse les autres hôtes ou URL afin de ne pas transmettre le jeton VYORA ailleurs. La fonction locale doit elle-même valider le jeton avec Supabase Auth. Cette URL seule ne rend pas le backend opérationnel : il faut encore un runtime Edge local, la base avec le schéma validé et les secrets serveur.
+Pour un développement local futur, `VITE_BUSINESS_GROW_FUNCTION_URL=http://127.0.0.1:54321/functions/v1/business-grow` (dans `.env.local`, jamais dans un fichier suivi) dirige uniquement le navigateur de développement vers l'Edge Function locale; le code refuse les autres hôtes ou URL afin de ne pas transmettre le jeton SORAHNEX ailleurs. La fonction locale doit elle-même valider le jeton avec Supabase Auth. Cette URL seule ne rend pas le backend opérationnel : il faut encore un runtime Edge local, la base avec le schéma validé et les secrets serveur.
 
 ---
 
@@ -224,7 +224,7 @@ Les Edge Functions de production sont déployées aux versions indiquées dans l
 | Suite | Résultat |
 | --- | --- |
 | `npm run typecheck` | ✅ 0 erreur |
-| `npm test` | ✅ **362 tests**, 33 fichiers — couvre notamment l'isolation VYORA, la redirection et les permissions admin, les crédits, MuAPI, les erreurs, la sécurité et la parité d'intégration |
+| `npm test` | ✅ **362 tests**, 33 fichiers — couvre notamment l'isolation SORAHNEX, la redirection et les permissions admin, les crédits, MuAPI, les erreurs, la sécurité et la parité d'intégration |
 | `npm run build` | ✅ production Vite build succeeded (1,715 modules) |
 | `GET /functions/v1/reelora-health` | ✅ `{"groq":false,"muapi":true,"supabase":true,"worker":true}` — `muapi:true` atteste seulement la présence du secret, pas sa validité fournisseur |
 | `GET /functions/v1/reelora-video` sans jeton | ✅ `UNAUTHORIZED_NO_AUTH_HEADER` (passerelle JWT) |
@@ -249,14 +249,14 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 4. **Premier administrateur** : le mécanisme de création est `/proprietaire`, avec confirmation e-mail et attribution via l'Edge Function propriétaire. Le bootstrap refuse toute seconde attribution. Le compte propriétaire existant a déjà le rôle admin ; il n'est pas nécessaire de créer un autre administrateur.
 5. **Worker** : `reelora_worker_token` existe dans Vault sans être exposé. Le cron `reelora-video-tick` est actif et ses exécutions récentes ont réussi.
 6. **Auth et paiements** : l'API Auth publique indique que l'inscription e-mail est activée et l'auto-confirmation active. Les parcours avec un vrai compte et la liste d'URL de redirection n'ont pas été testés. Les fonctions de paiement SasPay sont présentes, mais aucun paiement ou parcours de bout en bout n'a été réalisé.
-7. **Historique SQL** : les 25 migrations VYORA/Business Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.
+7. **Historique SQL** : les 25 migrations SORAHNEX/Business Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.
 
 ---
 
 ## 8. Structures de données notables
 
 - `saas_ugc.ugc_*` : schéma métier d'origine (profils, portefeuilles, espaces, projets, scripts, scènes, tâches, assets, services, tarifs, ledger, notifications…).
-- Ajouts VYORA : `ugc_avatars`, `ugc_prompt_templates`, `ugc_generation_presets`, `ugc_plans`, `ugc_subscriptions`, `ugc_usage_events`, `ugc_notifications`, `ugc_audit_logs`, **`ugc_video_models`**.
+- Ajouts SORAHNEX : `ugc_avatars`, `ugc_prompt_templates`, `ugc_generation_presets`, `ugc_plans`, `ugc_subscriptions`, `ugc_usage_events`, `ugc_notifications`, `ugc_audit_logs`, **`ugc_video_models`**.
 - Colonnes de suivi ajoutées à `ugc_generation_jobs` : `provider_status`, `next_poll_at`, `last_polled_at`, `poll_attempts`, `expires_at`, `webhook_received_at`, `submission_claim_id`, `muapi_cost`.
 - Formules : `Découverte` (gratuit, 9 crédits, 1 vidéo/mois), `Studio`, `Pro`, `Enterprise`. **Aucun crédit gratuit mensuel ajouté.**
 - Services actifs : `script=2`, `image_retouch=3`, `product_image=3`, `cutaway=10`, `ugc_clip_8s=9`, `ugc_clip_15s=16`, `ugc_ad_4clips=36` crédits.
@@ -273,7 +273,7 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 
 ---
 
-© 2026 VYORA. Hébergement Supabase `eu-central-1`. Aucune donnée de démonstration ni aucun résultat de génération n'est présenté comme réel.
+© 2026 SORAHNEX. Hébergement Supabase `eu-central-1`. Aucune donnée de démonstration ni aucun résultat de génération n'est présenté comme réel.
 
 ---
 

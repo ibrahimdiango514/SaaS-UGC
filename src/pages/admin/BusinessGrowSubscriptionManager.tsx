@@ -65,7 +65,7 @@ export function describeAdminSubscriptionError(message: string): string {
     case 'not_authenticated': return 'Session expirée : reconnectez-vous.';
     case 'target_required': return 'Aucun compte ciblé.';
     case 'target_not_found': return 'Ce compte n’existe pas.';
-    case 'target_not_vyora_customer': return 'Ce compte n’est pas un compte client VYORA (ou c’est un administrateur) : attribution refusée.';
+    case 'target_not_vyora_customer': return 'Ce compte n’est pas un compte client SORAHNEX (ou c’est un administrateur) : attribution refusée.';
     case 'self_assignment_forbidden': return 'Un administrateur ne peut pas s’attribuer une formule à lui-même.';
     case 'plan_not_found': return 'Formule inconnue.';
     case 'plan_inactive': return 'Cette formule n’est plus proposée.';

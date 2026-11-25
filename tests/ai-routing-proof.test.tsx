@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * VYORA AI — preuve de routage.
+ * SORAHNEX AI — preuve de routage.
  *
  * ## Le défaut que ce fichier empêche de réintroduire
  *
@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *
  * Ce fichier rend le **vrai routeur** de l'application et vérifie deux choses :
  *
- *   1. la nouvelle coquille VYORA AI est présente à `/app/ai` ;
+ *   1. la nouvelle coquille SORAHNEX AI est présente à `/app/ai` ;
  *   2. l'ancienne navigation Studio est **absente** de cette page.
  *
  * Le second point est le plus important : c'est lui qui empêche la régression.
@@ -114,9 +114,9 @@ function monterAvecLayout() {
 }
 
 describe('Preuve de routage — la nouvelle coquille est bien celle affichée', () => {
-  it('affiche la sidebar VYORA AI avec ses entrées', async () => {
+  it('affiche la sidebar SORAHNEX AI avec ses entrées', async () => {
     monterSansLayout();
-    await waitFor(() => expect(screen.getAllByText(/VYORA/i).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getAllByText(/SORAHNEX/i).length).toBeGreaterThan(0));
 
     // Marqueurs de la nouvelle coquille.
     expect(screen.getByText(/Nouveau chat/i)).toBeTruthy();

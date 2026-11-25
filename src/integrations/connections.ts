@@ -1,5 +1,5 @@
 /**
- * VYORA — état réel des connexions.
+ * SORAHNEX — état réel des connexions.
  *
  * ## Principe : l'état vient d'une source, il n'est pas déclaré
  *
@@ -162,7 +162,7 @@ export interface AuditEntry {
 }
 
 /**
- * Fournisseurs dont VYORA détient réellement un identifiant côté serveur.
+ * Fournisseurs dont SORAHNEX détient réellement un identifiant côté serveur.
  *
  * Cette liste est une **déclaration de configuration**, pas un état de
  * connexion. Elle est utilisée uniquement pour distinguer « il manque nos

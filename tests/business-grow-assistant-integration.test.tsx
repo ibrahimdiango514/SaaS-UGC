@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
 /**
- * Intégration de l'interface VYORA AI dans Business Grow.
+ * Intégration de l'interface SORAHNEX AI dans Business Grow.
  *
  * ## Ce que ces tests protègent
  *
@@ -13,7 +13,7 @@ import type { ReactNode } from 'react';
  * de Business Grow vérifient déjà les fonctions métier (AI Director, mémoire,
  * quota, isolation) ; ceux-ci vérifient la *direction architecturale* :
  *
- * 1. l'interface VYORA remplace réellement l'ancienne section Assistant ;
+ * 1. l'interface SORAHNEX remplace réellement l'ancienne section Assistant ;
  * 2. elle ne recrée pas une navigation d'application concurrente ;
  * 3. elle réutilise le socle de Business Grow (aucun service inventé) ;
  * 4. le catalogue d'intégrations reste accessible depuis Business Grow ;
@@ -107,8 +107,8 @@ function monter() {
   );
 }
 
-describe('Business Grow — l’interface VYORA remplace l’ancienne section Assistant', () => {
-  it('rend l’interface VYORA dans la section Assistant', async () => {
+describe('Business Grow — l’interface SORAHNEX remplace l’ancienne section Assistant', () => {
+  it('rend l’interface SORAHNEX dans la section Assistant', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 

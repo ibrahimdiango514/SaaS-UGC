@@ -1,5 +1,5 @@
 /**
- * Tarification du Studio VYORA.
+ * Tarification du Studio SORAHNEX.
  *
  * Sources de vérité :
  *  - Les packs (prix + crédits + recommandation) viennent de la base via

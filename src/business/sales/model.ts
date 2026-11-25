@@ -1,5 +1,5 @@
 /**
- * VYORA Growth OS — Lot E : ventes, devis, commandes et factures.
+ * SORAHNEX Growth OS — Lot E : ventes, devis, commandes et factures.
  *
  * Modèle pur, sans React ni Supabase. Les totaux, statuts et conversions sont
  * calculés ici afin de rester testables et explicables. Le stockage générique

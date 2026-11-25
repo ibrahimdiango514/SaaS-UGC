@@ -31,18 +31,18 @@ export const MODE_LABELS: Record<GenerationMode, string> = {
 export const MODE_DESCRIPTIONS: Record<GenerationMode, string> = {
   'text-to-video': 'Décrivez votre scène et donnez vie à votre idée en vidéo.',
   'image-to-video': 'Importez une image de référence et décrivez le mouvement souhaité.',
-  'video-to-video': 'Transformation d’une vidéo existante : source vidéo non connectée dans VYORA.',
-  'audio-to-video': 'Avatar / lip sync : source audio non produite par VYORA.',
+  'video-to-video': 'Transformation d’une vidéo existante : source vidéo non connectée dans SORAHNEX.',
+  'audio-to-video': 'Avatar / lip sync : source audio non produite par SORAHNEX.',
   'video-edit': 'Édition ou habillage d’une vidéo : source vidéo non connectée.',
   'video-tools': 'Outil vidéo : entrées spécifiques non connectées.',
   effects: 'Effet animé depuis une image : source image requise.',
   lora: 'Modèle LoRA vidéo : entrées spécifiques non connectées.',
-  training: 'Entraînement vidéo : aucun parcours VYORA connecté.',
+  training: 'Entraînement vidéo : aucun parcours SORAHNEX connecté.',
   other: 'Autre capacité vidéo.',
 };
 
 /**
- * Required input fields VYORA can actually provide today. A verified model
+ * Required input fields SORAHNEX can actually provide today. A verified model
  * that requires anything else (audio, video, multiple images, a previous
  * request id, …) is shown in the catalogue but never presented as a working
  * generation path until that capability is integrated.
@@ -207,13 +207,13 @@ export function paramsSummary(params: Record<string, ParamValue>): string {
   return entries.map(([k, v]) => `${paramLabel(k)} : ${typeof v === 'boolean' ? (v ? 'oui' : 'non') : String(v)}`).join(' · ');
 }
 
-/** A model is selectable only when VYORA can really serve it. */
+/** A model is selectable only when SORAHNEX can really serve it. */
 export function reeloraModelStatus(model: MuApiModel): { status: ReeloraModelStatus; reason: string } {
   if (!model.is_enabled) return { status: 'disabled', reason: 'Ce modèle est désactivé.' };
   if (model.is_coming_soon) return { status: 'coming_soon', reason: 'Ce modèle n’est pas encore lancé.' };
   const unsupported = (model.required_fields ?? []).filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
   if (unsupported.length) {
-    return { status: 'unsupported', reason: `Entrée non connectée dans VYORA : ${unsupported.join(', ')}.` };
+    return { status: 'unsupported', reason: `Entrée non connectée dans SORAHNEX : ${unsupported.join(', ')}.` };
   }
   if (model.account_access === 'unverified') {
     return { status: 'unverified', reason: 'Disponibilité non vérifiée.' };

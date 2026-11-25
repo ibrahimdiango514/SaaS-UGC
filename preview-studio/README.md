@@ -1,4 +1,4 @@
-# Preview Studio VYORA — captures reproductibles
+# Preview Studio SORAHNEX — captures reproductibles
 
 Ce dossier contient des captures de l'interface **réelle** (application Vite
 lancée par `npm run dev`), prises dans Chromium par

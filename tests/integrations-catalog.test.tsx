@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * VYORA Integrations — tests du catalogue.
+ * SORAHNEX Integrations — tests du catalogue.
  *
  * ## Ce que ces tests protègent
  *

@@ -68,7 +68,7 @@ export default function BusinessModules() {
         <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <p className="vy-chip border-violet-300/25 bg-violet-400/10 text-violet-200">
-              <Sparkles size={11} /> VYORA Business Growth
+              <Sparkles size={11} /> SORAHNEX Grow
             </p>
             <h1 className="vy-title mt-3 text-[1.75rem] leading-tight sm:text-[2.15rem]">Vos modules métier</h1>
             <p className="mt-2.5 max-w-2xl text-[13px] leading-relaxed text-slate-400">

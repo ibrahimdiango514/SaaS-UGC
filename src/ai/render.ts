@@ -1,5 +1,5 @@
 /**
- * VYORA AI — rendu Markdown minimal, sans dépendance.
+ * SORAHNEX AI — rendu Markdown minimal, sans dépendance.
  *
  * ## Pourquoi un rendu maison
  *

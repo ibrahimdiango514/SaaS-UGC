@@ -35,7 +35,7 @@ redéploiement Edge, donc une autorisation explicite.
 
 Aucune protection n'a été désactivée : l'abonnement a été posé par la RPC
 `public.vyora_admin_set_business_subscription`, exécutée dans le contexte de
-l'administrateur VYORA (`reelora_assert_admin()`), journalisée dans
+l'administrateur SORAHNEX (`reelora_assert_admin()`), journalisée dans
 `saas_ugc.ugc_audit_logs` (`business_grow_subscription_set`).
 
 - Compte : `ibagang009@gmail.com` (`373436db-0f06-4888-a489-e9c60d7fbd8b`)

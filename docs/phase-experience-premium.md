@@ -1,4 +1,4 @@
-# VYORA — Phase « expérience premium » : ce qui a été livré et ce qui reste
+# SORAHNEX — Phase « expérience premium » : ce qui a été livré et ce qui reste
 
 > État au 2026-11-14, branche de session issue de `develop`.
 > Chaque section indique le fichier concerné et le comportement préservé.

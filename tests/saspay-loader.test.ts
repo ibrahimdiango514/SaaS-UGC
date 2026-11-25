@@ -98,7 +98,7 @@ describe('artefact de production des paiements SasPay', () => {
     expect(bundle).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{8,}/);
     expect(bundle).toContain('VYORA_SASPAY_SECRET_KEY');
     expect(bundle).toContain('VYORA_SASPAY_WEBHOOK_SECRET');
-    // Les secrets du produit immobilier ne sont jamais lus par VYORA.
+    // Les secrets du produit immobilier ne sont jamais lus par SORAHNEX.
     expect(bundle).not.toMatch(/["'`]SASPAY_SECRET_KEY["'`]/);
     expect(bundle).not.toMatch(/["'`]SASPAY_WEBHOOK_SECRET["'`]/);
   });

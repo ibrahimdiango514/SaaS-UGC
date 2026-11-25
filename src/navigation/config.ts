@@ -3,7 +3,7 @@ import {
   BarChart3, BellRing, BookOpen, Bot, Boxes, Brain, Building2, Clapperboard,
   ClipboardList, Coins, CreditCard, Film, FolderKanban, HardDrive, History,
   LayoutDashboard, Mail, Plug, Scissors, Settings, Shield, SlidersHorizontal,
-  Sparkles, Target, Users, Wallet, Wand2, Zap,
+  Sparkles, Target, Users, Wallet, Wand2, Zap, Menu,
 } from 'lucide-react';
 
 export type WorkspaceScope = 'studio' | 'business';
@@ -47,7 +47,7 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
     defaultOpen: true,
     items: [{
       to: '/app/ai',
-      label: 'Assistant VYORA',
+      label: 'Assistant SORAHNEX',
       description: 'Conversations, pièces jointes et analyse',
       icon: Bot,
       keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
@@ -398,19 +398,34 @@ export const BUSINESS_SHORTCUTS: WorkspaceShortcut[] = [
   { to: '/app/business/finance', label: 'Finance', icon: Wallet },
 ];
 
-export const STUDIO_MOBILE_NAV = [
+export interface MobileNavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  /** Ouvre le tiroir complet au lieu de naviguer (entrée « Plus »). */
+  opensDrawer?: boolean;
+}
+
+export const STUDIO_MOBILE_NAV: MobileNavItem[] = [
   { to: '/app/studio/accueil', label: 'Vue d’ensemble', icon: LayoutDashboard },
   { to: '/app/studio', label: 'Créer', icon: Clapperboard },
   { to: '/app/projets', label: 'Projets', icon: FolderKanban },
   { to: '/app/historique', label: 'Historique', icon: History },
 ];
 
-export const BUSINESS_MOBILE_NAV = [
-  { to: '/app/business', label: 'Vue', icon: LayoutDashboard },
-  { to: '/app/business/crm', label: 'CRM', icon: Users },
-  { to: '/app/business/pipeline', label: 'Pipeline', icon: Target },
-  { to: '/app/business/finance', label: 'Finance', icon: Wallet },
+/**
+ * Barre du bas de SORAHNEX Grow sur Android.
+ *
+ * Quatre destinations réelles (accueil, prospects, ventes, assistant) plus une
+ * entrée « Plus » qui ouvre le tiroir complet : la finance, le recouvrement, la
+ * configuration et les modules restent accessibles sans saturer la barre.
+ */
+export const BUSINESS_MOBILE_NAV: MobileNavItem[] = [
+  { to: '/app/business', label: 'Accueil', icon: LayoutDashboard },
+  { to: '/app/business/crm', label: 'Prospects', icon: Users },
+  { to: '/app/business/pipeline', label: 'Ventes', icon: Target },
   { to: '/app/business/assistant', label: 'Assistant', icon: Brain },
+  { to: '', label: 'Plus', icon: Menu, opensDrawer: true },
 ];
 
 export function normalizeSearch(value: string): string {

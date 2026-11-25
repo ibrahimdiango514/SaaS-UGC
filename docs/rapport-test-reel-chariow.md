@@ -1,4 +1,4 @@
-# Rapport — test réel de connexion VYORA × boutique Chariow
+# Rapport — test réel de connexion SORAHNEX × boutique Chariow
 
 **Boutique testée** : `https://ewbnibvk.mychariow.online`
 **Date** : 14 novembre 2026
@@ -19,7 +19,7 @@ constats ci-dessous proviennent donc de deux sources, toujours distinguées :
 | Lecture HTTP réelle de la vitrine et de l'API, via la passerelle de récupération hors sandbox | Le comportement **effectif** des serveurs Chariow (codes HTTP, corps de réponse) |
 | Documentation officielle `chariow.dev` | Le **contrat** de l'API (champs, scopes, pagination, limites) |
 
-Aucun appel HTTP n'a été prétendu venir de VYORA elle-même : les Edge Functions
+Aucun appel HTTP n'a été prétendu venir de SORAHNEX elle-même : les Edge Functions
 `store-connect` / `store-import` n'ont pas pu joindre Chariow depuis le sandbox.
 La distinction est maintenue partout dans ce rapport ; le point 4 en tire les
 conséquences.
@@ -71,7 +71,7 @@ catalogue n'est donc interrogeable que par **l'API officielle authentifiée**.
 | Documentation | `https://chariow.dev` (spec OpenAPI : `/api-reference/openapi.json`) |
 | Authentification | `Authorization: Bearer sk_live_…` (clé d'API, **pas** d'OAuth) |
 | Création de la clé | `app.chariow.com` → **Settings → API Keys** (affichée une seule fois) |
-| Scopes utiles à VYORA | **`products.read`** et **`store.read`** — rien d'autre |
+| Scopes utiles à SORAHNEX | **`products.read`** et **`store.read`** — rien d'autre |
 | Scopes à ne PAS demander | `customers.read`, `customers.pii.read`, `sales.read`, `licenses.write`, `discounts.read`, `webhooks.write`, `checkout.write` |
 | Points d'entrée lecture | `GET /v1/store`, `GET /v1/products`, `GET /v1/products/{id\|slug}` |
 | Pagination | **curseur** : `?per_page=` (≤ 100) + `?cursor=` ; réponse `{data:[…], pagination:{next_cursor, has_more_pages, count, per_page}}` |
@@ -108,7 +108,7 @@ mécanisme officiel.
    d'autre (en particulier aucun scope `customers.*`, `sales.*`, `*.write`).
 4. Donner un nom parlant (ex. `vyora-import-readonly`).
 5. Copier la clé `sk_live_…` — elle n'est **plus jamais réaffichée** — et la
-   saisir **directement dans le formulaire du connecteur VYORA**.
+   saisir **directement dans le formulaire du connecteur SORAHNEX**.
 
 > **La clé ne doit jamais transiter par la conversation, un journal ou un
 > fichier du dépôt.** Le formulaire la transmet à `store-connect`, qui la stocke
@@ -129,9 +129,9 @@ mécanisme officiel.
 
 **Avec une clé `products.read`, l'API renvoie l'intégralité du catalogue du
 compte — y compris les brouillons** (`status: draft|published|suspended`). Ce
-point a une conséquence de conception : l'import VYORA devra **filtrer sur
+point a une conséquence de conception : l'import SORAHNEX devra **filtrer sur
 `published`** et signaler séparément le nombre de brouillons ignorés, pour ne
-jamais publier dans VYORA un article non publié chez le marchand.
+jamais publier dans SORAHNEX un article non publié chez le marchand.
 
 ## 6. Nombre de produits et de variantes réellement détectés
 
@@ -150,12 +150,12 @@ sans authentification**, et **non** la taille réelle du catalogue. La vitrine
 Seule la clé `products.read` tranchera. Le décompte définitif sera produit par
 le test authentifié, avec la répartition `published` / `draft` / `suspended`.
 
-## 7. Champs réellement récupérables, et leur destination dans VYORA
+## 7. Champs réellement récupérables, et leur destination dans SORAHNEX
 
 Contrat relevé sur la documentation officielle (produit) ; chaque champ est
 mis en face de son équivalent dans `NormalizedProduct`.
 
-| Champ Chariow | Type / remarque | Destination VYORA |
+| Champ Chariow | Type / remarque | Destination SORAHNEX |
 | --- | --- | --- |
 | `id` (`prd_…`) | **stable** | `platformId` (identité inter-imports) |
 | `name` | chaîne | `name` |
@@ -196,7 +196,7 @@ et références SKU — **non**.
 4. **Prix en décimal**, pas en unité mineure : la conversion ×100 doit être
    faite une seule fois et arrondie, sinon on reproduit le double-arrondi déjà
    corrigé côté PrestaShop.
-5. **Les brouillons sont renvoyés** par l'API : sans filtre `status`, VYORA
+5. **Les brouillons sont renvoyés** par l'API : sans filtre `status`, SORAHNEX
    importerait des fiches non publiées.
 6. **Accès strictement conditionné à une clé.** Aucun catalogue public, aucun
    flux : pas de mode « catalogue public » à implémenter, contrairement aux
@@ -279,6 +279,6 @@ Le plan de raccordement, qui **réutilise le moteur existant** et n'introduit
   produira le chiffre définitif du point 6.
 
 **Prérequis bloquant pour la suite** : la clé `sk_live_…` avec **`products.read`
-+ `store.read`**, saisie dans le formulaire VYORA (point 4). Sans elle, tout ce
++ `store.read`**, saisie dans le formulaire SORAHNEX (point 4). Sans elle, tout ce
 qui précède le point 8 peut être développé et testé hors ligne, mais **aucun
 import réel n'est possible**.

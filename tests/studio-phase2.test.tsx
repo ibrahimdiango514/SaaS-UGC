@@ -2,7 +2,7 @@
 /**
  * PHASE 2 — tests SIMULÉS, sans appel MuAPI, sans Supabase, sans génération,
  * sans réservation ni débit réel. Les fixtures reproduisent les agrégats du
- * catalogue vérifié (415 références, 236 actifs Reelora) et les 3 devis live
+ * catalogue vérifié (415 références, 236 actifs SORAHNEX Studio) et les 3 devis live
  * déjà consignés dans docs/validation-authentifiee-muapi.md.
  */
 import { readFileSync } from 'node:fs';
@@ -170,7 +170,7 @@ class SimulatedCreditWallet {
   }
 }
 
-describe('Phase 2 · devis opaques et crédits VYORA', () => {
+describe('Phase 2 · devis opaques et crédits SORAHNEX', () => {
   it('bloque un devis absent, indisponible ou expiré', () => {
     const cases: Array<Partial<VideoCostEstimate>> = [
       { pricing_available: false, quote_id: null },
@@ -469,7 +469,7 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
 
     render(<MemoryRouter><PromptBar {...props} estimate={estimate()} blockedReason="" /></MemoryRouter>);
     expect((screen.getByTestId('generate-button') as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByTestId('studio-credit-summary').textContent).toContain('16 crédits VYORA');
+    expect(screen.getByTestId('studio-credit-summary').textContent).toContain('16 crédits SORAHNEX');
     expect(screen.getByTestId('studio-credit-summary').textContent).not.toMatch(/USD|MuAPI|Groq/i);
   });
 

@@ -45,7 +45,7 @@ const allowedOrigins = [
 ```
 
 Le secret **s'ajoute** désormais à la liste au lieu de la remplacer. CORS n'est pas une
-frontière d'authentification : chaque requête exige toujours un JWT VYORA valide (401 sinon).
+frontière d'authentification : chaque requête exige toujours un JWT SORAHNEX valide (401 sinon).
 
 Secret `BUSINESS_GROW_ALLOWED_ORIGINS` repassé à une valeur **superset** explicite
 (localhost 5173/4173, `vyora-ugc`, `saas-ugc-growth`, deploy-preview, `sbc-ai-agency-dashbord`,

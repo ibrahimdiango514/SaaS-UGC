@@ -82,12 +82,12 @@ describe('accueil personnalisé — message', () => {
 
   it('hash stable et borné', () => {
     expect(stableHash('vyora')).toBe(stableHash('vyora'));
-    expect(stableHash('vyora')).not.toBe(stableHash('Vyora'));
+    expect(stableHash('alpha')).not.toBe(stableHash('Alpha'));
     expect(stableHash('')).toBeGreaterThanOrEqual(0);
   });
 
   it('rappel d’espace uniquement si le nom existe réellement', () => {
-    expect(workspaceHint('Maison VYORA')).toBe('Vous êtes dans Maison VYORA.');
+    expect(workspaceHint('Maison SORAHNEX')).toBe('Vous êtes dans Maison SORAHNEX.');
     expect(workspaceHint('')).toBeNull();
     expect(workspaceHint(null)).toBeNull();
   });

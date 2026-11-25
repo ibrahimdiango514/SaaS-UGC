@@ -45,7 +45,7 @@ export interface FeeQuote {
   mode: 'ADD_ON' | 'DEDUCTED';
   /** Montant débité au client. */
   total: string;
-  /** Montant reçu par VYORA. */
+  /** Montant reçu par SORAHNEX. */
   net: string;
 }
 
@@ -157,7 +157,7 @@ export interface PaymentOrder {
 }
 
 /**
- * Un remboursement se fait en deux temps, SANS mouvement d'argent par VYORA :
+ * Un remboursement se fait en deux temps, SANS mouvement d'argent par SORAHNEX :
  *  - `credits_recovered` : crédits (ou jours d'abonnement) repris, argent à rendre ;
  *  - `settled` : l'administrateur atteste avoir rendu l'argent, référence à l'appui.
  */
@@ -286,7 +286,7 @@ export function adminRefundPreview(product: PaymentProduct, orderId: string): Pr
 /**
  * Enregistre un remboursement : reprend les crédits (ou la période d'abonnement)
  * et clôt la commande. N'envoie AUCUN argent : le versement se fait hors de
- * VYORA, puis s'atteste avec `adminSettleRefund`.
+ * SORAHNEX, puis s'atteste avec `adminSettleRefund`.
  */
 export async function adminRecordRefund(input: {
   product: PaymentProduct; orderId: string; reason: string; amountXof: number; allowPartial: boolean;
@@ -463,7 +463,7 @@ export const ANOMALY_ADVICE: Record<string, string> = {
   subscription_conflict: 'Le client a payé, mais son abonnement en cours ne permettait pas d’appliquer ce paiement : rien n’a été livré ni modifié. Remboursez-le intégralement depuis la liste des paiements Business Grow (« Rembourser »), rendez l’argent, puis attestez le versement : l’anomalie se classera seule.',
   initiation_unconfirmed: 'La demande Mobile Money est partie, mais SasPay n’a jamais répondu : on ignore si le client a été débité. Rien n’a été livré et le client ne peut lancer aucun autre paiement. Cherchez la transaction dans le tableau de bord SasPay (numéro, montant, heure), puis tranchez dans « Paiements sans réponse » : rattachez-la, ou attestez qu’aucun encaissement n’existe.',
   fee_exceeds_provision: 'Le client a été livré normalement. Les frais réels de cette transaction dépassent la provision facturée : la marge est entamée. Importez les tarifs du compte SasPay (Finances → Barème) pour que les prochains prix couvrent ces frais, ou relevez la provision.',
-  net_below_base: 'Le client a été livré normalement, mais VYORA a reçu moins que le prix de base de l’article : cette vente est déficitaire. Vérifiez le barème et la provision dans Finances.',
+  net_below_base: 'Le client a été livré normalement, mais SORAHNEX a reçu moins que le prix de base de l’article : cette vente est déficitaire. Vérifiez le barème et la provision dans Finances.',
   fee_mode_unexpected: 'SasPay a AJOUTÉ les frais au montant demandé au lieu de les déduire : le client a payé plus que le prix affiché. Dans le tableau de bord SasPay, Paramètres → Frais, activez « Autoriser le choix du mode de frais par l’API » ou choisissez le mode « Déduits » par défaut. Envisagez de rendre la différence au client.',
   reconciliation_failed: 'Le paiement est confirmé et le client livré, mais la ligne de rapprochement (frais, net, marge) n’a pas pu être écrite. Relancez « Reprendre l’historique » dans Finances ; si l’erreur persiste, transmettez le détail au support technique.',
   sweep_unreliable: 'La liste des transactions SasPay n’a pas permis de rechercher les paiements dont la réponse s’est perdue (libellé absent, ou trop de transactions à lire). Les paiements rattachés à une commande restent revérifiés un par un. Comparez les encaissements récents du tableau de bord SasPay avec la liste des paiements.',

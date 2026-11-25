@@ -54,7 +54,7 @@ Consultées le 2026-11-14.
 | Régions / résidence | **non publié** |
 
 > ⚠️ Le serveur **local** `http://localhost:11434` n'exige aucune authentification :
-> ce n'est **pas** le mode visé ici. VYORA utilisera l'accès **cloud direct**, qui
+> ce n'est **pas** le mode visé ici. SORAHNEX utilisera l'accès **cloud direct**, qui
 > exige la clé. Ne jamais confondre les deux bases URL.
 
 ## 5. Modèles annoncés

@@ -41,7 +41,7 @@ const catalogue = {
     title: 'Sérum Éclat',
     body_html: '<p>Un sérum.</p>',
     handle: 'serum-eclat',
-    vendor: 'VYORA',
+    vendor: 'SORAHNEX',
     product_type: 'Soin',
     tags: 'visage',
     variants: [{ id: 11, title: 'Default', price: '12000.00', sku: 'SE-1', available: true }],

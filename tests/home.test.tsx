@@ -8,7 +8,7 @@ vi.mock('../src/context/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 'user-1', email: 'awa.traore@example.com' },
     profile: { display_name: 'Awa Traoré' },
-    workspace: { id: 'ws-1', name: 'Maison VYORA' },
+    workspace: { id: 'ws-1', name: 'Maison SORAHNEX' },
   }),
 }));
 
@@ -27,8 +27,8 @@ describe('Accueil personnalisé après connexion', () => {
     const business = screen.getByRole('link', { name: /Entrer dans Business Growth/ });
     expect(studio.getAttribute('href')).toBe('/app/studio');
     expect(business.getAttribute('href')).toBe('/app/business');
-    expect(screen.getByRole('heading', { name: 'VYORA Studio' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'VYORA Business Growth' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'SORAHNEX Studio' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'SORAHNEX Grow' })).toBeTruthy();
   });
 
   it('rappelle la séparation des crédits et des données', () => {

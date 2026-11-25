@@ -1,4 +1,4 @@
-# Tarification vidéo VYORA — état de validation
+# Tarification vidéo SORAHNEX — état de validation
 
 **Statut : configuration désactivée par défaut. Aucun devis réel ni génération payante
 n'a été demandé ou lancé dans cette validation.** Les tests du dépôt utilisent des

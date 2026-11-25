@@ -34,7 +34,7 @@ vi.mock('../src/business/api', () => ({
 
 import { businessGrowBridge } from '../src/business/bridge';
 
-describe('Reelora AI ↔ Platform contracts', () => {
+describe('SORAHNEX Studio AI ↔ Platform contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

@@ -361,7 +361,7 @@ export default function SalesWorkspace({
   };
 
   const openPrint = (kind: SalesTab, document: Quote | SalesOrder | Invoice) => {
-    const html = printableDocument(kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture', document, contactName(document.contactId), 'VYORA Business');
+    const html = printableDocument(kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture', document, contactName(document.contactId), 'SORAHNEX Business');
     const win = window.open('', '_blank', 'noopener,noreferrer');
     if (!win) { toast.error('Autorisez les fenêtres contextuelles pour imprimer.'); return; }
     win.document.write(html);

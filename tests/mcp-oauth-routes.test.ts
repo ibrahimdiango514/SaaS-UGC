@@ -223,7 +223,7 @@ describe('page de consentement', () => {
     expect(d.codes.size).toBe(0);
   });
 
-  it('exige une session VYORA', async () => {
+  it('exige une session SORAHNEX', async () => {
     const d = deps();
     const id = await enregistrerClient(d.deps);
     const r = await preparerConsentement(d.deps, PARAMS(id), null);

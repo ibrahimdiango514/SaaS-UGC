@@ -26,7 +26,7 @@ import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
 
 /**
- * VYORA Integrations — catalogue.
+ * SORAHNEX Integrations — catalogue.
  *
  * ## Règle appliquée partout : l'état vient de la base
  *
@@ -359,8 +359,8 @@ export function IntegrationsCenter({
       setNotice({
         tone: 'success',
         text: remoteRevoked
-          ? 'Connexion révoquée chez le fournisseur et dans VYORA.'
-          : 'Connexion désactivée dans VYORA. Le fournisseur n’a pas confirmé la révocation distante : révoquez aussi depuis votre compte si nécessaire.',
+          ? 'Connexion révoquée chez le fournisseur et dans SORAHNEX.'
+          : 'Connexion désactivée dans SORAHNEX. Le fournisseur n’a pas confirmé la révocation distante : révoquez aussi depuis votre compte si nécessaire.',
       });
       setConfirmation(null);
       await charger();
@@ -429,7 +429,7 @@ export function IntegrationsCenter({
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-brand-400/25 bg-brand-500/10 px-3 py-1 text-[0.7rem] text-brand-200">
               <Plug size={13} />
-              VYORA Integrations
+              SORAHNEX Integrations
             </span>
             {connections !== null && (
               <span className="text-[0.7rem] text-slate-500">
@@ -439,7 +439,7 @@ export function IntegrationsCenter({
           </div>
 
           <h1 className="font-display text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-            Connectez vos outils à VYORA
+            Connectez vos outils à SORAHNEX
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
             Chaque fiche indique ce que la connexion permettra réellement, les
@@ -709,7 +709,7 @@ export function IntegrationsCenter({
           <Card className="w-full max-w-md p-5">
             <h3 className="font-display text-base font-semibold text-white">Révoquer cette connexion ?</h3>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
-              VYORA cessera d’utiliser <strong className="text-slate-200">{confirmation.displayName || confirmation.email || confirmation.provider}</strong>.
+              SORAHNEX cessera d’utiliser <strong className="text-slate-200">{confirmation.displayName || confirmation.email || confirmation.provider}</strong>.
               Une tentative de révocation sera faite chez le fournisseur. Vos données déjà importées ne sont pas supprimées.
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -1102,7 +1102,7 @@ function FicheDetail({
               {associationLocale && (
                 <div className="rounded-lg border border-line bg-white/[0.03] px-3.5 py-3">
                   <p className="text-xs leading-relaxed text-slate-400">
-                    Retirer l’association locale détache VYORA de ce fournisseur pour
+                    Retirer l’association locale détache SORAHNEX de ce fournisseur pour
                     cette entreprise. Aucune révocation n’est effectuée chez le
                     fournisseur.
                   </p>
@@ -1165,9 +1165,9 @@ export function expliquerIndisponibilite(statut: IntegrationStatus, entry: Integ
   }
   switch (statut) {
     case 'needs_approval':
-      return `Ce fournisseur exige une validation de son côté (${entry.auth.find((a) => a.externalApproval)?.externalApproval ?? 'approbation du fournisseur'}). VYORA ne peut pas contourner cette étape : la connexion sera proposée une fois l’approbation obtenue.`;
+      return `Ce fournisseur exige une validation de son côté (${entry.auth.find((a) => a.externalApproval)?.externalApproval ?? 'approbation du fournisseur'}). SORAHNEX ne peut pas contourner cette étape : la connexion sera proposée une fois l’approbation obtenue.`;
     case 'needs_config':
-      return 'Les identifiants VYORA pour ce fournisseur ne sont pas encore configurés côté serveur. Le moteur d’intégration les ajoutera en Livraison 3.';
+      return 'Les identifiants SORAHNEX pour ce fournisseur ne sont pas encore configurés côté serveur. Le moteur d’intégration les ajoutera en Livraison 3.';
     case 'unavailable':
       return 'Aucun mode de connexion légal n’est disponible pour ce fournisseur actuellement.';
     default:

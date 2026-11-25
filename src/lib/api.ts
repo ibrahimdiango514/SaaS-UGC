@@ -1092,7 +1092,7 @@ export async function adminRefreshProviderBalance(): Promise<AdminProviderBalanc
 }
 
 /**
- * VYORA AI CORE — lecture admin du registre multi-fournisseurs (fournisseurs,
+ * SORAHNEX AI CORE — lecture admin du registre multi-fournisseurs (fournisseurs,
  * modèles vérifiés, rôles, règles, budgets, dépense du mois). Réservé à
  * l'administrateur vérifié côté serveur (ugc_is_admin).
  */
@@ -1100,13 +1100,13 @@ export function adminAiCoreRegistry(): Promise<AiCoreRegistrySnapshot> {
   return rpc<AiCoreRegistrySnapshot>('vyora_ai_admin_registry_get');
 }
 
-/** VYORA AI CORE — journal des appels IA récents (lecture admin). */
+/** SORAHNEX AI CORE — journal des appels IA récents (lecture admin). */
 export function adminAiCoreCalls(limit = 50): Promise<AiCoreCallEntry[]> {
   return rpc<AiCoreCallEntry[]>('vyora_ai_admin_calls_list', { p_limit: limit });
 }
 
 /**
- * VYORA AI CORE — enregistrement d'un fournisseur dans le registre.
+ * SORAHNEX AI CORE — enregistrement d'un fournisseur dans le registre.
  *
  * Seul le DESCRIPTEUR est transmis (gabarit de protocole, URL, nom de la
  * variable de secret). La clé elle-même reste un secret Edge : elle n'est
@@ -1125,17 +1125,17 @@ export function adminAiCoreProviderUpsert(args: {
   return rpc('vyora_ai_admin_provider_upsert', { p_payload: args });
 }
 
-/** VYORA AI CORE — désactivation d'un fournisseur (jamais de suppression). */
+/** SORAHNEX AI CORE — désactivation d'un fournisseur (jamais de suppression). */
 export function adminAiCoreProviderDisable(providerKey: string): Promise<{ provider_key: string; enabled: boolean }> {
   return rpc('vyora_ai_admin_provider_disable', { p_provider_key: providerKey });
 }
 
-/** VYORA AI CORE — réglages d'administration IA (lecture). */
+/** SORAHNEX AI CORE — réglages d'administration IA (lecture). */
 export function adminAiCoreSettingsGet(): Promise<AiCoreAdminSettings> {
   return rpc<AiCoreAdminSettings>('vyora_ai_admin_settings_get');
 }
 
-/** VYORA AI CORE — réglages d'administration IA (écriture, admin vérifié). */
+/** SORAHNEX AI CORE — réglages d'administration IA (écriture, admin vérifié). */
 export function adminAiCoreSettingsSet(args: {
   monthly_budget_usd: number | null;
   alert_threshold_pct: number;
@@ -1204,11 +1204,11 @@ export async function adminListAuditLogs() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI (VYORA AI GATEWAY -> FreeLLMAPI)                                        */
+/* AI (SORAHNEX AI -> FreeLLMAPI)                                        */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Moteur IA central VYORA : point d'entrée unique de toutes les fonctions IA.
+ * Moteur IA central SORAHNEX : point d'entrée unique de toutes les fonctions IA.
  * Le fournisseur central (FreeLLMAPI), le modèle et le secours sont décidés
  * côté serveur par le registre ; aucune passerelle de secours n'est nommée ici.
  */

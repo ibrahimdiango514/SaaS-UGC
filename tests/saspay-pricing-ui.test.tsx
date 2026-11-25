@@ -454,7 +454,7 @@ describe('administration — prix, frais et marge', () => {
     const text = screen.getByTestId('payout-result').textContent ?? '';
     expect(text).toContain('Aucune (la provision ne s’applique qu’aux encaissements)');
     expect(text).toContain('Non confirmés');
-    expect(text).toContain('VYORA n’exécute aucun décaissement');
+    expect(text).toContain('SORAHNEX n’exécute aucun décaissement');
     expect(invokeEdge).not.toHaveBeenCalled();
   });
 

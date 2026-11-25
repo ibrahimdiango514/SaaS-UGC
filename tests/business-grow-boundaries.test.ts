@@ -8,7 +8,7 @@ describe('Business Grow integration boundaries', () => {
   it('keeps provider endpoints and credentials out of browser code', () => {
     const api = read('src/business/api.ts');
 
-    // La fonction est appelée directement (fetch + JWT VYORA explicite) et via
+    // La fonction est appelée directement (fetch + JWT SORAHNEX explicite) et via
     // les relais same-origin : jamais un SDK qui pourrait omettre l'authentification.
     expect(api).toContain('/functions/v1/business-grow');
     expect(api).toContain('Bearer ${accessToken}');

@@ -357,7 +357,7 @@ function toApiError(payload: unknown, status: number): BusinessGrowApiError {
     : body; // La passerelle Supabase renvoie aussi { code, message } à la racine.
   const code = typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED';
   if (status === 401 && /^(?:UNAUTHORIZED|INVALID_JWT)/i.test(code)) {
-    return new BusinessGrowApiError('Session VYORA invalide ou expirée. Reconnectez-vous.', 'UNAUTHENTICATED', status);
+    return new BusinessGrowApiError('Session SORAHNEX invalide ou expirée. Reconnectez-vous.', 'UNAUTHENTICATED', status);
   }
   return new BusinessGrowApiError(
     typeof detail.message === 'string' ? detail.message : 'La demande Business Grow a échoué.',
@@ -578,7 +578,7 @@ export const businessGrowApi = {
     invoke<{ itemId: string }>('memory.item.put', { itemId, category, content, ...(workspaceId ? { workspaceId } : {}) }),
   deleteMemoryItem: (itemId: string, workspaceId?: string | null) =>
     invoke<{ deleted: boolean }>('memory.item.delete', { itemId, ...(workspaceId ? { workspaceId } : {}) }),
-  /** Mémoire persistante de l'agent (VYORA AI CORE, saas_business.ai_memories). */
+  /** Mémoire persistante de l'agent (SORAHNEX AI CORE, saas_business.ai_memories). */
   listAgentMemories: (options?: { category?: string; limit?: number; workspaceId?: string | null }) =>
     invoke<{ memories: BusinessAgentMemory[] }>('agentMemory.list', {
       ...(options?.category ? { category: options.category } : {}),

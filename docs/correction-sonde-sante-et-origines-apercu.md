@@ -54,7 +54,7 @@ pg_net id 4537 → `400 INVALID_INPUT` (validation applicative atteinte, donc le
 
 **Correction** : `defaultAllowedOrigins` contient désormais le motif `https://*.e2b.app` (les hôtes
 d'aperçu changent à chaque session), en plus des origines Netlify déjà autorisées. CORS n'est pas une
-frontière d'authentification ici : chaque requête exige de toute façon un JWT VYORA.
+frontière d'authentification ici : chaque requête exige de toute façon un JWT SORAHNEX.
 
 **Preuve après** (pg_net id 4530, session réelle du compte A, `Origin: https://4180-ia19ukd7j0vjzx70dsuks.e2b.app`) :
 

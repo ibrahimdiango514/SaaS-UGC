@@ -1,5 +1,5 @@
 /**
- * VYORA — accueil personnalisé après connexion.
+ * SORAHNEX — accueil personnalisé après connexion.
  *
  * Deux règles non négociables :
  *  1. **Jamais de nom inventé.** Si le profil ne contient pas de nom
@@ -97,7 +97,7 @@ const RETURNING_LINES = [
 
 const FIRST_VISIT_LINES = [
   'Bienvenue chez vous. Prenez un instant pour choisir l’espace qui correspond à votre envie du moment.',
-  'Votre espace VYORA est prêt. Rien à installer : choisissez un univers et commencez par une petite action.',
+  'Votre espace SORAHNEX est prêt. Rien à installer : choisissez un univers et commencez par une petite action.',
   'Bienvenue. Tout est en place — commencez simplement par ce qui vous inspire aujourd’hui.',
   'Voici votre espace. Prenez vos repères, puis lancez-vous : la première étape est toujours la plus simple.',
 ] as const;

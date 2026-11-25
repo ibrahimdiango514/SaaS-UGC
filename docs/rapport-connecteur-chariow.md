@@ -235,9 +235,9 @@ progression sont les composants communs, inchangés dans leur logique.
    `*.write`.
 5. Copier la clé `sk_live_…` immédiatement (affichée **une seule fois**).
 
-### Étape 2 — connecter dans VYORA
+### Étape 2 — connecter dans SORAHNEX
 
-1. Ouvrir VYORA → **Intégrations** → catégorie **Boutiques en ligne** → **Chariow**.
+1. Ouvrir SORAHNEX → **Intégrations** → catégorie **Boutiques en ligne** → **Chariow**.
 2. Sélectionner l'entreprise (abonnement Business Grow actif requis).
 3. Coller la clé dans le champ `sk_live_…`, puis **« Vérifier et connecter »**.
 4. La fiche affiche la **preuve** : nom de la boutique, URL lue chez Chariow,

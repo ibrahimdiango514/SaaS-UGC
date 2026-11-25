@@ -1,5 +1,5 @@
 /**
- * VYORA — PKCE (RFC 7636) et vérification des jetons.
+ * SORAHNEX — PKCE (RFC 7636) et vérification des jetons.
  *
  * ## Pourquoi PKCE et pas seulement `state`
  *

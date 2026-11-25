@@ -33,7 +33,7 @@ const STATUS_TONE: Record<string, 'success' | 'danger' | 'warning' | 'neutral'> 
 };
 
 /**
- * A7 — Contrôle IA (admin) : pilotage du VYORA AI CORE par le propriétaire.
+ * A7 — Contrôle IA (admin) : pilotage du SORAHNEX AI CORE par le propriétaire.
  * Budgets, état du registre multi-fournisseurs et journal des appels IA.
  * Les lectures sont servies par les façades admin (ugc_is_admin côté serveur).
  */

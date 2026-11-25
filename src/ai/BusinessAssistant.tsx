@@ -62,7 +62,7 @@ export interface BusinessAssistantHost {
 }
 
 /**
- * VYORA AI — interface de conversation, hébergée dans Business Grow.
+ * SORAHNEX AI — interface de conversation, hébergée dans Business Grow.
  *
  * ## Un seul espace métier
  *
@@ -71,7 +71,7 @@ export interface BusinessAssistantHost {
  * Grow et s'appuie sur le socle `business-grow`. Les conversations sont
  * rattachées à l'entreprise active.
  *
- * Le panneau latéral est celui de VYORA AI, utilisé en mode `embedded` : il ne
+ * Le panneau latéral est celui de SORAHNEX AI, utilisé en mode `embedded` : il ne
  * propose plus de liens vers d'autres espaces (sinon il reconstituerait la
  * navigation globale à côté de celle de Business Grow), seulement les
  * conversations et le raccourci vers la rubrique Intégrations.
@@ -274,7 +274,7 @@ export function BusinessAssistant({
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium text-slate-200">{titreActif}</p>
             <p className="text-[0.62rem] text-slate-500">
-              {workspaceId ? 'Entreprise active · AI Director VYORA' : 'Conversation personnelle'}
+              {workspaceId ? 'Entreprise active · AI Director SORAHNEX' : 'Conversation personnelle'}
               {' · '}
               {backendLoading
                 ? 'vérification des services IA…'
@@ -302,7 +302,7 @@ export function BusinessAssistant({
               </p>
               <p className="mt-1 text-amber-100/70">
                 {blocage === 'chargement'
-                  ? 'L’historique et la mémoire se chargent dès que la session VYORA est confirmée.'
+                  ? 'L’historique et la mémoire se chargent dès que la session SORAHNEX est confirmée.'
                   : 'La connexion a été retentée automatiquement. Vérifiez votre connexion puis utilisez « Réessayer » : aucune donnée n’est inventée ni enregistrée localement.'}
               </p>
             </div>

@@ -106,7 +106,7 @@ export default function Home() {
       <Reveal>
         <section className="relative isolate overflow-hidden rounded-[1.9rem] border border-white/[0.09] bg-[#070c13] px-5 py-7 sm:px-8 sm:py-10 lg:px-11 lg:py-12">
           <img
-            src="/brand/vyora-hero.jpg"
+            src="/brand/sorahnex-hero.jpg"
             alt=""
             aria-hidden="true"
             className="pointer-events-none absolute inset-y-0 right-0 -z-20 hidden h-full w-[56%] object-cover object-[62%_38%] opacity-40 lg:block [mask-image:linear-gradient(to_right,transparent,black_42%)]"
@@ -222,7 +222,7 @@ export default function Home() {
           />
           <MetricPill
             label="Compte"
-            value={workspace?.name || (profile?.display_name ? 'VYORA' : 'VYORA')}
+            value={workspace?.name || (profile?.display_name ? 'SORAHNEX' : 'SORAHNEX')}
             icon={ShieldCheck}
             hint="Isolation par espace active"
           />
@@ -240,7 +240,7 @@ export default function Home() {
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <WorkspaceCard
           to="/app/studio"
-          name="VYORA Studio"
+          name="SORAHNEX Studio"
           tagline="Création & production marketing"
           description="Transformez une idée, un produit ou une image en vidéo UGC, publicité ou contenu marketing — avec un devis vérifié et des outils de production réels."
           image="/brand/studio-creator.jpg"
@@ -254,7 +254,7 @@ export default function Home() {
         />
         <WorkspaceCard
           to="/app/business"
-          name="VYORA Business Growth"
+          name="SORAHNEX Grow"
           tagline="Pilotage, revenus & opérations"
           description="Pilotez votre activité, récupérez les revenus perdus et automatisez les actions commerciales grâce à un agent IA et des modules métier connectés à vos données."
           image="/brand/business-visual.jpg"

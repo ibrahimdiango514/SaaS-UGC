@@ -9,7 +9,7 @@ interface HomeCard {
 
 /**
  * Quatre visuels de démonstration, étiquetés « Démo ».
- * Ils illustrent des secteurs ; ce ne sont PAS des médias générés par VYORA.
+ * Ils illustrent des secteurs ; ce ne sont PAS des médias générés par SORAHNEX.
  */
 const HOME_CARDS: HomeCard[] = [
   { sector: 'cosmetique', label: 'Beauté', image: '/studio-examples/cosmetique.jpg' },
@@ -82,7 +82,7 @@ export function GenerationEmptyState({ onExample, onStart, onSector, selectedSec
         <h1 className="text-[26px] font-black uppercase leading-[1.02] tracking-[-0.02em] text-white sm:text-[46px]">
           Créez votre vidéo
           <br />
-          <span className="text-cyan-300">avec VYORA</span>
+          <span className="text-cyan-300">avec SORAHNEX</span>
         </h1>
 
         <p className="mx-auto mt-2.5 max-w-md text-[12.5px] leading-relaxed text-slate-400 sm:mt-4 sm:text-[14.5px]">

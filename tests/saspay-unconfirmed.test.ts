@@ -1,5 +1,5 @@
 // Création softpay dont la réponse s'est perdue : le paiement a pu être
-// encaissé sans que VYORA n'en connaisse l'identifiant.
+// encaissé sans que SORAHNEX n'en connaisse l'identifiant.
 //
 // Règle vérifiée ici : une telle commande n'est jamais déclarée « non payée »
 // par un automate, jamais « payée » sans vérification SasPay, et le client ne

@@ -84,7 +84,7 @@ describe('preuve de rendu du catalogue unifié', () => {
     mocks.listConnectedAccounts.mockResolvedValue([
       {
         id: 'acc-gmail', provider: 'gmail', externalAccountId: 'ext-g',
-        displayName: 'Direction VYORA', email: 'direction@vyora.app',
+        displayName: 'Direction SORAHNEX', email: 'direction@vyora.app',
         capabilities: ['read', 'send'], status: 'connected',
         lastVerifiedAt: '2026-11-14T09:12:00Z', lastError: null, createdAt: '2026-11-01T00:00:00Z',
       },
@@ -143,13 +143,13 @@ describe('preuve de rendu du catalogue unifié', () => {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VYORA — Intégrations unifiées (preuve de rendu)</title>
+<title>SORAHNEX — Intégrations unifiées (preuve de rendu)</title>
 <style>${css}</style>
 <style>${STYLES}</style>
 </head>
 <body>
 <div class="wrap">
-  <p class="capture-title">VYORA · Business Grow → Intégrations</p>
+  <p class="capture-title">SORAHNEX · Business Grow → Intégrations</p>
   <p class="capture-sub">Catalogue unique de ${INTEGRATIONS.length} fournisseurs, statuts dérivés du serveur. Capture produite depuis le composant réel.</p>
   <span class="capture-banner">Même composant que /app/connect</span>
   ${container.innerHTML}

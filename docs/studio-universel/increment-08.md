@@ -48,7 +48,7 @@ authenticated attestation=false ; service_role attestation=true.
 
 - Réservation expirant après24h : restitution transactionnelle, idempotente,
   quota rendu ; état terminal expired. Une réussite tardive ne peut plus capturer
-  de crédits. VYORA assume le coût tardif éventuel, pas le client.
+  de crédits. SORAHNEX assume le coût tardif éventuel, pas le client.
 - Réussite sans coût réel vérifiable : capture refusée ; réconciliation GET
   jusqu’à coût confirmé ou expiration. Jamais de coût réel inventé.
 - Verrou dans la RPC quota historique elle-même : ancienne vidéo et universel

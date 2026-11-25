@@ -101,7 +101,7 @@ Couvert par test : `127.0.0.1`, `127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1
 résolution mixte publique+privée, `content-length` menteur, réponse sans
 `content-length`.
 
-Le `User-Agent` s'annonce comme VYORA — aucun usurpation de navigateur pour
+Le `User-Agent` s'annonce comme SORAHNEX — aucun usurpation de navigateur pour
 franchir une protection.
 
 ### Fichiers

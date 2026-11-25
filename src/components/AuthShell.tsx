@@ -5,7 +5,7 @@ import { AuthStage, AuthStageMobile, type AuthVariant } from './auth/AuthStage';
 import { cn } from './ui';
 
 /**
- * Coquille du parcours d'authentification VYORA.
+ * Coquille du parcours d'authentification SORAHNEX.
  *
  * L'API publique (`title`, `subtitle`, `children`, `footer`) est conservée à
  * l'identique : les pages existantes continuent de fonctionner sans

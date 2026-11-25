@@ -108,7 +108,7 @@ describe('primitives cryptographiques', () => {
   });
 
   it('gère les caractères non ASCII', () => {
-    const t = 'VYORA — éàü 漢字';
+    const t = 'SORAHNEX — éàü 漢字';
     expect(sha256Hex(t)).toBe(createHash('sha256').update(t, 'utf8').digest('hex'));
   });
 

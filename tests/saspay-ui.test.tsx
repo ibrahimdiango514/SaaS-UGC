@@ -630,7 +630,7 @@ describe('administration — remboursement', () => {
     await openRefund();
     await waitFor(() => screen.getByTestId('refund-preview'));
     expect(rpcNamed('vyora_admin_refund_preview')[0][1]).toEqual({ p_product: 'studio', p_order_id: ORDER_ID });
-    expect(screen.getByText(/VYORA n’envoie pas d’argent/)).toBeTruthy();
+    expect(screen.getByText(/SORAHNEX n’envoie pas d’argent/)).toBeTruthy();
     expect(screen.getByTestId('refund-preview').textContent).toContain('Crédits qui seront repris : 27');
     expect(screen.getByTestId('refund-max').textContent).toBe('5\u202f000\u00a0FCFA');
     expect(field(AMOUNT).value).toBe('5000');
@@ -820,7 +820,7 @@ describe('administration — remboursement', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Attester le versement' }));
     const confirm = () => screen.getAllByRole('button', { name: 'Attester le versement' }).at(-1) as HTMLButtonElement;
-    expect(screen.getByText(/VYORA ne vérifie pas ce versement/)).toBeTruthy();
+    expect(screen.getByText(/SORAHNEX ne vérifie pas ce versement/)).toBeTruthy();
     expect(confirm().disabled).toBe(true);
     fireEvent.change(field(/^Référence du versement/), { target: { value: 'OM' } });
     expect(confirm().disabled).toBe(true);
