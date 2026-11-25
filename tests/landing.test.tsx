@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Vitrine SORAHNEX (B3) — homepage premium avec hero 3D, sélecteur 2 cartes
-// (Grow / Studio UGC) et AUCUNE offre fictive : le système commercial
+// (SORAHNEX Grow / Studio UGC) et AUCUNE offre fictive : le système commercial
 // (formules, crédits, SASPAY) vit dans les espaces authentifiés
 // (/app/abonnement, /app/credits, /app/business/abonnement), jamais sur la
 // page publique.
@@ -23,8 +23,10 @@ describe('vitrine SORAHNEX (B3)', () => {
 
   it('présente les deux univers avec leurs routes', async () => {
     render(<App />);
-    expect(await screen.findByText('SORAHNEX Studio')).toBeTruthy();
-    expect(screen.getByText('SORAHNEX Grow')).toBeTruthy();
+    // Chaque espace est nommé plusieurs fois dans la vitrine (aperçu produit,
+    // carte de dimension, pastille) : on exige la présence, pas l'unicité.
+    expect((await screen.findAllByText('SORAHNEX Studio')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SORAHNEX Grow').length).toBeGreaterThan(0);
     // Les cartes mènent vers l’onboarding : les espaces de travail sont
     // derrière l’authentification (parcours post-login, sélecteur 2 cartes).
     const cardLinks = screen.getAllByRole('link').filter((link) => link.getAttribute('href') === '/inscription');

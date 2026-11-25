@@ -1,19 +1,19 @@
-# SORAHNEX — Continuité Grow ↔ Studio UGC (itération 2026-11-11, soir)
+# SORAHNEX — Continuité Business Grow ↔ Studio UGC (itération 2026-11-11, soir)
 
 Cette itération prolonge le déploiement réussi de `business-grow` en production.
 Elle **ne modifie aucune migration, aucune clé, aucun prix, aucun crédit** et ne
 touche pas à la logique de quota.
 
-## 1. Navigation continue Grow ↔ Studio UGC (priorité 2)
+## 1. Navigation continue Business Grow ↔ Studio UGC (priorité 2)
 
 ### Ce qui existait
 - `BusinessGrowEntryIntent` (contrat typé) permettait à Dashboard / Projets
-  d'ouvrir Grow avec un projet et un brouillon.
+  d'ouvrir Business Grow avec un projet et un brouillon.
 - Le Studio savait recevoir un brief via `ugcBrief` (`BuildStudioLocationState`)
   et le préchargeait dans le prompt.
 
 ### Ce qui manquait réellement
-1. **Studio → Grow** : aucune entrée. Depuis la création vidéo, il était
+1. **Studio → Business Grow** : aucune entrée. Depuis la création vidéo, il était
    impossible de repartir vers l'analyse/stratégie en conservant le projet,
    le produit, le brief et le script.
 2. **Ancrage profond** : `GrowthWorkspace` démarrait toujours sur l'onglet
@@ -26,7 +26,7 @@ touche pas à la logique de quota.
 ### Implémentation
 - `src/contracts/business-grow.ts`
   - `buildBusinessGrowLocationStateFromStudio(context, options)` : construit
-    l'état de navigation Studio → Grow à partir de **données réelles
+    l'état de navigation Studio → Business Grow à partir de **données réelles
     uniquement** (projet, marque, produit, objectif, audience, brief, script).
     Le brouillon de conversation est borné à 4 000 caractères.
   - `BusinessGrowGrowthTab` + champ `growthTab` validé dans
@@ -35,7 +35,7 @@ touche pas à la logique de quota.
     `projectTitle`, `platform` — **UUID strictement validés** (`optionalUuid`),
     toute valeur non-UUID est ignorée au lieu d'être propagée.
 - `src/studio/GenerationStudio.tsx`
-  - Carte « Continuité Grow » avec le contexte réellement disponible
+  - Carte « Continuité Business Grow » avec le contexte réellement disponible
     et lien vers `/app/business` (état typé, `growthTab: 'strategy'`).
   - Le projet transmis par un brief est désormais sélectionné à l'arrivée
     (`?projet=` reste prioritaire), et le repli ne remplace plus un projet

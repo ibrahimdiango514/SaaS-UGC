@@ -206,7 +206,7 @@ describe('pages de tarifs — prix final', () => {
     await waitFor(() => expect(screen.getByTestId('pack-price-creator').textContent).toBe(FCFA('5 000')));
   });
 
-  it('Grow : la formule à 25 000 FCFA est annoncée 26 000 FCFA', async () => {
+  it('SORAHNEX Grow : la formule à 25 000 FCFA est annoncée 26 000 FCFA', async () => {
     mockRpc({
       business_grow_catalog: { billing_enabled: true, config: null, plans: [{
         plan_key: 'croissance', display_name: 'Croissance', tagline: null, monthly_price_minor: 25000, currency: 'XOF',

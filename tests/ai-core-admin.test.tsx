@@ -121,7 +121,7 @@ describe('admin — Contrôle IA (AI CORE)', () => {
     expect(within(table).getByText('Erreur')).toBeTruthy();
     expect(within(table).getByText('420 → 180')).toBeTruthy();
     expect(within(table).getByText('950 ms')).toBeTruthy();
-    expect(within(table).getAllByText('Business Grow').length).toBe(2);
+    expect(within(table).getAllByText('SORAHNEX Grow').length).toBe(2);
     expect(within(table).getByText('openai/gpt-oss-120b')).toBeTruthy();
   });
 

@@ -48,7 +48,7 @@ function sansCommentaires(sql: string): string {
 const CODE = sansCommentaires(FINALE);
 
 describe('mcp_account_info — sources de données', () => {
-  it('lit le portefeuille SORAHNEX, pas celui de Grow', () => {
+  it('lit le portefeuille SORAHNEX, pas celui de SORAHNEX Grow', () => {
     expect(CODE).toMatch(/from\s+saas_ugc\.ugc_wallets\s+w/i);
     // La régression coûteuse : des chiffres cohérents mais appartenant à un
     // autre produit du même projet Supabase.

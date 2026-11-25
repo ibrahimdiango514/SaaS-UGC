@@ -2,18 +2,21 @@
  * Paiements SasPay — côté navigateur.
  *
  * Le navigateur ne détient aucune clé et ne décide de rien : il transmet une
- * INTENTION (produit, article, réseau, numéro) à l'Edge Function `vyora-payments`.
+ * INTENTION (produit, article, réseau, numéro) à l'Edge Function de paiement
+ * (`sorahnex-payments`, encore déployée sous son nom historique : voir
+ * `src/lib/platform-identity.ts`).
  * Le prix, les crédits, les frais et l'état du paiement viennent toujours du
  * serveur. Un paiement n'est « confirmé » que lorsque le serveur l'a vérifié
  * auprès de SasPay ; l'URL de retour ou un message local ne prouvent rien.
  */
 import { invokeEdge, rpc } from './api';
+import { edgeFunctionName } from './platform-identity';
 
 export type PaymentProduct = 'studio' | 'business';
 export type PaymentFlow = 'softpay' | 'checkout';
 /**
  * États présentés à l'utilisateur. `unapplied` : paiement encaissé mais non
- * appliqué (Grow, abonnement incompatible au moment du paiement) —
+ * appliqué (SORAHNEX Grow, abonnement incompatible au moment du paiement) —
  * rien n'a été livré, le support rembourse. État final.
  * `review` : la demande Mobile Money est partie, mais SasPay n'a pas répondu —
  * on ignore si le client a été sollicité ou débité. Ni payée, ni échouée :
@@ -68,7 +71,7 @@ export interface PaymentCountry {
   price?: { amount: string; currency: string } | null;
 }
 
-/** Prix final d'un article du catalogue (pack Studio, formule Grow). */
+/** Prix final d'un article du catalogue (pack Studio, formule SORAHNEX Grow). */
 export interface CatalogPrice {
   /** Prix final le plus bas parmi les pays ouverts. */
   amount: string;
@@ -205,7 +208,7 @@ export interface CreatePaymentInput {
   idempotencyKey: string;
 }
 
-const FUNCTION = 'vyora-payments';
+const FUNCTION = edgeFunctionName('payments');
 
 export function getPaymentOptions(product: PaymentProduct, item?: PaymentItem): Promise<PaymentOptions> {
   return invokeEdge<PaymentOptions>(FUNCTION, { action: 'options', product, ...(item ? { item } : {}) });
@@ -264,7 +267,7 @@ export interface RefundPreview {
   wallet_reserved?: number;
   credits_recoverable?: number;
   credits_unrecoverable?: number;
-  // Grow
+  // SORAHNEX Grow
   plan_key?: string;
   period_days?: number;
   subscription_status?: string | null;
@@ -460,7 +463,7 @@ export const ANOMALY_ADVICE: Record<string, string> = {
   payment_conflict: 'Un encaissement réussi porte la référence d’une commande liée à une autre transaction. Rien n’a été livré : comparez les deux transactions chez SasPay.',
   amount_mismatch: 'Rien n’a été livré. Rendez le montant encaissé au client ou demandez-lui de repasser commande.',
   payment_not_found: 'SasPay ne connaît pas cette transaction. La commande est close après 24 h ; un succès tardif la rouvrirait.',
-  subscription_conflict: 'Le client a payé, mais son abonnement en cours ne permettait pas d’appliquer ce paiement : rien n’a été livré ni modifié. Remboursez-le intégralement depuis la liste des paiements Grow (« Rembourser »), rendez l’argent, puis attestez le versement : l’anomalie se classera seule.',
+  subscription_conflict: 'Le client a payé, mais son abonnement en cours ne permettait pas d’appliquer ce paiement : rien n’a été livré ni modifié. Remboursez-le intégralement depuis la liste des paiements SORAHNEX Grow (« Rembourser »), rendez l’argent, puis attestez le versement : l’anomalie se classera seule.',
   initiation_unconfirmed: 'La demande Mobile Money est partie, mais SasPay n’a jamais répondu : on ignore si le client a été débité. Rien n’a été livré et le client ne peut lancer aucun autre paiement. Cherchez la transaction dans le tableau de bord SasPay (numéro, montant, heure), puis tranchez dans « Paiements sans réponse » : rattachez-la, ou attestez qu’aucun encaissement n’existe.',
   fee_exceeds_provision: 'Le client a été livré normalement. Les frais réels de cette transaction dépassent la provision facturée : la marge est entamée. Importez les tarifs du compte SasPay (Finances → Barème) pour que les prochains prix couvrent ces frais, ou relevez la provision.',
   net_below_base: 'Le client a été livré normalement, mais SORAHNEX a reçu moins que le prix de base de l’article : cette vente est déficitaire. Vérifiez le barème et la provision dans Finances.',

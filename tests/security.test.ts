@@ -171,7 +171,7 @@ describe('Video Studio : frontière des secrets et espaces non opérationnels', 
   });
 });
 
-describe('bibliothèque Sorahnnex : RPC additive et RLS', () => {
+describe('bibliothèque SORAHNEX Studio : RPC additive et RLS', () => {
   it('l’attachement à un projet est défini, vérifié et réservé aux utilisateurs authentifiés', () => {
     const sql = read('supabase/migrations/20261108233629_reelora_studio_library.sql');
     expect(sql).toContain('function public.reelora_attach_asset_to_project(');
@@ -213,7 +213,7 @@ describe('contrat RPC frontend ↔ migrations', () => {
   const api = read('src/lib/api.ts');
   const rpcNames = Array.from(api.matchAll(/rpc(?:<[^>]+>)?\(\s*'([a-z_]+)'/g), (m) => m[1]);
 
-  it('tous les RPC Sorahnnex appelés par le frontend sont définis dans les migrations', () => {
+  it('tous les RPC SORAHNEX Studio appelés par le frontend sont définis dans les migrations', () => {
     const reelora = rpcNames.filter((n) => n.startsWith('reelora_'));
     expect(reelora.length).toBeGreaterThan(15);
     for (const name of reelora) expect(migrations).toContain(`function public.${name}(`);
@@ -227,7 +227,7 @@ describe('contrat RPC frontend ↔ migrations', () => {
     expect(legacy).toContain("status in ('failed', 'cancelled')");
   });
 
-  it('les migrations Sorahnnex ne suppriment aucune table ou vue existante', () => {
+  it('les migrations SORAHNEX Studio ne suppriment aucune table ou vue existante', () => {
     const sql = readdirSync(join(root, 'supabase/migrations'))
       .filter((f) => f.includes('reelora'))
       .map((f) => read(join('supabase/migrations', f)))

@@ -60,7 +60,7 @@ const STUDIO_QUICK: StudioQuickLink[] = [
 
 const BUSINESS_QUICK: BusinessQuickLink[] = [
   { to: '/app/business/assistant', icon: MessagesSquare, title: 'Agent métier', description: 'Poser une question à l’agent relié à votre contexte.', meta: 'Assistant' },
-  { to: '/app/business/modules', icon: Brain, title: 'Modules métier', description: 'Catalogue complet des modules Grow.', meta: 'Modules' },
+  { to: '/app/business/modules', icon: Brain, title: 'Modules métier', description: 'Catalogue complet des modules SORAHNEX Grow.', meta: 'Modules' },
   { to: '/app/business/crm', icon: ArrowUpRight, title: 'CRM intelligent', description: 'Contacts, pipeline, priorités et relances.', meta: 'Commercial' },
   { to: '/app/business/finance', icon: ArrowUpRight, title: 'Finances & recouvrement', description: 'Créances, paiements et promesses.', meta: 'Finance' },
   { to: '/app/business/modules/finance-intelligence', icon: Wallet, title: 'Finance Intelligence', description: 'Revenus, dépenses et marge réels.', meta: 'Finance' },
@@ -106,7 +106,7 @@ export default function Home() {
       <Reveal>
         <section className="relative isolate overflow-hidden rounded-[1.9rem] border border-white/[0.09] bg-[#070c13] px-5 py-7 sm:px-8 sm:py-10 lg:px-11 lg:py-12">
           <img
-            src="/brand/sorahnnex-hero.jpg"
+            src="/brand/sorahnex-hero.jpg"
             alt=""
             aria-hidden="true"
             className="pointer-events-none absolute inset-y-0 right-0 -z-20 hidden h-full w-[56%] object-cover object-[62%_38%] opacity-40 lg:block [mask-image:linear-gradient(to_right,transparent,black_42%)]"
@@ -181,7 +181,7 @@ export default function Home() {
               <div className="vyora-float-soft absolute bottom-0 right-0 w-[57%] rotate-[2deg] overflow-hidden rounded-[1.25rem] border border-white/15 bg-[#0d0b15] shadow-[0_28px_80px_rgba(0,0,0,0.55)]">
                 <img src="/brand/business-visual.jpg" alt="" className="h-[176px] w-full object-cover object-center opacity-90" />
                 <div className="flex items-center justify-between border-t border-white/10 bg-[#0d0b15]/95 px-3.5 py-3">
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-violet-100"><Brain size={12} /> Grow</span>
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-violet-100"><Brain size={12} /> SORAHNEX Grow</span>
                   <span className="text-[9px] uppercase tracking-[0.16em] text-slate-500">Piloter</span>
                 </div>
               </div>
@@ -258,11 +258,11 @@ export default function Home() {
           tagline="Pilotage, revenus & opérations"
           description="Pilotez votre activité, récupérez les revenus perdus et automatisez les actions commerciales grâce à un agent IA et des modules métier connectés à vos données."
           image="/brand/business-visual.jpg"
-          imageAlt="Interface de pilotage Grow avec courbes et indicateurs"
+          imageAlt="Interface de pilotage SORAHNEX Grow avec courbes et indicateurs"
           icon={Brain}
           benefits={BUSINESS_BENEFITS}
           accent="violet"
-          cta="Entrer dans Grow"
+          cta="Entrer dans SORAHNEX Grow"
           footer="Aucun accès aux crédits Studio."
           delay={150}
         />
@@ -300,8 +300,8 @@ export default function Home() {
       <Reveal delay={0.08}>
         <section className="mt-6 grid gap-3 rounded-[1.5rem] border border-white/[0.08] bg-white/[0.02] p-5 sm:grid-cols-3 sm:p-6">
           {[
-            { icon: ShieldCheck, title: 'Données isolées', text: 'Studio ne lit pas vos données Grow, et inversement. Chaque espace garde ses propres protections.' },
-            { icon: Coins, title: 'Crédits et quotas séparés', text: 'Les crédits Studio restent dans Studio. Grow ne les lit ni ne les débite.' },
+            { icon: ShieldCheck, title: 'Données isolées', text: 'Studio ne lit pas vos données SORAHNEX Grow, et inversement. Chaque espace garde ses propres protections.' },
+            { icon: Coins, title: 'Crédits et quotas séparés', text: 'Les crédits Studio restent dans Studio. SORAHNEX Grow ne les lit ni ne les débite.' },
             { icon: CreditCard, title: 'Retour au sélecteur', text: 'Le logo et le lien « Tous les espaces » vous ramènent ici, sans perdre votre travail.' },
           ].map((item) => (
             <div key={item.title} className="flex items-start gap-3 rounded-xl border border-white/[0.06] bg-black/15 p-4">

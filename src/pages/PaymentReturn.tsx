@@ -35,7 +35,7 @@ export default function PaymentReturn() {
   const refreshed = useRef(false);
 
   const backTo = product === 'business' ? '/app/business/abonnement' : '/app/credits';
-  const backLabel = product === 'business' ? 'Retour à l’abonnement Business Grow' : 'Retour aux crédits Studio';
+  const backLabel = product === 'business' ? 'Retour à l’abonnement SORAHNEX Grow' : 'Retour aux crédits Studio';
 
   const onOrder = useCallback((next: PaymentOrder) => {
     setOrder(next);
@@ -124,7 +124,7 @@ export default function PaymentReturn() {
                 <p className="text-sm leading-relaxed text-slate-300">
                   {order.product === 'studio'
                     ? `${order.credits ?? ''} crédits ont été ajoutés à votre solde Studio.`
-                    : 'Votre abonnement Business Grow est actif.'}
+                    : 'Votre abonnement SORAHNEX Grow est actif.'}
                 </p>
               </>
             )}

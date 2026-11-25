@@ -54,7 +54,7 @@ export function Composer({
   placeholder?: string;
   /**
    * Libellé du bouton d'envoi. L'espace autonome utilise une icône seule
-   * (`Envoyer le message`) ; Grow expose un bouton texte « Envoyer »,
+   * (`Envoyer le message`) ; SORAHNEX Grow expose un bouton texte « Envoyer »,
    * comme dans l'interface qu'il remplace.
    */
   sendLabel?: string;

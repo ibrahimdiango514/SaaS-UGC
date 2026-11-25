@@ -28,7 +28,7 @@ import {
 } from './types';
 
 /** Ligne de la table `vyora_files`. */
-export interface SorahnnexFile {
+export interface VyoraFile {
   id: string;
   workspace_id: string;
   owner_id: string;
@@ -123,7 +123,7 @@ export async function upload(
   workspaceId: string,
   validated: ValidatedFile,
   options: UploadOptions = {},
-): Promise<SorahnnexFile> {
+): Promise<VyoraFile> {
   const { file, detected, sizeBytes } = validated;
   const path = storagePathFor(workspaceId, detected.kind, detected.extension);
   const checksum = await sha256(file);
@@ -155,7 +155,7 @@ export async function upload(
     );
   }
   options.onProgress?.(100);
-  return data as SorahnnexFile;
+  return data as VyoraFile;
 }
 
 function messageForRpcError(message: string): string {
@@ -242,7 +242,7 @@ export function storageErrorMessage(status: number, body: string): string {
 export async function list(
   workspaceId: string,
   filters: { projectId?: string | null; conversationId?: string | null; kind?: FileKind } = {},
-): Promise<SorahnnexFile[]> {
+): Promise<VyoraFile[]> {
   let query = supabase
     .from('vyora_files')
     .select('*')
@@ -254,7 +254,7 @@ export async function list(
 
   const { data, error } = await query;
   if (error) throw new AppError(`Lecture des fichiers impossible : ${error.message}`, 'FILES_READ_FAILED');
-  return (data ?? []) as SorahnnexFile[];
+  return (data ?? []) as VyoraFile[];
 }
 
 /**
@@ -263,7 +263,7 @@ export async function list(
  * Le bucket est privé : aucun lien public n'existe. C'est la seule façon
  * d'accéder au binaire, et elle expire.
  */
-export async function signedUrl(file: SorahnnexFile, expiresInSeconds = 300): Promise<string> {
+export async function signedUrl(file: VyoraFile, expiresInSeconds = 300): Promise<string> {
   const { data, error } = await supabase.storage
     .from(STORAGE_BUCKET)
     .createSignedUrl(file.storage_path, expiresInSeconds);
@@ -289,7 +289,7 @@ export async function signedUrl(file: SorahnnexFile, expiresInSeconds = 300): Pr
  * Les droits sont vérifiés par la RLS `vyora_files_delete_owner` : si la
  * suppression de la ligne ne rend aucune ligne, rien n'est supprimé du stockage.
  */
-export async function remove(file: SorahnnexFile): Promise<void> {
+export async function remove(file: VyoraFile): Promise<void> {
   const { data, error } = await supabase
     .from('vyora_files')
     .delete()
@@ -318,7 +318,7 @@ export async function attachToProject(
   fileId: string,
   projectId: string,
   role?: ReferenceRole | null,
-): Promise<SorahnnexFile> {
+): Promise<VyoraFile> {
   const { data, error } = await supabase.rpc('vyora_file_attach_to_project', {
     p_file_id: fileId,
     p_project_id: projectId,
@@ -330,11 +330,11 @@ export async function attachToProject(
     }
     throw new AppError(`Rattachement impossible : ${error.message}`, 'ATTACH_FAILED');
   }
-  return data as SorahnnexFile;
+  return data as VyoraFile;
 }
 
 /** Rattache un fichier à une conversation de l'assistant. */
-export async function attachToConversation(fileId: string, conversationId: string): Promise<SorahnnexFile> {
+export async function attachToConversation(fileId: string, conversationId: string): Promise<VyoraFile> {
   const { data, error } = await supabase.rpc('vyora_file_attach_to_conversation', {
     p_file_id: fileId,
     p_conversation_id: conversationId,
@@ -348,7 +348,7 @@ export async function attachToConversation(fileId: string, conversationId: strin
     }
     throw new AppError(`Rattachement impossible : ${error.message}`, 'ATTACH_FAILED');
   }
-  return data as SorahnnexFile;
+  return data as VyoraFile;
 }
 
 /** Détecte le type sans téléverser : sert à prévenir avant l'envoi. */

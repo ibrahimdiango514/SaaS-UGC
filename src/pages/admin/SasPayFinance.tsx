@@ -28,7 +28,7 @@ const STRATEGY_LABELS: Record<PricingStrategy, string> = {
   cover_fees: 'Provision + couverture des frais (recommandé)',
   provision_only: 'Provision seule (le prix n’est jamais relevé)',
 };
-const PRODUCT_LABELS: Record<string, string> = { studio: 'Studio', business: 'Grow' };
+const PRODUCT_LABELS: Record<string, string> = { studio: 'Studio', business: 'SORAHNEX Grow' };
 
 /** Centièmes → saisie (« 100000 » → « 1000 »), pour préremplir un champ. */
 const centsInput = (cents: number) => (cents % 100 === 0 ? String(cents / 100) : `${Math.trunc(cents / 100)},${String(cents % 100).padStart(2, '0')}`);
@@ -588,7 +588,7 @@ function ReportCard({ missing, onBackfilled }: { missing: number; onBackfilled: 
           <Select id="fin-rep-5" label="Produit" value={filters.product} onChange={(e) => setFilters((f) => ({ ...f, product: e.target.value }))}>
             <option value="">Tous</option>
             <option value="studio">Studio</option>
-            <option value="business">Grow</option>
+            <option value="business">SORAHNEX Grow</option>
           </Select>
           <Button type="submit" variant="outline" loading={busy}>Filtrer</Button>
         </form>

@@ -1,5 +1,5 @@
 /**
- * SORAHNEX Grow Grow — Lot D : créances, paiements et recouvrement.
+ * SORAHNEX Grow — Lot D : créances, paiements et recouvrement.
  *
  * Modèle pur, sans React ni Supabase. Le solde et le statut sont toujours
  * recalculés à partir des paiements validés : une créance soldée ne peut pas

@@ -118,7 +118,7 @@ describe('preuve de rendu — import par URL', () => {
 </head>
 <body>
 <div class="wrap">
-  <p class="capture-title">SORAHNEX · Grow → Croissance → Catalogue → Importer un catalogue</p>
+  <p class="capture-title">SORAHNEX · SORAHNEX Grow → Croissance → Catalogue → Importer un catalogue</p>
   <p class="capture-sub">Aperçu renvoyé par l’Edge Function <code>store-import</code> pour <code>https://serum-eclat.example</code>. Lecture faite par le serveur ; rien n’a été enregistré.</p>
   ${container.innerHTML}
   <p class="capture-note">

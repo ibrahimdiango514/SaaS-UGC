@@ -92,7 +92,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Gestion persistante du catalogue métier', () => {
-  it('enregistre le profil Sorahnnex avant d’afficher une confirmation', async () => {
+  it('enregistre le profil SORAHNEX Studio avant d’afficher une confirmation', async () => {
     render(<MemoryRouter><Settings /></MemoryRouter>);
     fireEvent.change(await screen.findByLabelText('Nom affiché'), { target: { value: 'Aïssata' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enregistrer le profil' }));

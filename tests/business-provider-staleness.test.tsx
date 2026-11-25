@@ -87,7 +87,7 @@ describe('Validité réelle des contrôles fournisseur (24 h côté SQL)', () =>
   });
 });
 
-describe('Écran Business Grow — expiration des contrôles', () => {
+describe('Écran SORAHNEX Grow — expiration des contrôles', () => {
   const businessMocks = vi.hoisted(() => ({ getStatus: vi.fn(), getQuota: vi.fn() }));
 
   beforeEach(() => {

@@ -149,7 +149,7 @@ describe('preuve de rendu du catalogue unifié', () => {
 </head>
 <body>
 <div class="wrap">
-  <p class="capture-title">SORAHNEX · Grow → Intégrations</p>
+  <p class="capture-title">SORAHNEX · SORAHNEX Grow → Intégrations</p>
   <p class="capture-sub">Catalogue unique de ${INTEGRATIONS.length} fournisseurs, statuts dérivés du serveur. Capture produite depuis le composant réel.</p>
   <span class="capture-banner">Même composant que /app/connect</span>
   ${container.innerHTML}

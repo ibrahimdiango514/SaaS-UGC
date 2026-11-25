@@ -9,7 +9,7 @@
  *  - Seule écriture possible : enregistrer le remboursement d'un paiement
  *    confirmé (reprise de ce qui a été livré, sans mouvement d'argent), puis
  *    attester le versement fait hors de SORAHNEX. Voir `SasPayOperations`.
- *  - Studio et Grow sont listés séparément, jamais additionnés.
+ *  - Studio et SORAHNEX Grow sont listés séparément, jamais additionnés.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Lock, RefreshCw, Wallet } from 'lucide-react';
@@ -171,7 +171,7 @@ export default function SasPayPanel() {
           <Tabs
             active={product}
             onChange={(id) => setProduct(id === 'business' ? 'business' : 'studio')}
-            tabs={[{ id: 'studio', label: 'Studio (crédits)' }, { id: 'business', label: 'Grow (abonnements)' }]}
+            tabs={[{ id: 'studio', label: 'Studio (crédits)' }, { id: 'business', label: 'SORAHNEX Grow (abonnements)' }]}
           />
         </div>
         {notice && <p className="px-5 pt-3 text-[12px] text-amber-200" role="status">{notice}</p>}

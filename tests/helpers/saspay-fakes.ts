@@ -89,7 +89,7 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
     mode: options.mode ?? 'test',
     flows: options.flows ?? ['softpay', 'checkout'],
   };
-  const plans = options.businessPlans ?? { croissance: { price: 25000, label: 'Grow — Croissance' } };
+  const plans = options.businessPlans ?? { croissance: { price: 25000, label: 'SORAHNEX Grow — Croissance' } };
   let sequence = 0;
   const anomalies: PaymentAnomaly[] = [];
   /** Devis figés et lignes de rapprochement, comme `pricing_quote` et `vyora_payment_reconciliations`. */
@@ -107,7 +107,7 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
   }
   const runs: Array<{ id: string; source: string; status: string; counts?: ReconcileCounts & { detail?: Record<string, unknown> } }> = [];
   const reconcile = { sweep: true, due: null as Array<{ product: Product; orderId: string }> | null };
-  /** Commandes dont la base refuserait l'activation (Grow : abonnement incompatible). */
+  /** Commandes dont la base refuserait l'activation (SORAHNEX Grow : abonnement incompatible). */
   const activationBlocks = new Map<string, string>();
   /** Horloge de la base : avançable par les tests (fenêtre de rejeu, rapprochement). */
   const clock = { now: NOW };
@@ -165,7 +165,7 @@ export function createFakeStore(options: FakeStoreOptions = {}) {
       return { amount: `${amount}.00`, currency: 'XOF', label: 'Recharge personnalisée', credits: Math.floor((amount * tier.credits) / tier.price), kind: 'custom', pack_key: null };
     }
     const plan = plans[String(item.plan_key)];
-    if (!plan) throw new PaymentError('BUSINESS_PLAN_NOT_PURCHASABLE', 422, 'Cette formule Grow n’est pas commercialisée.');
+    if (!plan) throw new PaymentError('BUSINESS_PLAN_NOT_PURCHASABLE', 422, 'Cette formule SORAHNEX Grow n’est pas commercialisée.');
     return { amount: `${plan.price}.00`, currency: 'XOF', label: plan.label, plan_key: item.plan_key, period_days: 30 };
   }
 

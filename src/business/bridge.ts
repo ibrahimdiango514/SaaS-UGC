@@ -8,7 +8,7 @@ import type {
 import { businessGrowApi } from './api';
 
 /**
- * Pont officiel pour les modules SORAHNEX externes à Grow
+ * Pont officiel pour les modules SORAHNEX externes à SORAHNEX Grow
  * (Dashboard, Studio UGC, Projets, Paramètres, futurs outils VS Code).
  *
  * Ce pont expose uniquement les ports de contrats publics et isole

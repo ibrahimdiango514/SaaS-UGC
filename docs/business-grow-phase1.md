@@ -1,6 +1,6 @@
-# Grow — socle intégré à SORAHNEX
+# Business Grow — socle intégré à SORAHNEX
 
-Grow est le deuxième système fonctionnel de l’application SORAHNEX, aux côtés du Studio UGC. Il utilise le même frontend React, la même session Supabase, le même compte et le même profil. Le schéma `saas_business` sépare les données métier sans créer un second SaaS ni une authentification indépendante.
+Business Grow est le deuxième système fonctionnel de l’application SORAHNEX, aux côtés du Studio UGC. Il utilise le même frontend React, la même session Supabase, le même compte et le même profil. Le schéma `saas_business` sépare les données métier sans créer un second SaaS ni une authentification indépendante.
 
 ## Parcours applicatif
 
@@ -18,8 +18,8 @@ Grow est le deuxième système fonctionnel de l’application SORAHNEX, aux côt
   - **Groq** (`openai/gpt-oss-120b` priorité 1, `qwen/qwen3.8-27b` priorité 2, `openai/gpt-oss-20b` priorité 3 ; les anciens modèles non supportés sur ce compte ont été désactivés).
   - **Gemini** (`gemini-2.5-flash` priorité 10, `gemini-3.5-flash` priorité 11, `gemini-3-flash-preview` priorité 12, `gemini-2.5-flash-lite` priorité 13 ; `gemini-2.5-pro` et `gemini-pro-latest` désactivés suite aux sondes live).
 - **Adaptateurs extensibles préparés** : `openai`, `anthropic`, `deepseek`, `mistral` (enregistrés côté serveur et catalogue sans secret ni exécution distante active tant qu’ils ne sont pas configurés).
-- **MuAPI** reste exclusivement dans le Studio UGC (`saas_ugc`), hors du routage conversationnel Grow.
-- **Isolation financière** : Grow gère ses propres quotas (`saas_business.ai_quota_*`) et ne lit ni ne débite jamais `saas_ugc.ugc_wallets` ou `saas_ugc.ugc_credit_ledger` (`consumesStudioCredits: false`, `studio_ugc_untouched: true`).
+- **MuAPI** reste exclusivement dans le Studio UGC (`saas_ugc`), hors du routage conversationnel Business Grow.
+- **Isolation financière** : Business Grow gère ses propres quotas (`saas_business.ai_quota_*`) et ne lit ni ne débite jamais `saas_ugc.ugc_wallets` ou `saas_ugc.ugc_credit_ledger` (`consumesStudioCredits: false`, `studio_ugc_untouched: true`).
 
 ## État de la base et du déploiement (`xbuuhfwobrafcbgtdgjx`)
 

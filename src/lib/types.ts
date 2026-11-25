@@ -354,7 +354,7 @@ export interface MuApiParamDef {
   required?: boolean;
 }
 
-export type SorahnnexModelStatus = 'active' | 'disabled' | 'coming_soon' | 'unsupported' | 'unverified';
+export type ReeloraModelStatus = 'active' | 'disabled' | 'coming_soon' | 'unsupported' | 'unverified';
 export type MuApiAccountAccess = 'account' | 'public_only' | 'unverified';
 
 /** Catalog row from GET reelora-video { action: "catalog" } (live MuAPI metadata). */
@@ -381,7 +381,7 @@ export interface MuApiModel {
   endpoint_url?: string | null;
   estimate_endpoint?: string | null;
   source?: string | null;
-  reelora_status?: SorahnnexModelStatus;
+  reelora_status?: ReeloraModelStatus;
   reelora_reason?: string;
   account_access?: MuApiAccountAccess;
 }
@@ -568,7 +568,7 @@ export interface VideoCostEstimate {
   service_active: boolean;
   model_id: string | null;
   model_available: boolean;
-  model_status?: SorahnnexModelStatus;
+  model_status?: ReeloraModelStatus;
   model_reason?: string | null;
   pricing_available: boolean;
   pricing_error?: string | null;

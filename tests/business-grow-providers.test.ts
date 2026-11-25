@@ -34,7 +34,7 @@ const registryRows = [
 
 beforeEach(() => { primeProviderRegistry(registryRows); });
 
-describe('Grow provider clients', () => {
+describe('SORAHNEX Grow provider clients', () => {
   it('calls the official Groq Chat Completions API with configured model and maps usage', async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({

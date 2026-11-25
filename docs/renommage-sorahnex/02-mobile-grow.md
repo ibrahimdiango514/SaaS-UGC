@@ -50,7 +50,7 @@ conteneur `overflow-x-auto`.
 | --- | --- |
 | `npm run typecheck` | **succès** |
 | `npm run build` | **succès** |
-| `tests/layout-notifications.test.tsx`, `tests/growth-workspace.test.tsx`, `tests/business-grow.test.tsx`, `tests/business-modules.test.tsx`, `tests/brand-visible-sorahnnex.test.ts` | **87/87 succès** |
+| `tests/layout-notifications.test.tsx`, `tests/growth-workspace.test.tsx`, `tests/business-grow.test.tsx`, `tests/business-modules.test.tsx`, `tests/brand-visible-sorahnex.test.ts` | **87/87 succès** |
 
 **Non vérifié** : rendu réel sur 360×640, 390×844, 412×915 et en paysage, tenue
 du clavier virtuel dans le composeur de l'assistant, et défilement du tiroir sur

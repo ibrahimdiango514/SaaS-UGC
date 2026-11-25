@@ -21,7 +21,7 @@ export function MessageList({
   loading: boolean;
   sending: boolean;
   /**
-   * Préfixe des marqueurs de test. Grow conserve son préfixe
+   * Préfixe des marqueurs de test. SORAHNEX Grow conserve son préfixe
    * historique (`business-message-`), qui identifie déjà l'espace dans les
    * tests existants : on ne renomme pas un contrat en place.
    */

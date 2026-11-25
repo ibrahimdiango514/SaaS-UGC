@@ -103,7 +103,7 @@ describe('preuve de rendu — import universel', () => {
 </head>
 <body>
 <div class="wrap">
-  <p class="capture-title">SORAHNEX · Grow → Croissance → Catalogue</p>
+  <p class="capture-title">SORAHNEX · SORAHNEX Grow → Croissance → Catalogue</p>
   <p class="capture-sub">Aperçu renvoyé par le serveur pour un CSV de 4 lignes. Rien n’a été enregistré.</p>
   ${container.innerHTML}
   <p class="capture-note">

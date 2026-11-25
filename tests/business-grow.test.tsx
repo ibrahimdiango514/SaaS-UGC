@@ -235,12 +235,12 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe('Grow', () => {
+describe('SORAHNEX Grow', () => {
   it('est accessible par la route protégée et la navigation de l’application', async () => {
     window.history.pushState({}, '', '/app/business');
     render(<App />);
     expect(await screen.findByTestId('business-grow')).toBeTruthy();
-    expect(screen.getAllByRole('navigation', { name: 'Navigation Growth OS' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('navigation', { name: 'Navigation SORAHNEX Grow' }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: 'Vue générale' }).length).toBeGreaterThan(0);
   });
 
@@ -534,7 +534,7 @@ describe('Grow', () => {
     expect(screen.getByText('Proposition B')).toBeTruthy();
   });
 
-  it('ne laisse pas un chargement de messages d’un compte précédent repeupler Grow', async () => {
+  it('ne laisse pas un chargement de messages d’un compte précédent repeupler SORAHNEX Grow', async () => {
     const oldConversationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const newConversationId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
     businessMocks.state.conversations = [{
@@ -663,14 +663,14 @@ describe('Grow', () => {
   });
 
   it('affiche un chargement puis un message factuel — jamais « backend non déployé »', async () => {
-    businessMocks.getStatus.mockRejectedValue(new Error('Fonction Grow introuvable.'));
+    businessMocks.getStatus.mockRejectedValue(new Error('Fonction SORAHNEX Grow introuvable.'));
     businessMocks.listConversations.mockRejectedValue(new Error('Backend indisponible.'));
 
     render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     // Le premier appel est en vol : ce n'est pas une panne.
     expect(screen.getByTestId('business-ai-loading')).toBeTruthy();
     expect(screen.queryByTestId('business-ai-unavailable')).toBeNull();
-    expect(await screen.findByText('Grow ne répond pas pour le moment', undefined, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByText('SORAHNEX Grow ne répond pas pour le moment', undefined, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByTestId('business-overall-status').textContent).toContain('Statut IA indisponible');
     expect(screen.getByText(/statut des services IA indisponible/i)).toBeTruthy();
     expect(screen.getByText('Historique indisponible')).toBeTruthy();
@@ -771,7 +771,7 @@ describe('Grow', () => {
     expect(aggregator.note).toContain('Agrégateur');
   });
 
-  it('transmet le rôle, le mode manuel de routage et affiche le quota Grow isolé', async () => {
+  it('transmet le rôle, le mode manuel de routage et affiche le quota SORAHNEX Grow isolé', async () => {
     businessMocks.getStatus.mockResolvedValue({
       providers: [
         {
@@ -904,7 +904,7 @@ describe('Grow', () => {
     expect(screen.getByTestId('integration-opencart').textContent).toContain('Configuration requise');
   });
 
-  it('le catalogue de 26 fournisseurs est le catalogue principal de Grow', async () => {
+  it('le catalogue de 26 fournisseurs est le catalogue principal de SORAHNEX Grow', async () => {
     render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     await screen.findByTestId('business-integrations');
@@ -977,7 +977,7 @@ describe('Grow', () => {
     // Le handler répond 403 BUSINESS_GROW_SUBSCRIPTION_REQUIRED avec le motif
     // précis à la racine de `error` ; le client le reconstitue dans `details`.
     const refus = new BusinessGrowApiError(
-      'Abonnement Grow requis pour Import & Connect.',
+      'Abonnement SORAHNEX Grow requis pour Import & Connect.',
       'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
       403,
       { reason: 'NO_SUBSCRIPTION', subscription_status: null, plan_key: null, current_period_end: null },
@@ -986,8 +986,8 @@ describe('Grow', () => {
     render(<MemoryRouter initialEntries={['/app/business/assistant']}><BusinessGrow /></MemoryRouter>);
     fireEvent.click(screen.getByRole('link', { name: 'Intégrations' }));
     const bandeau = await screen.findByTestId('integrations-subscription-required');
-    expect(bandeau.textContent).toContain('Abonnement Grow requis');
-    expect(within(bandeau).getByRole('link', { name: /Voir l’abonnement Grow/ }).getAttribute('href')).toBe('/app/business/abonnement');
+    expect(bandeau.textContent).toContain('Abonnement SORAHNEX Grow requis');
+    expect(within(bandeau).getByRole('link', { name: /Voir l’abonnement SORAHNEX Grow/ }).getAttribute('href')).toBe('/app/business/abonnement');
     // Ce n'est pas une panne : le message d'indisponibilité n'apparaît pas.
     expect(screen.queryByText(/État des intégrations indisponible/)).toBeNull();
     const facebook = screen.getByTestId('integration-facebook');
@@ -1020,7 +1020,7 @@ describe('Grow', () => {
     fireEvent.click(facebook);
     const fiche = await screen.findByRole('dialog', { name: /Fiche Facebook/i });
     fireEvent.click(within(fiche).getByRole('button', { name: 'Demander l’activation' }));
-    expect(await screen.findByText(/Opération refusée : abonnement Grow requis/)).toBeTruthy();
+    expect(await screen.findByText(/Opération refusée : abonnement SORAHNEX Grow requis/)).toBeTruthy();
     expect(businessMocks.requestIntegration).toHaveBeenCalledTimes(1);
     const bandeau = await screen.findByTestId('integrations-subscription-required');
     expect(bandeau.textContent).toContain('expiré');

@@ -267,7 +267,7 @@ describe('Logique pure · Hydratation & assemblage intelligent des médias du pr
     expect(media.urlError).toContain('URL signée refusée');
   });
 
-  it('hydrate un projet Sorahnnex existant (scripts, scènes, vidéos) même sans brouillon éditeur sauvegardé', async () => {
+  it('hydrate un projet SORAHNEX Studio existant (scripts, scènes, vidéos) même sans brouillon éditeur sauvegardé', async () => {
     const dbProject: Project = {
       id: 'proj-real', workspace_id: 'ws-1', brand_id: null, product_id: null, created_by: 'u1',
       title: 'Campagne Sérum', brief: 'Publicité UGC pour un sérum hydratant', campaign_objective: null,

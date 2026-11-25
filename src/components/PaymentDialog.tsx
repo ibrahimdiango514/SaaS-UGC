@@ -1,5 +1,5 @@
 /**
- * Fenêtre de paiement SasPay, commune au Studio et à Grow.
+ * Fenêtre de paiement SasPay, commune au Studio et à SORAHNEX Grow.
  *
  * Règles tenues ici :
  *  - le prix, les crédits et les frais affichés viennent du serveur (`options`) ;
@@ -506,7 +506,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
                 <p className="text-[12.5px] leading-relaxed text-slate-300">
                   {order.product === 'studio'
                     ? `${order.credits ?? ''} crédits ont été ajoutés à votre solde Studio.`
-                    : 'Votre abonnement Grow est actif.'}
+                    : 'Votre abonnement SORAHNEX Grow est actif.'}
                   {' '}Référence : {order.internal_reference}.
                 </p>
               </>

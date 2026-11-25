@@ -14,7 +14,7 @@ const worker = read('supabase/functions/reelora-video-worker/index.ts');
 const config = read('supabase/config.toml');
 
 describe('Une seule intégration MuAPI, de bout en bout', () => {
-  it('déclare les quatre fonctions Studio, Grow, le bootstrap propriétaire et les trois fonctions de paiement', () => {
+  it('déclare les quatre fonctions Studio, SORAHNEX Grow, le bootstrap propriétaire et les trois fonctions de paiement', () => {
     const declared = [...config.matchAll(/^\[functions\.([a-z0-9-]+)\]/gm)].map((m) => m[1]);
     expect(declared.sort()).toEqual(['business-grow', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker', 'studio-runtime', 'universal-catalog', 'vyora-ai', 'vyora-payments', 'vyora-payments-reconcile', 'vyora-provider-discovery', 'vyora-provider-health', 'vyora-saspay-webhook']);
     expect(config).toMatch(/\[functions\.business-grow\]\r?\nverify_jwt = true/);
@@ -91,7 +91,8 @@ describe('Passerelle IA unique : indisponibilité explicite, aucune simulation',
     expect(config).toMatch(/\[functions\.vyora-ai\]\s*\nverify_jwt\s*=\s*true/);
     expect(config).not.toContain('[functions.reelora-ai]');
     const api = read('src/lib/api.ts');
-    expect(api).toContain("invokeEdge<T>('vyora-ai', body)");
+    expect(api).toContain("invokeEdge<T>(edgeFunctionName('ai'), body)");
+    expect(api).toContain("import { edgeFunctionName } from './platform-identity'");
     expect(api).not.toContain("'reelora-ai'");
   });
 

@@ -151,7 +151,7 @@ describe('réponse de création perdue — aucun second paiement', () => {
     expect(ctx.saspay.transactions.size).toBe(1);
   });
 
-  it('un abonnement Grow est refusé aussi (et réciproquement)', async () => {
+  it('un abonnement SORAHNEX Grow est refusé aussi (et réciproquement)', async () => {
     const ctx = setup();
     await lostResponse(ctx);
     await expectError(ctx.service.create(alice, plan('idem-bg-0001')), 'PAYMENT_UNDER_REVIEW', 409);

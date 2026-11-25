@@ -51,18 +51,18 @@ export function Sidebar({
   loading: boolean;
   onCloseMobile?: () => void;
   /**
-   * Intégré à Grow : la barre ne propose plus de liens vers d'autres
+   * Intégré à SORAHNEX Grow : la barre ne propose plus de liens vers d'autres
    * espaces de l'application. Sinon, embarquée dans l'onglet Assistant, elle
    * réafficherait « Espace Business », « Explorer », « Images »… et
-   * reconstituerait la navigation globale que Grow possède déjà —
+   * reconstituerait la navigation globale que SORAHNEX Grow possède déjà —
    * exactement le deuxième espace métier qu'on veut éviter.
    */
   embedded?: boolean;
-  /** En mode intégré, navigue vers une rubrique de Grow. */
+  /** En mode intégré, navigue vers une rubrique de SORAHNEX Grow. */
   onNavigateSection?: (section: 'chat' | 'integrations') => void;
   /**
    * En mode intégré, la barre occupe la hauteur imposée par son conteneur au
-   * lieu de coller au viewport : Grow l'héberge dans une carte.
+   * lieu de coller au viewport : SORAHNEX Grow l'héberge dans une carte.
    */
   fillHeight?: boolean;
   /** Libellé de l'action principale, selon l'espace hôte. */
@@ -73,7 +73,7 @@ export function Sidebar({
   const [menuOuvert, setMenuOuvert] = useState<string | null>(null);
   const [renommageId, setRenommageId] = useState<string | null>(null);
   // Supprimer une conversation n'est pas réversible : on demande confirmation,
-  // comme le faisait l'interface précédente de Grow.
+  // comme le faisait l'interface précédente de SORAHNEX Grow.
   const [suppressionId, setSuppressionId] = useState<string | null>(null);
   const [titreDraft, setTitreDraft] = useState('');
 
@@ -94,7 +94,7 @@ export function Sidebar({
       className={cn(
         'vy-rail shrink-0',
         collapsed ? 'w-[68px]' : 'w-[264px]',
-        // Hébergée dans une carte de Grow, la barre prend la hauteur
+        // Hébergée dans une carte de SORAHNEX Grow, la barre prend la hauteur
         // du conteneur au lieu de celle du viewport.
         fillHeight && 'h-full',
       )}
@@ -105,7 +105,7 @@ export function Sidebar({
         <Link
           to={embedded ? '/app/business' : '/app/ai'}
           className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1"
-          aria-label={embedded ? 'SORAHNEX Grow — assistant' : 'SORAHNEX AI — accueil'}
+          aria-label={embedded ? 'SORAHNEX Business — assistant' : 'SORAHNEX AI — accueil'}
         >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-accent shadow-glow">
             <Sparkles size={17} className="text-ink" />
@@ -176,15 +176,15 @@ export function Sidebar({
       </div>
 
       {/* Navigation courte.
-          En mode intégré, on n'expose QUE ce qui appartient à Grow.
+          En mode intégré, on n'expose QUE ce qui appartient à SORAHNEX Grow.
           Les autres rubriques métier restent dans la navigation de Business
-          Grow, juste à côté : pas de doublon. */}
+          SORAHNEX Grow, juste à côté : pas de doublon. */}
       {embedded ? (
         <nav className="space-y-0.5 px-2.5" aria-label="Rubriques de l’assistant">
           <SectionLink
             icon={<Plug size={16} />}
             label="Intégrations"
-            description="Ouvrir les intégrations de Grow"
+            description="Ouvrir les intégrations de SORAHNEX Grow"
             collapsed={collapsed}
             onClick={() => {
               onNavigateSection?.('integrations');
@@ -234,7 +234,7 @@ export function Sidebar({
             )}
 
             {!loading && groups.length === 0 && (
-              // `embedded` : vocabulaire de Grow. Sinon, celui de
+              // `embedded` : vocabulaire de SORAHNEX Grow. Sinon, celui de
               // l'espace assistant autonome, qui a ses propres tests.
               embedded ? (
                 <div className="rounded-xl border border-dashed border-white/[0.10] px-3 py-6 text-center">
@@ -481,7 +481,7 @@ function RailLink({
 
 /**
  * Lien de rubrique interne (mode intégré) : déclenche un changement de section
- * dans Grow au lieu d'une navigation de route.
+ * dans SORAHNEX Grow au lieu d'une navigation de route.
  */
 function SectionLink({
   icon, label, collapsed, onClick, description,
@@ -504,7 +504,7 @@ function SectionLink({
       className={cn('vy-nav-item w-full', collapsed && 'justify-center px-0')}
       title={description ?? label}
       // Le nom accessible porte la description : la rubrique « Intégrations »
-      // de Grow existe déjà juste à côté, deux boutons homonymes
+      // de SORAHNEX Grow existe déjà juste à côté, deux boutons homonymes
       // rendraient le choix ambigu.
       aria-label={description ?? label}
     >

@@ -24,7 +24,7 @@ const DIMENSIONS = [
     eyebrow: '02 · Développer',
     title: 'SORAHNEX Grow',
     text: 'Un cerveau commercial qui connaît votre entreprise, vos objectifs, vos produits et vos marchés — et transforme ces données en actions.',
-    image: '/brand/sorahnnex-growth.jpg',
+    image: '/brand/sorahnex-growth.jpg',
     icon: Brain,
     points: ['Mémoire par entreprise', 'Objectifs et priorités', 'Veille marché et concurrence', 'Prospects et opportunités'],
     accent: 'violet',
@@ -51,12 +51,12 @@ const STEPS = [
 const PAINS = [
   {
     key: 'business',
-    eyebrow: 'Grow',
+    eyebrow: 'SORAHNEX Grow',
     accent: 'violet' as const,
     title: 'Votre activité avance, mais vous n’avez pas le temps de la piloter.',
     intro: 'Les décisions importantes se prennent trop souvent sans vision claire de l’ensemble.',
     items: [
-      { pain: 'Suivre et organiser les activités devient un travail à part entière.', fix: 'L’assistant Grow analyse vos données et structure un plan d’action priorisé, avec des jalons concrets.' },
+      { pain: 'Suivre et organiser les activités devient un travail à part entière.', fix: 'L’assistant SORAHNEX Grow analyse vos données et structure un plan d’action priorisé, avec des jalons concrets.' },
       { pain: 'Les performances restent invisibles entre deux imprévus.', fix: 'Le tableau de bord Croissance réunit objectifs, prospects et opportunités en un seul lieu de travail.' },
       { pain: 'Les relances, les impayés et les litiges commerciaux se perdent.', fix: 'L’assistant structure le suivi des encaissements, des relances et des litiges, étape par étape.' },
       { pain: 'Des opportunités commerciales passent entre les mailles.', fix: 'Le CRM intégré fait remonter les prospects et les opportunités avant qu’ils n’échappent à votre contrôle.' },
@@ -129,7 +129,7 @@ function HeroVisual() {
 
   const staticImage = (
     <img
-      src="/brand/sorahnnex-hero.jpg"
+      src="/brand/sorahnex-hero.jpg"
       alt="Direction artistique SORAHNEX : lumière, matière et profondeur"
       className={cn('object-cover object-center', HERO_HEIGHT_CLASSES)}
     />
@@ -142,7 +142,7 @@ function HeroVisual() {
   return (
     <div className={`relative ${HERO_HEIGHT_CLASSES}`}>
       <img
-        src="/brand/sorahnnex-hero.jpg"
+        src="/brand/sorahnex-hero.jpg"
         alt=""
         aria-hidden="true"
         className="absolute inset-0 h-full w-full object-cover object-center"
@@ -202,7 +202,7 @@ export default function Landing() {
           <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 pb-10 pt-14 sm:px-6 sm:pb-14 sm:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
             <div className="relative z-10 max-w-2xl">
               <div className="vyora-eyebrow animate-riseIn">
-                <Sparkles size={13} /> Create. Evolve. Grow.
+                <Sparkles size={13} /> Create. Evolve. SORAHNEX Grow.
               </div>
               <h1 className="vyora-display mt-6 text-[2.6rem] leading-[1.02] text-white sm:text-[3.4rem] lg:text-[3.9rem]">
                 Vos idées prennent forme.<br />
@@ -259,7 +259,7 @@ export default function Landing() {
                     {[
                       ['Tableau de bord', Gauge, true],
                       ['Studio UGC', Clapperboard, false],
-                      ['Grow', Brain, false],
+                      ['SORAHNEX Grow', Brain, false],
                       ['Bibliothèque', Sparkles, false],
                       ['Historique', TrendingUp, false],
                     ].map(([label, Icon, active]) => {
@@ -301,7 +301,7 @@ export default function Landing() {
                         <p className="mt-1 text-[9px] text-slate-500">Aucune génération sans devis</p>
                       </div>
                       <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-                        <p className="text-[9px] uppercase tracking-wide text-slate-500">Grow</p>
+                        <p className="text-[9px] uppercase tracking-wide text-slate-500">SORAHNEX Grow</p>
                         <p className="mt-1 text-sm font-semibold text-white">Contexte entreprise</p>
                         <p className="mt-1 text-[9px] text-slate-500">Mémoire métier consentie</p>
                       </div>
@@ -505,7 +505,7 @@ export default function Landing() {
         {/* ---------------------------------------------------------------- */}
         <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-24">
           <div className="relative isolate overflow-hidden rounded-[2rem] border border-cyan-300/20 bg-[#070d16] p-8 text-center sm:p-16">
-            <img src="/brand/sorahnnex-hero.jpg" alt="" aria-hidden="true" className="absolute inset-0 -z-10 h-full w-full object-cover opacity-25" />
+            <img src="/brand/sorahnex-hero.jpg" alt="" aria-hidden="true" className="absolute inset-0 -z-10 h-full w-full object-cover opacity-25" />
             <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-br from-[#05080e]/90 via-[#05080e]/70 to-violet-900/40" />
             <div aria-hidden="true" className="vyora-glow-ring left-1/4 top-0 h-56 w-56 animate-pulseGlow bg-cyan-400/25" />
             <Zap className="mx-auto text-cyan-200" size={26} />
@@ -535,7 +535,7 @@ export default function Landing() {
           </div>
         </div>
         <div className="mx-auto mt-5 flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 text-[10px] text-slate-600 sm:px-6">
-          <span>© {new Date().getFullYear()} SORAHNEX — Create. Evolve. Grow.</span>
+          <span>© {new Date().getFullYear()} SORAHNEX — Create. Evolve. SORAHNEX Grow.</span>
           <Link to="/proprietaire" className="transition-colors hover:text-slate-400">Espace propriétaire</Link>
         </div>
       </footer>

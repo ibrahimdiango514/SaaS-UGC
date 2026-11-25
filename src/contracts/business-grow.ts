@@ -1,5 +1,5 @@
 /**
- * Contrats publics et stables entre le moteur IA Grow (géré par Arena)
+ * Contrats publics et stables entre le moteur IA SORAHNEX Grow (géré par Arena)
  * et le reste de la plateforme SORAHNEX (développé dans VS Code : Studio UGC,
  * Dashboard, Projets, Éditeur, Paramètres, Abonnement et futurs Connecteurs).
  *
@@ -57,7 +57,7 @@ export type BusinessGrowWorkspaceSection =
   | 'integrations'
   | 'ai';
 
-/** Onglets réels du cockpit croissance Grow. */
+/** Onglets réels du cockpit croissance SORAHNEX Grow. */
 export type BusinessGrowGrowthTab =
   | 'overview'
   | 'company'
@@ -204,7 +204,7 @@ function optionalUuid(value: unknown): string | null {
 }
 
 /**
- * Normalise un brief provenant de Grow (tool `handoff_ugc_brief`,
+ * Normalise un brief provenant de SORAHNEX Grow (tool `handoff_ugc_brief`,
  * `input_args` ou `output_result.handoffDraft`) en contrat strict pour le Studio UGC.
  * Garantit `consumesStudioCredits: false` (aucun débit automatique lors du transfert).
  */
@@ -343,7 +343,7 @@ export function parseBusinessGrowEntryIntent(state: unknown): BusinessGrowEntryI
 
 /**
  * Contexte réel disponible dans le Studio UGC pour une continuité de travail
- * Grow ↔ Studio. Chaque champ provient d'un projet, d'un produit ou
+ * SORAHNEX Grow ↔ Studio. Chaque champ provient d'un projet, d'un produit ou
  * d'une marque réellement chargés : aucune valeur n'est inventée.
  */
 export interface StudioToBusinessGrowContext {
@@ -359,7 +359,7 @@ export interface StudioToBusinessGrowContext {
 }
 
 /**
- * Construit l'état de navigation Studio UGC → Grow.
+ * Construit l'état de navigation Studio UGC → SORAHNEX Grow.
  *
  * Le contexte projet / produit / script devient un brouillon de conversation :
  * l'utilisateur continue son travail sans ressaisie. Aucune écriture, aucun

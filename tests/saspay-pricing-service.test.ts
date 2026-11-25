@@ -78,7 +78,7 @@ describe('prix affiché : final, sans frais ajoutés au moment de payer', () => 
 
   it('relève le prix quand un tarif confirmé dépasse la provision (2,5 % sur 100 000 FCFA)', async () => {
     const ctx = setup({
-      businessPlans: { croissance: { price: 100_000, label: 'Business Grow — Croissance' } },
+      businessPlans: { croissance: { price: 100_000, label: 'SORAHNEX Grow — Croissance' } },
       pricing: { policy: DEFAULT_PRICING_POLICY, lines: [line({ percent_milli: 2500n })] },
     });
     const options = await ctx.service.options(bob, { product: 'business', item: { plan_key: 'croissance' } });
@@ -118,7 +118,7 @@ describe('encaissement en frais déduits', () => {
     expect(result.order).toMatchObject({ amount: '6000.00' });
   });
 
-  it('Business Grow : 25 000 FCFA facturés 26 000 FCFA', async () => {
+  it('SORAHNEX Grow : 25 000 FCFA facturés 26 000 FCFA', async () => {
     const ctx = setup();
     const result = await ctx.service.create(bob, plan('idem-price-0003'));
     expect(ctx.sent()[0].body).toMatchObject({ amount: '26000.00', fee_charge_mode: 'DEDUCTED' });
@@ -242,7 +242,7 @@ describe('confirmation et rapprochement', () => {
   it('tarif connu, prix relevé : le net commercial est préservé', async () => {
     const lines = [line({ percent_milli: 2500n })];
     const ctx = setup({
-      businessPlans: { croissance: { price: 100_000, label: 'Business Grow — Croissance' } },
+      businessPlans: { croissance: { price: 100_000, label: 'SORAHNEX Grow — Croissance' } },
       pricing: { policy: DEFAULT_PRICING_POLICY, lines },
     });
     ctx.saspay.setFee((amount) => (amount * 2500n + 99_999n) / 100_000n);

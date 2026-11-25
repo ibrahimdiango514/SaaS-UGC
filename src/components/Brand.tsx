@@ -5,7 +5,7 @@ export function BrandSymbol({ className, size = 36 }: { className?: string; size
   // Un dégradé SVG partagé par plusieurs instances porte le même `id` : le
   // navigateur ne résout alors que la première, et les symboles suivants
   // s'affichent vides. L'identifiant est donc unique par instance.
-  const gradientId = `vyora-mark-${useId().replace(/[:]/g, '')}`;
+  const gradientId = `sorahnex-mark-${useId().replace(/[:]/g, '')}`;
 
   return (
     <span
@@ -17,10 +17,16 @@ export function BrandSymbol({ className, size = 36 }: { className?: string; size
       aria-hidden="true"
     >
       <svg viewBox="0 0 40 40" width={size * 0.72} height={size * 0.72} fill="none">
-        <path d="M7 11.5h8.2l5.1 15 5.2-15H33L23.1 32h-5.7L7 11.5Z" fill={`url(#${gradientId})`} />
-        <path d="M28.5 8.5v5M26 11h5" stroke="#E8FDFF" strokeLinecap="round" strokeWidth="1.5" />
+        {/* Monogramme SORAHNEX : un « S » tracé d’un seul geste. */}
+        <path
+          d="M26.5 14.2c-1.4-1.4-3.7-2.2-6.1-2.2-3.9 0-6.4 2-6.4 5 0 3 2.2 4.2 6.2 5 3.3.7 4.6 1.3 4.6 2.8 0 1.6-1.7 2.6-4.3 2.6-2.6 0-4.9-.9-6.5-2.5"
+          stroke={`url(#${gradientId})`}
+          strokeLinecap="round"
+          strokeWidth="3.2"
+        />
+        <path d="M30.5 9.5v3.6M28.7 11.3h3.6" stroke="#E8FDFF" strokeLinecap="round" strokeWidth="1.4" />
         <defs>
-          <linearGradient id={gradientId} x1="7" y1="11.5" x2="29" y2="31" gradientUnits="userSpaceOnUse">
+          <linearGradient id={gradientId} x1="10" y1="10" x2="30" y2="30" gradientUnits="userSpaceOnUse">
             <stop stopColor="#A5F3FC" />
             <stop offset=".58" stopColor="#22D3EE" />
             <stop offset="1" stopColor="#A78BFA" />

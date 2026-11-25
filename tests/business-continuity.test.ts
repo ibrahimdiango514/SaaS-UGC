@@ -1,5 +1,5 @@
 /**
- * Continuité de navigation Grow ↔ Studio UGC (priorité 2).
+ * Continuité de navigation SORAHNEX Grow ↔ Studio UGC (priorité 2).
  *
  * Ces tests couvrent uniquement des fonctions pures : aucune requête réseau,
  * aucun appel IA, aucun débit. Ils vérifient que le contexte transmis entre
@@ -18,7 +18,7 @@ import {
 const PROJECT_UUID = '7b15bfe0-e315-4262-a8b9-9d99a5a5f6bd';
 const PRODUCT_UUID = '3b4fe184-7e28-4b34-8f82-61fbe5e59ced';
 
-describe('Studio UGC → Grow', () => {
+describe('Studio UGC → SORAHNEX Grow', () => {
   it('transmet le projet, le produit et le brief réels comme brouillon de conversation', () => {
     const state = buildBusinessGrowLocationStateFromStudio({
       projectId: PROJECT_UUID,
@@ -87,7 +87,7 @@ describe('Studio UGC → Grow', () => {
   });
 });
 
-describe('Grow → Studio UGC', () => {
+describe('SORAHNEX Grow → Studio UGC', () => {
   it('conserve l’identifiant produit réel du catalogue', () => {
     const brief = normalizeUgcHandoffBrief({
       productId: PRODUCT_UUID,

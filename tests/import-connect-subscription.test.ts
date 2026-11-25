@@ -1,5 +1,5 @@
 /**
- * Import & Connect — accès réservé aux abonnés Grow.
+ * Import & Connect — accès réservé aux abonnés SORAHNEX Grow.
  *
  * Ces tests couvrent les dix situations exigées, et surtout celles qui ne se
  * voient pas dans l'interface : un appel direct à l'Edge Function, sans passer
@@ -170,7 +170,7 @@ function requete(body: Record<string, unknown>, options: {
 const ACCES_OK: ImportAccess = {
   allowed: true,
   reason: 'OK',
-  message: 'Abonnement Grow actif.',
+  message: 'Abonnement SORAHNEX Grow actif.',
   status: 'active',
   planKey: 'essentiel',
   currentPeriodEnd: '2026-12-31T00:00:00.000Z',
@@ -184,9 +184,9 @@ const refus = (reason: string, message: string, status: string | null): ImportAc
 /* 1 à 4 — les états d'abonnement                                             */
 /* -------------------------------------------------------------------------- */
 
-describe('Abonnement Grow — états', () => {
+describe('Abonnement SORAHNEX Grow — états', () => {
   it('1. sans abonnement : accès refusé, aucune opération', async () => {
-    const ctx = fixture(refus('NO_SUBSCRIPTION', 'Un abonnement Grow est requis.', null));
+    const ctx = fixture(refus('NO_SUBSCRIPTION', 'Un abonnement SORAHNEX Grow est requis.', null));
     const res = await ctx.handler(requete({ action: 'preview' }));
 
     expect(res.status).toBe(403);
@@ -230,7 +230,7 @@ describe('Abonnement Grow — états', () => {
 /* 5 à 8 — contournement et isolation                                         */
 /* -------------------------------------------------------------------------- */
 
-describe('Abonnement Grow — contournement et isolation', () => {
+describe('Abonnement SORAHNEX Grow — contournement et isolation', () => {
   it('5. appel direct à l’API sans abonnement : refusé malgré un corps valide', async () => {
     // Cas le plus important : l'utilisateur connaît la route, le format, et
     // n'a pas d'abonnement. Rien ne doit se produire.
@@ -328,7 +328,7 @@ describe('Abonnement Grow — contournement et isolation', () => {
 /* Fail-closed                                                                */
 /* -------------------------------------------------------------------------- */
 
-describe('Abonnement Grow — panne et fermeture par défaut', () => {
+describe('Abonnement SORAHNEX Grow — panne et fermeture par défaut', () => {
   it('une panne de vérification ferme l’accès (503), elle ne l’ouvre pas', async () => {
     const ctx = fixture('panne');
     const res = await ctx.handler(requete({ action: 'preview' }));

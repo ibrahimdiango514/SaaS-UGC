@@ -113,7 +113,7 @@ export default function Subscription() {
 
             <Card><CardHeader title="Code promotionnel" description="Un code valide crédite immédiatement votre portefeuille." />
               <form onSubmit={(e) => void onPromo(e)} className="space-y-4 p-5">
-                <Input label="Code" value={promo} onChange={(e) => setPromo(e.target.value.toUpperCase())} placeholder="SORAHNEX2026" />
+                <Input label="Code" value={promo} onChange={(e) => setPromo(e.target.value.toUpperCase())} placeholder="Code promo" />
                 <Button type="submit" variant="outline" className="w-full" loading={busy === 'promo'} icon={<Gift size={15} />}>Appliquer le code</Button>
               </form>
               <div className="border-t border-line p-5">

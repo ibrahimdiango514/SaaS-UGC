@@ -154,7 +154,7 @@ describe('page Tarifs Studio — remboursements', () => {
   });
 });
 
-describe('page Abonnement Grow', () => {
+describe('page Abonnement SORAHNEX Grow', () => {
   const plan = (extra: Record<string, unknown> = {}) => ({
     plan_key: 'croissance', display_name: 'Croissance', tagline: null, monthly_price_minor: null, currency: 'XOF',
     monthly_credit_units: null, features: [], active: false, ...extra,
@@ -169,10 +169,10 @@ describe('page Abonnement Grow', () => {
 
   it('état actuel de la production (facturation désactivée, aucun prix) : rien n’est achetable', async () => {
     mockRpc({ business_grow_catalog: { plans: [plan(), plan({ plan_key: 'scale', display_name: 'Scale' })], billing_enabled: false, config: null } });
-    invokeEdge.mockResolvedValue(businessOptions(false, 'La facturation Grow n’est pas activée.'));
+    invokeEdge.mockResolvedValue(businessOptions(false, 'La facturation SORAHNEX Grow n’est pas activée.'));
     renderPage();
     await waitFor(() => expect(screen.getByText('Croissance')).toBeTruthy());
-    expect(screen.getByText('Facturation Grow non activée')).toBeTruthy();
+    expect(screen.getByText('Facturation SORAHNEX Grow non activée')).toBeTruthy();
     expect(subscribeButtons()).toHaveLength(0);
     expect(screen.getAllByText('Prix à définir').length).toBe(2);
     for (const button of screen.getAllByRole('button', { name: /Souscription indisponible/ })) {
@@ -215,7 +215,7 @@ describe('page Abonnement Grow', () => {
     mockRpc({ business_grow_catalog: { plans: [priced], billing_enabled: true, config: null } });
     invokeEdge.mockImplementation(async (_n: string, body: { action: string; item?: unknown }) => ({
       ...businessOptions(true),
-      price: body.item ? { amount: '25000.00', currency: 'XOF', label: 'Grow — Croissance', period_days: 30 } : null,
+      price: body.item ? { amount: '25000.00', currency: 'XOF', label: 'SORAHNEX Grow — Croissance', period_days: 30 } : null,
       flows: ['checkout'],
     }));
     renderPage();
@@ -224,7 +224,7 @@ describe('page Abonnement Grow', () => {
     await waitFor(() => expect(screen.getByTestId('payment-price').textContent).toBe('25\u202f000\u00a0FCFA'));
     expect(edgeCalls('options').at(-1)?.[1]).toEqual({ action: 'options', product: 'business', item: { plan_key: 'croissance' } });
     expect(screen.getByText(/30 jours, sans renouvellement automatique/)).toBeTruthy();
-    // Aucun vocabulaire Studio dans le parcours Grow.
+    // Aucun vocabulaire Studio dans le parcours SORAHNEX Grow.
     expect(screen.getByTestId('payment-dialog').textContent ?? '').not.toMatch(/Crédits Studio/);
   });
 

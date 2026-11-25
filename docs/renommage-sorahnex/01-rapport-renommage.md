@@ -37,10 +37,10 @@ renommage confondus : 417 entrées dans `git status`, dont 368 modifications,
 | --- | --- | --- |
 | Types | `npm run typecheck` | **succès** (exit 0) |
 | Build de production | `npm run build` (`tsc -b && vite build`) | **succès**, 14,5 s |
-| Garde de marque visible | `npx vitest run tests/brand-visible-sorahnnex.test.ts` | **3/3 succès** |
-| Tests ciblés nav Grow / layout | `npx vitest run tests/layout-notifications.test.tsx tests/growth-workspace.test.tsx tests/business-grow.test.tsx tests/business-modules.test.tsx tests/brand-visible-sorahnnex.test.ts` | **87/87 succès** |
+| Garde de marque visible | `npx vitest run tests/brand-visible-sorahnex.test.ts` | **3/3 succès** |
+| Tests ciblés nav Grow / layout | `npx vitest run tests/layout-notifications.test.tsx tests/growth-workspace.test.tsx tests/business-grow.test.tsx tests/business-modules.test.tsx tests/brand-visible-sorahnex.test.ts` | **87/87 succès** |
 
-La garde `tests/brand-visible-sorahnnex.test.ts` échoue si `SORAHNEX`, `Sorahnnex`,
+La garde `tests/brand-visible-sorahnex.test.ts` échoue si `SORAHNEX`, `Sorahnnex`,
 `SORAHNEX` ou `Sorahnnex` réapparaissent comme **mot entier** dans `src/`, `public/`
 ou `index.html` (hors variables `SORAHNEX_*` / `SORAHNEX_*` explicitement protégées).
 

@@ -283,9 +283,9 @@ describe('fenêtre de paiement', () => {
 
   it('paiement reçu mais non appliqué : le dit, annonce le remboursement, ne propose pas de repayer', async () => {
     const unapplied = order({ product: 'business', status: 'processing', state: 'unapplied', failure_code: 'business_plan_change_not_supported',
-      amount: '25000.00', label: 'Grow — Croissance', credits: undefined, internal_reference: 'VYB-XYZ' });
+      amount: '25000.00', label: 'SORAHNEX Grow — Croissance', credits: undefined, internal_reference: 'VYB-XYZ' });
     edge({
-      options: () => options({ product: 'business', price: { amount: '25000.00', currency: 'XOF', label: 'Grow — Croissance', period_days: 30 } }),
+      options: () => options({ product: 'business', price: { amount: '25000.00', currency: 'XOF', label: 'SORAHNEX Grow — Croissance', period_days: 30 } }),
       create: () => ({ order: unapplied, next: 'done', reused: true }),
     });
     const { onConfirmed } = renderDialog({ product: 'business', item: { plan_key: 'croissance' } });
@@ -448,12 +448,12 @@ describe('page de retour de paiement', () => {
     expect(invokeEdge).toHaveBeenCalledTimes(1);
   });
 
-  it('Grow : renvoie vers la page d’abonnement Grow', async () => {
+  it('SORAHNEX Grow : renvoie vers la page d’abonnement SORAHNEX Grow', async () => {
     edge({ status: () => ({ order: order({ product: 'business', status: 'paid', state: 'confirmed', credits: undefined }), verified: true, credited: true, message: null }) });
     renderReturn(`?produit=business&commande=${ORDER_ID}`);
-    await waitFor(() => expect(screen.getByText('Votre abonnement Grow est actif.')).toBeTruthy());
-    expect(screen.getByText('Retour à l’abonnement Grow').getAttribute('href')).toBe('/app/business/abonnement');
-    // Un paiement Grow ne touche pas le solde Studio.
+    await waitFor(() => expect(screen.getByText('Votre abonnement SORAHNEX Grow est actif.')).toBeTruthy());
+    expect(screen.getByText('Retour à l’abonnement SORAHNEX Grow').getAttribute('href')).toBe('/app/business/abonnement');
+    // Un paiement SORAHNEX Grow ne touche pas le solde Studio.
     expect(refreshQuota).not.toHaveBeenCalled();
   });
 });
@@ -553,12 +553,12 @@ describe('administration — panneau SasPay', () => {
     expect(rpc.mock.calls.every(([name]) => name === 'vyora_admin_payments' || name === 'vyora_admin_payment_health')).toBe(true);
   });
 
-  it('Studio et Grow sont listés séparément', async () => {
+  it('Studio et SORAHNEX Grow sont listés séparément', async () => {
     edge({ balances: () => ({ configured: false, mode: null, balances: [], message: null }) });
     rpc.mockResolvedValue([]);
     render(<SasPayPanel />);
     await waitFor(() => expect(rpc).toHaveBeenCalledWith('vyora_admin_payments', { p_product: 'studio', p_limit: 100 }));
-    fireEvent.click(screen.getByText('Grow (abonnements)'));
+    fireEvent.click(screen.getByText('SORAHNEX Grow (abonnements)'));
     await waitFor(() => expect(rpc).toHaveBeenCalledWith('vyora_admin_payments', { p_product: 'business', p_limit: 100 }));
   });
 });
@@ -721,9 +721,9 @@ describe('administration — remboursement', () => {
     expect(submitButton()).toBeTruthy();
   });
 
-  it('Grow : jours retirés et résiliation annoncés ; appelle la fonction Grow', async () => {
+  it('SORAHNEX Grow : jours retirés et résiliation annoncés ; appelle la fonction SORAHNEX Grow', async () => {
     noBalances();
-    const bgOrder = paid({ product: 'business', amount: '25000.00', label: 'Grow — Croissance', credits: undefined, internal_reference: 'VYB-ABC' });
+    const bgOrder = paid({ product: 'business', amount: '25000.00', label: 'SORAHNEX Grow — Croissance', credits: undefined, internal_reference: 'VYB-ABC' });
     adminRpc({
       vyora_admin_payments: (args: Record<string, unknown>) => (args.p_product === 'business' ? [bgOrder] : []),
       vyora_admin_refund_preview: {
@@ -734,7 +734,7 @@ describe('administration — remboursement', () => {
       vyora_admin_refund_business: { ...bgOrder, status: 'refunded', refund_state: 'credits_recovered', refund_amount: '8333.00', outcome: 'refunded' },
     });
     render(<SasPayPanel />);
-    fireEvent.click(await screen.findByText('Grow (abonnements)'));
+    fireEvent.click(await screen.findByText('SORAHNEX Grow (abonnements)'));
     fireEvent.click(await screen.findByRole('button', { name: 'Rembourser' }));
     await waitFor(() => screen.getByTestId('refund-preview'));
     const summary = screen.getByTestId('refund-preview').textContent ?? '';
@@ -751,12 +751,12 @@ describe('administration — remboursement', () => {
     expect(rpcNamed('vyora_admin_refund_studio')).toHaveLength(0);
   });
 
-  it('Grow : paiement encaissé non appliqué → remboursable, intégralement seulement, sans rien reprendre', async () => {
+  it('SORAHNEX Grow : paiement encaissé non appliqué → remboursable, intégralement seulement, sans rien reprendre', async () => {
     noBalances();
     const unapplied = order({
       id: ORDER_ID, product: 'business', status: 'processing', state: undefined, failure_code: 'business_plan_change_not_supported',
       provider_status: 'SUCCESS', provider_payment_id: 'tx-9', user_email: 'client@vyora.test',
-      amount: '25000.00', label: 'Grow — Croissance', credits: undefined, internal_reference: 'VYB-ABC',
+      amount: '25000.00', label: 'SORAHNEX Grow — Croissance', credits: undefined, internal_reference: 'VYB-ABC',
     });
     adminRpc({
       vyora_admin_payments: (args: Record<string, unknown>) => (args.p_product === 'business' ? [unapplied] : []),
@@ -769,7 +769,7 @@ describe('administration — remboursement', () => {
       vyora_admin_refund_business: { ...unapplied, status: 'refunded', refund_state: 'credits_recovered', refund_amount: '25000.00', refund_days_recovered: 0, outcome: 'refunded' },
     });
     render(<SasPayPanel />);
-    fireEvent.click(await screen.findByText('Grow (abonnements)'));
+    fireEvent.click(await screen.findByText('SORAHNEX Grow (abonnements)'));
     // La ligne dit clairement ce qui s'est passé, et n'offre pas de « Revérifier » (état final).
     await waitFor(() => expect(screen.getByTestId('saspay-unapplied')).toBeTruthy());
     expect(screen.getByText('Reçu, non appliqué')).toBeTruthy();
@@ -865,7 +865,7 @@ describe('administration — surveillance des paiements', () => {
     const card = screen.getByTestId('saspay-health').textContent ?? '';
     expect(card).toContain('Vérification automatique active (*/5 * * * *)');
     expect(card).toContain('Studio : 2');
-    expect(card).toContain('Grow : 0');
+    expect(card).toContain('SORAHNEX Grow : 0');
     expect(card).toContain('3 vérifié(s) · 1 livré(s) · 1 clos · 0 erreur(s)');
     expect(card).toContain('Réussie');
     expect(card).toContain('Partielle');

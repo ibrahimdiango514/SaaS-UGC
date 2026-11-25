@@ -83,7 +83,7 @@ export interface ConnectedAccount {
 
 /**
  * Demande d'activation, telle que la rend `integrations.list` du socle
- * Grow (`saas_business.bg_list_scoped_integration_connections`).
+ * SORAHNEX Grow (`saas_business.bg_list_scoped_integration_connections`).
  *
  * `external_account_ref` vaut `null` pour une simple demande : aucune
  * autorisation fournisseur n'a été obtenue. C'est ce champ qui distingue une

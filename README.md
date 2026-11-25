@@ -1,6 +1,6 @@
 # SORAHNEX — Create. Evolve. Grow.
 
-SaaS francophone de création de contenus UGC et de croissance d'activité. Le Studio vidéo utilise MuAPI côté serveur ; Grow dispose de son schéma Supabase et de son Edge Function. Les fournisseurs sont présentés comme opérationnels uniquement lorsque leurs secrets et modèles sont effectivement vérifiés. Ce dépôt contient le frontend, les migrations SQL, les Edge Functions et les tests.
+SaaS francophone de création de contenus UGC et de croissance d'activité. Le Studio vidéo utilise MuAPI côté serveur ; Business Grow dispose de son schéma Supabase et de son Edge Function. Les fournisseurs sont présentés comme opérationnels uniquement lorsque leurs secrets et modèles sont effectivement vérifiés. Ce dépôt contient le frontend, les migrations SQL, les Edge Functions et les tests.
 
 > **État de production vérifié le 12 novembre 2026** — le frontend est publié sur [`vyora-ugc.netlify.app`](https://vyora-ugc.netlify.app) et cible le projet Supabase `xbuuhfwobrafcbgtdgjx`. La migration `20261111165732_vyora_customer_isolation_and_admin_entitlement` est appliquée : seuls les comptes explicitement inscrits pour SORAHNEX sont comptés comme clients, le bootstrap admin ne provisionne aucun compte client et l'administrateur vérifié a 0 crédit, aucun workspace et aucun abonnement actif. Les corrections de redirection et d'interface admin sont présentes dans le bundle de production ; une connexion navigateur avec les identifiants du propriétaire n'a pas été effectuée. Le plafond fournisseur reste à **0 USD** et désactivé ; la tarification vidéo est désactivée. Le secret MuAPI est présent mais n'a pas été validé auprès du fournisseur. Groq et Gemini sont configurés et vérifiés en santé (dernier contrôle réussi le 12 novembre 2026 à 23:46 UTC : `groq/openai-gpt-oss-120b` priorité 1, repli `gemini/gemini-2.5-flash`), et la fonction Edge `business-grow` est en version 13 ACTIVE (voir `docs/incident-business-grow-prod-20261112.md`). La surveillance `pg_cron` est rétablie : l'ambiguïté de `vyora_provider_health_dispatch` est corrigée (migration `20261112001000_vyora_provider_health_dispatch_ambiguity.sql` appliquée) et les jobs `vyora-provider-health-daily` (11) et `vyora-provider-health-fresh-guard` (12) appellent explicitement `dispatch(false)` ; un cycle forcé a renouvelé les contrôles Groq et Gemini (`healthy`, 164 ms / 78 ms). Aucune génération payante n'a été lancée.
 
@@ -15,7 +15,7 @@ SaaS francophone de création de contenus UGC et de croissance d'activité. Le S
 | Tableau de bord | Statistiques réelles, quotas, dernières générations, état des intégrations Groq / MuAPI / worker |
 | Projets | Création, recherche, filtre par statut, fiche détaillée, édition du brief, scripts, scènes, générations, suppression |
 | **UGC Studio MuAPI** | Catalogue et suivi présents. Une génération réelle n'est pas autorisée actuellement : le plafond est à 0 USD, la tarification est désactivée et la validité de la clé MuAPI n'a pas été confirmée par le fournisseur. Aucune génération payante n'a été lancée. |
-| **Grow** | `/app/business` : espace chat séparé, contexte conversationnel, **AI CORE multi-fournisseurs** (registre, routage par rôle, secours plafonné), **mémoire agent persistante** (déclarations explicites, consentement, effacement) et section **Contrôle IA** (routage, mémoire, activité). Administration : onglet **Contrôle IA** (budgets, registre, journal des appels). Aucun crédit du Studio n'est utilisé. |
+| **Business Grow** | `/app/business` : espace chat séparé, contexte conversationnel, **AI CORE multi-fournisseurs** (registre, routage par rôle, secours plafonné), **mémoire agent persistante** (déclarations explicites, consentement, effacement) et section **Contrôle IA** (routage, mémoire, activité). Administration : onglet **Contrôle IA** (budgets, registre, journal des appels). Aucun crédit du Studio n'est utilisé. |
 | Avatars | CRUD, **image de référence** uploadée dans `ugc-assets` pour les modèles MuAPI image → vidéo, avatar par défaut |
 | Scripts IA | Groq (accroche, script, CTA, angle, allégations à éviter, storyboard), accroches alternatives, enregistrement en base, approbation |
 | Prompts | CRUD de modèles, variables `{{...}}`, aperçu, favoris, modèles système, amélioration par Groq |
@@ -178,9 +178,9 @@ supabase secrets set MUAPI_API_KEY=... GROQ_API_KEY=... --project-ref xbuuhfwobr
 
 > Aucun secret HeyGen / fal.ai n'est nécessaire ni lu. Les anciennes variables `REELORA_VIDEO_PROVIDER`, `HEYGEN_API_KEY`, `FAL_KEY` ont été retirées de `.env.example` et du code vidéo.
 
-### Grow — fournisseurs à vérifier
+### Business Grow — fournisseurs à vérifier
 
-Grow utilise des secrets Edge séparés du Studio : `BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, `BUSINESS_GROW_GROQ_MODEL`, `BUSINESS_GROW_GEMINI_MODEL`, `BUSINESS_GROW_PROVIDER_ORDER` et `BUSINESS_GROW_DATABASE_URL`. Ils ne sont pas à ajouter à `.env.local`, à un fichier suivi par Git ou à une variable `VITE_*`. Le schéma et la fonction sont déployés sur le projet existant ; la disponibilité effective de chaque fournisseur doit être vérifiée par une sonde côté serveur avant de l'annoncer comme utilisable.
+Business Grow utilise des secrets Edge séparés du Studio : `BUSINESS_GROW_GROQ_API_KEY`, `BUSINESS_GROW_GEMINI_API_KEY`, `BUSINESS_GROW_GROQ_MODEL`, `BUSINESS_GROW_GEMINI_MODEL`, `BUSINESS_GROW_PROVIDER_ORDER` et `BUSINESS_GROW_DATABASE_URL`. Ils ne sont pas à ajouter à `.env.local`, à un fichier suivi par Git ou à une variable `VITE_*`. Le schéma et la fonction sont déployés sur le projet existant ; la disponibilité effective de chaque fournisseur doit être vérifiée par une sonde côté serveur avant de l'annoncer comme utilisable.
 
 Pour un développement local futur, `VITE_BUSINESS_GROW_FUNCTION_URL=http://127.0.0.1:54321/functions/v1/business-grow` (dans `.env.local`, jamais dans un fichier suivi) dirige uniquement le navigateur de développement vers l'Edge Function locale; le code refuse les autres hôtes ou URL afin de ne pas transmettre le jeton SORAHNEX ailleurs. La fonction locale doit elle-même valider le jeton avec Supabase Auth. Cette URL seule ne rend pas le backend opérationnel : il faut encore un runtime Edge local, la base avec le schéma validé et les secrets serveur.
 
@@ -249,7 +249,7 @@ Les tests MuAPI sont **entièrement mockés** (`fetch` stubé) : aucun appel ré
 4. **Premier administrateur** : le mécanisme de création est `/proprietaire`, avec confirmation e-mail et attribution via l'Edge Function propriétaire. Le bootstrap refuse toute seconde attribution. Le compte propriétaire existant a déjà le rôle admin ; il n'est pas nécessaire de créer un autre administrateur.
 5. **Worker** : `reelora_worker_token` existe dans Vault sans être exposé. Le cron `reelora-video-tick` est actif et ses exécutions récentes ont réussi.
 6. **Auth et paiements** : l'API Auth publique indique que l'inscription e-mail est activée et l'auto-confirmation active. Les parcours avec un vrai compte et la liste d'URL de redirection n'ont pas été testés. Les fonctions de paiement SasPay sont présentes, mais aucun paiement ou parcours de bout en bout n'a été réalisé.
-7. **Historique SQL** : les 25 migrations SORAHNEX/Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.
+7. **Historique SQL** : les 25 migrations SORAHNEX/Business Grow de ce dépôt portent maintenant les versions observées en production. Le CLI signale encore 106 migrations historiques distantes absentes du dépôt. Aucune entrée distante n'a été réparée ou supprimée ; continuer avec l'outil de migration Supabase et ne pas lancer `db push` avant réconciliation de ces sources historiques.
 
 ---
 
@@ -303,7 +303,7 @@ Règles appliquées côté serveur :
   `usd_to_xof`, marge cible Studio, valeur du crédit. Paramètre manquant ou coût
   non nul inconnu ⇒ `null` ⇒ génération bloquée.
 - Portefeuille, historique, grille et marge sont propres au Studio
-  (`saas_ugc.*`, `ugc_credit_ledger`). La marge de 95 % de Grow n'est
+  (`saas_ugc.*`, `ugc_credit_ledger`). La marge de 95 % de Business Grow n'est
   jamais réutilisée ici.
 
 ### Vérifications reproductibles

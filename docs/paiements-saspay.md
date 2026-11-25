@@ -1,4 +1,4 @@
-# Paiements SasPay — SORAHNEX Studio et Grow
+# Paiements SasPay — SORAHNEX Studio et Business Grow
 
 État : **livré dans le dépôt, non déployé, désactivé par défaut.** Aucun appel
 réel à SasPay n'a été effectué et rien n'a été appliqué à la base de production.
@@ -11,8 +11,8 @@ réel à SasPay n'a été effectué et rien n'a été appliqué à la base de pr
   soldes marchands (ces trois dernières en lecture). Aucun décaissement, transfert
   ni recharge de portefeuille n'existe dans le code — y compris pour rembourser.
 - **Studio** : achat d'un pack ou recharge libre → crédits Studio.
-- **Grow** : souscription d'une formule pour 30 jours, sans
-  renouvellement automatique → abonnement et unités Grow.
+- **Business Grow** : souscription d'une formule pour 30 jours, sans
+  renouvellement automatique → abonnement et unités Business Grow.
 - Les deux produits ont leurs propres commandes, portefeuilles et historiques.
   Aucune fonction ne crédite l'un à partir d'un paiement de l'autre.
 
@@ -43,7 +43,7 @@ abouti à une issue : si le webhook devance l'état de SasPay (vérification enc
 tableau de bord SasPay, revérifie au lieu d'être écartée. Si SasPay est
 injoignable pendant la vérification, le webhook répond 503 pour être retenté.
 
-### Grow : une formule à la fois
+### Business Grow : une formule à la fois
 
 Un utilisateur n'a qu'un abonnement courant. Les règles sont tenues en base, sous
 un verrou par utilisateur partagé par la création de commande et le règlement :
@@ -71,7 +71,7 @@ Un webhook peut se perdre, un client peut fermer sa page. Une tâche pg_cron
 1. **Entretien SQL, sans réseau** : clôt les commandes pour lesquelles **aucune
    demande n'est jamais partie** vers SasPay (expirées depuis 15 min) ; fait
    passer en rapprochement manuel les demandes Mobile Money restées sans
-   réponse (voir § 2 ter — elles ne sont **jamais** closes d'office) ; fait expirer les abonnements Grow échus
+   réponse (voir § 2 ter — elles ne sont **jamais** closes d'office) ; fait expirer les abonnements Business Grow échus
    depuis plus d'une heure et ramène leur quota à la valeur par défaut (hors
    abonnement).
 2. **S'il n'y a rien à vérifier, elle s'arrête là** : aucun appel sortant.
@@ -110,7 +110,7 @@ l'administration (onglet SasPay) et notifié une fois aux administrateurs :
 | `amount_mismatch` | Montant ou devise encaissés ≠ commande | Ne livre rien |
 | `payment_not_found` | SasPay ne connaît pas la transaction | Clôt la commande après 24 h (un succès tardif la rouvre) |
 | `order_stuck` | Commande toujours en attente après 24 h | Continue de la revérifier |
-| `subscription_conflict` | Paiement Grow encaissé mais inapplicable à l'abonnement en cours | Ne livre rien ; à rembourser intégralement (l'anomalie se classe à l'attestation du versement) |
+| `subscription_conflict` | Paiement Business Grow encaissé mais inapplicable à l'abonnement en cours | Ne livre rien ; à rembourser intégralement (l'anomalie se classe à l'attestation du versement) |
 | `sweep_unreliable` | Liste SasPay sans libellé, ou tronquée | Passage « partiel » ; les commandes rattachées restent revérifiées une à une |
 | `initiation_unconfirmed` | Demande Mobile Money partie, jamais de réponse, fenêtre de rejeu dépassée | Ne livre rien, ne clôt rien, bloque tout autre paiement du client ; **ne se classe pas** : à trancher (§ 2 ter) |
 
@@ -143,7 +143,7 @@ aucun essai réel) :
 | Avant l'envoi | La tentative est enregistrée en base **avec le corps exact** de la requête (`vyora_payment_initiations`). La clé d'idempotence SasPay est la référence interne de la commande. |
 | Pas de réponse | **Un** rejeu immédiat (2 s plus tard), à l'identique. S'il reste sans réponse : la commande passe « **en vérification** » — ni payée, ni échouée. Réponse HTTP 200, `next: "review"`, message « Ne payez pas une seconde fois ». |
 | Refus certain (400, 404, 422, 429 ; 401/403 s'il n'y a pas eu de tentative incertaine avant) | Aucun paiement n'existe : commande « échouée », le client peut recommencer. |
-| Tant que l'issue est inconnue | **Tout nouveau paiement du même utilisateur est refusé** (409 `PAYMENT_UNDER_REVIEW`), Studio et Grow confondus, Mobile Money comme page hébergée. Tenu par la base (trigger), pas seulement par le service. |
+| Tant que l'issue est inconnue | **Tout nouveau paiement du même utilisateur est refusé** (409 `PAYMENT_UNDER_REVIEW`), Studio et Business Grow confondus, Mobile Money comme page hébergée. Tenu par la base (trigger), pas seulement par le service. |
 | Le client relance | La **même** demande repart (même clé, corps d'origine — même s'il a changé de numéro à l'écran), au plus **4 envois** sur **10 minutes**. Deux clics simultanés n'envoient qu'une requête. |
 | Fenêtre dépassée | Plus aucun envoi. La commande passe en **rapprochement manuel** : alerte `initiation_unconfirmed`, notification aux administrateurs, message au client. Elle n'expire pas. |
 | Le client ne revient jamais | Trois voies, toutes sans son concours : (1) le **webhook** de la transaction inconnue — SORAHNEX la relit chez SasPay et ne la rattache que si SasPay restitue **notre** référence ; (2) le **balayage** des encaissements (même condition) ; (3) la **recherche par numéro** — qui ne fait que proposer. |
@@ -189,13 +189,13 @@ depuis l'administration (onglet SasPay), sur un paiement confirmé :
      jamais négatif. Si des crédits manquent et que des générations sont en
      cours, le remboursement est refusé jusqu'à leur fin (leurs crédits réservés
      peuvent encore revenir au solde).
-   - *Grow* : la période payée est retirée de l'abonnement ; s'il ne
+   - *Business Grow* : la période payée est retirée de l'abonnement ; s'il ne
      reste rien, l'abonnement est résilié et le quota ramené à la valeur par
      défaut (hors abonnement). Montant plafonné au prorata des jours restants (journée entamée
      comptée au client ; une journée = 24 h exactes, sans effet du fuseau). Si
      l'abonnement est depuis passé à une autre formule, la période payée par
      cette commande est terminée : il n'y a plus rien à reprendre.
-   - *Grow, paiement « reçu, non appliqué »* : rien n'a été livré, donc
+   - *Business Grow, paiement « reçu, non appliqué »* : rien n'a été livré, donc
      rien n'est repris. Le remboursement est **intégral et seulement intégral**
      (le montant encaissé), l'abonnement en cours et son quota ne sont pas
      touchés, aucun événement de facturation n'est créé.
@@ -205,7 +205,7 @@ depuis l'administration (onglet SasPay), sur un paiement confirmé :
 
 Entre les deux, la commande apparaît « Remboursement en cours » (client comme
 administrateur) et un rappel « remboursement(s) à verser » reste affiché. Un
-client Studio reçoit une notification au versement ; un client Grow
+client Studio reçoit une notification au versement ; un client Business Grow
 (qui n'a pas de centre de notifications) le lit dans son historique de
 paiements. Le
 motif et la référence du versement sont des notes internes, jamais montrées au
@@ -233,7 +233,7 @@ un webhook de paiement rejoué ne relivre rien.
 | Remboursement concurrent d'une dépense : un seul des deux aboutit | Base (verrou du portefeuille) |
 | Tâche planifiée non déclenchable par un tiers | Edge (en-tête dédié, puis jeton Vault comparé à temps constant) ; base (`dispatch` sans rôle d'API) |
 | Une seule réconciliation à la fois | Base (verrou consultatif + index unique sur l'exécution « en cours ») |
-| Grow : jamais deux formules, jamais une formule en cours écrasée par un paiement tardif | Base (verrou par utilisateur à la création et au règlement ; contrôle refait au règlement) |
+| Business Grow : jamais deux formules, jamais une formule en cours écrasée par un paiement tardif | Base (verrou par utilisateur à la création et au règlement ; contrôle refait au règlement) |
 | Encaissement non applicable : jamais livré plus tard, jamais clos en silence, remboursable une seule fois et intégralement | Base (trigger `subscription_conflict_is_final`, `vyora_admin_refund_business`) + anomalie |
 | Deux règlements simultanés du même utilisateur n'échouent jamais sur une date d'événement | Base (événement daté après les verrous, jamais avant le dernier état de l'abonnement) |
 | Le filet de réconciliation ne se déclare pas sain s'il est aveugle ou tronqué | Edge (`sweep_unreliable`, exécution « partielle ») + administration |
@@ -311,7 +311,7 @@ de l'interface.
 
 6. **Passer en production** : installer la clé `sk_live_…` et passer `mode` à
    `"live"`. Tant que la clé et le mode ne concordent pas, tout paiement est refusé.
-7. **Grow** (facultatif, indépendant) : fixer un prix et un quota sur une
+7. **Business Grow** (facultatif, indépendant) : fixer un prix et un quota sur une
    formule, l'activer, puis :
 
    ```sql
@@ -339,8 +339,8 @@ une hypothèse que les tests locaux n'ont pu que simuler.
 | 8 | « Attester le versement » avec une référence | « Remboursé » | Attestation |
 | 9 | `select * from cron.job_run_details where jobid = (select jobid from cron.job where jobname = 'vyora-payments-reconcile') order by start_time desc limit 5;` | Statut `succeeded` toutes les 5 min | pg_cron tourne |
 | 10 | Après les achats précédents, attendre un quart d'heure puis ouvrir Admin → SasPay | Aucune alerte « Rattrapage des paiements incomplet », aucune anomalie `sweep_unreliable` ; aucune alerte « sans jeton » ni « Appel HTTP indisponible » | **`GET /transactions/` renvoie bien le libellé** ; scope de la clé suffisant pour lister ; Vault et pg_net en place |
-| 11 | Grow (si activé) : ouvrir deux onglets, lancer le paiement de deux formules différentes | Le second est refusé avec un message clair ; un seul paiement créé chez SasPay | Verrou par utilisateur |
-| 12 | Grow : payer deux fois la même formule | Fin de période repoussée de 60 jours au total | Prolongation |
+| 11 | Business Grow (si activé) : ouvrir deux onglets, lancer le paiement de deux formules différentes | Le second est refusé avec un message clair ; un seul paiement créé chez SasPay | Verrou par utilisateur |
+| 12 | Business Grow : payer deux fois la même formule | Fin de période repoussée de 60 jours au total | Prolongation |
 | 13 | Ouvrir la transaction de l'achat n° 1 avec `GET /payments/{id}/verify/` (ou regarder le journal de la fonction) | La réponse contient `description` (`VYS-…`) ou `metadata.internal_reference` | **`verify` restitue notre référence** : condition du rattachement automatique par webhook (§ 2 ter) |
 | 14 | Appeler deux fois `POST /payments/softpay/` avec la même `Idempotency-Key` et le même corps, à 5 min d'intervalle | Même `id` de transaction, une seule demande sur le téléphone | Idempotence réelle de SasPay et durée de conservation au moins égale à la fenêtre de rejeu (10 min) |
 | 15 | `GET /transactions/?search=<numéro du payeur>` avec la clé de SORAHNEX | La transaction de l'achat n° 1 est listée | Scope de la clé suffisant et recherche par numéro effective (sinon : aucune candidate par recherche, seules restent celles du webhook) |
@@ -383,7 +383,7 @@ recrée).
   route ni webhook de remboursement. Un versement fait directement chez SasPay
   sans passer par l'administration SORAHNEX ne retire donc aucun crédit ; à
   l'inverse, SORAHNEX ne peut pas vérifier qu'un versement attesté a bien eu lieu.
-- **Remboursement Grow** : calculé sur la *dernière* période payée de
+- **Remboursement Business Grow** : calculé sur la *dernière* période payée de
   l'abonnement, au prorata des jours. Les unités déjà consommées pendant la
   période ne sont pas décomptées du montant.
 - **Balayage** : repose sur la présence de la référence interne dans le libellé
@@ -442,7 +442,7 @@ recrée).
   l'anomalie est levée, mais le montant à rendre n'étant pas celui de la
   commande, ce cas ne passe pas par l'écran de remboursement : il se traite chez
   SasPay puis se classe à la main, avec une note.
-- **Renouvellement Grow** : manuel. À l'échéance, l'abonnement expire
+- **Renouvellement Business Grow** : manuel. À l'échéance, l'abonnement expire
   (tâche planifiée, une heure de tolérance) et le quota revient à la valeur par
   défaut. Le changement de formule en cours de période est refusé.
 - **Commandes abandonnées** : closes par la tâche planifiée (aucune demande
@@ -453,7 +453,7 @@ recrée).
   production). Si la tâche est absente ou désactivée, l'administration l'affiche
   en rouge ; le rattrapage ne se fait alors plus qu'à la consultation.
 - **Unités** : `ugc_recharge_orders.amount_minor` (Studio) est en centimes alors
-  que `saas_business.payment_orders.amount_minor` (Grow) est en FCFA
+  que `saas_business.payment_orders.amount_minor` (Business Grow) est en FCFA
   entiers, comme le catalogue de chaque produit. La migration convertit
   explicitement côté Studio (`amount_minor = prix × 100`) sans corriger
   l'existant ; les deux colonnes ne doivent jamais être additionnées.
@@ -470,9 +470,9 @@ Défauts trouvés et corrigés :
 
 | Défaut | Conséquence avant correction | Correction |
 | --- | --- | --- |
-| Grow : deux formules payées en même temps sans abonnement préalable | Le second règlement échouait sur une contrainte d'unicité brute : paiement encaissé, commande sans issue | Verrou par utilisateur au règlement ; refus de la seconde commande à la création |
-| Grow : paiement tardif d'une autre formule | La formule en cours était remplacée et sa période écrasée | Contrôle refait au règlement ; état « reçu, non appliqué », anomalie, remboursement intégral |
-| Grow : deux règlements simultanés de la même formule | Échec intermittent « stale or mismatched subscription event » | Événement daté après la prise des verrous |
+| Business Grow : deux formules payées en même temps sans abonnement préalable | Le second règlement échouait sur une contrainte d'unicité brute : paiement encaissé, commande sans issue | Verrou par utilisateur au règlement ; refus de la seconde commande à la création |
+| Business Grow : paiement tardif d'une autre formule | La formule en cours était remplacée et sa période écrasée | Contrôle refait au règlement ; état « reçu, non appliqué », anomalie, remboursement intégral |
+| Business Grow : deux règlements simultanés de la même formule | Échec intermittent « stale or mismatched subscription event » | Événement daté après la prise des verrous |
 | Encaissement non applicable sans issue | Commande « en cours » indéfiniment, re-signalée sans pouvoir être close | Remboursement intégral dédié ; anomalie classée à l'attestation |
 | Webhook `transaction.success` arrivé avant la confirmation de SasPay | Marqué « traité » : ses relances étaient écartées comme doublons (livraison retardée jusqu'à la tâche planifiée) | L'événement reste rejouable tant que la vérification n'a pas abouti |
 | Balayage muet si la liste SasPay n'a pas de libellé, ou tronquée à 300 lignes | Le filet pouvait ne rien rattraper tout en s'affichant « réussi » | Lecture portée à 1 000 lignes ; passage « partiel », anomalie et alerte dans l'administration |
@@ -483,7 +483,7 @@ Défauts trouvés et corrigés :
 Points vérifiés sans défaut : crédit Studio unique sous rafales (webhooks rejoués
 + vérifications simultanées), remboursement Studio concurrent d'une dépense
 (solde jamais négatif, grand livre équilibré), attestation unique, cloisonnement
-Studio / Grow (même utilisateur, même clé d'intention), pannes réseau
+Studio / Business Grow (même utilisateur, même clé d'intention), pannes réseau
 (réponse de création perdue, SasPay injoignable pendant un webhook).
 
 ## 8. Demande de paiement dont la réponse se perd (novembre 2026)
@@ -500,7 +500,7 @@ balayage par libellé, que SasPay ne garantit pas.
 
 Preuves locales : `supabase/tests/saspay/unconfirmed.mjs` (base réelle, dont deux
 connexions simultanées), section H de `e2e.mjs` (vraies Edge Functions : client
-jamais revenu, SasPay sans libellé, requête jamais reçue, Grow),
+jamais revenu, SasPay sans libellé, requête jamais reçue, Business Grow),
 `tests/saspay-unconfirmed.test.ts`, et les tests d'interface
 (`tests/saspay-ui.test.tsx`).
 
@@ -669,7 +669,7 @@ section « prix tout compris » de `e2e.mjs` (vraies Edge Functions),
 | `vyora-payments`, sans session | 401 de la passerelle (`UNAUTHORIZED_NO_AUTH_HEADER`) |
 | `vyora_payment_quote`, pack Creator (SQL, rôle de service) | 6 000 FCFA, 27 crédits, `enabled: true`, `mode: "live"` |
 | `vyora_payment_quote`, pack Studio Business | 36 000 FCFA, 265 crédits |
-| `vyora_payment_quote`, Grow | `business_billing_disabled` |
+| `vyora_payment_quote`, Business Grow | `business_billing_disabled` |
 
 Un crédit n'est accordé qu'après relecture du paiement chez SasPay
 (`GET /payments/{id}/verify/`) : un webhook non signé, mal signé ou rejoué ne
@@ -697,7 +697,7 @@ crédite rien.
 3. Publier l'interface (branche non fusionnée, aucun déploiement Netlify fait).
 4. Premier paiement réel = recette : dérouler le tableau « Recette » du § 5,
    puis Administration → « Importer les tarifs du compte ».
-5. Grow : fixer prix et quota d'une formule, puis `billing_enabled`.
+5. Business Grow : fixer prix et quota d'une formule, puis `billing_enabled`.
 
 Couper les paiements sans rien redéployer :
 

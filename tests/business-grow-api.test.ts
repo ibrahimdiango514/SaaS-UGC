@@ -19,7 +19,7 @@ vi.mock('../src/lib/supabase', () => ({
 
 import { BusinessGrowApiError, businessGrowApi } from '../src/business/api';
 
-describe('Grow browser API', () => {
+describe('SORAHNEX Grow browser API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     publicConfig.url = 'https://xbuuhfwobrafcbgtdgjx.supabase.co';
@@ -29,7 +29,7 @@ describe('Grow browser API', () => {
     });
   });
 
-  it('does not call the Edge Function without the existing Sorahnnex session', async () => {
+  it('does not call the Edge Function without the existing SORAHNEX session', async () => {
     getSession.mockResolvedValueOnce({ data: { session: null }, error: null });
 
     await expect(businessGrowApi.listConversations()).rejects.toMatchObject({
@@ -226,7 +226,7 @@ describe('Grow browser API', () => {
     }
   });
 
-  it('invokes new Grow actions cleanly with structured payloads', async () => {
+  it('invokes new SORAHNEX Grow actions cleanly with structured payloads', async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);

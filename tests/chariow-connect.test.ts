@@ -6,7 +6,7 @@
  *
  *   1. **la clé n'apparaît nulle part** — ni dans la réponse, ni dans un
  *      journal, ni dans un enregistrement de connexion ;
- *   2. **l'abonnement Grow est exigé AVANT tout appel réseau** ;
+ *   2. **l'abonnement SORAHNEX Grow est exigé AVANT tout appel réseau** ;
  *   3. **l'entreprise est vérifiée en base**, jamais d'après l'identifiant reçu ;
  *   4. **une clé d'une autre boutique est refusée** (le cas qui écraserait le
  *      mauvais catalogue) ;
@@ -171,7 +171,7 @@ function environnement(options: {
       return {
         allowed,
         reason: options.reason ?? (allowed ? 'OK' : 'NO_SUBSCRIPTION'),
-        message: allowed ? 'Actif' : 'Un abonnement Grow actif est requis.',
+        message: allowed ? 'Actif' : 'Un abonnement SORAHNEX Grow actif est requis.',
       };
     },
     async grantWorkspace() { return { canRead: true, canWrite: options.canWrite ?? true }; },
@@ -273,7 +273,7 @@ describe('store-connect — Chariow', () => {
     expect(journal.connexions).toHaveLength(0);
   });
 
-  it('exige l’abonnement Grow AVANT tout appel à Chariow', async () => {
+  it('exige l’abonnement SORAHNEX Grow AVANT tout appel à Chariow', async () => {
     const { deps, journal, appels } = environnement({ allowed: false, reason: 'SUBSCRIPTION_EXPIRED' });
     const reponse = await handleStoreConnect(
       requete({ action: 'connect', workspaceId: ENTREPRISE, connectorKey: 'chariow', apiKey: CLE_TEST }),

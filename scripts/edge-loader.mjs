@@ -51,7 +51,7 @@ export function parseExports(source) {
  * @returns {{code: string, exports: string[]}}
  */
 export function prepareArtifact(source) {
-  const stripped = source.replace(/^\/\* VYORA-EDGE-SHA256:[0-9a-f]{12}[^\n]*\n/, '');
+  const stripped = source.replace(/^\/\* SORAHNEX-EDGE-SHA256:[0-9a-f]{12}[^\n]*\n/, '');
   const pairs = parseExports(stripped);
   const match = stripped.match(/export\{([^}]*)\};?\s*$/);
   const body = stripped.slice(0, match.index);

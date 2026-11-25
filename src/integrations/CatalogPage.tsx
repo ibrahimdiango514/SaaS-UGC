@@ -54,7 +54,7 @@ export type SubscriptionRefusal = NonNullable<ReturnType<typeof subscriptionRefu
  * `null`. Chaque cas a son libellé : « État inconnu » n'est plus un fourre-tout.
  *
  * - `subscription` : le serveur a refusé la lecture faute d'abonnement
- *   Grow actif — rien n'est en panne, l'accès est réservé ;
+ *   SORAHNEX Grow actif — rien n'est en panne, l'accès est réservé ;
  * - `workspace`    : aucune entreprise active, la lecture n'a pas été tentée ;
  * - `error`        : la lecture a échoué (réseau, serveur) ;
  * - `loading`      : la première lecture est en cours.
@@ -77,9 +77,9 @@ export function etatIndetermine(args: {
 }
 
 /**
- * Contrôleur d'état fourni par l'espace hôte (Grow).
+ * Contrôleur d'état fourni par l'espace hôte (SORAHNEX Grow).
  *
- * Grow possède déjà des compteurs de séquence et un verrou de mutation
+ * SORAHNEX Grow possède déjà des compteurs de séquence et un verrou de mutation
  * éprouvés par ses tests : les réimplémenter ici les affaiblirait. Quand ce
  * contrôleur est fourni, il pilote entièrement l'état ; sinon le composant gère
  * le sien (page `/app/connect`).
@@ -109,7 +109,7 @@ export function IntegrationsCenter({
   /** Entreprise active : les demandes d'activation y sont rattachées. */
   workspaceId?: string | null;
   /**
-   * Intégré à Grow : on ne rend pas l'en-tête de page (titre, retour),
+   * Intégré à SORAHNEX Grow : on ne rend pas l'en-tête de page (titre, retour),
    * déjà fournis par l'espace hôte. Le contenu est identique.
    */
   embedded?: boolean;
@@ -170,7 +170,7 @@ export function IntegrationsCenter({
     }
     /*
      * 1) Les demandes d'activation d'abord, SEULES. Le serveur refuse cette
-     *    lecture sans abonnement Grow actif : c'est la vérification
+     *    lecture sans abonnement SORAHNEX Grow actif : c'est la vérification
      *    d'abonnement elle-même. Tant qu'elle n'a pas réussi, aucune autre
      *    source n'est interrogée — ni comptes OAuth, ni journal, ni boutiques
      *    (voir `MesBoutiquesConnectees`). Lancer ces lectures « au cas où »
@@ -282,7 +282,7 @@ export function IntegrationsCenter({
     setSubscriptionRefusal(refus);
     setLoadError(refus ? null : erreur instanceof Error ? erreur.message : 'Réponse perdue.');
     setNotice(refus
-      ? { tone: 'error', text: 'Opération refusée : abonnement Grow requis. Rien n’a été enregistré.' }
+      ? { tone: 'error', text: 'Opération refusée : abonnement SORAHNEX Grow requis. Rien n’a été enregistré.' }
       : { tone: 'error', text: 'Opération non confirmée. Relisez l’état avant de réessayer.' });
   };
 
@@ -487,14 +487,14 @@ export function IntegrationsCenter({
               <p className="mt-0.5 opacity-80">{guidanceAbonnement.detail}</p>
               <p className="mt-1 opacity-60">
                 Connexions verrouillées : le catalogue reste consultable, mais aucune requête n’est émise vers vos
-                boutiques ni vos comptes tant que l’abonnement Grow n’est pas actif. Aucune connexion n’est supposée.
+                boutiques ni vos comptes tant que l’abonnement SORAHNEX Grow n’est pas actif. Aucune connexion n’est supposée.
               </p>
               {guidanceAbonnement.showSubscribe && (
                 <Link
                   to={SUBSCRIPTION_PATH}
                   className="mt-2 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
                 >
-                  Voir l’abonnement Grow <ArrowRight size={12} />
+                  Voir l’abonnement SORAHNEX Grow <ArrowRight size={12} />
                 </Link>
               )}
             </div>
@@ -872,7 +872,7 @@ function FicheDetail({
   // refuserait ou la rattacherait à un contexte indéterminé.
   const demandePossible = etatConnu && entrepriseActive && canRequestActivation(entry, statut);
   const annulationPossible = etatConnu && canCancelRequest(statut);
-  // « Connecté » au sens du socle Grow (ligne `connected`) : on peut
+  // « Connecté » au sens du socle SORAHNEX Grow (ligne `connected`) : on peut
   // retirer l'association locale, même si aucun compte OAuth ne la corrobore.
   const associationLocale = etatConnu && connection?.status === 'connected';
   const connectable = etatConnu && canConnect(entry, statut);
@@ -902,7 +902,7 @@ function FicheDetail({
           <div className="mt-3 flex items-start gap-2 rounded-lg border border-violet-300/25 bg-violet-400/[0.08] px-3 py-2 text-xs text-violet-100">
             <Lock size={13} className="mt-0.5 shrink-0" />
             <p>
-              Réservé aux abonnés Grow actifs : l’état de cette connexion n’est pas lu et aucune
+              Réservé aux abonnés SORAHNEX Grow actifs : l’état de cette connexion n’est pas lu et aucune
               action n’est proposée tant que l’abonnement n’est pas actif.{' '}
               <Link to={SUBSCRIPTION_PATH} className="font-medium underline underline-offset-2">Voir l’abonnement</Link>
             </p>
@@ -990,7 +990,7 @@ function FicheDetail({
           {!etatConnu ? (
             <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-3.5 py-3 text-xs leading-relaxed text-amber-100">
               {indetermine.kind === 'subscription'
-                ? 'Abonnement requis : aucune action n’est proposée tant que l’abonnement Grow n’est pas actif.'
+                ? 'Abonnement requis : aucune action n’est proposée tant que l’abonnement SORAHNEX Grow n’est pas actif.'
                 : indetermine.kind === 'workspace'
                   ? 'Aucune entreprise active : aucune action n’est proposée tant que l’entreprise n’est pas résolue.'
                   : indetermine.kind === 'loading'

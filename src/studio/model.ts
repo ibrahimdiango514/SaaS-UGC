@@ -1,4 +1,4 @@
-import type { MuApiModel, MuApiParamDef, SorahnnexModelStatus } from '../lib/types';
+import type { MuApiModel, MuApiParamDef, ReeloraModelStatus } from '../lib/types';
 
 /** Values a dynamic parameter can hold. Kept in sync with the Edge Function. */
 export type ParamValue = string | number | boolean;
@@ -208,7 +208,7 @@ export function paramsSummary(params: Record<string, ParamValue>): string {
 }
 
 /** A model is selectable only when SORAHNEX can really serve it. */
-export function reeloraModelStatus(model: MuApiModel): { status: SorahnnexModelStatus; reason: string } {
+export function reeloraModelStatus(model: MuApiModel): { status: ReeloraModelStatus; reason: string } {
   if (!model.is_enabled) return { status: 'disabled', reason: 'Ce modèle est désactivé.' };
   if (model.is_coming_soon) return { status: 'coming_soon', reason: 'Ce modèle n’est pas encore lancé.' };
   const unsupported = (model.required_fields ?? []).filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
@@ -229,7 +229,7 @@ export function isModelAvailable(model: MuApiModel): boolean {
   return reeloraModelStatus(model).status === 'active';
 }
 
-export function statusLabel(status: SorahnnexModelStatus): string {
+export function statusLabel(status: ReeloraModelStatus): string {
   return {
     active: 'Actif',
     disabled: 'Désactivé',

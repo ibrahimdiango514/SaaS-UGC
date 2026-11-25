@@ -19,7 +19,7 @@
  * `connected` sans secret — trace d'une ancienne demande d'activation — est
  * affiché comme une anomalie, jamais comme une connexion saine.
  *
- * ## Verrou Business Grow (constat de production, 2026-11-18)
+ * ## Verrou SORAHNEX Grow (constat de production, 2026-11-18)
  *
  * Sans abonnement actif, ce panneau lisait quand même les quatre connecteurs :
  * quatre appels `store-connect` inutiles, qui échouaient (CORS / réseau) et
@@ -66,7 +66,7 @@ export interface ConnectedStore {
 
 /**
  * Accès aux connexions, décidé par l'écran hôte à partir de la réponse du
- * serveur (`integrations.list` refuse sans abonnement Business Grow actif).
+ * serveur (`integrations.list` refuse sans abonnement SORAHNEX Grow actif).
  *
  * - `active`  : abonnement vérifié côté serveur → les états sont lus ;
  * - `locked`  : abonnement absent/inactif → verrouillé, aucune requête ;
@@ -194,7 +194,7 @@ export function MesBoutiquesConnectees({ workspaceId, access, onOpenConnector }:
         <p className="mt-0.5 text-[0.7rem] text-violet-100/70">{access.detail}</p>
         <p className="mt-1.5 text-[0.7rem] text-violet-100/70">
           Vos boutiques (PrestaShop, Chariow, Shopify, WooCommerce) ne sont pas interrogées tant que
-          l’abonnement Business Grow n’est pas actif : aucune requête n’est émise, aucun état n’est supposé.
+          l’abonnement SORAHNEX Grow n’est pas actif : aucune requête n’est émise, aucun état n’est supposé.
         </p>
         {access.showSubscribe && (
           <Link
@@ -202,7 +202,7 @@ export function MesBoutiquesConnectees({ workspaceId, access, onOpenConnector }:
             className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-100 underline-offset-2 hover:underline"
             data-testid="mes-boutiques-abonnement"
           >
-            Voir l’abonnement Business Grow <ArrowRight size={12} />
+            Voir l’abonnement SORAHNEX Grow <ArrowRight size={12} />
           </Link>
         )}
       </section>
@@ -219,7 +219,7 @@ export function MesBoutiquesConnectees({ workspaceId, access, onOpenConnector }:
           {access.message
             ? <AlertTriangle size={12} className="shrink-0 text-amber-300" />
             : <Loader2 size={12} className="animate-spin" />}
-          {access.message ?? 'Vérification de l’abonnement Business Grow… Les boutiques ne sont pas interrogées avant cette vérification.'}
+          {access.message ?? 'Vérification de l’abonnement SORAHNEX Grow… Les boutiques ne sont pas interrogées avant cette vérification.'}
         </p>
       </section>
     );

@@ -19,7 +19,7 @@ import { Film, ImageIcon, Loader2, Trash2, Upload, X } from 'lucide-react';
 import { Badge, Button, ProgressBar, cn } from '../components/ui';
 import { asAppError } from '../lib/errors';
 import {
-  attachToProject, list, remove, signedUrl, upload, validate, type SorahnnexFile,
+  attachToProject, list, remove, signedUrl, upload, validate, type VyoraFile,
 } from '../files/api';
 import { IMAGE_REFERENCE_ROLES, REFERENCE_ROLE_LABELS, type ReferenceRole } from '../files/types';
 import {
@@ -51,7 +51,7 @@ export function ProjectReferences({
   currentUserId = null,
   onPlanChange,
 }: ProjectReferencesProps) {
-  const [fichiers, setFichiers] = useState<SorahnnexFile[]>([]);
+  const [fichiers, setFichiers] = useState<VyoraFile[]>([]);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
   const [roleChoisi, setRoleChoisi] = useState<ReferenceRole>('product');
@@ -153,7 +153,7 @@ export function ProjectReferences({
     }
   }, [workspaceId, projectId, roleChoisi]);
 
-  const retirer = useCallback(async (fichier: SorahnnexFile) => {
+  const retirer = useCallback(async (fichier: VyoraFile) => {
     try {
       await remove(fichier);
       setFichiers((prev) => prev.filter((f) => f.id !== fichier.id));

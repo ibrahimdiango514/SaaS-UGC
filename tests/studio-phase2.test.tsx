@@ -2,7 +2,7 @@
 /**
  * PHASE 2 — tests SIMULÉS, sans appel MuAPI, sans Supabase, sans génération,
  * sans réservation ni débit réel. Les fixtures reproduisent les agrégats du
- * catalogue vérifié (415 références, 236 actifs Sorahnnex) et les 3 devis live
+ * catalogue vérifié (415 références, 236 actifs SORAHNEX Studio) et les 3 devis live
  * déjà consignés dans docs/validation-authentifiee-muapi.md.
  */
 import { readFileSync } from 'node:fs';

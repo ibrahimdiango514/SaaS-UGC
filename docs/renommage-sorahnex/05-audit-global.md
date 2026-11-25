@@ -6,7 +6,7 @@ pour ce qu'il est.
 
 | Domaine | État | Preuve / limite |
 | --- | --- | --- |
-| Renommage de marque visible | **opérationnel testé** | `typecheck`, `build`, garde `tests/brand-visible-sorahnnex.test.ts` (3/3), 323 fichiers en SORAHNEX ; identifiants techniques conservés et catalogués |
+| Renommage de marque visible | **opérationnel testé** | `typecheck`, `build`, garde `tests/brand-visible-sorahnex.test.ts` (3/3), 323 fichiers en SORAHNEX ; identifiants techniques conservés et catalogués |
 | Navigation mobile Grow (5 entrées, tiroir, verrou de défilement) | **corrigé, non testé sur appareil** | 87/87 tests ciblés ; aucun rendu 360/390/412 px ni clavier virtuel vérifié |
 | Intégration Chariow (connecteur) | **opérationnel testé hors réseau réel** | 64/64 tests ; conformité vérifiée ligne à ligne avec `chariow.dev/api-reference` ; **aucun appel authentifié** (pas de clé) |
 | Déploiement Edge (bundles + chargeurs) | **corrigé, en attente de déploiement** | 4 chargeurs à tranches régénérés, 4 chargeurs GitHub réépinglés ; 171/171 tests de parité. La production exécute encore l'ancien bundle jusqu'au redéploiement |
@@ -27,7 +27,7 @@ pour ce qu'il est.
 npm ci
 npm run typecheck                        → succès
 npm run build                            → succès (12,9 s)
-npx vitest run tests/brand-visible-sorahnnex.test.ts        → 3/3
+npx vitest run tests/brand-visible-sorahnex.test.ts        → 3/3
 npx vitest run (nav Grow + layout + business + modules)     → 87/87
 npx vitest run (chargement/parité Edge, 13 fichiers)        → 171/171
 npx vitest run (MCP, 16 fichiers)                            → 367/367

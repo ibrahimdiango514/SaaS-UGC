@@ -138,7 +138,7 @@ function fixture(overrides: Partial<StoreImportDependencies> = {}, options: {
     checkImportAccess: vi.fn(async () => ({
       allowed: true,
       reason: 'OK',
-      message: 'Abonnement Grow actif.',
+      message: 'Abonnement SORAHNEX Grow actif.',
       status: 'active',
       planKey: 'essentiel',
       currentPeriodEnd: null,

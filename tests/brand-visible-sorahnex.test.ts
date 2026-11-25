@@ -8,7 +8,7 @@ import { extname, join, relative } from 'node:path';
  * L'expérience utilisateur ne doit plus afficher les anciennes marques. Les
  * identifiants techniques (VYORA_BUILD_ENABLED, vyora-ai, vyora_*) restent
  * volontairement inchangés : ils sont retirés avant l'analyse, et leur
- * inventaire est tenu dans docs/renommage-sorahnnex/.
+ * inventaire est tenu dans docs/renommage-sorahnex/.
  *
  * ## Pourquoi les anciens noms sont assemblés à l'exécution
  *
@@ -56,8 +56,8 @@ describe('marque visible SORAHNEX', () => {
     expect(visibleBrandHits(join(ROOT, 'index.html'))).toEqual([]);
   });
 
-  it('le nom d’application est sorahnnex', () => {
+  it('le nom d’application est sorahnex', () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { name: string };
-    expect(pkg.name).toBe('sorahnnex');
+    expect(pkg.name).toBe('sorahnex');
   });
 });

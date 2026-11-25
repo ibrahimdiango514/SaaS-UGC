@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reelora — aligne les Edge Functions live sur les sources de ce dépôt.
+# SORAHNEX Studio — aligne les Edge Functions live sur les sources de ce dépôt.
 #
 # À exécuter UNIQUEMENT après autorisation explicite : ces fonctions sont
 # partagées par le projet Supabase xbuuhfwobrafcbgtdgjx et ne sont pas isolées
@@ -21,7 +21,7 @@ supabase link --project-ref "$PROJECT_REF"
 supabase functions deploy vyora-ai --project-ref "$PROJECT_REF"
 supabase functions deploy reelora-video --project-ref "$PROJECT_REF"
 
-# Business Grow : verify_jwt=true (chaque requête exige un JWT VYORA).
+# Business Grow : verify_jwt=true (chaque requête exige un JWT SORAHNEX).
 # La source déployée est le chargeur autonome, pas index.ts : le canal de
 # déploiement ne transmet pas fidèlement une source multi-fichiers. Régénérer
 # le chargeur avec `node scripts/build-business-grow-artifact.mjs` avant de

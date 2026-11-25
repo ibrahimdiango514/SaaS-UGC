@@ -1,4 +1,4 @@
-// SORAHNEX AI CORE — mémoire persistante de l'agent (Grow).
+// SORAHNEX AI CORE — mémoire persistante de l'agent (SORAHNEX Grow).
 //
 // Verrouille : (1) l'extraction heuristique des DÉCLARATIONS explicites
 // (jamais la conversation entière), (2) l'injection de la mémoire dans le

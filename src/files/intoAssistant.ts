@@ -27,7 +27,7 @@
  */
 import type { AiAttachment } from '../ai/api';
 import { MAX_EXCERPT_CHARS } from '../ai/attachments';
-import { upload, validate, type SorahnnexFile } from './api';
+import { upload, validate, type VyoraFile } from './api';
 import { readXlsxRows } from '../business/importer/files';
 import { asAppError } from '../lib/errors';
 
@@ -44,7 +44,7 @@ export interface ReadCapability {
  *
  * Fonction pure : testable sans réseau ni DOM.
  */
-export function readCapability(kind: SorahnnexFile['kind'], previewKind: SorahnnexFile['preview_kind']): ReadCapability {
+export function readCapability(kind: VyoraFile['kind'], previewKind: VyoraFile['preview_kind']): ReadCapability {
   if (previewKind === 'text') {
     return { transmitted: true, note: 'Contenu texte transmis à l’assistant.' };
   }
@@ -232,7 +232,7 @@ export interface PreparedAttachment {
   /** Pièce jointe compatible avec `composeMessageBody`. */
   attachment: AiAttachment;
   /** Ligne de fichier créée en base (preuve du téléversement). */
-  stored: SorahnnexFile;
+  stored: VyoraFile;
   capability: ReadCapability;
 }
 

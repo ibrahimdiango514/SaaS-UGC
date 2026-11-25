@@ -5,18 +5,18 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
 /**
- * Intégration de l'interface SORAHNEX AI dans Grow.
+ * Intégration de l'interface SORAHNEX AI dans SORAHNEX Grow.
  *
  * ## Ce que ces tests protègent
  *
  * La demande était explicite : **un seul espace métier**. Les tests existants
- * de Grow vérifient déjà les fonctions métier (AI Director, mémoire,
+ * de SORAHNEX Grow vérifient déjà les fonctions métier (AI Director, mémoire,
  * quota, isolation) ; ceux-ci vérifient la *direction architecturale* :
  *
  * 1. l'interface SORAHNEX remplace réellement l'ancienne section Assistant ;
  * 2. elle ne recrée pas une navigation d'application concurrente ;
- * 3. elle réutilise le socle de Grow (aucun service inventé) ;
- * 4. le catalogue d'intégrations reste accessible depuis Grow ;
+ * 3. elle réutilise le socle de SORAHNEX Grow (aucun service inventé) ;
+ * 4. le catalogue d'intégrations reste accessible depuis SORAHNEX Grow ;
  * 5. les conversations restent rattachées à l'entreprise active.
  */
 
@@ -107,7 +107,7 @@ function monter() {
   );
 }
 
-describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistant', () => {
+describe('SORAHNEX Grow — l’interface SORAHNEX remplace l’ancienne section Assistant', () => {
   it('rend l’interface SORAHNEX dans la section Assistant', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
@@ -123,7 +123,7 @@ describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistan
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
     // Ces liens existent dans la sidebar autonome ; imbriqués dans Business
-    // Grow, ils reconstitueraient le second espace métier qu'on refuse.
+    // SORAHNEX Grow, ils reconstitueraient le second espace métier qu'on refuse.
     expect(screen.queryByText('Espace Business')).toBeNull();
     expect(screen.queryByText('Explorer')).toBeNull();
     expect(screen.queryByText('Bibliothèque')).toBeNull();
@@ -134,7 +134,7 @@ describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistan
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
-    const nav = screen.getByRole('navigation', { name: 'Navigation Growth OS' });
+    const nav = screen.getByRole('navigation', { name: 'Navigation SORAHNEX Grow' });
     expect(nav).toBeTruthy();
     for (const rubrique of [
       'Vue générale', 'Rapports et analyses', 'CRM', 'Pipeline commercial',
@@ -148,7 +148,7 @@ describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistan
     expect(screen.queryByRole('link', { name: 'Croissance' })).toBeNull();
   });
 
-  it('s’appuie sur le socle de Grow, pas sur un service inventé', async () => {
+  it('s’appuie sur le socle de SORAHNEX Grow, pas sur un service inventé', async () => {
     monter();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Lancement karité' })).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: 'Lancement karité' }));
@@ -162,7 +162,7 @@ describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistan
 
   it('affiche les conversations et le fil de la plus récente', async () => {
     monter();
-    // Grow sélectionne la conversation la plus récente à l'ouverture,
+    // SORAHNEX Grow sélectionne la conversation la plus récente à l'ouverture,
     // et son fil s'affiche — comportement conservé de l'interface précédente.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Lancement karité' })).toBeTruthy());
     expect(await screen.findByText('Bonjour')).toBeTruthy();
@@ -184,14 +184,14 @@ describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistan
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de Grow/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de SORAHNEX Grow/i }));
     await waitFor(() => expect(screen.getByTestId('business-integrations')).toBeTruthy());
   });
 
   it('le catalogue d’intégrations reste accessible et relié au socle réel', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de Grow/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de SORAHNEX Grow/i }));
 
     await waitFor(() => expect(screen.getByTestId('business-integrations')).toBeTruthy());
     // La lecture des connexions a bien été tentée : l'état affiché en découle.

@@ -5,7 +5,7 @@
  * instruction into a structured plan (objective, sector, narrative scenes,
  * visual instructions). It is explicitly NOT an AI response and is labelled as
  * such in the UI. The optional AI path (`mapAiScriptToPlan`) uses the EXISTING
- * `vyora-ai` Edge function (SORAHNEX AI GATEWAY → FreeLLMAPI) and is only reachable
+ * `vyora-ai` Edge function (SORAHNEX AI → FreeLLMAPI) and is only reachable
  * when the central provider is configured; otherwise the UI shows an explicit
  * unavailability state and never simulates.
  *

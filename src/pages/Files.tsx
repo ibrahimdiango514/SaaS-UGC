@@ -7,7 +7,7 @@
  * part. Un fichier téléversé depuis l'assistant n'était donc consultable que
  * dans le fil de la conversation, sans moyen de le retrouver, de le réutiliser
  * ailleurs ni de le supprimer. Cette page lui donne sa place : c'est le point
- * d'entrée unique du système de fichiers, commun à Grow et au Studio.
+ * d'entrée unique du système de fichiers, commun à SORAHNEX Grow et au Studio.
  *
  * ## Ce qu'elle ne fait pas
  * Elle n'invente aucun droit : `workspaceId` vient de la session, et la base

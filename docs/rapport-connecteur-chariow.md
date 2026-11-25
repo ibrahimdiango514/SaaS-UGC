@@ -238,7 +238,7 @@ progression sont les composants communs, inchangés dans leur logique.
 ### Étape 2 — connecter dans SORAHNEX
 
 1. Ouvrir SORAHNEX → **Intégrations** → catégorie **Boutiques en ligne** → **Chariow**.
-2. Sélectionner l'entreprise (abonnement Grow actif requis).
+2. Sélectionner l'entreprise (abonnement Business Grow actif requis).
 3. Coller la clé dans le champ `sk_live_…`, puis **« Vérifier et connecter »**.
 4. La fiche affiche la **preuve** : nom de la boutique, URL lue chez Chariow,
    statut, ressources lues (`store`, `products`), hôte contacté

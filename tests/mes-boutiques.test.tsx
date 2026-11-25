@@ -24,12 +24,12 @@ vi.mock('../src/lib/api', async () => {
 import { MemoryRouter } from 'react-router-dom';
 import { MesBoutiquesConnectees, type BoutiquesAccess } from '../src/integrations/MesBoutiquesConnectees';
 
-/** Abonnement Business Grow vérifié par le serveur : la lecture est permise. */
+/** Abonnement SORAHNEX Grow vérifié par le serveur : la lecture est permise. */
 const ACTIF: BoutiquesAccess = { kind: 'active' };
 const VERROUILLE: BoutiquesAccess = {
   kind: 'locked',
-  title: 'Abonnement Business Grow requis',
-  detail: 'Import & Connect est réservé aux abonnés Business Grow.',
+  title: 'Abonnement SORAHNEX Grow requis',
+  detail: 'Import & Connect est réservé aux abonnés SORAHNEX Grow.',
   showSubscribe: true,
 };
 
@@ -208,7 +208,7 @@ describe('périmètre affiché', () => {
   });
 });
 
-describe('verrou Business Grow — aucune requête sans abonnement actif', () => {
+describe('verrou SORAHNEX Grow — aucune requête sans abonnement actif', () => {
   it('verrouillé : aucun appel store-connect, message explicite et lien vers la vraie page d’abonnement', () => {
     repondre({});
     render(
@@ -219,7 +219,7 @@ describe('verrou Business Grow — aucune requête sans abonnement actif', () =>
     const panneau = screen.getByTestId('mes-boutiques');
     expect(panneau.getAttribute('data-access')).toBe('locked');
     expect(panneau.textContent).toMatch(/Connexions verrouillées/);
-    expect(panneau.textContent).toMatch(/Abonnement Business Grow requis/);
+    expect(panneau.textContent).toMatch(/Abonnement SORAHNEX Grow requis/);
     expect(panneau.textContent).toMatch(/aucune requête n’est émise/i);
     // Ni « Vérification en cours », ni erreur réseau : rien n'a été tenté.
     expect(panneau.textContent).not.toMatch(/Vérification en cours|illisible|réseau|CORS/i);

@@ -1,6 +1,6 @@
 # SORAHNEX Growth OS — architecture et fonctionnement
 
-Growth OS est le cerveau métier de SORAHNEX Grow. Il ne s’agit pas d’un chatbot : chaque analyse est
+Growth OS est le cerveau métier de SORAHNEX Business. Il ne s’agit pas d’un chatbot : chaque analyse est
 ancrée sur des enregistrements réels, modifiables par l’utilisateur, stockés dans la mémoire métier
 de l’espace de travail.
 
@@ -57,7 +57,7 @@ de démonstration n’est inséré.
 
 ## 5. Interfaces
 
-`GrowthWorkspace` ajoute la section **Croissance** à SORAHNEX Grow, avec les onglets :
+`GrowthWorkspace` ajoute la section **Croissance** à SORAHNEX Business, avec les onglets :
 Vue d’ensemble, Entreprise, Objectifs, Catalogue, Marché, Prospects, Stratégie.
 Chaque action écrit ou relit la mémoire via l’API ; chaque échec affiche le message réel renvoyé par le
 serveur. Le consentement mémoire est obligatoire : sans lui, l’interface propose de l’activer.

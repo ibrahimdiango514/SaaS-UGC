@@ -1,4 +1,4 @@
-# Grow — dossier SQL autonome (proposition)
+# Business Grow — dossier SQL autonome (proposition)
 
 **Statut :** document de conception seulement. Aucun SQL n'a été exécuté, aucun fichier de migration n'a été créé et aucune configuration Supabase n'a été modifiée. Le dossier cible PostgreSQL 17 et conserve 18 tables dans `saas_business`; il ne modifie aucune table `saas_ugc`.
 
@@ -349,7 +349,7 @@ ON CONFLICT (provider_key) DO NOTHING;
 
 INSERT INTO saas_business.ai_roles(role_key,description,required_capabilities,enabled)
 VALUES
-  ('business_advisor','Assistant général Grow','{}'::jsonb,true),
+  ('business_advisor','Assistant général Business Grow','{}'::jsonb,true),
   ('business_analysis','Analyse métier et stratégie','{"reasoning":true}'::jsonb,true),
   ('content_strategy','Stratégie de contenu','{"writing":true}'::jsonb,true)
 ON CONFLICT (role_key) DO NOTHING;
@@ -1377,7 +1377,7 @@ Présence dans le dépôt (au moment de la vérification) :
 | `reelora-video` | Oui | Catalogue, devis, démarrage et état des tâches vidéo MuAPI | `verify_jwt=true`; appels backend/service-role et contrôles Auth côté code |
 | `reelora-video-worker` | Oui | Callback MuAPI et réconciliation planifiée | `verify_jwt=false`; jeton worker stocké côté serveur; callback traité comme signal non fiable, statut relu auprès de MuAPI |
 | `reelora-health` | Oui | Indique la présence de secrets serveur, sans en révéler les valeurs | `verify_jwt=false`; endpoint de santé non authentifié |
-| Grow / AI Director (`supabase/functions/business-grow/`) | Présent localement | Conversations/messages/mémoire via RPC privées; adaptateurs REST Groq/Gemini, sélection configurée, historique et fallback traçable; non déployé et non configuré sur le projet | `verify_jwt=true`; validation supplémentaire du JWT par Auth. Les opérations persistent restent inactives tant que le schéma et le secret DB ne sont pas installés |
+| Business Grow / AI Director (`supabase/functions/business-grow/`) | Présent localement | Conversations/messages/mémoire via RPC privées; adaptateurs REST Groq/Gemini, sélection configurée, historique et fallback traçable; non déployé et non configuré sur le projet | `verify_jwt=true`; validation supplémentaire du JWT par Auth. Les opérations persistent restent inactives tant que le schéma et le secret DB ne sont pas installés |
 
 `supabase/config.toml` montre `schemas = ["public"]` en local, et `verify_jwt` pour les fonctions ci-dessus. Il ne prouve pas la configuration Data API live.
 
@@ -1388,7 +1388,7 @@ L'Edge Function utilise les API HTTPS officielles avec `fetch`, sans SDK fournis
 - Groq Chat Completions : `POST https://api.groq.com/openai/v1/chat/completions`.
 - Gemini REST : `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, clé transmise dans l'en-tête serveur `x-goog-api-key`, pas dans l'URL.
 
-Les secrets sont exclusivement des secrets Edge Supabase dédiés à Grow : `BUSINESS_GROW_GROQ_API_KEY` et `BUSINESS_GROW_GEMINI_API_KEY`. Les identifiants de modèles sont configurés séparément via `BUSINESS_GROW_GROQ_MODEL` et `BUSINESS_GROW_GEMINI_MODEL`; aucun modèle n'est figé dans le code. Ces variables sont volontairement distinctes des clés Groq du Studio afin de séparer leur configuration et leur facturation fournisseur. `BUSINESS_GROW_PROVIDER_ORDER` accepte `groq,gemini` ou l'ordre inverse. Les modèles configurés doivent correspondre au `provider_model_key` de la cible validée par l'AI Director; la base reste la source de vérité pour `enabled`, la vérification individuelle et les contrôles de santé récents.
+Les secrets sont exclusivement des secrets Edge Supabase dédiés à Business Grow : `BUSINESS_GROW_GROQ_API_KEY` et `BUSINESS_GROW_GEMINI_API_KEY`. Les identifiants de modèles sont configurés séparément via `BUSINESS_GROW_GROQ_MODEL` et `BUSINESS_GROW_GEMINI_MODEL`; aucun modèle n'est figé dans le code. Ces variables sont volontairement distinctes des clés Groq du Studio afin de séparer leur configuration et leur facturation fournisseur. `BUSINESS_GROW_PROVIDER_ORDER` accepte `groq,gemini` ou l'ordre inverse. Les modèles configurés doivent correspondre au `provider_model_key` de la cible validée par l'AI Director; la base reste la source de vérité pour `enabled`, la vérification individuelle et les contrôles de santé récents.
 
 Ne pas mettre ces valeurs dans `VITE_*`, un fichier `.env` suivi, une réponse HTTP ou un log. Les secrets ne sont pas configurés dans cette étape; ne pas réutiliser une clé déjà partagée dans une conversation. Les clés précédemment communiquées doivent être révoquées/renouvelées avant un test réel.
 
@@ -1396,7 +1396,7 @@ L'Edge Function récupère l'historique de la conversation avec l'UUID dérivé 
 
 À la réussite, `bg_complete_attempt` écrit le message assistant, les tokens/latence et clôt la tentative/la requête au sein d'une même transaction. Aucun coût n'est estimé ou facturé par ce client tant qu'un prix vérifiable n'est pas disponible. Les crédits et tables Studio ne sont pas utilisés.
 
-**Prérequis de déploiement non satisfaits par le dépôt seul :** le schéma `saas_business`, les fonctions `bg_select_route` mises à jour et `bg_complete_attempt` doivent exister dans un environnement autorisé; `BUSINESS_GROW_DATABASE_URL`, `SUPABASE_URL`, la clé publique Supabase, les clés fournisseur Grow dédiées, les modèles vérifiés et l'ordre du routeur doivent être configurés comme secrets/variables serveur. Aucun de ces secrets ne doit être ajouté au frontend. Après installation en staging, exécuter les tests d'isolation A/B puis seulement un test de chat non payant autorisé.
+**Prérequis de déploiement non satisfaits par le dépôt seul :** le schéma `saas_business`, les fonctions `bg_select_route` mises à jour et `bg_complete_attempt` doivent exister dans un environnement autorisé; `BUSINESS_GROW_DATABASE_URL`, `SUPABASE_URL`, la clé publique Supabase, les clés fournisseur Business Grow dédiées, les modèles vérifiés et l'ordre du routeur doivent être configurés comme secrets/variables serveur. Aucun de ces secrets ne doit être ajouté au frontend. Après installation en staging, exécuter les tests d'isolation A/B puis seulement un test de chat non payant autorisé.
 
 ### État d'installation vérifié le 2026-11-10
 
@@ -1588,13 +1588,13 @@ Recevoir deux fois événement/hash identiques : un événement. Identifiant ide
 
 ### Non-interférence Studio
 
-Dans une transaction de test, prendre les comptes des tables Studio avant et après `bg_create_request`, génération de tentatives et insertion d'usage; aucun objet `ugc_*` ne doit changer. Les tokens/coûts ne doivent exister que dans `saas_business`. Les tests Studio existants restent exécutés séparément; le DDL Grow n'y touche pas.
+Dans une transaction de test, prendre les comptes des tables Studio avant et après `bg_create_request`, génération de tentatives et insertion d'usage; aucun objet `ugc_*` ne doit changer. Les tokens/coûts ne doivent exister que dans `saas_business`. Les tests Studio existants restent exécutés séparément; le DDL Business Grow n'y touche pas.
 
 ## 8. Vérifications et limites
 
 **Écrit dans ce livrable :** un document SQL autonome dans `docs/`, contenant les 18 tables, RLS, privilèges, fonctions proposées, chemin Edge, script de vérification et tests.
 
-**Contrôles statiques effectués :** présence locale des Edge Functions et lecture de leur mode d'authentification; config locale (`schemas=["public"]`, JWT des fonctions); la CLI Supabase liste le projet SORAHNEX `xbuuhfwobrafcbgtdgjx`, mais aucun projet n'est lié au dépôt et l'inspection locale est bloquée par l'absence de Docker/Podman. L'état live des tables/fonctions Grow n'est donc pas vérifié dans cette révision. Aucun SQL mutatif ni migration n'a été exécuté.
+**Contrôles statiques effectués :** présence locale des Edge Functions et lecture de leur mode d'authentification; config locale (`schemas=["public"]`, JWT des fonctions); la CLI Supabase liste le projet SORAHNEX `xbuuhfwobrafcbgtdgjx`, mais aucun projet n'est lié au dépôt et l'inspection locale est bloquée par l'absence de Docker/Podman. L'état live des tables/fonctions Business Grow n'est donc pas vérifié dans cette révision. Aucun SQL mutatif ni migration n'a été exécuté.
 
 **Non exécuté / non compilé :** tout le SQL de ce document, le script de droits et les tests transactionnels. Aucun test PostgreSQL réel n'a été exécuté. Restent à tester en PostgreSQL 17 les transitions et cascades, l'identité de session `bg_erasure`, les capacités JSON du routage, la reprise concurrente des leases et l'intégration Edge des rôles de connexion. La validation de signature des paiements demeure spécifique au prestataire qui sera choisi. Le document ne doit pas être qualifié de « DDL validé » avant compilation et tests sur une base PostgreSQL 17 isolée.
 

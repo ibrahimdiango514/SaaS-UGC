@@ -488,7 +488,7 @@ export function buildGrowthPrompt(task: GrowthAiTask, snapshot: GrowthSnapshot):
     produits: snapshot.products.slice(0, 20),
   };
   return [
-    'Tu es le moteur d’intelligence commerciale SORAHNEX Grow Grow.',
+    'Tu es le moteur d’intelligence commerciale SORAHNEX Grow.',
     TASK_BRIEF[task],
     'Règles strictes :',
     '- Appuie-toi UNIQUEMENT sur les données fournies ci-dessous et sur des connaissances générales clairement identifiables comme telles.',

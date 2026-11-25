@@ -20,7 +20,7 @@ const formatUsd = (amount: number | null) => {
 };
 
 const SPACE_LABELS: Record<string, string> = {
-  business: 'Grow',
+  business: 'SORAHNEX Grow',
   studio: 'Studio UGC',
   system: 'Système',
 };
@@ -415,7 +415,7 @@ export default function AiCoreControl() {
         ) : calls === null ? (
           <div className="px-5 pb-5"><LoadingState label="Chargement du journal…" /></div>
         ) : calls.length === 0 ? (
-          <div className="px-5 pb-5"><EmptyState icon={<History size={24} />} title="Aucun appel IA enregistré" description="Le journal se remplit au fil des conversations Grow et des tâches IA." /></div>
+          <div className="px-5 pb-5"><EmptyState icon={<History size={24} />} title="Aucun appel IA enregistré" description="Le journal se remplit au fil des conversations SORAHNEX Grow et des tâches IA." /></div>
         ) : (
           <div className="table-wrap px-5 pb-5">
             <table className="table">

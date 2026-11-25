@@ -97,7 +97,7 @@ function request(body: unknown, authorization = 'Bearer valid-user-session') {
   });
 }
 
-describe('Grow Edge handler', () => {
+describe('SORAHNEX Grow Edge handler', () => {
   it('refuses unauthenticated calls before accessing the store', async () => {
     const { handler, store } = fixture();
     const response = await handler(request({ action: 'conversations.list' }, 'Bearer invalid'));
@@ -583,7 +583,7 @@ describe('Grow Edge handler', () => {
     expect((await handler(request({ action: 'integrations.list' }))).status).toBe(200);
   });
 
-  it('enforces isolated Grow quota and releases reservation on failed requests', async () => {
+  it('enforces isolated SORAHNEX Grow quota and releases reservation on failed requests', async () => {
     const { dependencies, store } = fixture();
     const reserveQuota = vi.fn(async () => {
       throw new Error('BG_INSUFFICIENT_QUOTA');
@@ -1317,10 +1317,10 @@ describe('Business Agent Phase 3 · API cloisonnée et consentement', () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Import & Connect — abonnement Grow requis                       */
+/* Import & Connect — abonnement SORAHNEX Grow requis                       */
 /* -------------------------------------------------------------------------- */
 
-describe('Grow — Import & Connect exige un abonnement actif', () => {
+describe('SORAHNEX Grow — Import & Connect exige un abonnement actif', () => {
   /**
    * Ces tests portent sur la DEUXIÈME surface d'Import & Connect : les
    * connexions de boutique passent par `business-grow` (`integrations.*`), pas
@@ -1434,7 +1434,7 @@ describe('Grow — Import & Connect exige un abonnement actif', () => {
 
   it('ne restreint pas les connecteurs sociaux, hors périmètre du module', async () => {
     const { handler, store, dependencies } = withAccess({ allowed: false, reason: 'NO_SUBSCRIPTION' });
-    // `facebook` relève du catalogue Grow historique : on ne casse pas
+    // `facebook` relève du catalogue SORAHNEX Grow historique : on ne casse pas
     // une fonctionnalité existante en la soumettant à un abonnement qu'elle
     // n'a jamais exigé.
     const res = await handler(request({ action: 'v3.integrations.request', workspaceId: workspace, connectorKey: 'facebook' }));

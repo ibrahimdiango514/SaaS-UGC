@@ -13,9 +13,14 @@
  * `localStorage`, aucun état global, aucun journal.
  */
 import { supabase, SUPABASE_URL } from '../lib/supabase';
+import { edgeFunctionName } from '../lib/platform-identity';
 
-/** URL publique du serveur MCP, servie par la fonction Edge déployée (repli public inclus). */
-export const MCP_SERVER_URL = `${SUPABASE_URL}/functions/v1/vyora-mcp`;
+/**
+ * URL publique du serveur MCP, servie par la fonction Edge déployée.
+ * Le nom vient de l'identité technique : basculer vers `sorahnex-mcp` se fait
+ * par configuration, sans toucher aux appelants.
+ */
+export const MCP_SERVER_URL = `${SUPABASE_URL}/functions/v1/${edgeFunctionName('mcp')}`;
 
 /** Type de client, utilisé pour l'affichage et les instructions d'installation. */
 export type TypeClient = 'claude' | 'cursor' | 'vscode' | 'generic' | 'autre';

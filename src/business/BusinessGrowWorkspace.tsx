@@ -274,7 +274,7 @@ function describeProviderFailureHint(code: string | null | undefined): string {
     case 'ORIGIN_NOT_ALLOWED':
       return 'Cette connexion n’est pas disponible depuis cet environnement. Réessayez plus tard.';
     case 'BUSINESS_GROW_UNAVAILABLE':
-      return 'Grow est momentanément indisponible. Réessayez plus tard.';
+      return 'SORAHNEX Grow est momentanément indisponible. Réessayez plus tard.';
     default:
       return 'Réessayez plus tard ou contactez le support SORAHNEX.';
   }
@@ -371,7 +371,7 @@ function ProviderStatusList({ statuses, compact: _compact = false, loading = fal
 }
 
 /**
- * Section « Assistant » de Grow.
+ * Section « Assistant » de SORAHNEX Grow.
  *
  * L'ancienne interface de conversation (fil brut, liste latérale ad hoc,
  * composeur minimal) a été remplacée par le composant SORAHNEX AI commun
@@ -497,7 +497,7 @@ function AssistantView({
                 aria-label="Rôle de la tâche IA"
                 value={roleKey}
                 onChange={(event) => onChangeRole(event.target.value as BusinessRoleKey)}
-                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
+                className="min-h-11 rounded-lg border border-white/10 bg-[#0c111b] px-2 text-xs text-slate-200 outline-none focus:border-violet-300/40 sm:min-h-8"
               >
                 {BUSINESS_ROLES.map((role) => (
                   <option key={role.roleKey} value={role.roleKey}>{role.label}</option>
@@ -510,7 +510,7 @@ function AssistantView({
                 aria-label="Mode de routage"
                 value={routingMode}
                 onChange={(event) => onChangeRoutingMode(event.target.value as RoutingSelectionMode)}
-                className="rounded-lg border border-white/10 bg-[#0c111b] px-2 py-1 text-xs text-slate-200 outline-none focus:border-violet-300/40"
+                className="min-h-11 rounded-lg border border-white/10 bg-[#0c111b] px-2 text-xs text-slate-200 outline-none focus:border-violet-300/40 sm:min-h-8"
               >
                 <option value="auto">Automatique</option>
                 <option value="manual">Manuel</option>
@@ -615,7 +615,7 @@ function AssistantView({
         )}
 
         {/* Interface de conversation SORAHNEX AI — remplace l'ancienne.
-            L'état et les mutations restent la propriété de Grow :
+            L'état et les mutations restent la propriété de SORAHNEX Grow :
             l'interface ne fait qu'afficher et déclencher les mêmes rappels. */}
         <BusinessAssistant
           workspaceId={workspaceId}
@@ -1748,7 +1748,7 @@ function ScopedBusinessGrowWorkspace() {
         setIntegrationNotice({
           tone: 'error',
           text: refus
-            ? 'Opération refusée : abonnement Grow requis. Rien n’a été enregistré.'
+            ? 'Opération refusée : abonnement SORAHNEX Grow requis. Rien n’a été enregistré.'
             : `${asAppError(error).message} Vérifiez l’état avant de recommencer.`,
         });
       }
@@ -1769,7 +1769,7 @@ function ScopedBusinessGrowWorkspace() {
       setConversationsLoaded(false);
       setSelectedConversationId(null);
       setMessages([]);
-      setError('Session SORAHNEX indisponible. Reconnectez-vous pour charger Grow.');
+      setError('Session SORAHNEX indisponible. Reconnectez-vous pour charger SORAHNEX Grow.');
       return;
     }
     setBackendReady(false);
@@ -1800,7 +1800,7 @@ function ScopedBusinessGrowWorkspace() {
       ? statusResult.reason instanceof Error ? statusResult.reason.message : 'Le registre IA est indisponible.'
       : conversationsResult.status === 'rejected' && conversationsResult.reason instanceof Error
         ? conversationsResult.reason.message
-        : 'Grow ne répond pas pour le moment. Réessayez dans quelques instants.');
+        : 'SORAHNEX Grow ne répond pas pour le moment. Réessayez dans quelques instants.');
   }, [accountScope, hasSession, loadConversations, loadOperationalDetails, loadStatus, sessionToken]);
 
   useEffect(() => {
@@ -2413,7 +2413,7 @@ function ScopedBusinessGrowWorkspace() {
                 ? `${availableProviderCount} service(s) IA vérifié(s)`
                 : 'IA non disponible'}
         </span>
-        <Link to="/app/business/providers" className="text-slate-500 transition hover:text-violet-200">
+        <Link to="/app/business/providers" className="inline-flex min-h-11 items-center rounded-lg px-2 text-slate-400 transition hover:bg-white/[0.04] hover:text-violet-200">
           Gérer les services IA
         </Link>
       </section>

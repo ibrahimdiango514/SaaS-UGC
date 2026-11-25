@@ -44,7 +44,7 @@ vi.mock('../src/context/AuthContext', () => ({
 
 import Dashboard from '../src/pages/Dashboard';
 
-describe('espace client Sorahnnex', () => {
+describe('espace client SORAHNEX Studio', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listProjects.mockResolvedValue([]);
@@ -56,7 +56,7 @@ describe('espace client Sorahnnex', () => {
 
   afterEach(cleanup);
 
-  it('reste strictement dans l’espace Studio et n’affiche aucune fonctionnalité Grow', async () => {
+  it('reste strictement dans l’espace Studio et n’affiche aucune fonctionnalité SORAHNEX Grow', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
 
     const studio = await screen.findByRole('link', { name: /Créer avec Studio/ });
@@ -65,7 +65,7 @@ describe('espace client Sorahnnex', () => {
     expect(studio.getAttribute('href')).toBe('/app/studio');
     expect(projects.getAttribute('href')).toBe('/app/projets');
     expect(screen.getByText('87')).toBeTruthy();
-    expect(screen.queryByText(/Grow/i)).toBeNull();
+    expect(screen.queryByText(/SORAHNEX Grow/i)).toBeNull();
     expect(screen.queryByText(/Quota métier/i)).toBeNull();
     expect(screen.queryByRole('link', { name: /Business/i })).toBeNull();
   });

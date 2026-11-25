@@ -76,7 +76,7 @@ Note : le dépôt n'a pas GitHub Actions (indisponible), donc cette vérificatio
 - Branch deploys / deploy previews : **aperçus uniquement** — ne jamais les prendre
   pour la production (URLs d'aperçu distinctes de `vyora-ugc.netlify.app`).
 - Après chaque livraison : vérifier que le commit publié est celui attendu et que le
-  site fonctionne (marqueurs de version, Grow, Studio).
+  site fonctionne (marqueurs de version, Business Grow, Studio).
 
 ## 5. Procédure obligatoire avant chaque livraison (`develop` → `main`)
 
@@ -97,7 +97,7 @@ Après fusion :
 
 - Vérifier que Netlify a publié le commit attendu (dashboard des déploiements ou
   fetch de la page avec les marqueurs de version).
-- Vérifier que le site fonctionne (Grow v3, Studio, sondes).
+- Vérifier que le site fonctionne (Business Grow v3, Studio, sondes).
 - Reporter les preuves (SHA publié, marqueurs observés) dans le fil de la session.
 
 ## 6. Couplage Supabase avec le déploiement
@@ -108,7 +108,7 @@ Après fusion :
   épinglé par SHA-256 + longueur dans le loader court. Tout changement de bundle exige
   la régénération de l'artefact (`scripts/build-business-grow-artifact.mjs`) et la
   mise à jour du loader **avant** la publication du frontend qui l'utilise.
-- Fonctions Edge legacy / Sorahnnex : jamais redéployées aveuglément, hors périmètre
+- Fonctions Edge legacy / SORAHNEX Studio : jamais redéployées aveuglément, hors périmètre
   explicite d'une mission.
 
 ## 7. Points à maintenir manuellement (hors capacité de l'agent Arena)
@@ -129,7 +129,7 @@ git push origin cc43bb370996df60714c25727bd5cc441645a64e:refs/heads/develop
 # État des branches canoniques
 git fetch origin && git rev-parse origin/main origin/develop
 
-# Bundle Grow canonique dans main
+# Bundle Business Grow canonique dans main
 git show origin/main:supabase/functions/business-grow.edge.js | sha256sum
 # attendu : 020890b52a66883dcc74ef22b8034d9bddf8a0bcaf94f7b18093ed86cfd15303
 

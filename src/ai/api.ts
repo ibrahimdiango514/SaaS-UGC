@@ -57,7 +57,7 @@ const HISTORY_KEY = 'vyora.ai.history.v1';
  * Liste les conversations de l'utilisateur.
  *
  * `workspaceId` vaut `null` pour l'espace assistant autonome, et l'identifiant
- * de l'entreprise active lorsque l'interface est hébergée dans Grow :
+ * de l'entreprise active lorsque l'interface est hébergée dans SORAHNEX Grow :
  * les conversations y sont alors rattachées à cette entreprise, et la RLS
  * serveur garantit qu'un membre d'une autre entreprise ne les voit pas.
  */
@@ -110,7 +110,7 @@ export async function sendMessage(params: {
     crypto.randomUUID(),
     {
       // `workspaceId` rattache l'échange à l'entreprise active quand l'interface
-      // est hébergée dans Grow. Absent pour l'assistant autonome, le
+      // est hébergée dans SORAHNEX Grow. Absent pour l'assistant autonome, le
       // socle retombe sur son comportement d'origine.
       ...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
       ...(images.length ? { images } : {}),

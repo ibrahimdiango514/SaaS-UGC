@@ -82,7 +82,7 @@ describe('accueil personnalisé — message', () => {
 
   it('hash stable et borné', () => {
     expect(stableHash('vyora')).toBe(stableHash('vyora'));
-    expect(stableHash('vyora')).not.toBe(stableHash('Sorahnnex'));
+    expect(stableHash('alpha')).not.toBe(stableHash('Alpha'));
     expect(stableHash('')).toBeGreaterThanOrEqual(0);
   });
 
