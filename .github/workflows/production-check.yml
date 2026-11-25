@@ -200,6 +200,53 @@ jobs:
           fi
           echo "::notice::reelora-video HTTP $v_code · réponse ${v_body:-vide}"
 
+      - name: Chargeurs épinglés (business-grow, store-connect, store-import, mcp-client)
+        env:
+          # Clé publique, identique à celle livrée au navigateur : aucun secret.
+          # Elle sert UNIQUEMENT à franchir la passerelle pour que le chargeur
+          # s'exécute vraiment. Sans elle, un 401 de passerelle ne prouve rien :
+          # le code de la fonction n'a alors jamais été lu.
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz
+        run: |
+          set -u
+          summary="$GITHUB_STEP_SUMMARY"
+          base="https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1"
+          {
+            echo
+            echo "### Chargeurs épinglés : le code publié est-il réellement servi ?"
+            echo
+            echo "| Fonction | HTTP | Réponse | Verdict |"
+            echo "| --- | --- | --- | --- |"
+          } >> "$summary"
+          rc_global=0
+          for fn in business-grow store-connect store-import mcp-client; do
+            url="$base/$fn"
+            rc=0
+            code=$(curl -sS -o "/tmp/$fn.json" -w '%{http_code}' --max-time 40 \
+              -X POST "$url" \
+              -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_PUBLISHABLE_KEY" \
+              -H 'content-type: application/json' \
+              --data '{"action":"health"}' 2>/tmp/$fn.err) || rc=$?
+            body=$(head -c 220 "/tmp/$fn.json" 2>/dev/null | tr '\n' ' ' | tr '|' '/')
+            if [ "$rc" -ne 0 ]; then
+              verdict="AUCUNE RÉPONSE (curl rc=$rc)"
+              echo "::warning::$fn : aucune réponse (curl rc=$rc)."
+            elif [ "$code" = "503" ] || printf '%s' "$body" | grep -q 'ARTIFACT_UNAVAILABLE'; then
+              verdict="ARTEFACT NON CHARGÉ"
+              echo "::error::$fn : le chargeur tourne mais l'artefact épinglé ne se charge pas — le code publié n'est pas servi."
+              rc_global=1
+            elif printf '%s' "$body" | grep -q 'UNAUTHORIZED_NO_AUTH_HEADER'; then
+              verdict="refus passerelle (non prouvé)"
+              echo "::warning::$fn : refus de la passerelle, le chargeur n'a pas été exécuté."
+            else
+              verdict="chargeur exécuté"
+              echo "::notice::$fn HTTP $code · chargeur exécuté · réponse ${body:-vide}"
+            fi
+            echo "| \`$fn\` | $code | \`${body:-vide}\` | $verdict |" >> "$summary"
+          done
+          exit "$rc_global"
+
       - name: Détails réseau (DNS et TLS), pour trancher une absence de réponse
         env:
           FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
