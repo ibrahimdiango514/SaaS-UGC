@@ -159,7 +159,7 @@ describe('preuve de rendu — Business Grow', () => {
     expect(screen.queryByText('Explorer')).toBeNull();
 
     // 3. La navigation réelle du Growth OS remplace l'ancien cockpit.
-    expect(screen.getByRole('navigation', { name: 'Navigation Growth OS' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: 'Navigation SORAHNEX Grow' })).toBeTruthy();
     for (const section of ['Vue générale', 'CRM', 'Pipeline commercial', 'Finance', 'Recouvrement', 'Assistant IA', 'Mémoire métier', 'Services IA', 'Contrôle IA', 'Intégrations']) {
       expect(screen.getByRole('link', { name: section })).toBeTruthy();
     }

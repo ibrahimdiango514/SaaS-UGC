@@ -227,7 +227,7 @@ function ScopedModuleWorkspace() {
   if (!definition) {
     return (
       <div className="space-y-6">
-        <PageHeader eyebrow="Business Growth" title="Module introuvable" description="Ce module n’existe pas ou n’est pas encore disponible dans votre espace." />
+        <PageHeader eyebrow="SORAHNEX Grow" title="Module introuvable" description="Ce module n’existe pas ou n’est pas encore disponible dans votre espace." />
         <Link to="/app/business/modules" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-line px-4 text-sm text-slate-200 hover:bg-white/5">
           <ArrowLeft size={16} /> Revenir aux modules
         </Link>
@@ -467,7 +467,7 @@ function ScopedModuleWorkspace() {
     <div className="space-y-5 pb-8" data-testid="business-module-workspace">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Link to="/app/business" className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-slate-400 hover:text-white">
-          <ArrowLeft size={15} /> Business Growth
+          <ArrowLeft size={15} /> SORAHNEX Grow
         </Link>
         <span className="text-slate-600">/</span>
         <Link to="/app/business/modules" className="inline-flex min-h-11 items-center rounded-lg px-2 text-slate-400 hover:text-white">Modules</Link>
@@ -483,7 +483,7 @@ function ScopedModuleWorkspace() {
               <definition.icon size={22} />
             </span>
             <div className="min-w-0">
-              <p className={cn('text-[11px] font-semibold uppercase tracking-[0.18em]', accent.text)}>{groups?.label ?? 'Business Growth'}</p>
+              <p className={cn('text-[11px] font-semibold uppercase tracking-[0.18em]', accent.text)}>{groups?.label ?? 'SORAHNEX Grow'}</p>
               <h1 className="mt-1 text-2xl font-bold tracking-tight text-white">{definition.title}</h1>
               <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">{definition.description}</p>
             </div>
@@ -496,7 +496,7 @@ function ScopedModuleWorkspace() {
           </div>
         </div>
         <div className="relative mt-4 grid gap-2 border-t border-line pt-4 text-xs text-slate-500 sm:grid-cols-2">
-          <span className="inline-flex items-start gap-2"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-400" /> Données Business Growth isolées, aucun crédit Studio consommé.</span>
+          <span className="inline-flex items-start gap-2"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-400" /> Données SORAHNEX Grow isolées, aucun crédit Studio consommé.</span>
           <span className="inline-flex items-start gap-2"><Database size={14} className="mt-0.5 shrink-0 text-brand-300" /> Le brouillon agent contient des indicateurs, pas les noms ni messages clients. Relisez-le avant envoi au fournisseur IA.</span>
         </div>
       </section>
@@ -719,7 +719,7 @@ function ScopedModuleWorkspace() {
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel/60 px-4 py-3 text-sm">
-        <span className="text-slate-500">Chaque action est enregistrée dans votre espace Business Growth.</span>
+        <span className="text-slate-500">Chaque action est enregistrée dans votre espace SORAHNEX Grow.</span>
         <Link to="/app/business/modules" className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-slate-300 hover:text-white">
           Tous les modules <ArrowUpRight size={14} />
         </Link>

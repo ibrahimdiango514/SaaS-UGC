@@ -157,7 +157,7 @@ export function WorkspaceNav({ scope, onNavigate, onRequestClose }: {
         )}
       </div>
 
-      <nav aria-label={scope === 'business' ? 'Navigation Business Growth' : 'Navigation Studio'} className="relative mt-1 min-h-0 flex-1 overflow-y-auto pb-3 no-scrollbar">
+      <nav aria-label={scope === 'business' ? 'Navigation SORAHNEX Grow' : 'Navigation Studio'} className="relative mt-1 min-h-0 flex-1 overflow-y-auto pb-3 no-scrollbar">
         {filtered.length === 0 && (
           <div className="mx-2 mt-3 rounded-xl border border-dashed border-white/10 px-3 py-5 text-center">
             <p className="text-xs font-medium text-slate-300">Aucun outil trouvé</p>

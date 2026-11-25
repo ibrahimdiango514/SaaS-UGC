@@ -54,6 +54,7 @@ import {
   type TypeClient,
 } from '../mcp/api';
 import { OUTILS_AFFICHES, OUTILS_LECTURE_AFFICHES } from '../mcp/outils';
+import { edgeFunctionName } from '../lib/platform-identity';
 
 const CLIENTS: Array<{ valeur: TypeClient; libelle: string; aide: string }> = [
   {
@@ -577,7 +578,7 @@ export function McpConnectionsPage({ sansEnTete = false }: { sansEnTete?: boolea
           <Loader2 size={11} className="mt-0.5 shrink-0" />
           Si votre client reste « non connecté » alors que le journal montre des appels, c’est
           l’initialisation qui échoue : vérifiez que l’URL se termine bien par
-          <code> /functions/v1/vyora-mcp</code>.
+          <code> /functions/v1/{edgeFunctionName('mcp')}</code>.
         </p>
       </section>
     </div>

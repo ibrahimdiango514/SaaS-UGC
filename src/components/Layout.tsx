@@ -12,6 +12,8 @@ import { listNotifications, markAllNotificationsRead, markNotificationRead } fro
 import type { AppNotification } from '../lib/types';
 import { BrandLockup, BrandSymbol } from './Brand';
 import { WorkspaceNav } from '../navigation/WorkspaceNav';
+import { SpaceSwitcher } from './SpaceSwitcher';
+import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import {
   BUSINESS_MOBILE_NAV, STUDIO_MOBILE_NAV, isNavItemActive,
 } from '../navigation/config';
@@ -33,6 +35,8 @@ export default function Layout() {
   const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+  // Chaque navigation repart en haut, chaque retour arrière retrouve sa place.
+  useScrollRestoration();
   const isHub = location.pathname === '/app';
   const isBusiness = location.pathname === '/app/business' || location.pathname.startsWith('/app/business/');
   // Le Growth OS possède sa propre sidebar : la masquer évite une double
@@ -160,7 +164,7 @@ export default function Layout() {
       <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', (isHub || isGrowthOs) && 'lg:hidden')}>
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
-        {/* Liseré d'identité : cyan en Studio, violet en Business Growth. */}
+        {/* Liseré d'identité : cyan en Studio, violet en SORAHNEX Grow. */}
         {!isHub && (
           <div
             aria-hidden="true"
@@ -174,16 +178,9 @@ export default function Layout() {
           <Logo to={isAdmin ? '/admin' : '/app'} />
         </div>
         {!isAdmin && (
-          <Link
-            to="/app"
-            className="relative mb-4 flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-3 py-2 text-[11px] font-semibold text-slate-300 transition hover:border-white/25 hover:text-white"
-          >
-            <ArrowLeftRight size={13} className={isBusiness ? 'text-violet-300' : 'text-cyan-300'} />
-            Tous les espaces
-            <span className="ml-auto text-[9px] font-normal uppercase tracking-[0.12em] text-slate-600">
-              {isBusiness ? 'Business' : 'Studio'}
-            </span>
-          </Link>
+          <div className="relative mb-4">
+            <SpaceSwitcher scope={scope} />
+          </div>
         )}
         {isAdmin ? (
           <nav className="relative flex-1">
@@ -213,7 +210,7 @@ export default function Layout() {
         </div>}
         {!isAdmin && isBusiness && (
           <div className="relative mt-4 overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-violet-400/[0.10] via-panel/70 to-cyan-400/[0.04] p-3.5">
-            <div className="flex items-center gap-2 text-xs font-semibold text-violet-100"><Brain size={14} /> Espace Business Growth</div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-violet-100"><Brain size={14} /> Espace SORAHNEX Grow</div>
             <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">Données métier isolées. Aucun accès aux crédits ni aux fichiers Studio.</p>
             <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/app/business/modules')}>Ouvrir les modules métier</Button>
           </div>
@@ -235,14 +232,9 @@ export default function Layout() {
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
             {!isAdmin && !isHub && (
-              <Link
-                to="/app"
-                aria-label="Tous les espaces"
-                className="group inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-2.5 text-[11px] font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:bg-cyan-400/[0.07] hover:text-white sm:px-3"
-              >
-                <ArrowLeftRight size={14} className="text-cyan-300 transition group-hover:rotate-180" />
-                <span className="hidden md:inline">Tous les espaces</span>
-              </Link>
+              <div className="hidden sm:block">
+                <SpaceSwitcher scope={scope} />
+              </div>
             )}
             {!isAdmin && !isBusiness && !isHub && <button onClick={() => void onRefreshQuota()} disabled={quotaRefreshing}
               className="hidden items-center gap-1.5 rounded-xl border border-line bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:flex" title="Actualiser le solde">
@@ -305,7 +297,7 @@ export default function Layout() {
                     : <>
                       <button onClick={() => navigate('/app/parametres')} className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><Settings size={15} /> Paramètres</button>
                       {!isBusiness && <button onClick={() => navigate('/app/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Abonnement Studio</button>}
-                      {isBusiness && <button onClick={() => navigate('/app/business/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Formules Business Growth</button>}
+                      {isBusiness && <button onClick={() => navigate('/app/business/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Formules SORAHNEX Grow</button>}
                       {!isHub && <button onClick={() => navigate('/app')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><ArrowLeftRight size={15} /> Tous les espaces</button>}
                     </>}
                   <button onClick={() => void onLogout()} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-rose-300 hover:bg-rose-500/10"><LogOut size={15} /> Déconnexion</button>
@@ -327,9 +319,12 @@ export default function Layout() {
           <div className="flex h-full w-[min(88vw,300px)] max-w-full flex-col overflow-y-auto overscroll-contain border-r border-line bg-panel px-3 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] pt-5" onMouseDown={(e) => e.stopPropagation()}>
             <div className="mb-6 flex items-center justify-between px-2"><Logo to={isAdmin ? '/admin' : '/app'} /><button onClick={() => setDrawerOpen(false)} className="btn btn-ghost btn-icon"><X size={18} /></button></div>
             {!isAdmin && (
-              <Link to="/app" onClick={() => setDrawerOpen(false)} className="mb-3 flex min-h-11 items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.06] px-3 py-2 text-xs font-semibold text-slate-200">
-                <ArrowLeftRight size={14} className="text-cyan-300" /> Tous les espaces
-              </Link>
+              <div className="mb-3 space-y-2" onClick={() => setDrawerOpen(false)}>
+                <SpaceSwitcher scope={scope} />
+                <Link to="/app" className="flex min-h-11 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs font-semibold text-slate-300">
+                  <ArrowLeftRight size={14} className="text-slate-400" /> Tous les espaces
+                </Link>
+              </div>
             )}
             {isAdmin ? (
               <nav className="flex-1">

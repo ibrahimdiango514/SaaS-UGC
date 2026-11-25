@@ -24,7 +24,8 @@ describe('Une seule passerelle IA', () => {
 
   it('le client ne connaît que `vyora-ai`, sans repli nommant un fournisseur', () => {
     const api = read('src/lib/api.ts');
-    expect(api).toContain("invokeEdge<T>('vyora-ai', body)");
+    expect(api).toContain("invokeEdge<T>(edgeFunctionName('ai'), body)");
+    expect(api).toContain("import { edgeFunctionName } from './platform-identity'");
     expect(api).not.toContain("'reelora-ai'");
     expect(api).not.toMatch(/api\.groq\.com|generativelanguage\.googleapis\.com/i);
   });

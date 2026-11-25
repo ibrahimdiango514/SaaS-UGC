@@ -91,7 +91,8 @@ describe('Passerelle IA unique : indisponibilité explicite, aucune simulation',
     expect(config).toMatch(/\[functions\.vyora-ai\]\s*\nverify_jwt\s*=\s*true/);
     expect(config).not.toContain('[functions.reelora-ai]');
     const api = read('src/lib/api.ts');
-    expect(api).toContain("invokeEdge<T>('vyora-ai', body)");
+    expect(api).toContain("invokeEdge<T>(edgeFunctionName('ai'), body)");
+    expect(api).toContain("import { edgeFunctionName } from './platform-identity'");
     expect(api).not.toContain("'reelora-ai'");
   });
 

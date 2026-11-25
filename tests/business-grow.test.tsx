@@ -240,7 +240,7 @@ describe('Business Grow', () => {
     window.history.pushState({}, '', '/app/business');
     render(<App />);
     expect(await screen.findByTestId('business-grow')).toBeTruthy();
-    expect(screen.getAllByRole('navigation', { name: 'Navigation Growth OS' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('navigation', { name: 'Navigation SORAHNEX Grow' }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('link', { name: 'Vue générale' }).length).toBeGreaterThan(0);
   });
 

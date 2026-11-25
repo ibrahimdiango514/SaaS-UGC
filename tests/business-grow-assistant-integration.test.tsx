@@ -134,7 +134,7 @@ describe('Business Grow — l’interface SORAHNEX remplace l’ancienne section
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
-    const nav = screen.getByRole('navigation', { name: 'Navigation Growth OS' });
+    const nav = screen.getByRole('navigation', { name: 'Navigation SORAHNEX Grow' });
     expect(nav).toBeTruthy();
     for (const rubrique of [
       'Vue générale', 'Rapports et analyses', 'CRM', 'Pipeline commercial',
