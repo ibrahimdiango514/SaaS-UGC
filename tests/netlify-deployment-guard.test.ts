@@ -31,7 +31,14 @@ const identite = Object.fromEntries(
     .split('\n')
     .filter((l) => l.trim() && !l.trim().startsWith('#'))
     .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]),
-) as { SITE_ID: string; SITE_NAME: string; ANCIEN_SITE_NAME: string };
+) as { SITE_ID: string; SITE_NAME?: string; SITE_NAME_FACULTATIF?: string; ANCIEN_SITE_NAME: string };
+
+/**
+ * Nom utilisé par les scénarios « site légitime ». Quand le nom n'est pas
+ * contraint dans la conf, on en prend un plausible : la garde ne doit PAS
+ * dépendre de sa valeur (seul l'identifiant fait foi).
+ */
+const NOM_UTILISE = identite.SITE_NAME ?? 'saas-ugc';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SITE_ID_AUTRE = '0b7d3a6e-1c2f-4e5a-9d8b-7f6e5d4c3b2a';
@@ -43,7 +50,7 @@ type Env = Record<string, string>;
 /** Environnement d'un déploiement LÉGITIME : toutes les conditions réunies. */
 const autorise = (extra: Env = {}): Env => ({
   SITE_ID: identite.SITE_ID,
-  SITE_NAME: identite.SITE_NAME,
+  SITE_NAME: NOM_UTILISE,
   BRANCH: 'main',
   VYORA_BUILD_ENABLED: 'true',
   SORAHNEX_DEPLOY_AUTHORIZED: 'true',
@@ -98,7 +105,13 @@ function executerDans(dir: string, script: string, env: Env) {
 describe('Configuration — portable, sans identité en dur', () => {
   it('netlify.site.conf est la SEULE source de l’identité autorisée', () => {
     expect(identite.SITE_ID).toMatch(UUID);
-    expect(identite.SITE_NAME).toMatch(/^[a-z0-9-]+$/);
+    // Le nom est soit déclaré et bien formé, soit explicitement facultatif —
+    // jamais absent sans que ce soit dit.
+    if (identite.SITE_NAME) {
+      expect(identite.SITE_NAME).toMatch(/^[a-z0-9-]+$/);
+    } else {
+      expect(identite.SITE_NAME_FACULTATIF).toBe('true');
+    }
     expect(identite.ANCIEN_SITE_NAME).toBe('vyora-ugc');
     // Aucun identifiant ne doit subsister dans les DIRECTIVES de netlify.toml :
     // c'est précisément ce qui imposait de modifier deux fichiers lors d'une
@@ -109,7 +122,9 @@ describe('Configuration — portable, sans identité en dur', () => {
       .filter((ligne) => !ligne.trim().startsWith('#'))
       .join('\n');
     expect(directives).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
-    expect(directives).not.toContain(identite.SITE_NAME);
+    // Aucun identifiant de site dans les directives (le nom peut apparaître dans
+    // des commentaires, jamais dans une valeur exécutée).
+    expect(directives).not.toContain(identite.SITE_ID);
     expect(directives).not.toContain(identite.ANCIEN_SITE_NAME);
   });
 
@@ -145,7 +160,7 @@ describe('Cas légitime — publication autorisée', () => {
     expect(rideau2Refuse(env)).toBe(false);
     expect(publicationAutorisee(env)).toBe(true);
     expect(executer(commandeBuild!.split(' && ')[0], env).sortie)
-      .toContain(`build autorisé : site ${identite.SITE_ID} (${identite.SITE_NAME}), branche main`);
+      .toContain(`build autorisé : site ${identite.SITE_ID} (${NOM_UTILISE}), branche main`);
   });
 });
 
@@ -200,8 +215,15 @@ describe('Identité du site — positive, sans liste noire', () => {
     expect(executer(commandeBuild!.split(' && ')[0], env).sortie).toMatch(/n'est pas le site autorisé/);
   });
 
-  it('un nom inconnu est refusé même avec le bon identifiant', () => {
-    expect(publicationAutorisee(autorise({ SITE_NAME: 'autre-site' }))).toBe(false);
+  it('un nom différent ne bloque plus quand le nom n’est pas contraint (identifiant seul)', () => {
+    // Choix explicite consigné dans netlify.site.conf : après recréation du site
+    // par Netlify, le nom exact peut porter un suffixe inconnu. L'identifiant, lui,
+    // est unique et certain. Inventer un nom ferait échouer un build légitime.
+    if (identite.SITE_NAME_FACULTATIF === 'true') {
+      expect(publicationAutorisee(autorise({ SITE_NAME: 'autre-site' }))).toBe(true);
+    } else {
+      expect(publicationAutorisee(autorise({ SITE_NAME: 'autre-site' }))).toBe(false);
+    }
   });
 
   it('l’ancien site reste refusé explicitement, avec ou sans le bon identifiant', () => {
@@ -303,7 +325,7 @@ describe('Diagnostic — le message dit exactement ce qui manque', () => {
     expect(r.sortie).toContain('déploiement REFUSÉ');
     expect(r.sortie).toContain('Raison :');
     expect(r.sortie).toContain(`SITE_ID   = ${identite.SITE_ID}`);
-    expect(r.sortie).toContain(`SITE_NAME = ${identite.SITE_NAME}`);
+    expect(r.sortie).toMatch(/SITE_NAME = .+/);
     expect(r.sortie).toContain('Aucun déploiement n\'a eu lieu');
     expect(r.sortie).toContain('docs/NETLIFY_DEPLOYMENT_CHECKLIST.md');
     expect(r.sortie).toContain('netlify.site.conf');
@@ -312,7 +334,9 @@ describe('Diagnostic — le message dit exactement ce qui manque', () => {
   it('chaque condition manquante a son message propre, pas un refus muet', () => {
     const cas: [Env, string][] = [
       [autorise({ SITE_ID: SITE_ID_AUTRE }), "n'est pas le site autorisé"],
-      [autorise({ SITE_NAME: 'autre-site' }), 'le site autorisé s\'appelle'],
+      ...(identite.SITE_NAME_FACULTATIF === 'true'
+        ? []
+        : [[autorise({ SITE_NAME: 'autre-site' }), 'le site autorisé s\'appelle']] as [Env, string][]),
       [autorise({ BRANCH: 'dev' }), 'seule la branche main'],
       [sans(autorise(), 'VYORA_BUILD_ENABLED'), 'VYORA_BUILD_ENABLED doit valoir'],
       [sans(autorise(), 'SORAHNEX_DEPLOY_AUTHORIZED', 'SORAHNEX_DEPLOY_AUTHORIZED_NAME'), 'AUTORISATION HUMAINE ABSENTE'],
@@ -506,7 +530,7 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
   it('cite le site autorisé dans l’état du refus', () => {
     const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
     expect(r.stderr).toMatch(/Site autorisé/);
-    expect(r.stderr).toContain('6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803');
+    expect(r.stderr).toContain('2135cb38-c4ba-4be2-9392-4b75ff414364');
   });
 
   it('n’accuse pas la variable d’opt-in pour un site totalement inconnu', () => {
@@ -525,7 +549,7 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
       encoding: 'utf8',
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
-        SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
+        SITE_ID: '2135cb38-c4ba-4be2-9392-4b75ff414364',
         SITE_NAME: 'saas-ugc',
         BRANCH: 'main',
         VYORA_BUILD_ENABLED: 'true',
@@ -541,7 +565,7 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
       encoding: 'utf8',
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
-        SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
+        SITE_ID: '2135cb38-c4ba-4be2-9392-4b75ff414364',
         SITE_NAME: 'saas-ugc',
         BRANCH: 'main',
         VYORA_BUILD_ENABLED: 'true',
@@ -576,7 +600,7 @@ describe('Identité autorisée — le site choisi, et les anciens écartés', ()
   it('netlify.site.conf autorise saas-ugc et écarte explicitement l’ancien site', () => {
     const conf = lire('netlify.site.conf');
     const autorise = conf.split('\n').find((l) => /^SITE_ID=/.test(l.trim()));
-    expect(autorise).toContain('6ec85a76');
+    expect(autorise).toContain('2135cb38');
     expect(autorise).not.toContain('fc88d197');
     // L'ancien identifiant n'est pas supprimé : il est REFUSÉ nommément.
     expect(conf).toContain('ANCIEN_SITE_ID=fc88d197-fe0b-47c7-a6e3-fba44eeccda9');
@@ -602,7 +626,7 @@ describe('Diagnostic d’une valeur PRESQUE correcte — le cas du 25/11 07:2x',
    */
   const base = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
-    SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
+    SITE_ID: '2135cb38-c4ba-4be2-9392-4b75ff414364',
     SITE_NAME: 'saas-ugc',
     BRANCH: 'main',
     VYORA_BUILD_ENABLED: 'true',
@@ -729,8 +753,10 @@ describe('Le journal tronqué suffit encore à agir', () => {
     // La conf doit rester inerte : aucune ligne non reconnue ne doit être
     // interprétée comme une identité.
     const conf = lire('netlify.site.conf');
-    const lignesIdentite = conf.split('\n').filter((l) => /^\s*(SITE_ID|SITE_NAME|ANCIEN_SITE_ID|ANCIEN_SITE_NAME)=/.test(l));
-    expect(lignesIdentite).toHaveLength(4);
+    const lignesIdentite = conf.split('\n').filter((l) => /^\s*(SITE_ID|SITE_NAME|SITE_NAME_FACULTATIF|ANCIEN_SITE_ID|ANCIEN_SITE_NAME)=/.test(l));
+    expect(lignesIdentite.length).toBeGreaterThanOrEqual(3);
+    // Une seule ligne SITE_ID : aucune ambiguïté sur l'identité autorisée.
+    expect(lignesIdentite.filter((l) => /^SITE_ID=/.test(l))).toHaveLength(1);
   });
 });
 
@@ -794,9 +820,10 @@ describe('Bascule d’identité — un seul geste, vérifié', () => {
       spawnSync('sh', ['scripts/netlify-autoriser-site.sh', '09412497-abcd-4abc-8abc-abcdefabcdef', 'saas-ugc-0d54'], { cwd: dir, encoding: 'utf8' });
       const conf = readFileSync(joindre(dir, 'netlify.site.conf'), 'utf8');
       const autorise = conf.split('\n').find((l) => /^SITE_ID=/.test(l));
-      // L'ancien identifiant doit avoir QUITTÉ la ligne d'autorisation.
-      expect(autorise).not.toContain('6ec85a76');
-      expect(conf).toContain('ANCIEN_SITE_ID=6ec85a76');
+      // L'identifiant qui était autorisé doit avoir QUITTÉ cette ligne : sinon
+      // l'ancien site resterait une cible, et le déplacement n'aurait servi à rien.
+      expect(autorise).not.toContain(identite.SITE_ID);
+      expect(conf).toContain(`ANCIEN_SITE_ID=${identite.SITE_ID}`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -804,6 +831,6 @@ describe('Bascule d’identité — un seul geste, vérifié', () => {
 
   it('le vrai netlify.site.conf n’a pas été modifié par les tests', () => {
     const conf = lire('netlify.site.conf');
-    expect(conf.split('\n').find((l) => /^SITE_ID=/.test(l))).toContain('6ec85a76');
+    expect(conf.split('\n').find((l) => /^SITE_ID=/.test(l))).toContain('2135cb38');
   });
 });

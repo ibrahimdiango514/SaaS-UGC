@@ -48,11 +48,11 @@ Tout ce qui suit ne consomme aucun crédit et ne dépend pas du nouveau site.
 
 ## Étape 2 — Préparer le dépôt pour le nouveau site (PR, sans fusionner)
 
-> ✅ **FAIT le 25 novembre 2026.** Le site autorisé est désormais `saas-ugc`
-> (`6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803`). `vyora-saas-ugc` est passé en
-> `ANCIEN_SITE_ID` : il est refusé nommément, même si ses trois variables
-> d'autorisation étaient déclarées — pour qu'une bascule ne republie jamais par
-> accident sur l'ancien hébergement.
+> ✅ **FAIT le 25 novembre 2026.** Le site autorisé est `2135cb38-c4ba-4be2-9392-4b75ff414364`
+> (identité fournie par le propriétaire après recréation du site par Netlify).
+> Le nom n'est **pas** contraint (`SITE_NAME_FACULTATIF=true`) : l'identifiant,
+> unique et attribué par Netlify, fait foi. `vyora-saas-ugc` (`fc88d197-…`) est
+> passé en `ANCIEN_SITE_ID` et reste refusé nommément.
 
 - [ ] Pour un futur changement, remplacer les **deux** valeurs dans `netlify.site.conf` :
 

@@ -42,6 +42,7 @@ FICHIER_IDENTITE="netlify.site.conf"
 charger_identite() {
   ID_ATTENDU=""
   NOM_ATTENDU=""
+  NOM_FACULTATIF=""
   ANCIEN_NOM=""
   ANCIEN_ID=""
   ID_DECLARE=""
@@ -61,6 +62,7 @@ charger_identite() {
     case "$_cle" in
       SITE_ID) ID_ATTENDU=$_valeur ;;
       SITE_NAME) NOM_ATTENDU=$_valeur ;;
+      SITE_NAME_FACULTATIF) NOM_FACULTATIF=$_valeur ;;
       ANCIEN_SITE_NAME) ANCIEN_NOM=$_valeur ;;
       ANCIEN_SITE_ID) ANCIEN_ID=$_valeur ;;
       A_DECLARER) ID_DECLARE=$_valeur ;;
@@ -122,9 +124,14 @@ verifier_garde() {
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
     *) refuser "SITE_ID autorisé absent ou mal formé dans $FICHIER_IDENTITE (UUID minuscule attendu)" || return 1 ;;
   esac
-  case "$NOM_ATTENDU" in
-    '' | *[!a-z0-9-]*) refuser "SITE_NAME autorisé absent ou mal formé dans $FICHIER_IDENTITE (minuscules, chiffres, tirets)" || return 1 ;;
-  esac
+  if [ -z "$NOM_ATTENDU" ] && [ "$NOM_FACULTATIF" != "true" ]; then
+    refuser "SITE_NAME autorisé absent de $FICHIER_IDENTITE, et le nom n'est pas déclaré facultatif. Rien ne se publie sur une identité incomplète." || return 1
+  fi
+  if [ -n "$NOM_ATTENDU" ]; then
+    case "$NOM_ATTENDU" in
+      '' | *[!a-z0-9-]*) refuser "SITE_NAME autorisé mal formé dans $FICHIER_IDENTITE (minuscules, chiffres, tirets)" || return 1 ;;
+    esac
+  fi
   if [ -n "$ANCIEN_NOM" ] && [ "$NOM_ATTENDU" = "$ANCIEN_NOM" ]; then
     refuser "le nom autorisé ne peut pas être celui de l'ancien site ($ANCIEN_NOM)" || return 1
   fi
@@ -161,7 +168,7 @@ verifier_garde() {
   if [ -n "$ANCIEN_NOM" ] && [ "$SITE_NAME" = "$ANCIEN_NOM" ]; then
     refuser "ce site porte le nom de l'ANCIEN site ($ANCIEN_NOM) : aucun déploiement n'y est autorisé." || return 1
   fi
-  if [ "$SITE_NAME" != "$NOM_ATTENDU" ]; then
+  if [ -n "$NOM_ATTENDU" ] && [ "$SITE_NAME" != "$NOM_ATTENDU" ]; then
     refuser "ce site s'appelle « $SITE_NAME », le site autorisé s'appelle « $NOM_ATTENDU »." || return 1
   fi
 
@@ -206,7 +213,7 @@ refuser() {
     echo
     echo "Site autorisé (source : $FICHIER_IDENTITE) :"
     echo "  SITE_ID   = ${ID_ATTENDU:-<illisible>}"
-    echo "  SITE_NAME = ${NOM_ATTENDU:-<illisible>}"
+    echo "  SITE_NAME = ${NOM_ATTENDU:-<non contraint : seul l'identifiant fait foi>}"
     echo
     echo "Aucun déploiement n'a eu lieu, aucun crédit n'a été consommé."
     echo "Procédure : docs/NETLIFY_DEPLOYMENT_CHECKLIST.md"
