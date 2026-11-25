@@ -104,3 +104,85 @@ describe('messages d’erreur compréhensibles',()=>{
   expect(corps.error.message.length).toBeGreaterThan(10);
  });
 });
+
+// ===========================================================================
+describe('Studio Runtime — aucun 500 possible depuis notre code', () => {
+  /**
+   * Incident du 25/11/2026 : deux réponses HTTP 500 observées en production.
+   *
+   * Ce test établit un FAIT qui oriente le diagnostic : le gestionnaire ne peut
+   * pas produire 500. Toute erreur est convertie en `RuntimeError` (400/401/403/
+   * 409/413/429/503) ou, pour un imprévu, en 503 `RUNTIME_UNAVAILABLE` :
+   *
+   *     return reply({error:{code,message}}, e instanceof RuntimeError ? e.status : 503);
+   *
+   * Un 500 ne peut donc venir que de la PLATEFORME, avant l'exécution de ce
+   * code — typiquement un échec de chargement de module (import manquant ou
+   * chemin relatif cassé : cette fonction importe `../universal-catalog/*`,
+   * `../_shared/*` et `../../../src/business/importer/url-guard.ts`).
+   *
+   * Ce test protège la conclusion : si quelqu'un introduit un `catch` qui
+   * laisse remonter une erreur brute, la garantie disparaît et ce test le dit.
+   */
+  const deps = {
+    env: () => '',
+    fetcher: vi.fn(async () => new Response('{}')),
+    download: vi.fn(async () => new Uint8Array()),
+  };
+
+  it('un corps non-JSON donne 400 INVALID_BODY, pas 500', async () => {
+    // Il faut une configuration présente : elle est contrôlée AVANT le corps
+    // (sans quoi la réponse serait 503 SERVER_NOT_CONFIGURED, ce qui est
+    // également correct mais ne teste pas ce point).
+    const configure = {
+      ...deps,
+      env: (k: string) => ({
+        SUPABASE_URL: 'https://exemple.supabase.co',
+        SUPABASE_SERVICE_ROLE_KEY: 'service',
+        SUPABASE_ANON_KEY: 'anon',
+      } as Record<string, string>)[k] ?? '',
+    };
+    const handler = createHandler(configure as never);
+    const res = await handler(new Request('https://x.test', {
+      method: 'POST', body: 'ceci-n-est-pas-du-json',
+    }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('INVALID_BODY');
+  });
+
+  it('une méthode non POST donne 405, pas 500', async () => {
+    const handler = createHandler(deps as never);
+    const res = await handler(new Request('https://x.test', { method: 'GET' }));
+    expect(res.status).toBe(405);
+  });
+
+  it('une configuration serveur absente donne 503, pas 500', async () => {
+    // `env` ne renvoie rien : toutes les variables sont vides.
+    const handler = createHandler(deps as never);
+    const res = await handler(new Request('https://x.test', {
+      method: 'POST', body: JSON.stringify({ action: 'models' }),
+    }));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe('SERVER_NOT_CONFIGURED');
+  });
+
+  it('aucun appel au fournisseur n’a lieu quand la configuration manque', async () => {
+    const fetcher = vi.fn(async () => new Response('{}'));
+    const handler = createHandler({ ...deps, fetcher } as never);
+    await handler(new Request('https://x.test', {
+      method: 'POST', body: JSON.stringify({ action: 'quote', model_id: 'x' }),
+    }));
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('le code de repli est bien 503, jamais 500', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../supabase/functions/studio-runtime/handler.ts', import.meta.url), 'utf8');
+    // La ligne exacte qui garantit l'absence de 500.
+    expect(source).toMatch(/new RuntimeError\(code,status\)/);
+    expect(source).toMatch(/e instanceof RuntimeError\?e\.status:503/);
+    // Aucun `status: 500` codé en dur dans ce gestionnaire.
+    expect(source).not.toMatch(/status:\s*500/);
+    expect(source).not.toMatch(/,\s*500\s*\)/);
+  });
+});

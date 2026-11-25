@@ -257,13 +257,28 @@ const deps: ConnectDependencies = {
    * `bg_can_workspace` vérifie propriétaire OU membre avec rôle d'écriture. Un
    * identifiant d'entreprise fourni par le client ne donne donc rien : il est
    * contrôlé avant d'être utilisé.
+   *
+   * ## Contrat SQL — à ne pas confondre avec une table
+   * La fonction est déclarée `RETURNS boolean` (migration
+   * `20261114120000_business_agent_workspace.sql`). Elle s'appelle donc en
+   * EXPRESSION, une fois par droit, et non en `from`.
+   *
+   * Écrire `select can_read, can_write from saas_business.bg_can_workspace(...)`
+   * produit une table à UNE colonne nommée d'après la fonction, et non les deux
+   * colonnes attendues : PostgreSQL répond alors
+   * `column "can_read" does not exist`. Constaté en production le 25/11/2026,
+   * HTTP 500 sur TOUTE action authentifiée de Store Connect — cette requête est
+   * exécutée avant chaque action, y compris `status`.
+   *
+   * La forme ci-dessous est celle de `store-import`, qui fonctionnait.
    */
   async grantWorkspace(userId: string, workspaceId: string) {
     const db = requiredSql();
     try {
       const [ligne] = await db<{ can_read: boolean; can_write: boolean }[]>`
-        select can_read, can_write
-          from saas_business.bg_can_workspace(${userId}::uuid, ${workspaceId}::uuid, true)
+        select
+          saas_business.bg_can_workspace(${userId}::uuid, ${workspaceId}::uuid, false) as can_read,
+          saas_business.bg_can_workspace(${userId}::uuid, ${workspaceId}::uuid, true) as can_write
       `;
       return { canRead: ligne?.can_read === true, canWrite: ligne?.can_write === true };
     } finally {
