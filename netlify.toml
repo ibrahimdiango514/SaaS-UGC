@@ -1,36 +1,42 @@
 [build]
   # ---------------------------------------------------------------------------
-  # GARDE DE BUILD À DEUX RIDEAUX (2026-11-18, nouveau compte Netlify)
+  # GARDE DE DÉPLOIEMENT — deux rideaux, une seule source de vérité
   #
-  # Site de production autorisé — les QUATRE conditions sont exigées :
-  #   BRANCH              = main
-  #   SITE_ID             = fc88d197-fe0b-47c7-a6e3-fba44eeccda9
-  #   SITE_NAME           = vyora-saas-ugc   (https://vyora-saas-ugc.netlify.app)
-  #   VYORA_BUILD_ENABLED = true             (variable à déclarer sur le site)
-  # L'ancien site (nom « vyora-ugc », ancien compte) est refusé explicitement,
-  # en plus de l'être par l'identité positive ci-dessus.
+  # L'identité du site autorisé n'est PLUS écrite ici : elle vit dans
+  # `netlify.site.conf`, lu par les deux rideaux. Migrer vers un nouveau site
+  # Netlify = remplacer SITE_ID et SITE_NAME dans ce fichier, par PR, et rien
+  # d'autre. (Avant : le même identifiant recopié dans une commande `ignore` de
+  # 700 caractères et dans un script séparé — deux occasions de bloquer un
+  # déploiement légitime à la dernière minute.)
   #
-  # Preuve de terrain (journal du déploiement ca410d5) : Netlify expose bien
-  # BRANCH, SITE_ID et SITE_NAME à l'étape `ignore` ; VYORA_BUILD_ENABLED était
-  # « absent » sur le nouveau site → annulation attendue, affichée par Netlify
-  # « Canceled build due to no content change » (libellé générique de toute
-  # annulation par `ignore`, sans rapport avec le contenu).
+  # Rideau 1 — `ignore = "sh scripts/netlify-ignore.sh"` : évalué AVANT toute
+  # installation. Code 0 = build ANNULÉ, zéro crédit. Code 1 = on continue.
+  # Rideau 2 — `command` commence par `sh scripts/netlify-build-guard.sh` :
+  # revérifie la même chose dans l'environnement de build complet, AVANT
+  # `npm ci`. Un « Trigger deploy » manuel ne contourne pas ce rideau.
   #
-  # Rideau 1 — `ignore` : évalué AVANT toute installation ; code 0 = annulé sans
-  # coût. Journalise les valeurs reçues puis n'autorise (code 1) que si les quatre
-  # conditions sont vraies. Variable absente = refus (fermé par défaut).
-  # Rideau 2 — `scripts/netlify-build-guard.sh` en tête de la commande de build :
-  # mêmes quatre conditions, revérifiées dans l'environnement complet, message de
-  # refus explicite, échec avant `npm ci` (aucun déploiement). Un « Trigger
-  # deploy » manuel contourne le rideau 1 mais pas le rideau 2.
+  # Logique commune : `scripts/netlify-guard-lib.sh` (les deux rideaux ne peuvent
+  # pas diverger). Huit conditions, toutes exigées, FERMÉ par défaut :
+  #   SITE_ID = identifiant de netlify.site.conf   SITE_NAME = nom de netlify.site.conf
+  #   SITE_NAME ≠ vyora-ugc (ancien site, refus explicite)
+  #   BRANCH = main                                VYORA_BUILD_ENABLED = true
+  #   SORAHNEX_DEPLOY_AUTHORIZED = true            SORAHNEX_DEPLOY_AUTHORIZED_NAME = sorahnex-deploy
   #
-  # Changer de site = modifier identifiant ET nom aux DEUX endroits, par PR ; les
-  # tests (tests/business-grow-deployment-guard.test.ts) vérifient la cohérence.
-  # Procédure de la variable : docs/migration-nouveau-netlify.md §3.
+  # Les deux dernières variables forment le VERROU DE CRÉDITS : un déploiement
+  # de production réussi coûte 15 crédits Netlify, et le pool épuisé met tous les
+  # sites de l'équipe en pause. Elles ne sont déclarées NULLE PART : publier
+  # exige un acte humain explicite, jamais un effet de bord d'un push ou d'une
+  # fusion. Voir docs/NETLIFY_DEPLOYMENT_CHECKLIST.md.
+  #
+  # Constat de terrain (journal du déploiement ca410d5, 2026-11-18) : Netlify
+  # expose bien BRANCH, SITE_ID et SITE_NAME à l'étape `ignore`.
+  #
+  # Local : `sh scripts/netlify-ignore.sh` sans variables annule, sans rien
+  # toucher — on ne peut pas confondre un test local avec une publication.
   # ---------------------------------------------------------------------------
-  command = "sh scripts/netlify-build-guard.sh fc88d197-fe0b-47c7-a6e3-fba44eeccda9 vyora-saas-ugc && npm ci && npm run build"
+  command = "sh scripts/netlify-build-guard.sh && npm ci && npm run build"
   publish = "dist"
-  ignore = 'echo "garde ignore: BRANCH=${BRANCH:-absent} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-absent} SITE_ID=${SITE_ID:-absent} SITE_NAME=${SITE_NAME:-absent}"; if [ "$SITE_NAME" != "vyora-ugc" ] && [ "$VYORA_BUILD_ENABLED" = "true" ] && [ "$BRANCH" = "main" ] && [ "$SITE_ID" = "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ] && [ "$SITE_NAME" = "vyora-saas-ugc" ]; then echo "garde ignore: build autorise"; exit 1; else echo "garde ignore: build annule (conditions non reunies)"; exit 0; fi'
+  ignore = "sh scripts/netlify-ignore.sh"
 
 [build.environment]
   NODE_VERSION = "22"

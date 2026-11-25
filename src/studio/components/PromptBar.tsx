@@ -131,7 +131,12 @@ export function PromptBar({
         'studio-v2 sticky z-40 -mx-3 border-t border-white/[0.06] bg-[#050505]/96 px-3 pb-2 pt-2 backdrop-blur-xl sm:-mx-6 sm:px-6 sm:pb-3 sm:pt-3',
         // `mt-auto` est porté par `.studio-composer-dock` : la marge utilitaire
         // `mt-3` la masquerait (les utilitaires sont émis après les composants).
-        compactShell ? 'studio-composer-dock bottom-0' : 'mt-3 bottom-[54px] sm:mt-5 lg:bottom-0',
+        // La barre de navigation basse fait `--nav-basse-hauteur` (voir index.css) :
+        // composer avec une hauteur devinée laissait le champ passer dessous sur
+        // les écrans à encoche. `sm:` rétablit la valeur d'origine sur grand écran.
+        compactShell
+          ? 'studio-composer-dock bottom-0'
+          : 'mt-3 bottom-[var(--nav-basse-hauteur)] sm:mt-5 lg:bottom-0',
       )}
     >
       <div className="mx-auto max-w-[1400px]">

@@ -24,9 +24,10 @@
 import process from 'node:process';
 
 export const DEFAULTS = {
-  // `VYORA_SITE_URL` permet de viser le nouveau domaine Netlify sans toucher
-  // au code ; `--site` reste prioritaire. L'ancien domaine n'est qu'un repli.
-  site: (process.env.VYORA_SITE_URL || '').trim() || 'https://vyora-ugc.netlify.app',
+  // AUCUN repli : viser par défaut l'ancien domaine produirait un « tout va bien »
+  // sur un site mort — exactement le faux positif qu'un harnais doit éviter.
+  // L'adresse est donc obligatoire (`--site` ou `VYORA_SITE_URL`).
+  site: (process.env.VYORA_SITE_URL || '').trim(),
   fn: 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import',
   repo: 'ibrahimdiango514/SaaS-UGC',
 };
@@ -67,6 +68,14 @@ async function main(argv) {
   const site = arg('site', DEFAULTS.site);
   const fn = arg('fn', DEFAULTS.fn);
   const repo = arg('repo', DEFAULTS.repo);
+
+  if (!site) {
+    // Refus explicite plutôt qu'une cible par défaut : mieux vaut un code 2
+    // « mesure impossible » qu'un rapport vert obtenu contre le mauvais site.
+    console.error('Adresse du site inconnue : préciser --site https://… ou VYORA_SITE_URL.');
+    console.error('Aucun repli n’est utilisé volontairement : viser un ancien domaine donnerait un faux OK.');
+    return 2;
+  }
 
   let expected = '';
   try {

@@ -48,3 +48,59 @@ it('checks unsafe parameters recursively and preserves only validated defaults a
  expect(projected.schemas.input_data.properties.invalid.default).toBeUndefined();
  expect(JSON.stringify(projected)).not.toContain('supplier cost secret');
 });
+
+/**
+ * Messages d'erreur — un refus d'accès n'est pas une panne.
+ *
+ * Constat de production (2026-11-25) : `action:'quotas'` renvoyait 409
+ * SUBSCRIPTION_REQUIRED avec le message générique « Consultez le statut avant de
+ * réessayer une génération ». Deux défauts : on parle de génération à quelqu'un
+ * qui consulte ses quotas, et on l'invite à réessayer un refus définitif.
+ */
+describe('messages d’erreur compréhensibles',()=>{
+ function handlerQuiRefuse(status:number,corps:Record<string,unknown>){
+  const fetcher=vi.fn(async(url:string)=>{
+   if(String(url).includes('/auth/v1/user'))return new Response(JSON.stringify({id:'11111111-1111-4111-8111-111111111111'}),{status:200});
+   if(String(url).includes('/rest/v1/rpc/'))return new Response(JSON.stringify(corps),{status});
+   return new Response('{}',{status:200});
+  });
+  return createHandler({env:k=>k==='SUPABASE_URL'?'https://project.supabase.co':'configured',fetcher:fetcher as any,download:vi.fn()});
+ }
+ const request=(body:unknown)=>new Request('https://example.com',{method:'POST',headers:{authorization:'Bearer jeton'},body:JSON.stringify(body)});
+
+ it('explique un refus d’abonnement au lieu de parler de génération',async()=>{
+  const reponse=await handlerQuiRefuse(409,{message:'subscription_required'})(
+   request({action:'quotas'}));
+  const corps=await reponse.json() as any;
+  expect(reponse.status).toBe(409);
+  expect(corps.error.code).toBe('SUBSCRIPTION_REQUIRED');
+  expect(corps.error.message).toMatch(/abonnés actifs/);
+  expect(corps.error.message).not.toMatch(/génération/i);
+ });
+
+ it('ne dit pas « réessayez une génération » sur une simple lecture de quotas',async()=>{
+  // Panne technique réelle : le message doit rester prudent, sans promesse fausse.
+  const reponse=await handlerQuiRefuse(500,{message:'connexion impossible'})(
+   request({action:'quotas'}));
+  const corps=await reponse.json() as any;
+  expect(corps.error.code).toBe('ACCESS_OR_STATE_REJECTED');
+  expect(corps.error.message).not.toMatch(/génération/i);
+ });
+
+ it('garde un message générique prudent pour une panne du handler',async()=>{
+  const fetcher=vi.fn(async()=>{throw new Error('réseau coupé');});
+  const handler=createHandler({env:()=> 'configured',fetcher:fetcher as any,download:vi.fn()});
+  const reponse=await handler(request({action:'quotas'}));
+  expect(reponse.status).toBe(503);
+  const corps=await reponse.json() as any;
+  expect(corps.error.code).toBe('RUNTIME_UNAVAILABLE');
+  expect(corps.error.message).toMatch(/indisponible/i);
+ });
+
+ it('donne toujours un code et un message, jamais un message vide',async()=>{
+  const handler=handlerQuiRefuse(409,{message:'quota_exceeded:audio:5:5'});
+  const corps=await (await handler(request({action:'models'}))).json() as any;
+  expect(corps.error.code).toBe('QUOTA_EXCEEDED');
+  expect(corps.error.message.length).toBeGreaterThan(10);
+ });
+});

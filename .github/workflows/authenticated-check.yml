@@ -1,0 +1,79 @@
+name: Vérification authentifiée
+
+# Objet : constater ce que le backend répond RÉELLEMENT à un utilisateur connecté.
+# Les sondes anonymes prouvent seulement qu'un appel sans jeton est refusé ; elles
+# ne disent rien de Grow, Studio, MCP ou des intégrations une fois la session
+# ouverte. C'est ce trou que ce workflow comble.
+#
+# Cet environnement de développement n'a pas d'accès réseau aux domaines de
+# production : la vérification est exécutée par un runner GitHub, qui lui l'a.
+#
+# DÉCLENCHEMENT VOLONTAIREMENT ÉTROIT
+#   - `workflow_dispatch` (bouton « Run workflow ») ;
+#   - push sur `arena/**` DONT le message contient `[verif-auth]`.
+# Ce marqueur est nécessaire parce que la vérification crée un compte de test via
+# la route d'inscription publique : il ne doit pas s'en créer un à chaque push.
+#
+# AUCUN SECRET N'EST REQUIS NI UTILISÉ : seule la clé PUBLIQUE du projet (celle du
+# navigateur) sert à obtenir une session. Si des identifiants de test sont fournis
+# en secrets de dépôt, ils sont utilisés à la place de l'inscription.
+#
+# PÉRIMÈTRE LECTURE SEULE : aucune écriture, aucune génération payante, aucun
+# OAuth. Le script n'envoie que des actions de consultation (voir
+# tests/verify-authenticated-harness.test.ts qui l'interdit explicitement).
+#
+# AUCUN DÉPLOIEMENT : ce workflow ne construit rien et ne publie rien. Il n'a
+# aucun effet sur Netlify et ne consomme aucun crédit de déploiement.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ecritures:
+        description: "Exécuter aussi la vérification des ÉCRITURES (crée puis supprime de vraies lignes de test)"
+        type: boolean
+        default: false
+  push:
+    branches: ["arena/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[verif-auth]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Vérification authentifiée en lecture seule
+        env:
+          # Facultatifs : compte de test existant. Absents, on inscrit un compte
+          # éphémère ; le mot de passe est engendré sur place et jamais journalisé.
+          SORAHNEX_TEST_EMAIL: ${{ secrets.SORAHNEX_TEST_EMAIL }}
+          SORAHNEX_TEST_PASSWORD: ${{ secrets.SORAHNEX_TEST_PASSWORD }}
+          SORAHNEX_QA_SIGNUP: "1"
+        run: node scripts/verify-authenticated.mjs
+      - name: Vérification des ÉCRITURES Grow (mutations réelles, nettoyées)
+        # Second harnais, séparé et à double opt-in : il CRÉE puis SUPPRIME de
+        # vraies lignes pour prouver que les écritures persistent. Il n'est pas
+        # activé par défaut, pour ne pas modifier de données à chaque passage.
+        if: ${{ contains(github.event.head_commit.message, '[verif-ecriture]') || inputs.ecritures == true }}
+        env:
+          SORAHNEX_TEST_EMAIL: ${{ secrets.SORAHNEX_TEST_EMAIL }}
+          SORAHNEX_TEST_PASSWORD: ${{ secrets.SORAHNEX_TEST_PASSWORD }}
+          SORAHNEX_QA_SIGNUP: "1"
+          SORAHNEX_WRITE_TEST: "1"
+        run: node scripts/verify-grow-writes.mjs
+      - name: Publier le rapport complet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-verification-authentifiee
+          path: |
+            rapport-verification-authentifiee.md
+          if-no-files-found: warn
+          retention-days: 30

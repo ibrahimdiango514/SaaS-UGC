@@ -9,7 +9,30 @@ import { MAX_BYTES } from './media.ts';
 export interface Dependencies {env:(name:string)=>string; fetcher:typeof fetch; download:(url:string)=>Promise<Uint8Array>}
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, apikey, content-type, x-client-info, x-reelora-worker-token','Access-Control-Allow-Methods':'POST, OPTIONS'};
 const reply=(data:unknown,status=200)=>Response.json(data,{status,headers:cors});
-class RuntimeError extends Error {constructor(readonly code:string,readonly status=400){super(code);}}
+class RuntimeError extends Error {constructor(readonly code:string,readonly status=400,readonly detail?:string){super(code);}}
+
+/**
+ * Messages destinés à la personne devant l'écran. Un refus d'accès n'est pas une
+ * panne : dire « réessayez une génération » à quelqu'un qui n'a pas d'abonnement,
+ * ou qui consulte simplement ses quotas, l'envoie réessayer indéfiniment.
+ * Le message générique reste réservé aux vraies pannes techniques.
+ */
+const MESSAGES: Record<string,string> = {
+  SUBSCRIPTION_REQUIRED: 'Studio est réservé aux abonnés actifs. Consultez votre offre pour continuer.',
+  ACCESS_OR_STATE_REJECTED: 'Cette action n’est pas disponible pour votre compte dans son état actuel.',
+  UNAUTHENTICATED: 'Session SORAHNEX invalide ou expirée. Reconnectez-vous.',
+  SERVER_NOT_CONFIGURED: 'Le service Studio n’est pas configuré sur ce serveur.',
+  MODEL_NOT_OPERATIONAL: 'Ce modèle n’est pas disponible pour votre offre.',
+  QUOTA_EXCEEDED: 'Votre quota est épuisé pour cette famille de modèles.',
+  RATE_LIMITED: 'Trop de demandes rapprochées. Patientez un instant avant de réessayer.',
+  DAILY_BUDGET_EXCEEDED: 'Le budget quotidien de Studio est atteint. Réessayez demain.',
+  NOT_AUTHENTICATED: 'Session SORAHNEX invalide ou expirée. Reconnectez-vous.',
+  ACCOUNT_NOT_ACTIVE: 'Votre compte n’est pas actif. Consultez votre offre.',
+  VERIFICATION_REQUIRED: 'Une vérification est nécessaire avant de continuer.',
+  INVALID_BODY: 'La demande est mal formée.',
+  INVALID_REQUEST: 'La demande est incomplète.',
+};
+const MESSAGE_PAR_DEFAUT = 'La demande n’a pas pu être traitée. Consultez le statut avant de réessayer une génération.';
 const error=(code:string,status=400):never=>{throw new RuntimeError(code,status);};
 export function createHandler(deps:Dependencies) {
  const {env,fetcher}=deps;
@@ -286,6 +309,12 @@ export function createHandler(deps:Dependencies) {
     return reply({job_id:updated.id,status:updated.status,credits:updated.credits,error_code:updated.error_code});
    }
    return error('INVALID_ACTION');
-  } catch(e) {return reply({error:{code:e instanceof RuntimeError?e.code:'RUNTIME_UNAVAILABLE',message:'La demande n’a pas pu être traitée. Consultez le statut avant de réessayer une génération.'}},e instanceof RuntimeError?e.status:503);}
+  } catch(e) {
+    const code=e instanceof RuntimeError?e.code:'RUNTIME_UNAVAILABLE';
+    const message=e instanceof RuntimeError
+      ? (MESSAGES[code] ?? MESSAGE_PAR_DEFAUT)
+      : 'Studio est momentanément indisponible. Réessayez dans quelques instants.';
+    return reply({error:{code,message}},e instanceof RuntimeError?e.status:503);
+  }
  };
 }
