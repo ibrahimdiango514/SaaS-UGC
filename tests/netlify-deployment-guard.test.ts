@@ -733,3 +733,77 @@ describe('Le journal tronqué suffit encore à agir', () => {
     expect(lignesIdentite).toHaveLength(4);
   });
 });
+
+describe('Bascule d’identité — un seul geste, vérifié', () => {
+  /** Copie le dépôt minimal nécessaire pour tester sans toucher au vrai fichier. */
+  async function depotTemporaire() {
+    const { mkdtempSync, mkdirSync, copyFileSync } = await import('node:fs');
+    const { join: joindre } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const dir = mkdtempSync(joindre(tmpdir(), 'bascule-'));
+    mkdirSync(joindre(dir, 'scripts'), { recursive: true });
+    for (const f of ['netlify-autoriser-site.sh', 'netlify-build-guard.sh', 'netlify-guard-lib.sh']) {
+      copyFileSync(joindre(process.cwd(), 'scripts', f), joindre(dir, 'scripts', f));
+    }
+    copyFileSync(joindre(process.cwd(), 'netlify.site.conf'), joindre(dir, 'netlify.site.conf'));
+    return dir;
+  }
+
+  it('affiche l’identité actuelle puis la nouvelle, et vérifie les deux', async () => {
+    const dir = await depotTemporaire();
+    const { rmSync } = await import('node:fs');
+    try {
+      const r = spawnSync('sh', ['scripts/netlify-autoriser-site.sh', '09412497-abcd-4abc-8abc-abcdefabcdef', 'saas-ugc-0d54'], { cwd: dir, encoding: 'utf8' });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toMatch(/nouveau site : build AUTORISÉ/);
+      expect(r.stdout).toMatch(/ancien site : refusé/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuse un identifiant mal formé (avant toute écriture)', async () => {
+    const dir = await depotTemporaire();
+    const { rmSync } = await import('node:fs');
+    try {
+      const r = spawnSync('sh', ['scripts/netlify-autoriser-site.sh', 'pas-un-uuid', 'saas-ugc'], { cwd: dir, encoding: 'utf8' });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/identifiant mal formé/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuse de revenir sur un site explicitement écarté', async () => {
+    const dir = await depotTemporaire();
+    const { rmSync } = await import('node:fs');
+    try {
+      const r = spawnSync('sh', ['scripts/netlify-autoriser-site.sh', 'fc88d197-fe0b-47c7-a6e3-fba44eeccda9', 'vyora-saas-ugc'], { cwd: dir, encoding: 'utf8' });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/explicitement écarté/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('ne laisse JAMAIS l’ancien site autorisé après une bascule', async () => {
+    const dir = await depotTemporaire();
+    const { rmSync, readFileSync } = await import('node:fs');
+    const { join: joindre } = await import('node:path');
+    try {
+      spawnSync('sh', ['scripts/netlify-autoriser-site.sh', '09412497-abcd-4abc-8abc-abcdefabcdef', 'saas-ugc-0d54'], { cwd: dir, encoding: 'utf8' });
+      const conf = readFileSync(joindre(dir, 'netlify.site.conf'), 'utf8');
+      const autorise = conf.split('\n').find((l) => /^SITE_ID=/.test(l));
+      // L'ancien identifiant doit avoir QUITTÉ la ligne d'autorisation.
+      expect(autorise).not.toContain('6ec85a76');
+      expect(conf).toContain('ANCIEN_SITE_ID=6ec85a76');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('le vrai netlify.site.conf n’a pas été modifié par les tests', () => {
+    const conf = lire('netlify.site.conf');
+    expect(conf.split('\n').find((l) => /^SITE_ID=/.test(l))).toContain('6ec85a76');
+  });
+});
