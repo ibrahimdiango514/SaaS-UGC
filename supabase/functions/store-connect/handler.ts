@@ -1132,7 +1132,25 @@ export async function handleStoreConnect(
     }
 
     // 3) Entreprise : lue en base, pas reçue du client.
-    const grant = await deps.grantWorkspace(userId, workspaceId);
+    //
+    // Une vérification de droits qui ÉCHOUE n'est pas un refus : c'est une
+    // panne de notre côté. Elle est donc distinguée (503 + code lisible) au
+    // lieu de tomber dans le catch générique en 500 : lors de l'incident du
+    // 25/11/2026, c'est précisément ce 500 muet qui a masqué la requête SQL
+    // fautive pendant plusieurs jours. `store-import` faisait déjà ce
+    // distinguo ; les deux fonctions répondent maintenant pareil.
+    let grant: ConnectGrant;
+    try {
+      grant = await deps.grantWorkspace(userId, workspaceId);
+    } catch {
+      deps.log?.('store-connect: vérification des droits indisponible', { workspaceId });
+      return new Response(JSON.stringify(failure(
+        'WORKSPACE_CHECK_UNAVAILABLE',
+        'La vérification d’accès à l’entreprise est indisponible.',
+      )), {
+        status: 503, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
+      });
+    }
     const ecriture = action === 'connect' || action === 'disconnect' || action === 'save-custom';
     if (ecriture ? !grant.canWrite : !grant.canRead) {
       return new Response(JSON.stringify(failure('WORKSPACE_ACCESS_DENIED', 'Droits insuffisants sur cette entreprise.')), {

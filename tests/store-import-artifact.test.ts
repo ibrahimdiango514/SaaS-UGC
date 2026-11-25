@@ -80,6 +80,68 @@ function fichierAuCommit(commit: string, chemin: string): string | null {
   }
 }
 
+
+/**
+ * Un artefact est-il committé et pourtant PAS encore ré-épinglé ?
+ *
+ * ## Pourquoi cette distinction est indispensable
+ * Le ré-épinglage est impossible en un seul commit : `loader.ts` doit désigner
+ * un commit qui CONTIENT déjà le nouvel artefact. La procédure du dépôt
+ * (`docs/renommage-sorahnex.md` §5) est donc en deux temps :
+ *   1. committer l'artefact seul ;
+ *   2. régénérer le chargeur sur ce commit, puis le committer.
+ *
+ * Entre les deux, tout build intermédiaire de `main` est ROUGE si ce
+ * désalignement compte comme un échec — et un rouge attendu finit par masquer
+ * une vraie dérive.
+ *
+ * ## La garantie conservée (et non désactivée)
+ * L'état « en attente » n'est reconnu que si le bundle RÉELLEMENT committé est
+ * bit pour bit celui que le code actuel produit. Autrement dit : le code et
+ * l'artefact sont d'accord, seul l'ÉPINGLAGE est en retard. Dès que l'un des
+ * deux bouge sans l'autre, la comparaison échoue et le test redevient rouge.
+ */
+/**
+ * L'ancien artefact est-il RÉELLEMENT celui du commit épinglé ?
+ *
+ * C'est la seule preuve que l'épingle pointe sur une version antérieure du code
+ * et non sur autre chose. Le mode « en attente » ne doit jamais couvrir une
+ * empreinte épinglée qui ne correspond à RIEN de connu : ce serait un
+ * déploiement cassé, pas un ré-épinglage en retard.
+ *
+ * Indisponible si le commit épinglé n'est pas dans ce clone (contrôle déjà
+ * signalé en `skipped` par le test dédié).
+ */
+function ancienArtefactEstCeluiDuCommit(nomFonction: string): boolean {
+  const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
+  const commit = /const COMMIT = "([0-9a-f]{40})"/.exec(chargeur)?.[1];
+  if (!commit) return false;
+  if (!commitPresent(commit)) return true; // non vérifiable ici : le test dédié le dit
+  const ancien = fichierAuCommit(commit, FUNCTIONS[nomFonction].artifact);
+  if (ancien === null) return false;
+  const empreinteEpinglee = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
+  return createHash('sha256').update(ancien, 'utf8').digest('hex') === empreinteEpinglee;
+}
+
+function reepinglageEnAttente(nomFonction: string): boolean {
+  const built = buildArtifact(nomFonction);
+  const artefactCommis = readFileSync(FUNCTIONS[nomFonction].artifact, 'utf8');
+  const empreinteCommis = createHash('sha256').update(artefactCommis, 'utf8').digest('hex');
+  const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
+  const empreinteEpinglee = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
+  return empreinteCommis === built.sha256
+    && empreinteEpinglee !== built.sha256
+    // Sans cette condition, une épingle pointant sur un artefact inconnu
+    // passerait pour un simple retard de ré-épinglage.
+    && ancienArtefactEstCeluiDuCommit(nomFonction);
+}
+
+/** Message d'attente, affiché dans le rapport de test. */
+const MESSAGE_REEPINGLAGE =
+  'ré-épinglage en attente : artefact committé conforme au code, chargeur pas encore réépinglé. '
+  + 'Après fusion, exécuter `EDGE_PIN_COMMIT=<sha de main> node scripts/build-edge-artifact.mjs '
+  + '<fonction>` puis committer le chargeur et redéployer.';
+
 describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nomFonction) => {
   it('produit un bundle déterministe et non vide', () => {
     const a = buildArtifact(nomFonction);
@@ -116,9 +178,13 @@ describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nom
     return m[1];
   };
 
-  it('le chargeur livré correspond au bundle actuel', () => {
+  it('le chargeur livré correspond au bundle actuel', (ctx) => {
     const built = buildArtifact(nomFonction);
     const livre = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
+    if (reepinglageEnAttente(nomFonction)) {
+      // Étape 1/2 du cycle documenté : l'artefact est à jour, l'épingle non.
+      ctx.skip(`${nomFonction} — ${MESSAGE_REEPINGLAGE}`);
+    }
     expect(livre).toBe(renderLoader(nomFonction, built, commitEpingle()));
   });
 
@@ -159,9 +225,31 @@ describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nom
       artefact,
       `l'artefact est absent du commit épinglé ${commit} : poussez-le, puis régénérez le chargeur sur ce commit`,
     ).not.toBeNull();
-    expect(createHash('sha256').update(artefact as string, 'utf8').digest('hex')).toBe(built.sha256);
+
+    // 1) L'épingle est HONNÊTE : l'artefact réellement présent au commit
+    //    épinglé a bien l'empreinte et la taille annoncées par le chargeur.
+    //    C'est le contrôle qui empêche un déploiement cassé, et il ne se
+    //    relâche jamais — y compris pendant un ré-épinglage.
+    const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
+    const empreinteEpinglee = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
+    const tailleEpinglee = Number(/const ARTIFACT_CHARS = (\d+);/.exec(chargeur)?.[1]);
+    expect(createHash('sha256').update(artefact as string, 'utf8').digest('hex')).toBe(empreinteEpinglee);
     // `chars` compte des CARACTÈRES, pas des octets : comparer `Buffer.length`
     // à `chars` ferait échouer à tort dès qu'un accent est présent.
+    expect((artefact as string).length).toBe(tailleEpinglee);
+
+    // 2) L'épingle désigne-t-elle la version COURANTE du code ? Pendant le
+    //    cycle en deux temps (docs/renommage-sorahnex.md §5), l'artefact est
+    //    committé avant le ré-épinglage : l'épingle pointe alors, à raison,
+    //    sur la version précédente. Le test dédié au ré-épinglage l'annonce
+    //    en « skipped » ; ici on vérifie que l'écart se limite à cela.
+    if (reepinglageEnAttente(nomFonction)) {
+      // L'artefact committé est, lui, exactement celui du code actuel.
+      expect(createHash('sha256').update(readFileSync(FUNCTIONS[nomFonction].artifact, 'utf8'), 'utf8').digest('hex'))
+        .toBe(built.sha256);
+      return;
+    }
+    expect(createHash('sha256').update(artefact as string, 'utf8').digest('hex')).toBe(built.sha256);
     expect((artefact as string).length).toBe(built.chars);
   });
 
@@ -180,6 +268,16 @@ describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nom
     const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
     const epingle = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
     if (epingle === built.sha256) return;
+
+    // Artefact committé conforme au code : seule l'épingle est en retard. Le
+    // bundle déployé n'a donc pas dérivé — on le signale sans faire échouer.
+    if (reepinglageEnAttente(nomFonction)) {
+      const commis = createHash('sha256')
+        .update(readFileSync(FUNCTIONS[nomFonction].artifact, 'utf8'), 'utf8')
+        .digest('hex');
+      expect(commis).toBe(built.sha256);
+      return;
+    }
 
     const partages = [
       'supabase/functions/store-import/safe-egress.ts',

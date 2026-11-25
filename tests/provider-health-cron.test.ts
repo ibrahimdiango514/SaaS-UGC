@@ -241,3 +241,86 @@ describe('surveillance fournisseur — aucun secret dans le verdict', () => {
     expect(record!.body).not.toContain('secret-value-0123456789');
   });
 });
+
+// ===========================================================================
+describe('sémantique du 502 — un verdict, pas une panne du service', () => {
+  /**
+   * Incident du 25/11/2026 : des 502 ont été lus comme une panne de Provider
+   * Health. Ce n'est pas le cas : 502 est le code de retour NORMAL d'une sonde
+   * qui a trouvé au moins un fournisseur dégradé.
+   *
+   *     return json({...}, failed.length === 0 ? 200 : 502);
+   *
+   * Le corps de la réponse porte le verdict détaillé (statut, code d'erreur,
+   * HTTP du catalogue, latence). Un 502 EST le compte rendu ; un 200 signifie
+   * « tout va bien ». Ces tests figent cette convention, pour qu'on ne
+   * « corrige » pas un jour ce 502 en 200 — ce qui masquerait une panne réelle.
+   *
+   * Ce qui relèverait d'une vraie panne du système de vérification :
+   *   - 403 CRON_HEADER_REQUIRED  : le job pg_cron n'envoie plus l'en-tête
+   *   - 401 SERVICE_TOKEN_INVALID : jeton de service désynchronisé
+   *   - 503 SERVICE_TOKEN_UNAVAILABLE : Vault illisible
+   *   - 404 PROVIDER_UNKNOWN      : fournisseur absent du registre
+   *   - `recorded: false` dans le corps : le verdict n'a pas pu être enregistré
+   */
+  const appeler = async (options: Parameters<typeof stubFetch>[0] = {}) => {
+    const { fetchMock } = stubFetch(options);
+    const handler = await loadHandler();
+    const res = await handler(request(cronHeaders));
+    return { res, body: await res.json(), fetchMock };
+  };
+
+  it('un fournisseur sain donne 200', async () => {
+    const { res, body } = await appeler({ catalogStatus: 200 });
+    expect(res.status).toBe(200);
+    expect(body.results.every((r: { status: string }) => r.status === 'healthy')).toBe(true);
+  });
+
+  it('un fournisseur dégradé donne 502 ET le détail du verdict dans le corps', async () => {
+    const { res, body } = await appeler({ catalogStatus: 401 });
+    expect(res.status).toBe(502);
+    const [verdict] = body.results;
+    // Le diagnostic est exploitable : qui, quoi, quel statut HTTP.
+    expect(verdict.providerKey).toBe('freellmapi');
+    expect(verdict.status).not.toBe('healthy');
+    expect(verdict.errorCode).toBeTruthy();
+    expect(verdict.catalogHttpStatus).toBe(401);
+  });
+
+  it('sans fournisseur désigné, un fournisseur non configuré n’est pas sondé', async () => {
+    // Aucune clé et aucune demande explicite : rien n'est sondé, donc 200.
+    const { fetchMock } = stubFetch({
+      descriptors: [{ ...FREELLM_DESCRIPTOR, api_key_env: null }],
+    });
+    const handler = await loadHandler();
+    // Corps sans `providerKey` : on demande le balayage par défaut.
+    const res = await handler(request(cronHeaders, {}));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.results).toHaveLength(0);
+    // Aucun appel au catalogue du fournisseur.
+    const appelsCatalogue = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes('api.test'));
+    expect(appelsCatalogue).toHaveLength(0);
+  });
+
+  it('un fournisseur DEMANDÉ sans clé est signalé, pas ignoré silencieusement', async () => {
+    // Demande explicite = diagnostic demandé : l'absence de clé doit se voir.
+    const { res, body } = await appeler({
+      descriptors: [{ ...FREELLM_DESCRIPTOR, api_key_env: null }],
+    });
+    expect(res.status).toBe(502);
+    expect(body.results[0].errorCode).toBe('PROVIDER_NOT_CONFIGURED');
+  });
+
+  it('un échec d’enregistrement du verdict est signalé, pas masqué', async () => {
+    const { res, body } = await appeler({ catalogStatus: 200, recordOk: false });
+    // Le fournisseur va bien -> 200, mais `recorded: false` dit que la trace manque.
+    // `recordDetail` porte la réponse brute de la RPC : c'est elle qu'il faut
+    // lire pour comprendre pourquoi l'enregistrement a échoué.
+    expect(res.status).toBe(200);
+    expect(body.results[0].recorded).toBe(false);
+    expect(body.results[0].recordDetail).toBeTruthy();
+  });
+});

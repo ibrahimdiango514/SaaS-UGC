@@ -555,3 +555,41 @@ describe('store-connect — utilitaires', () => {
     expect(nom).not.toContain(CLE);
   });
 });
+
+// ===========================================================================
+describe('vérification des droits indisponible — 503 explicite, jamais 500', () => {
+  /**
+   * Incident du 25/11/2026 : la requête SQL de `grantWorkspace` était fautive
+   * (`column "can_read" does not exist`). Le catch générique la transformait en
+   * 500 `STORE_CONNECT_BACKEND_ERROR`, sans code lisible : la cause est restée
+   * invisible. `store-import` distinguait déjà ce cas ; Store Connect le fait
+   * maintenant aussi.
+   */
+  it('une erreur de vérification donne 503 WORKSPACE_CHECK_UNAVAILABLE', async () => {
+    const { deps, journal } = environnement({});
+    deps.grantWorkspace = async () => {
+      throw new Error('column "can_read" does not exist');
+    };
+    const res = await handleStoreConnect(requete({ action: 'status', workspaceId: ENTREPRISE }), deps);
+    expect(res.status).toBe(503);
+    const corps = await res.json();
+    expect(corps.error.code).toBe('WORKSPACE_CHECK_UNAVAILABLE');
+    // Le message est destiné à l'écran : il ne doit pas fuiter le SQL.
+    expect(corps.error.message).not.toContain('can_read');
+    // La panne est journalisée pour l'exploitant.
+    expect(journal.logs.map((entree) => entree.message).join(' ')).toContain('vérification des droits');
+  });
+
+  it('une vérification qui aboutit laisse passer la requête', async () => {
+    const { deps } = environnement({ etat: { connected: false } });
+    const res = await handleStoreConnect(requete({ action: 'status', workspaceId: ENTREPRISE }), deps);
+    expect(res.status).toBe(200);
+  });
+
+  it('un refus de droits reste un 403, pas un 503', async () => {
+    const { deps } = environnement({ canRead: false, canWrite: false });
+    const res = await handleStoreConnect(requete({ action: 'status', workspaceId: ENTREPRISE }), deps);
+    // Distinction essentielle : refus = 403, panne = 503.
+    expect(res.status).toBe(403);
+  });
+});
