@@ -171,3 +171,34 @@ describe('prompt structuré et sécurité des secrets', () => {
     }
   });
 });
+
+/**
+ * Le composeur Studio ne doit pas passer sous la barre de navigation basse.
+ *
+ * Défaut réel : le composeur s'appuyait sur `bottom-[54px]`, une hauteur devinée
+ * de la barre mobile. La barre fait en réalité `pt-2 + min-h-12 + safe-bottom`
+ * (≈ 4rem + encoche iOS), donc le champ se retrouvait partiellement masqué sur
+ * les écrans à encoche. Une seule source de vérité, et un test qui la relie.
+ */
+describe('composeur Studio — alignement sur la barre de navigation basse', () => {
+  const lire = (chemin: string) => readFileSync(chemin, 'utf8');
+
+  it('définit la hauteur de la barre dans une variable partagée', () => {
+    const css = lire('src/index.css');
+    expect(css).toContain('--nav-basse-hauteur:');
+    expect(css).toMatch(/--nav-basse-hauteur:\s*calc\([^)]*env\(safe-area-inset-bottom/);
+  });
+
+  it('le composeur consomme la variable au lieu d’une hauteur devinée', () => {
+    const source = lire('src/studio/components/PromptBar.tsx');
+    expect(source).toContain('bottom-[var(--nav-basse-hauteur)]');
+    // La valeur devinée ne doit pas revenir : elle ne correspond à aucune barre.
+    expect(source).not.toContain('bottom-[54px]');
+  });
+
+  it('la barre de navigation basse utilise bien la même mesure', () => {
+    const layout = lire('src/components/Layout.tsx');
+    expect(layout).toContain('safe-bottom');
+    expect(layout).toContain('min-h-12');
+  });
+});

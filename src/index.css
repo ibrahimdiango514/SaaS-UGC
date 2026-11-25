@@ -185,6 +185,11 @@
 }
 
 @layer utilities {
+  /* Hauteur de la barre de navigation basse (mobile). La barre la consomme via
+     `.safe-bottom`, et le composeur Studio s'appuie dessus avec `bottom`.
+     Une seule source de vérité : une valeur devinée à un seul endroit laissait le
+     composeur passer sous la barre. */
+  :root { --nav-basse-hauteur: calc(4rem + env(safe-area-inset-bottom, 0px)); }
   .safe-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
