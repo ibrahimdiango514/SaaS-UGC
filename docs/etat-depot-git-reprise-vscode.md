@@ -66,7 +66,7 @@ après fusion (comportement par défaut de GitHub).
 ```
 1a572be | 2026-11-11 15:26:10 -0500 (20:26 UTC)
 Merge pull request #5 from ibrahimdiango514/arena/ae76dba9-saas-ugc
-Titre : VYORA : moteur IA central, espaces continus, devis fournisseur, admin et crédits réels
+Titre : SORAHNEX : moteur IA central, espaces continus, devis fournisseur, admin et crédits réels
 ```
 
 ### Pull requests
@@ -138,7 +138,7 @@ Historique complet (42 commits, du plus récent au plus ancien). En **gras** : l
 | `915bf43` | merge VS Code Business Grow & Studio | — |
 | `9eec20f` | isolation comptes | — |
 | `b487f71` | workspace + fiabilité | — |
-| **`e728a17`** | moteur IA multi-fournisseurs Reelora + Business Grow core | Origine du moteur IA |
+| **`e728a17`** | moteur IA multi-fournisseurs SORAHNEX Studio + Business Grow core | Origine du moteur IA |
 | `068709c` | Business Grow + Studio | — |
 | **`930d6af`** | Phase 4 export vidéo pro | WebCodecs MP4/WebM, ExportPanel |
 | `2f9c995` | correctif CORS preflight Edge | — |

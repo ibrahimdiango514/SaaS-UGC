@@ -2,9 +2,9 @@
  * Administration — remboursements et exploitation des paiements SasPay.
  *
  * Règles tenues par l'interface comme par la base :
- *  - VYORA n'envoie AUCUN argent. SasPay n'offre pas de remboursement par API :
+ *  - SORAHNEX n'envoie AUCUN argent. SasPay n'offre pas de remboursement par API :
  *    « rembourser » consiste à reprendre ce qui a été livré (crédits Studio ou
- *    jours d'abonnement Business Grow), puis à rendre l'argent hors de VYORA et à
+ *    jours d'abonnement SORAHNEX Grow), puis à rendre l'argent hors de SORAHNEX et à
  *    l'attester ici avec la référence du versement ;
  *  - le plafond du montant à rendre est calculé par le serveur, au prorata de ce
  *    qui est effectivement repris ;
@@ -134,7 +134,7 @@ export function RefundDialog({ order, onClose, onDone }: {
       )}
     >
       <div className="space-y-4">
-        <Banner tone="warning" title="VYORA n’envoie pas d’argent">
+        <Banner tone="warning" title="SORAHNEX n’envoie pas d’argent">
           SasPay ne propose pas de remboursement automatique. Cette action reprend ce qui a été livré et clôt la commande ;
           vous rendez ensuite l’argent au client par vos propres moyens, puis vous attestez le versement. Elle est définitive.
         </Banner>
@@ -214,7 +214,7 @@ export function SettleRefundDialog({ order, onClose, onDone }: {
       <div className="space-y-4">
         <p className="text-[12.5px] leading-relaxed text-slate-300">
           À remplir <strong className="text-white">après</strong> avoir rendu l’argent au client (transfert Mobile Money, décaissement
-          depuis le tableau de bord SasPay…). VYORA ne vérifie pas ce versement : la référence saisie fait foi et ne pourra plus être changée.
+          depuis le tableau de bord SasPay…). SORAHNEX ne vérifie pas ce versement : la référence saisie fait foi et ne pourra plus être changée.
         </p>
         <Input
           label="Référence du versement" value={reference} maxLength={120}
@@ -413,7 +413,7 @@ function UnconfirmedPayments({ lines, onChanged }: { lines: UnconfirmedPayment[]
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-[12.5px] font-semibold text-amber-100">
-                      {formatAmount(String(line.amount), line.currency)} · {line.product === 'business' ? 'Business Grow' : 'Studio'}
+                      {formatAmount(String(line.amount), line.currency)} · {line.product === 'business' ? 'SORAHNEX Grow' : 'Studio'}
                       {' · '}{line.user_email ?? 'Utilisateur inconnu'}
                     </p>
                     <p className="text-[11px] text-slate-400">
@@ -512,7 +512,7 @@ export function PaymentHealthCard({ health, error, busy, onReload, onOrdersChang
               <Badge tone={scheduled ? 'success' : 'danger'}>
                 {scheduled ? `Vérification automatique active (${health.cron.schedule ?? '—'})` : 'Vérification automatique inactive'}
               </Badge>
-              <span>Paiements en attente — Studio : <strong className="text-white">{health.open_orders.studio}</strong> · Business Grow : <strong className="text-white">{health.open_orders.business}</strong></span>
+              <span>Paiements en attente — Studio : <strong className="text-white">{health.open_orders.studio}</strong> · SORAHNEX Grow : <strong className="text-white">{health.open_orders.business}</strong></span>
             </div>
             {!scheduled && (
               <Banner tone="danger" title="Aucune vérification automatique">
@@ -583,7 +583,7 @@ export function PaymentHealthCard({ health, error, busy, onReload, onOrdersChang
                         <div className="min-w-0">
                           <p className="text-[12.5px] font-semibold text-amber-100">{ANOMALY_LABELS[a.kind] ?? a.kind}</p>
                           <p className="text-[11px] text-slate-400">
-                            {a.product === 'business' ? 'Business Grow' : a.product === 'studio' ? 'Studio' : 'Produit inconnu'}
+                            {a.product === 'business' ? 'SORAHNEX Grow' : a.product === 'studio' ? 'Studio' : 'Produit inconnu'}
                             {a.internal_reference && <> · <span className="font-mono">{a.internal_reference}</span></>}
                             {a.provider_payment_id && <> · transaction <span className="font-mono">{a.provider_payment_id}</span></>}
                             {' · '}vue {a.seen_count} fois, dernière le {formatDate(a.last_seen_at, true)}

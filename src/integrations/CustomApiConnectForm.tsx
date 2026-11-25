@@ -71,7 +71,7 @@ export interface CustomApiConnectFormProps {
 type Schema = 'none' | 'bearer' | 'header' | 'basic';
 type Pagination = 'none' | 'page' | 'cursor';
 
-/** Champs VYORA proposés à la correspondance, dans l'ordre d'utilité. */
+/** Champs SORAHNEX proposés à la correspondance, dans l'ordre d'utilité. */
 const CHAMPS_MAPPABLES: Array<{ cle: keyof CustomApiMapping; label: string; obligatoire?: boolean; aide: string }> = [
   { cle: 'name', label: 'Nom du produit', obligatoire: true, aide: 'Sans nom, aucun produit ne peut être identifié.' },
   { cle: 'price', label: 'Prix', aide: 'Indiquez l’unité ci-dessous : c’est le point le plus sensible.' },
@@ -274,7 +274,7 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
           <Plug size={13} className="text-brand-300" /> API personnalisée
         </p>
         <p className="mt-0.5 text-[0.68rem] leading-relaxed text-slate-400">
-          Pour une boutique dont l’API expose vos produits en JSON. VYORA ne contacte que l’adresse
+          Pour une boutique dont l’API expose vos produits en JSON. SORAHNEX ne contacte que l’adresse
           que vous indiquez, en lecture seule.
         </p>
       </div>
@@ -452,7 +452,7 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
           {mappingOuvert && (
             <div className="mt-2.5 space-y-2">
               <p className="text-[0.66rem] leading-relaxed text-slate-500">
-                VYORA a trouvé ces champs dans votre API. Vérifiez la correspondance : un prix mal
+                SORAHNEX a trouvé ces champs dans votre API. Vérifiez la correspondance : un prix mal
                 associé fausse tout le catalogue.
               </p>
               {CHAMPS_MAPPABLES.map((champ) => (
@@ -520,7 +520,7 @@ export function CustomApiConnectForm({ workspaceId, onChanged, onSaved }: Custom
           )}
         </div>
         <p className="mt-2 text-[0.62rem] leading-relaxed text-slate-500">
-          Lecture seule : VYORA ne modifie jamais votre boutique. Aucune écriture n’est possible,
+          Lecture seule : SORAHNEX ne modifie jamais votre boutique. Aucune écriture n’est possible,
           et la base refuse une configuration sans test réussi.
         </p>
       </div>

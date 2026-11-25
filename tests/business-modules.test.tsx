@@ -44,7 +44,7 @@ function record(id: string, data: Record<string, unknown>): ModuleRecord {
   };
 }
 
-describe('Registre des modules Business Growth', () => {
+describe('Registre des modules SORAHNEX Grow', () => {
   it('couvre les 17 modules : 13 outils + 4 fondations (CRM et finances inclus)', () => {
     expect(MODULE_DEFINITIONS).toHaveLength(13);
     expect(FOUNDATION_MODULES).toHaveLength(4);

@@ -1,4 +1,4 @@
-# VYORA — Continuité Business Grow ↔ Studio UGC (itération 2026-11-11, soir)
+# SORAHNEX — Continuité Business Grow ↔ Studio UGC (itération 2026-11-11, soir)
 
 Cette itération prolonge le déploiement réussi de `business-grow` en production.
 Elle **ne modifie aucune migration, aucune clé, aucun prix, aucun crédit** et ne

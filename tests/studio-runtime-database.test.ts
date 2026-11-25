@@ -18,9 +18,11 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  create function ugc_private.can_edit_workspace(uuid) returns boolean language sql as $$select $1=auth.uid()$$;
  create function saas_ugc.ugc_ensure_my_workspace() returns uuid language sql as $$select auth.uid()$$;
  create table saas_ugc.ugc_subscriptions(user_id uuid,plan_key text,status text,current_period_end timestamptz);
- create table saas_ugc.ugc_plans(plan_key text primary key,active boolean);
+ create table saas_ugc.ugc_plans(plan_key text primary key,active boolean,display_name text,sort_order integer default 0,
+   max_scripts_per_month integer default 0,max_prompts_per_month integer default 0,max_videos_per_month integer default 0);
  create table saas_ugc.ugc_wallets(user_id uuid primary key,available_balance bigint,reserved_balance bigint);
- create table saas_ugc.ugc_usage_events(user_id uuid,event_kind text,reference_id uuid);
+ create table saas_ugc.ugc_usage_events(id uuid default gen_random_uuid(),user_id uuid,event_kind text,reference_id uuid,
+   quantity integer default 1,period_key text default '2026-11',metadata jsonb default '{}'::jsonb);
  create table storage.objects(bucket_id text,name text,metadata jsonb);
  create table saas_ugc.fake_ledger(user_id uuid,key text unique,operation text);
  create function public.reelora_consume_quota(p_kind text,p_reference_id uuid,p_metadata jsonb) returns jsonb language plpgsql as $$begin perform ugc_private.reelora_assert_active(); insert into saas_ugc.ugc_usage_events values(auth.uid(),p_kind,p_reference_id);return '{}';end$$;
@@ -30,7 +32,8 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  if not found then raise exception 'insufficient_balance';end if;
  insert into saas_ugc.fake_ledger values($1,$5,$2);return gen_random_uuid();end$$;
  insert into saas_ugc.ugc_wallets values('${uid}',100,0),('${other}',50,0);
- insert into saas_ugc.ugc_plans values('pro',true);
+ insert into saas_ugc.ugc_plans(plan_key,active,display_name,sort_order,max_scripts_per_month,max_prompts_per_month,max_videos_per_month)
+   values('pro',true,'Pro',3,400,300,80);
  insert into saas_ugc.ugc_subscriptions values('${uid}','pro','active',now()+interval '1 month'),('${other}','pro','active',now()+interval '1 month');`);
  await db.exec(read('20261120010940_studio_universal_catalog'));
  await db.exec(`alter table saas_ugc.studio_ai_models add column endpoint_evidence jsonb;`);
@@ -43,6 +46,7 @@ it('executes universal reservation, replay, capture/refund and isolation using f
  await db.exec(read('20261120050000_studio_catalog_truth'));
  await db.exec(read('20261120053000_studio_structured_media'));
  await db.exec(read('20261120054000_studio_text_adapter'));
+ await db.exec(read('20261120230000_studio_quota_plan_policy'));
  await db.exec(`insert into saas_ugc.studio_ai_models(provider_key,provider_model_id,display_name,category,provider_enabled,coming_soon,account_access,input_schema)
  values('muapi','real-model','Real','image',true,false,'available','{"schemas":{"input_data":{"type":"object","endpoint_url":"actual-endpoint","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}');
  set test.uid='${uid}';set test.role='authenticated';set test.admin='yes';`);

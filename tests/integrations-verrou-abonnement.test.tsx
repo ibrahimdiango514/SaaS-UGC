@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * VYORA Integrations — verrou Business Grow sur le parcours d'accès.
+ * SORAHNEX Integrations — verrou SORAHNEX Grow sur le parcours d'accès.
  *
  * ## Constat de production (2026-11-18)
  * Abonnement inactif : les 28 fiches affichaient « Abonnement requis » (exact),
@@ -56,7 +56,7 @@ import { BusinessGrowApiError } from '../src/business/api';
 const WORKSPACE = 'workspace-1';
 
 const refusAbonnement = () => new BusinessGrowApiError(
-  'Abonnement Business Grow requis pour Import & Connect.',
+  'Abonnement SORAHNEX Grow requis pour Import & Connect.',
   'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
   403,
   { reason: 'NO_SUBSCRIPTION', subscription_status: null, plan_key: null, current_period_end: null },
@@ -84,7 +84,7 @@ describe('abonnement inactif', () => {
     mocks.listIntegrations.mockRejectedValue(refusAbonnement());
     monter();
     const bandeau = await screen.findByTestId('integrations-subscription-required');
-    expect(bandeau.textContent).toContain('Abonnement Business Grow requis');
+    expect(bandeau.textContent).toContain('Abonnement SORAHNEX Grow requis');
     expect(bandeau.textContent).toMatch(/Connexions verrouillées/);
 
     expect(mocks.listIntegrations).toHaveBeenCalledTimes(1);
@@ -109,11 +109,11 @@ describe('abonnement inactif', () => {
     expect(screen.getByTestId('integration-shopify').textContent).toContain('Abonnement requis');
   });
 
-  it('les deux liens « Voir l’abonnement Business Grow » mènent à la vraie page de gestion', async () => {
+  it('les deux liens « Voir l’abonnement SORAHNEX Grow » mènent à la vraie page de gestion', async () => {
     mocks.listIntegrations.mockRejectedValue(refusAbonnement());
     monter();
     const bandeau = await screen.findByTestId('integrations-subscription-required');
-    expect(within(bandeau).getByRole('link', { name: /Voir l’abonnement Business Grow/ }).getAttribute('href')).toBe('/app/business/abonnement');
+    expect(within(bandeau).getByRole('link', { name: /Voir l’abonnement SORAHNEX Grow/ }).getAttribute('href')).toBe('/app/business/abonnement');
     expect(screen.getByTestId('mes-boutiques-abonnement').getAttribute('href')).toBe('/app/business/abonnement');
   });
 });

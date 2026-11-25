@@ -21,7 +21,7 @@ export function MessageList({
   loading: boolean;
   sending: boolean;
   /**
-   * Préfixe des marqueurs de test. Business Grow conserve son préfixe
+   * Préfixe des marqueurs de test. SORAHNEX Grow conserve son préfixe
    * historique (`business-message-`), qui identifie déjà l'espace dans les
    * tests existants : on ne renomme pas un contrat en place.
    */
@@ -108,7 +108,7 @@ function Bubble({ message, testIdPrefix }: { message: AiMessage; testIdPrefix: s
   /**
    * Synthèse vocale.
    *
-   * C'est la voix du navigateur (`speechSynthesis`), pas un service VYORA.
+   * C'est la voix du navigateur (`speechSynthesis`), pas un service SORAHNEX.
    * Disponible hors ligne, sans clé. Si l'API manque, le bouton n'est pas rendu.
    */
   const parler = () => {
@@ -172,7 +172,7 @@ function Bubble({ message, testIdPrefix }: { message: AiMessage; testIdPrefix: s
             </span>
           )}
           {assistant && message.request_status === 'succeeded' && (
-            <span className="mr-1">Réponse générée par l’assistant VYORA</span>
+            <span className="mr-1">Réponse générée par l’assistant SORAHNEX</span>
           )}
           <span>{heure(message.created_at)}</span>
 

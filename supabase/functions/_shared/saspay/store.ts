@@ -1,8 +1,8 @@
-// VYORA — persistance des paiements : appels RPC PostgREST avec la clé service.
+// SORAHNEX — persistance des paiements : appels RPC PostgREST avec la clé service.
 //
 // Aucune écriture directe en table : tout passe par les fonctions
 // `public.vyora_payment_*` (réservées à `service_role`), qui portent les verrous,
-// l'unicité et l'immuabilité. Studio et Business Grow ont des fonctions distinctes.
+// l'unicité et l'immuabilité. Studio et Grow ont des fonctions distinctes.
 
 import {
   PaymentError,
@@ -43,9 +43,9 @@ const DB_ERRORS: Record<string, [code: string, status: number, message: string]>
   pricing_invalid_base: ['PAYMENT_PRICING_ERROR', 503, 'Le prix n’a pas pu être calculé. Aucun paiement n’a été lancé.'],
   pricing_quote_mismatch: ['PAYMENT_PRICING_ERROR', 503, 'Le prix n’a pas pu être calculé. Aucun paiement n’a été lancé.'],
   rates_empty: ['PAYMENT_RATES_EMPTY', 502, 'SasPay n’a renvoyé aucun tarif exploitable. Le barème n’a pas été modifié.'],
-  business_billing_disabled: ['BUSINESS_BILLING_DISABLED', 503, 'La facturation Business Grow n’est pas activée.'],
-  business_plan_not_purchasable: ['BUSINESS_PLAN_NOT_PURCHASABLE', 422, 'Cette formule Business Grow n’est pas commercialisée.'],
-  business_subscription_managed_elsewhere: ['BUSINESS_SUBSCRIPTION_MANAGED_ELSEWHERE', 409, 'Votre abonnement Business Grow est géré par un autre moyen de paiement. Contactez le support.'],
+  business_billing_disabled: ['BUSINESS_BILLING_DISABLED', 503, 'La facturation Grow n’est pas activée.'],
+  business_plan_not_purchasable: ['BUSINESS_PLAN_NOT_PURCHASABLE', 422, 'Cette formule Grow n’est pas commercialisée.'],
+  business_subscription_managed_elsewhere: ['BUSINESS_SUBSCRIPTION_MANAGED_ELSEWHERE', 409, 'Votre abonnement Grow est géré par un autre moyen de paiement. Contactez le support.'],
   business_plan_change_not_supported: ['BUSINESS_PLAN_CHANGE_NOT_SUPPORTED', 409, 'Une autre formule est déjà en cours. Vous pourrez changer de formule à la fin de la période, ou contactez le support.'],
   business_other_plan_payment_in_progress: ['BUSINESS_OTHER_PLAN_PAYMENT_IN_PROGRESS', 409, 'Un paiement est déjà en cours pour une autre formule. Terminez-le, ou attendez son expiration (30 minutes) avant de changer de formule.'],
   payment_order_not_found: ['PAYMENT_NOT_FOUND', 404, 'Commande introuvable.'],
@@ -84,7 +84,7 @@ export function createSupabasePaymentStore(config: StoreConfig): PaymentStore {
       const known = DB_ERRORS[message];
       if (known) throw new PaymentError(known[0], known[1], known[2]);
       config.log?.('payment_rpc_failed', { rpc: name, status: response.status, db_message: message.slice(0, 160) });
-      throw new PaymentError('PAYMENT_STORAGE_ERROR', 500, 'L’opération n’a pas pu être enregistrée. Aucun débit n’a été effectué par VYORA.');
+      throw new PaymentError('PAYMENT_STORAGE_ERROR', 500, 'L’opération n’a pas pu être enregistrée. Aucun débit n’a été effectué par SORAHNEX.');
     }
     return parsed as T;
   }

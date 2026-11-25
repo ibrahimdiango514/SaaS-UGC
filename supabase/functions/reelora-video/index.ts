@@ -1,4 +1,4 @@
-// VYORA video gateway — MuAPI is the PRIMARY (and only) video provider.
+// SORAHNEX video gateway — MuAPI is the PRIMARY (and only) video provider.
 // Groq remains the text provider (reelora-ai). HeyGen / fal.ai are NOT used here.
 //
 // Official MuAPI contract (verified):
@@ -145,7 +145,7 @@ function customerModel(model: Json, index: number, status?: Status, reason?: str
   const modelStatus = status ?? statusFor(model).status;
   return {
     model_id: str(model.public_id, 80),
-    display_name: `VYORA ${category === "Image to Video" ? "Image" : "Video"} ${String(index + 1).padStart(2, "0")}`,
+    display_name: `SORAHNEX ${category === "Image to Video" ? "Image" : "Video"} ${String(index + 1).padStart(2, "0")}`,
     description: category === "Image to Video"
       ? "Animez un visuel de référence avec des paramètres de création vérifiés."
       : "Créez une vidéo à partir d'une instruction et de paramètres vérifiés.",
@@ -159,7 +159,7 @@ function customerModel(model: Json, index: number, status?: Status, reason?: str
     sort_order: finite(model.sort_order) ?? index,
     reelora_status: modelStatus,
     reelora_reason: reason ?? (modelStatus === "active"
-      ? "Disponible dans VYORA."
+      ? "Disponible dans SORAHNEX."
       : modelStatus === "coming_soon" ? "Bientôt disponible." : "Indisponible momentanément."),
   };
 }
@@ -282,7 +282,7 @@ async function loadScript(projectId: string): Promise<string> {
   return str(rows[0]?.script_text, 4000);
 }
 /**
- * A reference image may be uploaded to the private VYORA bucket. Only paths
+ * A reference image may be uploaded to the private SORAHNEX bucket. Only paths
  * inside the job's own workspace prefix are signed and forwarded to MuAPI.
  */
 function workspaceImagePath(raw: unknown, workspaceId: string): string {
@@ -330,13 +330,13 @@ interface AccountProbe {
 type Access = "account" | "public_only" | "unverified";
 type Status = "active" | "disabled" | "coming_soon" | "unsupported" | "unverified";
 
-/** Required inputs VYORA can actually provide today. No audio/TTS/lipsync engine is connected. */
+/** Required inputs SORAHNEX can actually provide today. No audio/TTS/lipsync engine is connected. */
 /**
  * Champs obligatoires réellement câblés par `buildMuapiBody` : une source image,
  * une source vidéo et une source audio, chacune importée par l'utilisateur dans
  * le bucket privé du workspace et signée côté serveur. Tout autre champ
  * obligatoire (mask, LoRA, liste d'images…) reste refusé : il n'existe aucun
- * contrôle VYORA pour le fournir, donc aucune génération ne doit être lancée.
+ * contrôle SORAHNEX pour le fournir, donc aucune génération ne doit être lancée.
  */
 const SUPPORTED_REQUIRED_FIELDS = new Set([
   "prompt", "image_url", "video_url", "audio_url",
@@ -414,7 +414,7 @@ function paramSchemaFromClient(raw: unknown, fields: string[]): Record<string, P
   }
   return out;
 }
-/** Convert MuAPI's JSON-Schema-like input_schema into VYORA's param_schema. */
+/** Convert MuAPI's JSON-Schema-like input_schema into SORAHNEX's param_schema. */
 function schemaFromInputSchema(raw: unknown, fallbackFields: string[]): Record<string, ParamDef> {
   void fallbackFields; // Kept for call-site clarity; JSON Schema properties are authoritative.
   const root = obj(raw);
@@ -493,7 +493,7 @@ function quoteMetaFromRow(row: Json, modelId: string): QuoteModelMeta {
   return {
     modelId,
     publicId,
-    displayName: `VYORA ${category === "Image to Video" ? "Image" : "Video"}`,
+    displayName: `SORAHNEX ${category === "Image to Video" ? "Image" : "Video"}`,
     catalogCostUsd: finite(row.cost_usd),
     catalogCurrency: str(row.cost_currency, 10) || "USD",
     dynamicPricing: bool(meta.dynamic_pricing, false),
@@ -579,11 +579,11 @@ function mapDbRow(row: Json, access: Access): Json {
   };
 }
 function statusFor(model: Json): { status: Status; reason: string } {
-  if (!bool(model.active, true)) return { status: "disabled", reason: "Désactivé dans le catalogue VYORA." };
+  if (!bool(model.active, true)) return { status: "disabled", reason: "Désactivé dans le catalogue SORAHNEX." };
   if (!bool(model.is_enabled, true)) return { status: "disabled", reason: "Désactivé dans le catalogue MuAPI." };
   if (bool(model.is_coming_soon, false)) return { status: "coming_soon", reason: "Annoncé par MuAPI, pas encore lancé." };
   const unsupported = asArray(model.required_fields).filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
-  if (unsupported.length) return { status: "unsupported", reason: `Entrée non connectée dans VYORA : ${unsupported.join(", ")}.` };
+  if (unsupported.length) return { status: "unsupported", reason: `Entrée non connectée dans SORAHNEX : ${unsupported.join(", ")}.` };
   if (model.account_access === "unverified") return { status: "unverified", reason: "Clé / compte MuAPI non validée côté serveur." };
   if (model.account_access === "public_only") return { status: "unverified", reason: "Modèle public MuAPI absent du catalogue retourné avec la clé." };
   return { status: "active", reason: "Modèle actif et sélectionnable." };
@@ -882,7 +882,7 @@ function buildMuapiBody(
     } else if (def.type === "string") {
       body[key] = value;
     }
-    // array / object: no connected VYORA control, never invented or forwarded.
+    // array / object: no connected SORAHNEX control, never invented or forwarded.
   }
   return body;
 }
@@ -949,7 +949,7 @@ function friendly(code: string, _detail: string): string {
     PROVIDER_SPEND_CAP_EXCEEDED: "Le budget fournisseur disponible ne couvre pas cette génération.",
     PROVIDER_SPEND_UNAVAILABLE: "La vérification du budget fournisseur est indisponible. Aucun appel payant n’a été lancé.",
     PROVIDER_SPEND_ALREADY_RESERVED: "La réservation du budget est déjà utilisée ou nécessite une vérification administrative.",
-    PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED: "Le plafond VYORA de ce fournisseur est atteint. Aucun appel payant n’a été lancé.",
+    PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED: "Le plafond SORAHNEX de ce fournisseur est atteint. Aucun appel payant n’a été lancé.",
     PROVIDER_SPEND_PROVIDER_CAP_UNAVAILABLE: "Le plafond de ce fournisseur n’a pas pu être vérifié. Aucun appel payant n’a été lancé.",
     PROVIDER_BALANCE_INSUFFICIENT: "Le solde fournisseur MuAPI est insuffisant pour cette génération. Aucun appel payant n’a été lancé : rechargez le compte MuAPI depuis l’espace administration.",
     PROVIDER_BALANCE_UNAVAILABLE: "Impossible de vérifier le solde MuAPI. Aucun appel payant n’a été lancé. Réessayez ou vérifiez la clé et la connexion au fournisseur.",
@@ -1265,7 +1265,7 @@ async function resolveProviderQuote(body: Json): Promise<ResolvedProviderQuote> 
   };
   const modelReason = unsupported.length
     ? "Ce modèle nécessite un réglage qui n’est pas encore pris en charge."
-    : modelAvailable ? "Disponible dans VYORA." : (status.reason || "Indisponible momentanément.");
+    : modelAvailable ? "Disponible dans SORAHNEX." : (status.reason || "Indisponible momentanément.");
 
   const finish = (quote: ProviderQuote): ResolvedProviderQuote => ({
     quote, quoteParams, pricingBasis,

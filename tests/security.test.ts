@@ -94,7 +94,7 @@ describe('configuration des Edge Functions', () => {
     expect(providerHealth).not.toContain(':generateContent');
     // Webhook SasPay : appelé par SasPay, donc sans JWT utilisateur. Il s'authentifie
     // par signature HMAC-SHA256 du corps brut, comparée à temps constant, avec un
-    // secret propre à VYORA et une fenêtre anti-rejeu ; sans secret, tout est refusé.
+    // secret propre à SORAHNEX et une fenêtre anti-rejeu ; sans secret, tout est refusé.
     expect(config).toMatch(/\[functions\.vyora-saspay-webhook\][\s\S]*?verify_jwt\s*=\s*false/);
     const sasPayWebhook = read('supabase/functions/_shared/saspay/webhook.ts');
     expect(sasPayWebhook).toContain("name: 'HMAC', hash: 'SHA-256'");
@@ -123,7 +123,7 @@ describe('configuration des Edge Functions', () => {
     expect(reconcileMigration).toContain("vault.create_secret(");
     expect(reconcileMigration).toContain("'vyora_payments_reconcile_token'");
     expect(reconcileMigration).not.toMatch(/Bearer [0-9a-f]{32,}/);
-    // La clé SasPay est propre à VYORA : aucun repli sur celle d'un autre produit.
+    // La clé SasPay est propre à SORAHNEX : aucun repli sur celle d'un autre produit.
     expect(sasPayHttp).not.toMatch(/get\('SASPAY_SECRET_KEY'\)/);
     expect(sasPayHttp).not.toMatch(/get\('SASPAY_WEBHOOK_SECRET'\)/);
     const worker = read('supabase/functions/reelora-video-worker/index.ts');
@@ -171,7 +171,7 @@ describe('Video Studio : frontière des secrets et espaces non opérationnels', 
   });
 });
 
-describe('bibliothèque Reelora : RPC additive et RLS', () => {
+describe('bibliothèque SORAHNEX Studio : RPC additive et RLS', () => {
   it('l’attachement à un projet est défini, vérifié et réservé aux utilisateurs authentifiés', () => {
     const sql = read('supabase/migrations/20261108233629_reelora_studio_library.sql');
     expect(sql).toContain('function public.reelora_attach_asset_to_project(');
@@ -213,7 +213,7 @@ describe('contrat RPC frontend ↔ migrations', () => {
   const api = read('src/lib/api.ts');
   const rpcNames = Array.from(api.matchAll(/rpc(?:<[^>]+>)?\(\s*'([a-z_]+)'/g), (m) => m[1]);
 
-  it('tous les RPC Reelora appelés par le frontend sont définis dans les migrations', () => {
+  it('tous les RPC SORAHNEX Studio appelés par le frontend sont définis dans les migrations', () => {
     const reelora = rpcNames.filter((n) => n.startsWith('reelora_'));
     expect(reelora.length).toBeGreaterThan(15);
     for (const name of reelora) expect(migrations).toContain(`function public.${name}(`);
@@ -227,7 +227,7 @@ describe('contrat RPC frontend ↔ migrations', () => {
     expect(legacy).toContain("status in ('failed', 'cancelled')");
   });
 
-  it('les migrations Reelora ne suppriment aucune table ou vue existante', () => {
+  it('les migrations SORAHNEX Studio ne suppriment aucune table ou vue existante', () => {
     const sql = readdirSync(join(root, 'supabase/migrations'))
       .filter((f) => f.includes('reelora'))
       .map((f) => read(join('supabase/migrations', f)))

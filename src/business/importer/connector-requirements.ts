@@ -1,5 +1,5 @@
 /**
- * VYORA — exigences d'identification déclaratives, par connecteur.
+ * SORAHNEX — exigences d'identification déclaratives, par connecteur.
  *
  * ## Le problème que ce fichier résout
  *
@@ -236,7 +236,7 @@ export const CONNECTOR_REQUIREMENTS: Record<string, ConnectorRequirement> = {
       + 'accordez-lui uniquement « read_products », installez-la, puis copiez le jeton d’accès.',
     docsUrl: 'https://shopify.dev/docs/api/admin-rest',
     caveat:
-      'Lecture seule : VYORA n’écrit jamais dans Shopify. Le jeton se révoque à tout moment en '
+      'Lecture seule : SORAHNEX n’écrit jamais dans Shopify. Le jeton se révoque à tout moment en '
       + 'désinstallant l’application. Les produits en brouillon et archivés sont écartés, et comptés.',
   },
 
@@ -287,7 +287,7 @@ export const CONNECTOR_REQUIREMENTS: Record<string, ConnectorRequirement> = {
       + 'avec le droit « Lecture » uniquement, puis copiez les deux clés.',
     docsUrl: 'https://woocommerce.github.io/woocommerce-rest-api-docs/',
     caveat:
-      'Lecture seule. Le droit « Lecture » suffit, et VYORA n’émet que des requêtes de lecture. '
+      'Lecture seule. Le droit « Lecture » suffit, et SORAHNEX n’émet que des requêtes de lecture. '
       + 'L’API REST exige des permaliens autres que « Simple » : sinon /wp-json/ renvoie une erreur 404.',
   },
 

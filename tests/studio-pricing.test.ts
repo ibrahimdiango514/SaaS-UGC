@@ -1,6 +1,6 @@
 /**
  * Tarification du Studio : calcul serveur, paliers dégressifs, isolation
- * stricte vis-à-vis de Business Grow, et absence de tout calcul client.
+ * stricte vis-à-vis de SORAHNEX Grow, et absence de tout calcul client.
  *
  * Ces tests sont statiques (lecture de source) ou unitaires sur les fonctions
  * pures du moteur : aucun appel réseau, aucun crédit consommé.
@@ -140,7 +140,7 @@ describe('Le navigateur ne fixe jamais le prix', () => {
   });
 });
 
-describe('Isolation Studio ↔ Business Grow', () => {
+describe('Isolation Studio ↔ SORAHNEX Grow', () => {
   it('la migration tarifaire ne touche que saas_ugc', () => {
     const sql = read('supabase/migrations/20261112040000_studio_credit_grid.sql');
     const statements = sql
@@ -159,14 +159,14 @@ describe('Isolation Studio ↔ Business Grow', () => {
     expect(sql).not.toContain('saas_business.credit_ledger');
   });
 
-  it('la marge Studio n’est pas la marge de Business Grow', () => {
+  it('la marge Studio n’est pas la marge de SORAHNEX Grow', () => {
     const sql = read('supabase/migrations/20261112040000_studio_credit_grid.sql');
     expect(sql).toContain('target_margin_percent');
-    // L'objectif de marge de 95 % appartient à Business Grow.
+    // L'objectif de marge de 95 % appartient à SORAHNEX Grow.
     expect(sql).not.toMatch(/'target_margin_percent',\s*95/);
   });
 
-  it('le calcul Studio n’est pas importé par le code Business Grow', () => {
+  it('le calcul Studio n’est pas importé par le code SORAHNEX Grow', () => {
     const businessFiles = readdirSync(join(process.cwd(), 'src/business'), { recursive: true })
       .map(String)
       .filter((name) => name.endsWith('.ts') || name.endsWith('.tsx'));

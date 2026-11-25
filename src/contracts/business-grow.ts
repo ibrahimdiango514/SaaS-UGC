@@ -1,6 +1,6 @@
 /**
- * Contrats publics et stables entre le moteur IA Business Grow (géré par Arena)
- * et le reste de la plateforme VYORA (développé dans VS Code : Studio UGC,
+ * Contrats publics et stables entre le moteur IA SORAHNEX Grow (géré par Arena)
+ * et le reste de la plateforme SORAHNEX (développé dans VS Code : Studio UGC,
  * Dashboard, Projets, Éditeur, Paramètres, Abonnement et futurs Connecteurs).
  *
  * Règle anti-conflit :
@@ -38,9 +38,9 @@ export interface BusinessGrowUgcHandoffBrief {
   cta: string | null;
   preferredRatio: UgcPreferredRatio | null;
   suggestedSector: string | null;
-  /** Produit réel du catalogue VYORA quand le brief provient d'une fiche existante. */
+  /** Produit réel du catalogue SORAHNEX quand le brief provient d'une fiche existante. */
   productId: string | null;
-  /** Projet publicitaire VYORA à réutiliser, pour éviter un doublon de projet. */
+  /** Projet publicitaire SORAHNEX à réutiliser, pour éviter un doublon de projet. */
   projectId: string | null;
   projectTitle: string | null;
   /** Plateforme visée par le brief (TikTok, Instagram Reels…), si connue. */
@@ -57,7 +57,7 @@ export type BusinessGrowWorkspaceSection =
   | 'integrations'
   | 'ai';
 
-/** Onglets réels du cockpit croissance Business Grow. */
+/** Onglets réels du cockpit croissance SORAHNEX Grow. */
 export type BusinessGrowGrowthTab =
   | 'overview'
   | 'company'
@@ -195,7 +195,7 @@ function parseRatio(value: unknown): UgcPreferredRatio | null {
   return null;
 }
 
-/** Identifiants VYORA (produit, projet) : UUID uniquement, sinon ignorés. */
+/** Identifiants SORAHNEX (produit, projet) : UUID uniquement, sinon ignorés. */
 function optionalUuid(value: unknown): string | null {
   const clean = cleanText(value, 64);
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clean)
@@ -204,7 +204,7 @@ function optionalUuid(value: unknown): string | null {
 }
 
 /**
- * Normalise un brief provenant de Business Grow (tool `handoff_ugc_brief`,
+ * Normalise un brief provenant de SORAHNEX Grow (tool `handoff_ugc_brief`,
  * `input_args` ou `output_result.handoffDraft`) en contrat strict pour le Studio UGC.
  * Garantit `consumesStudioCredits: false` (aucun débit automatique lors du transfert).
  */
@@ -343,7 +343,7 @@ export function parseBusinessGrowEntryIntent(state: unknown): BusinessGrowEntryI
 
 /**
  * Contexte réel disponible dans le Studio UGC pour une continuité de travail
- * Business Grow ↔ Studio. Chaque champ provient d'un projet, d'un produit ou
+ * SORAHNEX Grow ↔ Studio. Chaque champ provient d'un projet, d'un produit ou
  * d'une marque réellement chargés : aucune valeur n'est inventée.
  */
 export interface StudioToBusinessGrowContext {
@@ -359,7 +359,7 @@ export interface StudioToBusinessGrowContext {
 }
 
 /**
- * Construit l'état de navigation Studio UGC → Business Grow.
+ * Construit l'état de navigation Studio UGC → SORAHNEX Grow.
  *
  * Le contexte projet / produit / script devient un brouillon de conversation :
  * l'utilisateur continue son travail sans ressaisie. Aucune écriture, aucun

@@ -54,7 +54,7 @@ export function Composer({
   placeholder?: string;
   /**
    * Libellé du bouton d'envoi. L'espace autonome utilise une icône seule
-   * (`Envoyer le message`) ; Business Grow expose un bouton texte « Envoyer »,
+   * (`Envoyer le message`) ; SORAHNEX Grow expose un bouton texte « Envoyer »,
    * comme dans l'interface qu'il remplace.
    */
   sendLabel?: string;
@@ -308,7 +308,7 @@ export function Composer({
       </div>
 
       <p className="mt-1.5 text-center text-[0.68rem] text-slate-600">
-        VYORA peut se tromper. Vérifiez les informations importantes.
+        SORAHNEX peut se tromper. Vérifiez les informations importantes.
       </p>
     </div>
   );

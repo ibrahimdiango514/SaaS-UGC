@@ -29,7 +29,7 @@ const supabaseUrl = env('SUPABASE_URL');
 const anonKey = env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY');
 const databaseUrl = env('BUSINESS_GROW_DATABASE_URL') || env('SUPABASE_DB_URL');
 
-// Secrets Business Grow strictement séparés du Studio UGC.
+// Secrets Grow strictement séparés du Studio UGC.
 //
 // AUCUNE liste de fournisseurs ici : elle est lue dans le registre central
 // (`saas_business.ai_providers`), qui décrit pour chacun son gabarit de
@@ -86,7 +86,7 @@ const sql = databaseUrl
   : null;
 
 function requiredSql() {
-  if (!sql) throw new Error('Business Grow database connection is not configured.');
+  if (!sql) throw new Error('Grow database connection is not configured.');
   return sql;
 }
 
@@ -114,7 +114,7 @@ const store: BusinessGrowStore = {
   async listProviders() {
     const db = requiredSql();
     // Synchronise l'état de configuration de TOUS les fournisseurs de la pile
-    // VYORA AI CORE (pas seulement les historiques). Un fournisseur sans clé
+    // SORAHNEX AI CORE (pas seulement les historiques). Un fournisseur sans clé
     // passe à 'missing' et reste inactif (enabled=false) — comportement dormant.
     await ensureProviderRegistry();
     const configs = providerConfigs();
@@ -552,7 +552,7 @@ const store: BusinessGrowStore = {
     `;
     return row.deleted as boolean;
   },
-  // --- Mémoire persistante de l'agent (VYORA AI CORE) ------------------------
+  // --- Mémoire persistante de l'agent (SORAHNEX AI CORE) ------------------------
   // Chaque fonction est SECURITY DEFINER et contrôle l'appartenance
   // utilisateur/workspace (bg_assert_workspace_access) : l'Edge ne fait que
   // transmettre l'identifiant authentifié, jamais un périmètre arbitraire.
@@ -693,7 +693,7 @@ const defaultAllowedOrigins = [
   // l'identifiant de sandbox change à chaque session : lister des identifiants
   // figés produisait un 403 ORIGIN_NOT_ALLOWED (« backend absent ou
   // injoignable ») dès qu'un nouvel aperçu était ouvert. CORS n'est pas une
-  // frontière d'authentification ici : chaque requête exige un JWT VYORA.
+  // frontière d'authentification ici : chaque requête exige un JWT SORAHNEX.
   'https://*.e2b.app',
 ].join(',');
 
@@ -702,7 +702,7 @@ const defaultAllowedOrigins = [
 // jusqu'ici retirer la production de la liste et produisait un 403
 // ORIGIN_NOT_ALLOWED — donc « backend absent ou injoignable » côté SaaS alors que
 // la fonction répondait. CORS n'est pas la frontière d'authentification : chaque
-// requête exige encore un JWT VYORA valide.
+// requête exige encore un JWT SORAHNEX valide.
 const productionOrigins = ['https://vyora-ugc.netlify.app', 'https://*.e2b.app'];
 
 const allowedOrigins = [

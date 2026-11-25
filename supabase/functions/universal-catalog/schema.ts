@@ -9,12 +9,63 @@ const types = ['string', 'text', 'number', 'float', 'integer', 'int', 'boolean']
 const numeric = (t: unknown) => ['number','float','integer','int'].includes(String(t));
 const textual = (t: unknown) => ['string','text'].includes(String(t));
 const mediaFields = ['image','video','audio','zip','images_list','videos_list','audios_list'];
+/**
+ * Un lien public accepté par SORAHNEX doit être un HTTPS vers un hôte PUBLIC.
+ *
+ * Ce contrôle protège contre le SSRF et le contournement d'import :
+ *  - schéma HTTPS uniquement, sans identifiants ni port explicite ;
+ *  - aucun littéral IPv4/IPv6 (y compris les formes déguisées `127.1`,
+ *    `0x7f000001`, `2130706433`) : le dernier label ne peut pas être numérique ;
+ *  - plages privées, loopback, lien-local, CGNAT et métadonnées cloud refusées ;
+ *  - domaines internes/réservés (`.local`, `.internal`, `.localhost`, `.lan`,
+ *    `.corp`, `.home.arpa`, `.test`, `.invalid`, `.example`) refusés.
+ *
+ * Un lien accepté n'est JAMAIS téléchargé : il est transmis au fournisseur.
+ */
+const BLOCKED_V4 = [
+  /^0\./, /^10\./, /^127\./, /^169\.254\./, /^192\.168\./,
+  /^172\.(1[6-9]|2\d|3[01])\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+  /^198\.(18|19)\./, /^192\.0\.(0|2)\./, /^198\.51\.100\./, /^203\.0\.113\./,
+];
+const BLOCKED_HOST = /(^|\.)(localhost|local|internal|intranet|lan|corp|home\.arpa|test|invalid|example|onion)$/;
+function isPublicHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (!host || host.length > 253) return false;
+  // Littéral IPv6 (`[::1]`) : jamais un hôte public attendu par une API.
+  if (host.startsWith('[') || host.includes(':')) return false;
+  const labels = host.split('.');
+  if (labels.length < 2) return false;
+  // Un TLD numérique est une IPv4 déguisée (`127.1`, `1.2.3.4`).
+  if (/^\d+$/.test(labels[labels.length - 1])) return false;
+  if (labels.some(label => !label.length || label.length > 63 || !/^[a-z0-9-]+$/.test(label)
+    || label.startsWith('-') || label.endsWith('-'))) return false;
+  if (BLOCKED_V4.some(pattern => pattern.test(host))) return false;
+  if (BLOCKED_HOST.test(host)) return false;
+  return true;
+}
 export function isHttpsInput(value: string): boolean {
   try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && !u.port &&
-    /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(u.hostname) && !/^[0-9.]+$/.test(u.hostname) &&
-    !/(^|\.)(localhost|local|internal|test|invalid)$/.test(u.hostname); } catch { return false; }
+    isPublicHostname(u.hostname); } catch { return false; }
 }
 const natural = (v: unknown) => number(v) && Number.isInteger(v) && v >= 0;
+
+/**
+ * Le fournisseur déclare-t-il EXPLICITEMENT ce champ comme un lien public ?
+ * Seule une mention « public URL » dans la fiche compte : un simple exemple
+ * HTTPS sur un champ `field: image` reste un import privé, et un nom de champ
+ * n'est jamais une preuve. Utilisé par les formulaires, la préparation et le
+ * runtime pour ne pas exiger un téléversement là où l'API attend un lien.
+ */
+export function declaredExternalLink(d: unknown): boolean {
+  if (!object(d) || !textual(d.type) || d.field === undefined) return false;
+  const text = `${typeof d.title === 'string' ? d.title : ''} ${typeof d.description === 'string' ? d.description : ''}`;
+  if (/\bpublic\s+URLs?\b/i.test(text)) return true;
+  // Une archive d'entraînement est décrite comme « URL to ZIP archive » :
+  // le fournisseur attend un lien, et un ZIP ne peut pas être vérifié comme un
+  // média privé. La règle est limitée au champ `zip` : aucun autre import ne
+  // change de nature.
+  return String(d.field) === 'zip' && /\bURLs?\b/i.test(text);
+}
 
 export type SchemaValidation = { ok: true; value: JsonObject } | { ok: false; code: 'SCHEMA_UNSUPPORTED' | 'PARAMETER_INVALID' | 'PARAMETER_REQUIRED'; field: string | null };
 const fail = (code: 'SCHEMA_UNSUPPORTED' | 'PARAMETER_INVALID' | 'PARAMETER_REQUIRED', field: string | null): SchemaValidation => ({ ok: false, code, field });
@@ -50,8 +101,17 @@ function supported(s: JsonObject, depth=0): boolean {
   }
   if (!types.includes(String(s.type))) return false;
   const constraints = textual(s.type) ? ['minLength','maxLength','format','field'] :
-    numeric(s.type) ? ['minimum','maximum','minValue','maxValue','step'] : [];
+    // Un identifiant de compte connecté est un entier : ces annotations ne sont
+    // admises que sur un champ numérique, jamais sur un champ texte (où elles
+    // masqueraient un choix dynamique non résolu).
+    numeric(s.type) ? ['minimum','maximum','minValue','maxValue','step','options_source','options_platform'] : [];
   if (!only(s, ['type', 'enum', 'typing', ...constraints])) return false;
+  if ('options_source' in s || 'options_platform' in s) {
+    if (s.options_source !== 'social_accounts') return false;
+    // « x » (Twitter) est une plateforme déclarée à UN caractère : la borne
+    // basse ne peut pas être 2.
+    if (typeof s.options_platform !== 'string' || !/^[a-z_]{1,40}$/.test(s.options_platform)) return false;
+  }
   if('typing' in s && (typeof s.typing!=='boolean'||!textual(s.type)||!Array.isArray(s.enum)))return false;
   if(Array.isArray(s.enum)&&s.enum.some(x=>object(x)&&(!only(x,['label','value'])||Object.keys(x).some(k=>!['label','value'].includes(k))||typeof x.label!=='string'||!Object.hasOwn(x,'value'))))return false;
   if ('enum' in s && (!Array.isArray(s.enum) || s.enum.length === 0 || enumChoices(s)!.some(({value:x}) =>
@@ -62,7 +122,8 @@ function supported(s: JsonObject, depth=0): boolean {
     if (number(s.minLength) && number(s.maxLength) && s.minLength > s.maxLength) return false;
   }
   if (numeric(s.type)) {
-    for (const k of constraints) if (s[k] !== undefined && !number(s[k])) return false;
+    // Seules les bornes/pas sont numériques ; `options_*` sont des annotations.
+    for (const k of ['minimum', 'maximum', 'minValue', 'maxValue', 'step']) if (s[k] !== undefined && !number(s[k])) return false;
     if (s.step !== undefined && (!number(s.step) || s.step <= 0)) return false;
     if ('minimum' in s && 'minValue' in s && s.minimum !== s.minValue) return false;
     if ('maximum' in s && 'maxValue' in s && s.maximum !== s.maxValue) return false;
@@ -101,7 +162,7 @@ function valid(s: JsonObject, v: unknown): boolean {
 export function validateMuapiInput(inputSchema: unknown, params: unknown): SchemaValidation {
   if (!object(inputSchema) || !object(inputSchema.schemas) || !object(inputSchema.schemas.input_data)) return fail('SCHEMA_UNSUPPORTED',null);
   const root = inputSchema.schemas.input_data;
-  if (root.type !== 'object' || !object(root.properties) || !only(root, ['type','properties','required','additionalProperties','endpoint_url','x-order-properties']) ||
+  if (root.type !== 'object' || !object(root.properties) || !only(root, ['type','properties','required','additionalProperties','endpoint_url','x-order-properties','title']) ||
       (root.additionalProperties !== undefined && typeof root.additionalProperties !== 'boolean')) return fail('SCHEMA_UNSUPPORTED',null);
   const required = root.required ?? [];
   if (Object.keys(root.properties).length > 100 || Object.keys(root.properties).some(k => !safeKey(k))) return fail('SCHEMA_UNSUPPORTED',null);

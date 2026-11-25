@@ -61,7 +61,8 @@ export async function handler(req: Request): Promise<Response> {
             const saved = await fetch(`${base}/rest/v1/rpc/studio_save_muapi_detail`, {
               method: 'POST', headers: serviceHeaders, signal: AbortSignal.timeout(15000),
               body: JSON.stringify({ p_model_id: detail.model_id, p_status: detail.status, p_http_status: detail.http_status,
-                p_input_schema: detail.input_schema ? { ...detail.input_schema, vyora_endpoint_evidence: detail.endpoint_evidence } : null, p_output_schema: detail.output_schema }),
+                p_input_schema: detail.input_schema ? { ...detail.input_schema, vyora_endpoint_evidence: detail.endpoint_evidence } : null, p_output_schema: detail.output_schema,
+                p_provider_pricing: detail.provider_pricing ?? null }),
             });
             if (!saved.ok || await saved.json() !== true) { counts.persist_error++; return; }
             counts[detail.status]++;

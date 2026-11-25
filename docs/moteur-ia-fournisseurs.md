@@ -1,8 +1,8 @@
-# VYORA — Fiche de renseignement des fournisseurs d'IA
+# SORAHNEX — Fiche de renseignement des fournisseurs d'IA
 
 > **Document de travail — réception et documentation uniquement.**
 > Il sert à recueillir les informations officielles de chaque fournisseur avant
-> intégration dans le moteur IA de VYORA. Les cases marquées « à renseigner » sont
+> intégration dans le moteur IA de SORAHNEX. Les cases marquées « à renseigner » sont
 > vides volontairement : **aucune valeur n'est inventée**.
 >
 > - La **liste des fournisseurs n'est pas figée** : elle vit dans le registre
@@ -58,7 +58,7 @@ servent qu'à la compatibilité, la convention `BUSINESS_GROW_*` prime.
 
 ### Où dépose-t-on la clé, concrètement
 
-**C'est le développeur VYORA qui dépose les secrets** (décision du 2026-11-14),
+**C'est le développeur SORAHNEX qui dépose les secrets** (décision du 2026-11-14),
 via le connecteur Supabase de l'espace de travail :
 
 ```
@@ -93,7 +93,7 @@ l'interface et n'est jamais sélectionné par le routeur.
 
 ## 2. Google Gemini
 
-**Statut VYORA :** intégration **existante et vérifiée en santé** (modèle
+**Statut SORAHNEX :** intégration **existante et vérifiée en santé** (modèle
 `gemini-2.5-flash` en production au 2026-11-12). Protocole natif (≠ OpenAI).
 
 | Champ | Valeur |
@@ -104,9 +104,9 @@ l'interface et n'est jamais sélectionné par le routeur.
 | Méthode d'authentification | Clé API (en-tête `x-goog-api-key` ou paramètre de requête) |
 | **Variable d'environnement** | `BUSINESS_GROW_GEMINI_API_KEY` (alias `GEMINI_API_KEY`) |
 | URL de base de l'API | `https://generativelanguage.googleapis.com/v1beta/` |
-| Endpoints utilisés par VYORA | `POST models/{model}:generateContent`, `GET models` |
+| Endpoints utilisés par SORAHNEX | `POST models/{model}:generateContent`, `GET models` |
 | Modèles disponibles | à renseigner (liste officielle) |
-| Identifiants exacts des modèles | à renseigner — catalogue VYORA actuel : `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.5-flash`, `gemini-3.8-flash`, `gemini-4-hydrogen`, `gemini-4-carbon`, `gemini-4-argon` |
+| Identifiants exacts des modèles | à renseigner — catalogue SORAHNEX actuel : `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-pro`, `gemini-3-flash-preview`, `gemini-3.5-flash`, `gemini-3.8-flash`, `gemini-4-hydrogen`, `gemini-4-carbon`, `gemini-4-argon` |
 | Capacités (texte/image/vidéo/audio/raisonnement) | à renseigner par modèle |
 | Limites de requêtes et quotas | à renseigner (RPM/TPM, quotas journaliers du free tier) |
 | Tarification (entrée/sortie par 1M tokens) | à renseigner — liens officiels de tarification |
@@ -117,7 +117,7 @@ l'interface et n'est jamais sélectionné par le routeur.
 
 ## 3. Groq
 
-**Statut VYORA :** intégration **existante et vérifiée en santé**
+**Statut SORAHNEX :** intégration **existante et vérifiée en santé**
 (`openai/gpt-oss-120b` en production au 2026-11-12). Protocole OpenAI-compatible.
 
 | Champ | Valeur |
@@ -128,9 +128,9 @@ l'interface et n'est jamais sélectionné par le routeur.
 | Méthode d'authentification | Clé API — en-tête `Authorization: Bearer <clé>` |
 | **Variable d'environnement** | `BUSINESS_GROW_GROQ_API_KEY` (alias `GROQ_API_KEY`) |
 | URL de base de l'API | `https://api.groq.com/openai/v1/` |
-| Endpoints utilisés par VYORA | `POST chat/completions`, `GET models` |
+| Endpoints utilisés par SORAHNEX | `POST chat/completions`, `GET models` |
 | Modèles disponibles | à renseigner |
-| Identifiants exacts des modèles | à renseigner — catalogue VYORA actuel : `openai-gpt-oss-120b`, `openai-gpt-oss-20b`, `qwen-qwen3.8-27b`, `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, `qwen-3-32b` |
+| Identifiants exacts des modèles | à renseigner — catalogue SORAHNEX actuel : `openai-gpt-oss-120b`, `openai-gpt-oss-20b`, `qwen-qwen3.8-27b`, `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, `qwen-3-32b` |
 | Capacités | texte, raisonnement, outils (à confirmer par modèle) |
 | Limites de requêtes et quotas | à renseigner (RPM/TPM par modèle) |
 | Tarification | à renseigner — plusieurs références sont « Enterprise / Contact Sales » : prix public indisponible |
@@ -141,7 +141,7 @@ l'interface et n'est jamais sélectionné par le routeur.
 
 ## 4. Mistral AI
 
-**Statut VYORA :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
+**Statut SORAHNEX :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
 
 | Champ | Valeur |
 |---|---|
@@ -151,9 +151,9 @@ l'interface et n'est jamais sélectionné par le routeur.
 | Méthode d'authentification | Clé API — `Authorization: Bearer <clé>` |
 | **Variable d'environnement** | `BUSINESS_GROW_MISTRAL_API_KEY` (alias `MISTRAL_API_KEY`) |
 | URL de base de l'API | `https://api.mistral.ai/v1/` |
-| Endpoints utilisés par VYORA | `POST chat/completions`, `GET models` |
+| Endpoints utilisés par SORAHNEX | `POST chat/completions`, `GET models` |
 | Modèles disponibles | à renseigner |
-| Identifiants exacts des modèles | à renseigner — catalogue VYORA actuel : `mistral-large-latest`, `mistral-small-latest`, `open-mistral-nemo` |
+| Identifiants exacts des modèles | à renseigner — catalogue SORAHNEX actuel : `mistral-large-latest`, `mistral-small-latest`, `open-mistral-nemo` |
 | Capacités | texte, documents, outils ; embeddings possibles (à confirmer) |
 | Limites de requêtes et quotas | à renseigner |
 | Tarification | **non publiée sur les pages consultées le 2026-11-13** → à confirmer sur la console avant activation |
@@ -164,7 +164,7 @@ l'interface et n'est jamais sélectionné par le routeur.
 
 ## 5. DeepSeek
 
-**Statut VYORA :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
+**Statut SORAHNEX :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
 
 | Champ | Valeur |
 |---|---|
@@ -174,12 +174,12 @@ l'interface et n'est jamais sélectionné par le routeur.
 | Méthode d'authentification | Clé API — `Authorization: Bearer <clé>` |
 | **Variable d'environnement** | `BUSINESS_GROW_DEEPSEEK_API_KEY` (alias `DEEPSEEK_API_KEY`) |
 | URL de base de l'API | `https://api.deepseek.com/` |
-| Endpoints utilisés par VYORA | `POST chat/completions`, `GET models` |
+| Endpoints utilisés par SORAHNEX | `POST chat/completions`, `GET models` |
 | Modèles disponibles | à renseigner |
-| Identifiants exacts des modèles | à renseigner — catalogue VYORA actuel : `deepseek-chat` (legacy), `deepseek-flash`, `deepseek-v4-pro` |
+| Identifiants exacts des modèles | à renseigner — catalogue SORAHNEX actuel : `deepseek-chat` (legacy), `deepseek-flash`, `deepseek-v4-pro` |
 | Capacités | texte, raisonnement, documents, outils (à confirmer) |
 | Limites de requêtes et quotas | à renseigner |
-| Tarification | à renseigner — VYORA distingue **prix pic** et **prix creux** (heures creuses) et le **prix cache hit** |
+| Tarification | à renseigner — SORAHNEX distingue **prix pic** et **prix creux** (heures creuses) et le **prix cache hit** |
 | Région / contraintes | à renseigner |
 | Informations complémentaires | fenêtre de contexte annoncée très large : à confirmer par la documentation officielle |
 
@@ -187,7 +187,7 @@ l'interface et n'est jamais sélectionné par le routeur.
 
 ## 6. OpenRouter (agrégateur)
 
-**Statut VYORA :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
+**Statut SORAHNEX :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
 Marqué **agrégateur** dans le registre : jamais compté deux fois avec un accès direct.
 
 | Champ | Valeur |
@@ -198,7 +198,7 @@ Marqué **agrégateur** dans le registre : jamais compté deux fois avec un acc�
 | Méthode d'authentification | Clé API — `Authorization: Bearer <clé>` + en-têtes `HTTP-Referer` et `X-Title` (attribution) |
 | **Variable d'environnement** | `BUSINESS_GROW_OPENROUTER_API_KEY` (alias `OPENROUTER_API_KEY`) |
 | URL de base de l'API | `https://openrouter.ai/api/v1/` |
-| Endpoints utilisés par VYORA | `POST chat/completions`, `GET models` |
+| Endpoints utilisés par SORAHNEX | `POST chat/completions`, `GET models` |
 | Modèles disponibles | **catalogue vivant** : resynchronisé via `GET /api/v1/models` |
 | Identifiants exacts des modèles | à renseigner — exemples déjà au registre : `ernie-5.5-flash-free`, `ling-3.2-flash-free`, `gemini-4-hydrogen` |
 | Capacités | dépend du modèle sous-jacent (texte, image, raisonnement…) |
@@ -211,7 +211,7 @@ Marqué **agrégateur** dans le registre : jamais compté deux fois avec un acc�
 
 ## 7. Cloudflare Workers AI
 
-**Statut VYORA :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
+**Statut SORAHNEX :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
 URL **par compte** : l'identifiant de compte est obligatoire en plus du jeton.
 
 | Champ | Valeur |
@@ -222,7 +222,7 @@ URL **par compte** : l'identifiant de compte est obligatoire en plus du jeton.
 | Méthode d'authentification | Jeton API (`Authorization: Bearer <jeton>`) **+ identifiant de compte** dans l'URL |
 | **Variables d'environnement** | `BUSINESS_GROW_CLOUDFLARE_API_TOKEN` et `BUSINESS_GROW_CLOUDFLARE_ACCOUNT_ID` (+ `BUSINESS_GROW_CLOUDFLARE_MODEL` optionnel) |
 | URL de base de l'API | `https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/` |
-| Endpoints utilisés par VYORA | `POST v1/chat`, `GET models` |
+| Endpoints utilisés par SORAHNEX | `POST v1/chat`, `GET models` |
 | Modèles disponibles | à renseigner |
 | Identifiants exacts des modèles | à renseigner — exemples au registre : `qwen3.8-27b-cf`, `embeddinggemma-2-cf` |
 | Capacités | texte, embeddings (à confirmer par modèle) |
@@ -235,7 +235,7 @@ URL **par compte** : l'identifiant de compte est obligatoire en plus du jeton.
 
 ## 8. xAI (Grok)
 
-**Statut VYORA :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
+**Statut SORAHNEX :** adaptateur **prêt**, fournisseur **non vérifié** (aucune clé).
 
 | Champ | Valeur |
 |---|---|
@@ -245,12 +245,12 @@ URL **par compte** : l'identifiant de compte est obligatoire en plus du jeton.
 | Méthode d'authentification | Clé API — `Authorization: Bearer <clé>` |
 | **Variable d'environnement** | `BUSINESS_GROW_GROK_API_KEY` (alias `XAI_API_KEY`) |
 | URL de base de l'API | `https://api.x.ai/v1/` |
-| Endpoints utilisés par VYORA | `POST chat/completions`, `GET models` |
+| Endpoints utilisés par SORAHNEX | `POST chat/completions`, `GET models` |
 | Modèles disponibles | à renseigner |
-| Identifiants exacts des modèles | à renseigner — catalogue VYORA actuel : `grok-4.7`, `grok-4.3`, `grok-4.20-0309-reasoning` |
+| Identifiants exacts des modèles | à renseigner — catalogue SORAHNEX actuel : `grok-4.7`, `grok-4.3`, `grok-4.20-0309-reasoning` |
 | Capacités | texte, raisonnement, images, outils (à confirmer) |
 | Limites de requêtes et quotas | à renseigner |
-| Tarification | à renseigner — VYORA applique un tarif dégressif au-delà d'un seuil de prompt (à confirmer) |
+| Tarification | à renseigner — SORAHNEX applique un tarif dégressif au-delà d'un seuil de prompt (à confirmer) |
 | Région / contraintes | à renseigner |
 | Informations complémentaires | — |
 
@@ -263,7 +263,7 @@ Dupliquez ce bloc pour chaque nouveau fournisseur :
 ```markdown
 ## N. <Nom du fournisseur>
 
-**Statut VYORA :** à intégrer — aucune clé, aucun modèle vérifié.
+**Statut SORAHNEX :** à intégrer — aucune clé, aucun modèle vérifié.
 
 | Champ | Valeur |
 |---|---|

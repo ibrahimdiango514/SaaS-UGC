@@ -1,4 +1,4 @@
-// VYORA AI CORE — moteur d'exécution : appels unifiés + secours plafonné.
+// SORAHNEX AI CORE — moteur d'exécution : appels unifiés + secours plafonné.
 //
 // Le moteur n'invente jamais de réponse : chaque tentative réelle est
 // journalisée (fournisseur, modèle, tokens, latence, coût, code d'erreur) et
@@ -50,7 +50,7 @@ export interface AiCallRequest {
    * rappelle JAMAIS le fournisseur — le moteur rend le résultat déjà obtenu.
    */
   requestKey?: string | null;
-  /** Provenance de l'appel (Business Grow, Studio UGC, système). */
+  /** Provenance de l'appel (Grow, Studio UGC, système). */
   space?: 'business' | 'studio' | 'system';
   userId?: string | null;
   workspaceId?: string | null;

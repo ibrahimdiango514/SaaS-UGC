@@ -366,7 +366,7 @@ export default function VideoStudio() {
         quote_id: estimate.quote_id,
         visual_prompt: prompt.trim(), script_text: (scriptText.trim() || prompt.trim()).slice(0, 4000),
         product_name: productName.trim(), structured_prompt: structure,
-        project_title: projects.find((p) => p.id === projectId)?.title ?? 'VYORA',
+        project_title: projects.find((p) => p.id === projectId)?.title ?? 'SORAHNEX',
         ...reference, ...lastReference,
       };
       const id = await startGeneration(projectId, serviceKey, payload, idempotencyKey);
@@ -437,7 +437,7 @@ export default function VideoStudio() {
                       <h3 className="text-sm font-semibold text-white">Vidéo réelle disponible</h3>
                       <p className="mt-1 text-xs leading-relaxed text-slate-400">Votre vidéo est conservée dans votre bibliothèque privée. L’URL de lecture est temporaire, mais le fichier reste disponible dans votre espace.</p>
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Type : </span><span className="text-slate-200">{selectedModel ? MODE_LABELS[modelModes(selectedModel)[0]] ?? 'Vidéo VYORA' : 'Vidéo VYORA'}</span></div>
+                        <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Type : </span><span className="text-slate-200">{selectedModel ? MODE_LABELS[modelModes(selectedModel)[0]] ?? 'Vidéo SORAHNEX' : 'Vidéo SORAHNEX'}</span></div>
                         <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Coût : </span><span className="text-amber-300">{resultCredits} crédits</span></div>
                         <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Date : </span><span className="text-slate-200">{finishedJob ? formatDate(finishedJob.created_at, true) : '—'}</span></div>
                         <div className="rounded-lg bg-white/[0.03] px-3 py-2 text-[11px]"><span className="text-slate-500">Projet : </span><span className="text-slate-200">{currentProject?.title ?? 'Bibliothèque'}</span></div>
@@ -538,7 +538,7 @@ export default function VideoStudio() {
                     {projects.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
                   </Select>
                   <Select id="studio-service" label="Service / coût" value={serviceKey} onChange={(e) => setServiceKey(e.target.value)}>
-                    {services.map((s, index) => <option key={s.service_key} value={s.service_key}>{`Service vidéo VYORA ${index + 1}`}</option>)}
+                    {services.map((s, index) => <option key={s.service_key} value={s.service_key}>{`Service vidéo SORAHNEX ${index + 1}`}</option>)}
                   </Select>
                 </div>
                 <Button variant="ghost" size="sm" className="mt-3" icon={<Plus size={13} />} onClick={() => setProjectModal(true)}>Créer un projet rapide</Button>
@@ -582,7 +582,7 @@ export default function VideoStudio() {
       {mode !== 'video-to-video' && selectedModel && !jobId && (
         <div className="sticky bottom-[76px] z-20 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-400/25 bg-[#10131f]/95 p-3 shadow-[0_18px_50px_-25px_rgba(0,0,0,0.9)] backdrop-blur-xl lg:bottom-4">
           <div className="min-w-0">
-            <p className="truncate text-xs font-semibold text-white">Modèle vidéo VYORA <span className="font-normal text-slate-500">· {MODE_LABELS[modelModes(selectedModel)[0]] ?? 'Vidéo'}</span></p>
+            <p className="truncate text-xs font-semibold text-white">Modèle vidéo SORAHNEX <span className="font-normal text-slate-500">· {MODE_LABELS[modelModes(selectedModel)[0]] ?? 'Vidéo'}</span></p>
             <CostSummary compact model={selectedModel} estimate={estimate} balance={balance} params={paramValues} />
           </div>
           <Button size="lg" icon={<Play size={16} />} disabled={Boolean(blockedReason)} onClick={() => setConfirmOpen(true)}>
@@ -597,7 +597,7 @@ export default function VideoStudio() {
           loading={starting || uploading} blockedReason={blockedReason} />
       )}
 
-      <Modal open={projectModal} onClose={() => setProjectModal(false)} title="Nouveau projet VYORA" size="sm"
+      <Modal open={projectModal} onClose={() => setProjectModal(false)} title="Nouveau projet SORAHNEX" size="sm"
         description="Utilise la RPC, les quotas et les RLS existants. Aucune donnée n’est supprimée."
         footer={<><Button variant="ghost" onClick={() => setProjectModal(false)}>Annuler</Button><Button loading={creatingProject} onClick={() => void onCreateProject()}>Créer le projet</Button></>}>
         <Input label="Nom du projet" value={newProjectTitle} onChange={(e) => setNewProjectTitle(e.target.value)} placeholder="Ex. Campagne Sérum Éclat — Novembre" />

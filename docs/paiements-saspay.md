@@ -1,4 +1,4 @@
-# Paiements SasPay — VYORA Studio et Business Grow
+# Paiements SasPay — SORAHNEX Studio et Business Grow
 
 État : **livré dans le dépôt, non déployé, désactivé par défaut.** Aucun appel
 réel à SasPay n'a été effectué et rien n'a été appliqué à la base de production.
@@ -83,7 +83,7 @@ Un webhook peut se perdre, un client peut fermer sa page. Une tâche pg_cron
      72 h, car SasPay permet de relancer un paiement échoué ;
    - au plus une fois par quart d'heure, **balaie les encaissements réussis** des
      72 dernières heures (`GET /transactions/`, 5 pages de 200 au plus) et
-     retrouve la commande par sa référence interne (`VYS-…`/`VYB-…`), que VYORA
+     retrouve la commande par sa référence interne (`VYS-…`/`VYB-…`), que SORAHNEX
      place dans le libellé de chaque paiement. C'est l'un des moyens de rattraper
      une réponse de création perdue (§ 2 ter). **Ce filet dépend d'un champ que la spécification SasPay
      ne garantit pas** (`description` n'apparaît que dans un exemple de réponse) :
@@ -103,7 +103,7 @@ le croire.
 Ce que la tâche ne décide pas seule est consigné comme **anomalie**, visible dans
 l'administration (onglet SasPay) et notifié une fois aux administrateurs :
 
-| Anomalie | Ce qui s'est passé | Ce que fait VYORA |
+| Anomalie | Ce qui s'est passé | Ce que fait SORAHNEX |
 | --- | --- | --- |
 | `duplicate_payment` | Deux encaissements réussis pour une même commande | Livre une fois ; le second est à rendre au client |
 | `payment_conflict` | Un encaissement porte la référence d'une commande liée à une autre transaction | Ne livre rien |
@@ -116,10 +116,10 @@ l'administration (onglet SasPay) et notifié une fois aux administrateurs :
 
 ## 2 ter. Demande Mobile Money restée sans réponse
 
-**Le cas.** VYORA envoie `POST /payments/softpay/` ; SasPay crée peut-être le
+**Le cas.** SORAHNEX envoie `POST /payments/softpay/` ; SasPay crée peut-être le
 paiement et sollicite le téléphone du client, mais la réponse n'arrive jamais
 (délai dépassé, coupure, 5xx, 409, réponse illisible, identifiant impossible à
-enregistrer). VYORA n'a alors **aucun identifiant de transaction**, et le client
+enregistrer). SORAHNEX n'a alors **aucun identifiant de transaction**, et le client
 a peut-être été débité.
 
 **Ce que SasPay permet, d'après sa documentation** (relue en novembre 2026 ;
@@ -136,7 +136,7 @@ aucun essai réel) :
   pas notre référence ; `GET /payments/{id}/verify/` *peut* restituer le libellé
   ou les métadonnées (présents dans un exemple, dans aucun schéma).
 
-**Ce que fait VYORA.**
+**Ce que fait SORAHNEX.**
 
 | Moment | Comportement |
 | --- | --- |
@@ -146,7 +146,7 @@ aucun essai réel) :
 | Tant que l'issue est inconnue | **Tout nouveau paiement du même utilisateur est refusé** (409 `PAYMENT_UNDER_REVIEW`), Studio et Business Grow confondus, Mobile Money comme page hébergée. Tenu par la base (trigger), pas seulement par le service. |
 | Le client relance | La **même** demande repart (même clé, corps d'origine — même s'il a changé de numéro à l'écran), au plus **4 envois** sur **10 minutes**. Deux clics simultanés n'envoient qu'une requête. |
 | Fenêtre dépassée | Plus aucun envoi. La commande passe en **rapprochement manuel** : alerte `initiation_unconfirmed`, notification aux administrateurs, message au client. Elle n'expire pas. |
-| Le client ne revient jamais | Trois voies, toutes sans son concours : (1) le **webhook** de la transaction inconnue — VYORA la relit chez SasPay et ne la rattache que si SasPay restitue **notre** référence ; (2) le **balayage** des encaissements (même condition) ; (3) la **recherche par numéro** — qui ne fait que proposer. |
+| Le client ne revient jamais | Trois voies, toutes sans son concours : (1) le **webhook** de la transaction inconnue — SORAHNEX la relit chez SasPay et ne la rattache que si SasPay restitue **notre** référence ; (2) le **balayage** des encaissements (même condition) ; (3) la **recherche par numéro** — qui ne fait que proposer. |
 | Transaction qui ressemble (même montant, même devise, bonne période) sans référence restituée | **Jamais rattachée automatiquement.** Consignée comme « candidate » (origine, « même numéro » ou non) pour l'administrateur. Rien n'est livré. |
 
 **Décision de l'administrateur** (Admin → SasPay → « Paiements sans réponse ») :
@@ -177,10 +177,10 @@ protège).
 
 **SasPay n'a ni route ni événement de remboursement** (vérifié dans sa
 documentation : un remboursement y est un décaissement ordinaire du marchand).
-VYORA n'envoie donc **aucun argent**. Un remboursement se fait en deux temps,
+SORAHNEX n'envoie donc **aucun argent**. Un remboursement se fait en deux temps,
 depuis l'administration (onglet SasPay), sur un paiement confirmé :
 
-1. **Enregistrer le remboursement** (motif obligatoire). VYORA reprend ce qui a
+1. **Enregistrer le remboursement** (motif obligatoire). SORAHNEX reprend ce qui a
    été livré et clôt la commande, définitivement :
    - *Studio* : les crédits de l'achat encore disponibles sont retirés du solde
      (écriture `refund` au grand livre, clé `refund:<commande>`). Si une partie a
@@ -199,9 +199,9 @@ depuis l'administration (onglet SasPay), sur un paiement confirmé :
      rien n'est repris. Le remboursement est **intégral et seulement intégral**
      (le montant encaissé), l'abonnement en cours et son quota ne sont pas
      touchés, aucun événement de facturation n'est créé.
-2. **Rendre l'argent hors de VYORA** (transfert Mobile Money, décaissement depuis
+2. **Rendre l'argent hors de SORAHNEX** (transfert Mobile Money, décaissement depuis
    le tableau de bord SasPay), puis **attester le versement** avec sa référence.
-   VYORA ne vérifie pas ce versement : la référence saisie fait foi.
+   SORAHNEX ne vérifie pas ce versement : la référence saisie fait foi.
 
 Entre les deux, la commande apparaît « Remboursement en cours » (client comme
 administrateur) et un rappel « remboursement(s) à verser » reste affiché. Un
@@ -239,7 +239,7 @@ un webhook de paiement rejoué ne relivre rien.
 | Le filet de réconciliation ne se déclare pas sain s'il est aveugle ou tronqué | Edge (`sweep_unreliable`, exécution « partielle ») + administration |
 | Un webhook arrivé trop tôt reste rejouable | Edge (événement non marqué « traité » tant que SasPay ne confirme pas) |
 | La clé SasPay n'est jamais envoyée ailleurs qu'à SasPay | Edge (curseur de pagination restreint à l'API configurée) |
-| Clé SasPay propre à VYORA | Edge (`VYORA_SASPAY_SECRET_KEY` seule ; aucun repli sur `SASPAY_SECRET_KEY`) |
+| Clé SasPay propre à SORAHNEX | Edge (`VYORA_SASPAY_SECRET_KEY` seule ; aucun repli sur `SASPAY_SECRET_KEY`) |
 | Demande sans réponse : jamais close « non payée » par un automate, jamais « payée » sans `verify` `SUCCESS` | Base (`housekeeping`, `vyora_payment_open_review`) + Edge (règlement inchangé) |
 | Demande sans réponse : aucun second paiement du même client | Base (trigger `vyora_payment_block_unconfirmed`, `begin_initiation` sous verrou par utilisateur) |
 | Rejeu à l'identique seulement (même clé, corps enregistré), borné dans le temps | Base (`vyora_payment_begin_initiation`) + Edge |
@@ -275,9 +275,9 @@ déployées, paiements activés en mode `live` (§ 10). Restent le contrôle du
 webhook et du mode de frais dans le tableau de bord SasPay, et la publication
 de l'interface.
 
-1. **Créer la clé SasPay de VYORA.** Les secrets `SASPAY_SECRET_KEY` et
+1. **Créer la clé SasPay de SORAHNEX.** Les secrets `SASPAY_SECRET_KEY` et
    `SASPAY_WEBHOOK_SECRET` existants appartiennent au produit immobilier et ne
-   sont **jamais lus** par VYORA. Installer `VYORA_SASPAY_SECRET_KEY` (VYORA
+   sont **jamais lus** par SORAHNEX. Installer `VYORA_SASPAY_SECRET_KEY` (SORAHNEX
    n'a besoin d'aucun droit de décaissement : un scope `PAYIN` devrait suffire —
    à confirmer en recette pour la lecture des transactions et des soldes). Sans ce
    secret, tout paiement répond « service non configuré ».
@@ -343,7 +343,7 @@ une hypothèse que les tests locaux n'ont pu que simuler.
 | 12 | Business Grow : payer deux fois la même formule | Fin de période repoussée de 60 jours au total | Prolongation |
 | 13 | Ouvrir la transaction de l'achat n° 1 avec `GET /payments/{id}/verify/` (ou regarder le journal de la fonction) | La réponse contient `description` (`VYS-…`) ou `metadata.internal_reference` | **`verify` restitue notre référence** : condition du rattachement automatique par webhook (§ 2 ter) |
 | 14 | Appeler deux fois `POST /payments/softpay/` avec la même `Idempotency-Key` et le même corps, à 5 min d'intervalle | Même `id` de transaction, une seule demande sur le téléphone | Idempotence réelle de SasPay et durée de conservation au moins égale à la fenêtre de rejeu (10 min) |
-| 15 | `GET /transactions/?search=<numéro du payeur>` avec la clé de VYORA | La transaction de l'achat n° 1 est listée | Scope de la clé suffisant et recherche par numéro effective (sinon : aucune candidate par recherche, seules restent celles du webhook) |
+| 15 | `GET /transactions/?search=<numéro du payeur>` avec la clé de SORAHNEX | La transaction de l'achat n° 1 est listée | Scope de la clé suffisant et recherche par numéro effective (sinon : aucune candidate par recherche, seules restent celles du webhook) |
 
 **Si la ligne 10 affiche « Rattrapage des paiements incomplet », ou si la
 ligne 13 échoue** : aucun rattachement automatique n'est possible pour un
@@ -379,10 +379,10 @@ recrée).
   code préalable restent à confirmer avec une clé de test.
 - **Sessions hébergées sans idempotence côté SasPay.** Deux créations simultanées
   peuvent ouvrir deux sessions ; une seule est rattachée et remise au client.
-- **Remboursements : l'argent n'est pas déplacé par VYORA.** SasPay n'offre ni
+- **Remboursements : l'argent n'est pas déplacé par SORAHNEX.** SasPay n'offre ni
   route ni webhook de remboursement. Un versement fait directement chez SasPay
-  sans passer par l'administration VYORA ne retire donc aucun crédit ; à
-  l'inverse, VYORA ne peut pas vérifier qu'un versement attesté a bien eu lieu.
+  sans passer par l'administration SORAHNEX ne retire donc aucun crédit ; à
+  l'inverse, SORAHNEX ne peut pas vérifier qu'un versement attesté a bien eu lieu.
 - **Remboursement Business Grow** : calculé sur la *dernière* période payée de
   l'abonnement, au prorata des jours. Les unités déjà consommées pendant la
   période ne sont pas décomptées du montant.
@@ -398,7 +398,7 @@ recrée).
 - **Demande Mobile Money sans réponse** (§ 2 ter) : rien, dans la documentation
   SasPay, ne permet de retrouver *à coup sûr* un paiement sans son identifiant.
   Le rejeu à l'identique n'est garanti que tant que SasPay conserve la clé
-  d'idempotence (durée non documentée) ; au-delà de 10 minutes VYORA n'en envoie
+  d'idempotence (durée non documentée) ; au-delà de 10 minutes SORAHNEX n'en envoie
   plus, pour ne pas risquer de créer un paiement que le client n'attend plus.
   Le rattachement automatique dépend de champs que SasPay ne garantit pas
   (`description`, `metadata`). Quand ils manquent, la commande attend une
@@ -411,7 +411,7 @@ recrée).
   retrouvées que par le balayage, la recherche ou l'administrateur. Chaque
   webhook inconnu coûte alors une lecture `verify` chez SasPay, y compris ceux
   d'un autre produit partageant le compte marchand.
-- **Rattachement par l'administrateur** : VYORA contrôle montant, devise, sens,
+- **Rattachement par l'administrateur** : SORAHNEX contrôle montant, devise, sens,
   période et absence d'autre référence, mais ne peut pas prouver que la
   transaction choisie est bien celle *de ce client* si SasPay ne restitue ni
   libellé ni numéro. Deux clients payant le même montant au même moment se
@@ -430,7 +430,7 @@ recrée).
   sessions ouvertes les plus récentes. Au-delà, il est ignoré et c'est la tâche
   planifiée qui livre (sous ~5 min) en interrogeant l'état de la session.
 - **Quota d'appels SasPay** : 300 requêtes par minute **par compte marchand**. Si
-  la clé de VYORA appartient au même compte que le produit immobilier, le quota
+  la clé de SORAHNEX appartient au même compte que le produit immobilier, le quota
   est partagé. Un passage de réconciliation vérifie 20 commandes au plus (une
   ou deux lectures chacune) et lit 5 pages de liste : quelques dizaines d'appels,
   toutes les 5 minutes au plus, et aucun s'il n'y a rien à vérifier.
@@ -525,13 +525,13 @@ prix final = plus petit montant P, arrondi au pas de la devise (1 FCFA), tel que
 
 - Sans tarif confirmé au barème : `P = base + provision` (5 000 → 6 000 FCFA).
 - Avec un tarif confirmé qui dépasse la provision, le prix est relevé juste
-  assez pour que VYORA reçoive au moins le prix de base (stratégie
+  assez pour que SORAHNEX reçoive au moins le prix de base (stratégie
   `cover_fees`). La stratégie `provision_only` ne relève jamais le prix.
 - Un même prix pour tous les opérateurs d'un pays (le tarif le plus cher fait
   référence) : le prix affiché ne change pas quand le client change d'opérateur.
 - Les **crédits Studio et la durée d'abonnement restent calculés sur le prix de
   base** : la provision n'achète rien.
-- VYORA demande à SasPay le mode de frais **« déduits »** (`fee_charge_mode:
+- SORAHNEX demande à SasPay le mode de frais **« déduits »** (`fee_charge_mode:
   "DEDUCTED"`) : le client est débité exactement du prix affiché, SasPay prélève
   ses frais sur ce montant.
 - Unités internes : montants en centièmes entiers, taux en millièmes de pour cent
@@ -583,7 +583,7 @@ Alertes (une par commande et par genre, visibles dans « Surveillance ») :
 | Alerte | Signification | Le client est-il livré ? |
 | --- | --- | --- |
 | `fee_exceeds_provision` | Frais réels supérieurs à ce que le prix prévoyait pour les absorber (prix final − prix de base) | Oui |
-| `net_below_base` | VYORA a reçu moins que le prix de base | Oui |
+| `net_below_base` | SORAHNEX a reçu moins que le prix de base | Oui |
 | `fee_mode_unexpected` | SasPay a ajouté les frais au client au lieu de les déduire : le client a payé plus que le prix affiché | Oui |
 | `reconciliation_failed` | La ligne de rapprochement n'a pas pu être écrite | Oui (un échec comptable ne bloque jamais une livraison) |
 
@@ -606,7 +606,7 @@ net, ni dans la marge.
 3. Dans le tableau de bord SasPay, **Paramètres → Frais** : activer
    « Autoriser le choix du mode de frais par l'API », ou choisir le mode
    « Déduits » par défaut. Sans cela, SasPay ignore silencieusement le mode
-   demandé et **ajoute** ses frais au client. VYORA le détecte après coup (alerte
+   demandé et **ajoute** ses frais au client. SORAHNEX le détecte après coup (alerte
    `fee_mode_unexpected`) mais ne peut pas l'empêcher.
 4. Administration → SasPay → « Prix, frais et marge » → « Importer les tarifs du
    compte ».
@@ -629,7 +629,7 @@ net, ni dans la marge.
 - Avec la page de paiement hébergée, l'opérateur n'est connu qu'après le
   paiement : le prix est calculé sur le tarif le plus cher du pays.
 - Décaissements (payouts) : seule une **estimation** de frais existe (simulateur),
-  sans provision. VYORA n'exécute aucun décaissement.
+  sans provision. SORAHNEX n'exécute aucun décaissement.
 - Les événements `settlement.*` de SasPay ne sont pas traités : leur contenu n'est
   pas documenté.
 - Plusieurs devises : la politique accepte une provision par devise, mais seule
@@ -687,7 +687,7 @@ crédite rien.
 
 ### Reste à faire
 
-1. Tableau de bord SasPay : vérifier que le webhook VYORA pointe vers
+1. Tableau de bord SasPay : vérifier que le webhook SORAHNEX pointe vers
    `https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/vyora-saspay-webhook`
    avec `transaction.success`, `transaction.failed`, `transaction.cancelled`.
    Sans lui, la réconciliation rattrape le paiement en 5 minutes au plus.

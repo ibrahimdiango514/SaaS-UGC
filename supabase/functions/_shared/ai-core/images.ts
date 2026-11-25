@@ -1,4 +1,4 @@
-// VYORA AI CORE — validation des images transmises à un modèle vision.
+// SORAHNEX AI CORE — validation des images transmises à un modèle vision.
 //
 // Le navigateur redimensionne déjà l'image ; le serveur ne fait pas confiance
 // pour autant : type MIME allowlisté, base64 strict, taille bornée et nombre

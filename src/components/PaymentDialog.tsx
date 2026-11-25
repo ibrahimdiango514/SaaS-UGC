@@ -1,5 +1,5 @@
 /**
- * Fenêtre de paiement SasPay, commune au Studio et à Business Grow.
+ * Fenêtre de paiement SasPay, commune au Studio et à SORAHNEX Grow.
  *
  * Règles tenues ici :
  *  - le prix, les crédits et les frais affichés viennent du serveur (`options`) ;
@@ -399,7 +399,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="flex items-center gap-1.5 text-[10.5px] text-slate-500">
-                <ShieldCheck size={12} className="text-emerald-400/70" /> Paiement traité par SasPay. VYORA ne voit ni votre code ni votre solde.
+                <ShieldCheck size={12} className="text-emerald-400/70" /> Paiement traité par SasPay. SORAHNEX ne voit ni votre code ni votre solde.
               </p>
               <Button
                 type="submit"
@@ -506,7 +506,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
                 <p className="text-[12.5px] leading-relaxed text-slate-300">
                   {order.product === 'studio'
                     ? `${order.credits ?? ''} crédits ont été ajoutés à votre solde Studio.`
-                    : 'Votre abonnement Business Grow est actif.'}
+                    : 'Votre abonnement SORAHNEX Grow est actif.'}
                   {' '}Référence : {order.internal_reference}.
                 </p>
               </>

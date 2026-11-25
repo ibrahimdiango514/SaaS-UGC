@@ -22,7 +22,7 @@ const GROUP_ACCENT: Record<string, { text: string; border: string; bg: string; d
 };
 
 /**
- * Catalogue des modules métier Business Growth.
+ * Catalogue des modules métier SORAHNEX Grow.
  *
  * - recherche et filtre par catégorie inchangés dans leur comportement ;
  * - hiérarchie visuelle : fondations opérationnelles, puis une section par
@@ -53,7 +53,7 @@ export default function BusinessModules() {
     <div className="space-y-6 pb-10" data-testid="business-modules">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Link to="/app/business" className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-slate-400 transition hover:text-white">
-          <ArrowLeft size={15} /> Business Growth
+          <ArrowLeft size={15} /> SORAHNEX Grow
         </Link>
         <span className="text-slate-600">/</span>
         <span className="inline-flex min-h-11 items-center px-2 text-slate-300">Modules métier</span>
@@ -68,11 +68,11 @@ export default function BusinessModules() {
         <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <p className="vy-chip border-violet-300/25 bg-violet-400/10 text-violet-200">
-              <Sparkles size={11} /> VYORA Business Growth
+              <Sparkles size={11} /> SORAHNEX Grow
             </p>
             <h1 className="vy-title mt-3 text-[1.75rem] leading-tight sm:text-[2.15rem]">Vos modules métier</h1>
             <p className="mt-2.5 max-w-2xl text-[13px] leading-relaxed text-slate-400">
-              Chaque module écrit dans vos propres données Business Growth. Rien n’est partagé avec le Studio,
+              Chaque module écrit dans vos propres données SORAHNEX Grow. Rien n’est partagé avec le Studio,
               aucun crédit Studio n’est consommé et aucun chiffre n’est simulé.
             </p>
           </div>

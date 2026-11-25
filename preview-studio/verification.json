@@ -27,7 +27,7 @@
         "name": "Devis serveur affiché dans la barre de prompt",
         "pass": true,
         "detail": {
-          "creditSummary": "28 crédits VYORA"
+          "creditSummary": "28 crédits SORAHNEX"
         }
       },
       {
@@ -70,7 +70,7 @@
   "files": [
     {
       "file": "screenshots/01-studio-desktop.png",
-      "title": "Studio VYORA — canvas immersif, hero et barre de prompt dockée"
+      "title": "Studio SORAHNEX — canvas immersif, hero et barre de prompt dockée"
     },
     {
       "file": "screenshots/02-studio-devis-desktop.png",

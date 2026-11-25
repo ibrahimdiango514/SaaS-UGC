@@ -1,4 +1,4 @@
-# Migration VYORA vers un nouveau compte Netlify
+# Migration SORAHNEX vers un nouveau compte Netlify
 
 Date de préparation : 2026-11-18. Source unique à importer : branche **`main`** du dépôt
 `ibrahimdiango514/SaaS-UGC`. Le backend Supabase (`xbuuhfwobrafcbgtdgjx`) **ne change pas** :
@@ -153,7 +153,7 @@ l'ancien site sert encore des utilisateurs. Toute modification de secret redéma
 | --- | --- | --- |
 | `VYORA_ALLOWED_ORIGINS` | `store-connect` (v13), `mcp-client` (v13), `reelora-owner-bootstrap` (v9, page « Propriétaire ») | Ajouter `<NOUVELLE_URL_NETLIFY>`. Sans cela : `access-control-allow-origin: null` (boutiques, MCP) et `403 origin_not_allowed` (propriétaire). |
 | `STORE_IMPORT_ALLOWED_ORIGINS` | `store-import` (v22) — lit uniquement ce secret | Ajouter `<NOUVELLE_URL_NETLIFY>` |
-| `BUSINESS_GROW_ALLOWED_ORIGINS` | `business-grow` (v33) | Ajouter `<NOUVELLE_URL_NETLIFY>`. Sur Netlify, le navigateur passe d'abord par le relais `/api/business-grow` (serveur → serveur, sans origine) : Business Grow fonctionne même avant cet ajout ; le secret couvre le transport direct de repli (`403 ORIGIN_NOT_ALLOWED` sinon). |
+| `BUSINESS_GROW_ALLOWED_ORIGINS` | `business-grow` (v33) | Ajouter `<NOUVELLE_URL_NETLIFY>`. Sur Netlify, le navigateur passe d'abord par le relais `/api/business-grow` (serveur → serveur, sans origine) : Grow fonctionne même avant cet ajout ; le secret couvre le transport direct de repli (`403 ORIGIN_NOT_ALLOWED` sinon). |
 | `VYORA_PAYMENTS_ALLOWED_ORIGINS` | `vyora-payments`, `vyora-payments-reconcile`, `vyora-saspay-webhook` (bundle `vyora-saspay`) | **Créer** (n'existe pas aujourd'hui) avec `<NOUVELLE_URL_NETLIFY>` exacte. La liste codée n'accepte que l'ancien domaine et ses aperçus ; aucun joker n'est admis car l'origine sert aussi à construire l'adresse de retour après paiement. Sans cela : `403 ORIGIN_NOT_ALLOWED` à l'achat de crédits. |
 
 Valeur actuelle de `VYORA_ALLOWED_ORIGINS` = `STORE_IMPORT_ALLOWED_ORIGINS` (publique, mesurée) :
@@ -195,7 +195,7 @@ Fournisseurs OAuth tiers (Google, Facebook, etc.) : aucun n'est activé dans GoT
 (`external_*_enabled = false`, mesuré le 2026-11-18) ; rien à mettre à jour. Le projet Supabase
 héberge aussi d'autres produits (entrées `lovable.app`, `sbc-ai-agency-dashbord.netlify.app` dans la
 liste) : ne pas les retirer sans vérification, et noter que `Site URL` est global au projet — il
-désignait déjà VYORA (`vyora-ugc`), le passer à la nouvelle URL ne change rien pour les autres. Les OAuth gérés par VYORA (MCP sortant via `mcp-client`, connecteurs via
+désignait déjà SORAHNEX (`vyora-ugc`), le passer à la nouvelle URL ne change rien pour les autres. Les OAuth gérés par SORAHNEX (MCP sortant via `mcp-client`, connecteurs via
 `vyora-oauth`) utilisent des URL de retour **côté Supabase**
 (`https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/mcp-client/oauth/callback`, dérivée de
 `SUPABASE_URL`) : elles ne dépendent pas de Netlify.
@@ -230,7 +230,7 @@ Ne cocher que ce qui a été mesuré.
    pour `reelora-owner-bootstrap` (attendu : `200` avec `access-control-allow-origin` renseigné,
    pas `403 origin_not_allowed`).
 6. Dans le navigateur : inscription / connexion → lien reçu pointe vers la nouvelle URL ; page
-   *Intégrations* → état « non connectée » lisible (pas d'erreur réseau) ; *Business Grow* →
+   *Intégrations* → état « non connectée » lisible (pas d'erreur réseau) ; *Grow* →
    réponse de l'assistant ; *Studio* → devis vidéo affiché.
 7. `node scripts/verify-production.mjs --site <NOUVELLE_URL_NETLIFY>` → code 0.
 8. Workflow GitHub *Constat de production* vert sur le prochain push `main`.
@@ -242,7 +242,7 @@ Ne cocher que ce qui a été mesuré.
 | Où | Quoi | Bloquant ? |
 | --- | --- | --- |
 | Netlify | `VITE_SITE_URL`, `VYORA_BUILD_ENABLED=true` | Oui (build + redirections) |
-| Supabase secrets | `VYORA_ALLOWED_ORIGINS`, `STORE_IMPORT_ALLOWED_ORIGINS`, `BUSINESS_GROW_ALLOWED_ORIGINS` (ajouter), `VYORA_PAYMENTS_ALLOWED_ORIGINS` (créer) | Oui (CORS : boutiques, import, MCP, propriétaire, paiements ; Business Grow seulement pour le transport direct) |
+| Supabase secrets | `VYORA_ALLOWED_ORIGINS`, `STORE_IMPORT_ALLOWED_ORIGINS`, `BUSINESS_GROW_ALLOWED_ORIGINS` (ajouter), `VYORA_PAYMENTS_ALLOWED_ORIGINS` (créer) | Oui (CORS : boutiques, import, MCP, propriétaire, paiements ; Grow seulement pour le transport direct) |
 | Supabase Auth | `site_url`, `uri_allow_list` | Oui (connexion par lien) |
 | GitHub | variable `VYORA_SITE_URL` | Non (constat uniquement) |
 | Dépôt | listes par défaut (§6, facultatif) | Non |

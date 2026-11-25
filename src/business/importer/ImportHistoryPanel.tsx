@@ -1,5 +1,5 @@
 /**
- * VYORA — historique des imports.
+ * SORAHNEX — historique des imports.
  *
  * ## Ce que l'écran montre
  * Pour chaque import : la date, l'origine (CSV, XLSX, URL et nom du fichier),

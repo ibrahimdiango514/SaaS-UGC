@@ -48,7 +48,7 @@ import type { UrlRejection } from './url-guard';
  */
 export type PriceUnit = 'major' | 'minor';
 
-/** Correspondance d'un champ VYORA vers un chemin de la source. */
+/** Correspondance d'un champ SORAHNEX vers un chemin de la source. */
 export interface FieldMapping {
   /**
    * Chemin de la propriété. Les points séparent les niveaux.
@@ -66,7 +66,7 @@ export interface FieldMapping {
   multiplier?: number;
 }
 
-/** Mapping complet d'une API vers le modèle VYORA. */
+/** Mapping complet d'une API vers le modèle SORAHNEX. */
 export interface CustomApiMapping {
   /** Champ du nom. Obligatoire : sans nom, le produit n'est pas identifiable. */
   name: FieldMapping;

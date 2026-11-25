@@ -58,7 +58,7 @@ export const BUSINESS_ROLE_SPECS: readonly BusinessRoleSpec[] = [
   {
     roleKey: 'business_advisor',
     label: 'Conseil business général',
-    description: 'Assistant général Business Grow pour piloter l’activité et structurer les décisions.',
+    description: 'Assistant général Grow pour piloter l’activité et structurer les décisions.',
     guidance: 'Réponds en conseiller stratégique concret, orienté résultats mesurables.',
   },
   {
@@ -165,7 +165,7 @@ export function buildBusinessSystemInstruction(input: {
     const brands = (input.workspaceContext.brands ?? []).slice(0, 5);
     const products = (input.workspaceContext.products ?? []).slice(0, 8);
     sections.push(
-      `Contexte entreprise VYORA (lecture autorisée) : ${safeJsonSlice({
+      `Contexte entreprise SORAHNEX (lecture autorisée) : ${safeJsonSlice({
         workspace: ws?.name ?? null,
         country: ws?.country_code ?? null,
         language: ws?.default_language ?? null,

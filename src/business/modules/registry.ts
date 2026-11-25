@@ -5,7 +5,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 
 /* -------------------------------------------------------------------------- */
-/* Contrats des modules métier Business Growth                                */
+/* Contrats des modules métier SORAHNEX Grow                                */
 /* -------------------------------------------------------------------------- */
 
 export type ModuleFieldType = 'text' | 'textarea' | 'number' | 'date' | 'select' | 'email' | 'tel' | 'url';
@@ -682,7 +682,7 @@ export const MODULE_DEFINITIONS: readonly ModuleDefinition[] = [
     category: moduleKeyToCategory('customer-support-ai'),
     title: 'Customer Support AI',
     shortTitle: 'Support',
-    description: 'Suivez les demandes clients et préparez une réponse assistée par l’agent Business Growth.',
+    description: 'Suivez les demandes clients et préparez une réponse assistée par l’agent SORAHNEX Grow.',
     purpose: 'Chaque ticket garde le message du client et un brouillon de réponse. L’IA propose, vous validez et enregistrez.',
     group: 'operations',
     icon: MessageSquare,

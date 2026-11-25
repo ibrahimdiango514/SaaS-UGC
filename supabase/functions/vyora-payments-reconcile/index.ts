@@ -1,4 +1,4 @@
-// VYORA — Edge Function `vyora-payments-reconcile` (`verify_jwt = false`).
+// SORAHNEX — Edge Function `vyora-payments-reconcile` (`verify_jwt = false`).
 //
 // Appelée uniquement par la tâche pg_cron `vyora-payments-reconcile` via pg_net.
 // Deux protections, dans cet ordre : l'en-tête `x-vyora-cron: payments-reconcile`

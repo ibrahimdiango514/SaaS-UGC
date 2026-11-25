@@ -1,5 +1,5 @@
 /**
- * VYORA FILES → assistant : ce que le modèle peut RÉELLEMENT lire.
+ * SORAHNEX FILES → assistant : ce que le modèle peut RÉELLEMENT lire.
  *
  * ## Le problème que ce module résout
  * Avant, une pièce jointe n'existait que dans l'onglet courant : le fichier

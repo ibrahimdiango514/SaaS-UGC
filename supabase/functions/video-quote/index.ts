@@ -1,4 +1,4 @@
-// VYORA — service de devis fournisseur (MyAPI / MuAPI), calculé côté serveur.
+// SORAHNEX — service de devis fournisseur (MyAPI / MuAPI), calculé côté serveur.
 //
 // Contrat : POST { model_id, params?, prompt?, image_url?, last_image_url? }
 //   -> { model_id, model_available, model_status, model_reason, quote }
@@ -84,7 +84,7 @@ function estimatePath(raw: unknown, modelId: string): string | null {
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
-  MODEL_NOT_FOUND: "Ce modèle vidéo n’existe pas dans le catalogue VYORA.",
+  MODEL_NOT_FOUND: "Ce modèle vidéo n’existe pas dans le catalogue SORAHNEX.",
   MODEL_UNAVAILABLE: "Ce modèle n’est pas disponible pour votre compte.",
   PROVIDER_KEY_MISSING: "Le service de génération n’est pas configuré côté serveur.",
   ESTIMATE_ENDPOINT_MISSING: "Ce modèle n’expose pas d’endpoint de devis vérifié.",
@@ -328,8 +328,8 @@ export async function buildQuote(row: ModelRow | null, requestedId: string, body
     ? `Ce modèle nécessite un réglage qui n’est pas encore pris en charge : ${required.join(", ")}.`
     : meta.comingSoon ? "Annoncé par le fournisseur, pas encore lancé."
       : !meta.enabled ? "Désactivé dans le catalogue fournisseur."
-        : !meta.active ? "Désactivé dans le catalogue VYORA."
-          : "Disponible dans VYORA.";
+        : !meta.active ? "Désactivé dans le catalogue SORAHNEX."
+          : "Disponible dans SORAHNEX.";
 
   const pack = (quote: QuoteResult) => ({
     model_id: meta.publicId ?? str(row.public_id, 80) ?? requestedId,

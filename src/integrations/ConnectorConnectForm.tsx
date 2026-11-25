@@ -435,7 +435,7 @@ export function ConnectorConnectForm({
       </div>
 
       <p className="mt-2 text-[0.62rem] leading-relaxed text-slate-500">
-        Le secret part directement vers le serveur VYORA et n’est jamais réaffiché après
+        Le secret part directement vers le serveur SORAHNEX et n’est jamais réaffiché après
         enregistrement. Il n’apparaît ni dans les journaux ni dans le navigateur.
       </p>
     </div>

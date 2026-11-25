@@ -1,4 +1,4 @@
-// VYORA — orchestration des paiements SasPay (indépendante de Deno et de la base).
+// SORAHNEX — orchestration des paiements SasPay (indépendante de Deno et de la base).
 //
 // Invariants portés par ce module :
 //   1. Le montant vient TOUJOURS du serveur (grille Studio / formule Business
@@ -7,7 +7,7 @@
 //      Un webhook, une redirection ou un statut de session ne suffisent jamais.
 //   3. Un paiement ne règle qu'une commande et ne crédite qu'une fois
 //      (garanti par la base : voir la migration `vyora_saspay_payments`).
-//   4. Studio et Business Grow ne partagent ni commande, ni portefeuille :
+//   4. Studio et Grow ne partagent ni commande, ni portefeuille :
 //      chaque appel porte explicitement son produit.
 
 import {
@@ -24,7 +24,7 @@ export type OrderStatus = 'pending' | 'processing' | 'paid' | 'failed' | 'cancel
 /** États présentés à l'utilisateur. */
 /**
  * États présentés à l'utilisateur. `unapplied` : paiement ENCAISSÉ mais que la
- * base a refusé d'activer (Business Grow, abonnement incompatible) — rien n'a
+ * base a refusé d'activer (Grow, abonnement incompatible) — rien n'a
  * été livré, l'argent est à rendre par le support. État final.
  */
 export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancelled' | 'unapplied'
@@ -36,7 +36,7 @@ export type PaymentState = 'todo' | 'pending' | 'confirmed' | 'failed' | 'cancel
   | 'review';
 export type SettleOutcome =
   | 'paid' | 'already_paid' | 'pending' | 'failed' | 'cancelled' | 'amount_mismatch'
-  /** Business Grow : encaissement incompatible avec l'abonnement en cours — rien n'est livré, définitivement. */
+  /** Grow : encaissement incompatible avec l'abonnement en cours — rien n'est livré, définitivement. */
   | 'subscription_conflict';
 
 export const PRODUCTS: readonly Product[] = ['studio', 'business'];
@@ -249,7 +249,7 @@ export interface PaymentAnomaly {
   details: Record<string, unknown>;
 }
 
-/** Référence interne VYORA (`VYS-…` Studio, `VYB-…` Business Grow) présente dans un texte. */
+/** Référence interne SORAHNEX (`VYS-…` Studio, `VYB-…` Grow) présente dans un texte. */
 export function orderReferenceIn(value: string | null | undefined): string | null {
   return /(?:^|[^A-Za-z0-9])(VY[SB]-[0-9A-F]{32})(?![A-Za-z0-9])/.exec(value ?? '')?.[1] ?? null;
 }
@@ -310,7 +310,7 @@ const PROVIDER_CODE_MESSAGES: Record<string, string> = {
   api_key_scope_forbidden: 'Le compte de paiement n’est pas autorisé à encaisser.',
 };
 
-/** Motifs de refus d'activation d'un encaissement Business Grow (posés par la base, définitifs). */
+/** Motifs de refus d'activation d'un encaissement Grow (posés par la base, définitifs). */
 export const SUBSCRIPTION_CONFLICT_CODES: readonly string[] = [
   'business_plan_change_not_supported', 'business_subscription_managed_elsewhere',
 ];
@@ -340,9 +340,9 @@ export const OTHER_UNCONFIRMED_MESSAGE = 'Un de vos paiements est en cours de v�
 
 /** Motifs d'inéligibilité renvoyés par la base → (code, message). */
 const INELIGIBLE_REASONS: Record<string, [code: string, message: string]> = {
-  business_billing_disabled: ['BUSINESS_BILLING_DISABLED', 'La facturation Business Grow n’est pas activée.'],
+  business_billing_disabled: ['BUSINESS_BILLING_DISABLED', 'La facturation Grow n’est pas activée.'],
   business_subscription_managed_elsewhere: ['BUSINESS_SUBSCRIPTION_MANAGED_ELSEWHERE',
-    'Votre abonnement Business Grow est géré par un autre moyen de paiement. Contactez le support.'],
+    'Votre abonnement Grow est géré par un autre moyen de paiement. Contactez le support.'],
   business_plan_change_not_supported: ['BUSINESS_PLAN_CHANGE_NOT_SUPPORTED',
     'Une autre formule est déjà en cours. Vous pourrez changer de formule à la fin de la période, ou contactez le support.'],
   not_vyora_customer: ['PAYMENT_NOT_ELIGIBLE', 'Ce compte ne peut pas acheter de crédits Studio.'],
@@ -411,7 +411,7 @@ export function publicOrder(order: OrderRecord): Record<string, unknown> {
   const view: Record<string, unknown> = {};
   for (const field of PUBLIC_FIELDS) if (order[field] !== undefined) view[field] = order[field];
   // Frais déduits : le client paie le prix affiché, point. Le montant des frais
-  // (estimé ou réel) et le net reçu par VYORA sont des données internes.
+  // (estimé ou réel) et le net reçu par SORAHNEX sont des données internes.
   if (order.quoted_fee_mode === 'DEDUCTED' || order.fee_charge_mode === 'DEDUCTED') {
     delete view.quoted_fee_amount;
     delete view.fee_amount;
@@ -451,7 +451,7 @@ function splitName(name: string | null, email: string | null): { first: string; 
   const source = (name ?? '').replace(/\s+/g, ' ').trim() || (email ?? '').split('@')[0] || '';
   const parts = source.split(' ').filter(Boolean);
   const first = (parts[0] ?? 'Client').slice(0, 60);
-  const last = (parts.slice(1).join(' ') || 'VYORA').slice(0, 60);
+  const last = (parts.slice(1).join(' ') || 'SORAHNEX').slice(0, 60);
   return { first, last };
 }
 
@@ -463,7 +463,7 @@ function parseItem(product: Product, raw: unknown): PaymentItem {
   const item = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
   if (product === 'business') {
     if (typeof item.plan_key !== 'string' || !/^[a-z0-9_-]{1,60}$/i.test(item.plan_key)) {
-      throw new PaymentError('PAYMENT_INVALID_REQUEST', 400, 'Formule Business Grow invalide.');
+      throw new PaymentError('PAYMENT_INVALID_REQUEST', 400, 'Formule Grow invalide.');
     }
     return { plan_key: item.plan_key };
   }
@@ -594,7 +594,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         networks: (country.networks ?? []).map((network) => {
           const option = networkOption(rows, code, network, country.price?.amount ?? amount);
           // Sous la politique de prix, aucun frais n'est annoncé en sus : les
-          // frais SasPay sont déduits de ce que VYORA reçoit.
+          // frais SasPay sont déduits de ce que SORAHNEX reçoit.
           return allInclusive ? { ...option, fee: null } : option;
         }),
       })),
@@ -603,7 +603,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
 
   /** Interroge SasPay puis règle la commande selon le statut VÉRIFIÉ. */
   /**
-   * Encaissement Business Grow que la base a refusé d'activer : signalé tout de
+   * Encaissement Grow que la base a refusé d'activer : signalé tout de
    * suite (une seule ligne par commande), quel que soit le chemin qui l'a vu.
    */
   async function flagSubscriptionConflict(order: OrderRecord): Promise<void> {
@@ -645,7 +645,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     const charged = normalizeDecimal(tx.debited_amount);
     const net = normalizeDecimal(tx.net_amount);
     // Frais réellement prélevés par SasPay = montant débité au client − net
-    // reçu par VYORA. Vrai dans les deux modes : frais ajoutés (débité =
+    // reçu par SORAHNEX. Vrai dans les deux modes : frais ajoutés (débité =
     // demandé + frais, net = demandé) comme frais déduits (débité = demandé,
     // net = demandé − frais). « Débité − demandé » vaudrait toujours zéro en
     // frais déduits et masquerait le coût réel.
@@ -1059,7 +1059,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
     }
   }
 
-  /** Référence de commande VYORA restituée par SasPay pour une transaction (libellé ou métadonnées). */
+  /** Référence de commande SORAHNEX restituée par SasPay pour une transaction (libellé ou métadonnées). */
   function provenReference(tx: { description: string | null; metadata_reference: string | null }): string | null {
     return orderReferenceIn(tx.description) ?? orderReferenceIn(tx.metadata_reference);
   }
@@ -1154,7 +1154,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
       const amount = parseDecimal(normalizeDecimal(tx.requested_amount));
       if (expected !== null && amount !== null && amount !== expected) continue;
       if (tx.currency && target.currency && tx.currency !== target.currency.toUpperCase()) continue;
-      // Déjà rattachée à une autre commande VYORA : écartée.
+      // Déjà rattachée à une autre commande SORAHNEX : écartée.
       if (await store.findOrder({ paymentId: tx.id, sessionId: null })) continue;
       candidates.push({
         id: tx.id, reference: tx.reference, status: tx.status, amount: tx.requested_amount,
@@ -1377,7 +1377,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         // Le filet a deux angles morts, signalés au lieu d'être tus :
         //  * la liste dépasse ce qu'un passage peut lire (ordre des pages non spécifié) ;
         //  * SasPay ne renvoie pas le libellé (`description`), que sa spécification
-        //    ne garantit pas : aucune référence VYORA n'est alors lisible.
+        //    ne garantit pas : aucune référence SORAHNEX n'est alors lisible.
         if (listing.truncated) detail.sweep_truncated = true;
         if (listing.transactions.length > 0 && listing.described === 0) detail.sweep_blind = true;
         if (detail.sweep_truncated || detail.sweep_blind) {
@@ -1392,7 +1392,7 @@ export function createPaymentService(deps: PaymentServiceDeps) {
         for (const tx of listing.transactions) {
           if (outOfTime()) { detail.stopped = 'time_budget'; break; }
           const reference = orderReferenceIn(tx.description);
-          // Le compte marchand peut servir d'autres produits : sans référence VYORA, ignoré.
+          // Le compte marchand peut servir d'autres produits : sans référence SORAHNEX, ignoré.
           if (!reference) continue;
           counts.swept += 1;
           const match = await store.findOrderByReference(reference);

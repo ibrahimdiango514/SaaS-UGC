@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// Vitrine VYORA (B3) — homepage premium avec hero 3D, sélecteur 2 cartes
-// (Business Grow / Studio UGC) et AUCUNE offre fictive : le système commercial
+// Vitrine SORAHNEX (B3) — homepage premium avec hero 3D, sélecteur 2 cartes
+// (SORAHNEX Grow / Studio UGC) et AUCUNE offre fictive : le système commercial
 // (formules, crédits, SASPAY) vit dans les espaces authentifiés
 // (/app/abonnement, /app/credits, /app/business/abonnement), jamais sur la
 // page publique.
@@ -12,7 +12,7 @@ import App from '../src/App';
 beforeEach(() => { window.history.pushState({}, '', '/'); });
 afterEach(() => { cleanup(); });
 
-describe('vitrine VYORA (B3)', () => {
+describe('vitrine SORAHNEX (B3)', () => {
   it('présente le hero et un lien d’évitement accessible au clavier', async () => {
     render(<App />);
     const h1 = await screen.findByRole('heading', { level: 1 });
@@ -23,8 +23,10 @@ describe('vitrine VYORA (B3)', () => {
 
   it('présente les deux univers avec leurs routes', async () => {
     render(<App />);
-    expect(await screen.findByText('VYORA Studio')).toBeTruthy();
-    expect(screen.getByText('VYORA Business')).toBeTruthy();
+    // Chaque espace est nommé plusieurs fois dans la vitrine (aperçu produit,
+    // carte de dimension, pastille) : on exige la présence, pas l'unicité.
+    expect((await screen.findAllByText('SORAHNEX Studio')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SORAHNEX Grow').length).toBeGreaterThan(0);
     // Les cartes mènent vers l’onboarding : les espaces de travail sont
     // derrière l’authentification (parcours post-login, sélecteur 2 cartes).
     const cardLinks = screen.getAllByRole('link').filter((link) => link.getAttribute('href') === '/inscription');

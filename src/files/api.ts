@@ -1,5 +1,5 @@
 /**
- * VYORA FILES — téléversement, lecture, suppression.
+ * SORAHNEX FILES — téléversement, lecture, suppression.
  *
  * ## Le chemin d'un fichier, dans l'ordre
  *   1. `validate()` lit les premiers octets et décide du type RÉEL ;

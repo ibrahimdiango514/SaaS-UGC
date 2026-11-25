@@ -1,10 +1,9 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  BarChart3, BellRing, BookOpen, Bot, Boxes, Brain, Building2, Clapperboard,
-  ClipboardList, Coins, CreditCard, Film, FolderKanban, HardDrive, History,
-  LayoutDashboard, Mail, Plug, Scissors, Settings, Shield, SlidersHorizontal,
-  Sparkles, Target, Users, Wallet, Wand2, Zap,
+  BookOpen, Bot, Boxes, Brain, Clapperboard, Coins, CreditCard, Film, FolderKanban,
+  HardDrive, History, LayoutDashboard, Menu, Scissors, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
+import { GROWTH_OS_NAV } from '../business/os/modules';
 
 export type WorkspaceScope = 'studio' | 'business';
 
@@ -38,38 +37,50 @@ export interface WorkspaceShortcut {
   icon: LucideIcon;
 }
 
+/**
+ * Navigation SORAHNEX Studio.
+ *
+ * Cinq groupes par intention, et non par technologie : piloter, créer,
+ * préparer les contenus, retrouver ses fichiers, gérer son compte. Les
+ * interfaces historiques (génération simplifiée, options avancées) restent
+ * accessibles dans « Créer », étiquetées pour ce qu'elles sont.
+ */
 export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
   {
-    id: 'assistant',
-    label: 'Assistant IA',
-    hint: 'Chat, analyse et rédaction',
-    icon: Bot,
-    defaultOpen: true,
-    items: [{
-      to: '/app/ai',
-      label: 'Assistant VYORA',
-      description: 'Conversations, pièces jointes et analyse',
-      icon: Bot,
-      keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
-    }],
-  },
-  {
-    id: 'overview',
-    label: 'Vue d’ensemble',
+    id: 'pilotage',
+    label: 'Pilotage',
+    hint: 'Vue d’ensemble et assistant',
     icon: LayoutDashboard,
     defaultOpen: true,
-    items: [{
-      to: '/app/studio/accueil',
-      label: 'Tableau de bord Studio',
-      description: 'Projets, crédits et activité de création',
-      icon: LayoutDashboard,
-      keywords: ['accueil', 'dashboard', 'studio'],
-    }],
+    items: [
+      {
+        to: '/app/studio/accueil',
+        label: 'Tableau de bord',
+        description: 'Projets, crédits et activité de création',
+        icon: LayoutDashboard,
+        keywords: ['accueil', 'dashboard', 'studio', 'credits', 'activite'],
+      },
+      {
+        to: '/app/ai',
+        label: 'Assistant SORAHNEX',
+        description: 'Conversations, pièces jointes et analyse',
+        icon: Bot,
+        keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
+      },
+      {
+        to: '/app/historique',
+        label: 'Historique des générations',
+        description: 'Statuts, coûts et résultats de génération',
+        icon: History,
+        keywords: ['historique', 'generations', 'jobs', 'statut'],
+      },
+    ],
   },
   {
     id: 'creation',
-    label: 'Création et génération',
-    icon: Sparkles,
+    label: 'Créer',
+    hint: 'Génération et montage',
+    icon: Clapperboard,
     defaultOpen: true,
     items: [
       {
@@ -80,28 +91,6 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
         keywords: ['video', 'ugc', 'generer', 'creer'],
       },
       {
-        to: '/app/studio/avance',
-        label: 'Studio avancé',
-        description: 'Parcours historique et options avancées',
-        icon: Wand2,
-        keywords: ['avance', 'legacy', 'options'],
-      },
-      {
-        to: '/app/studio/classique',
-        label: 'Studio classique',
-        description: 'Interface de génération simplifiée',
-        icon: Film,
-        keywords: ['classique', 'simple', 'video'],
-      },
-    ],
-  },
-  {
-    id: 'production',
-    label: 'Production vidéo',
-    icon: Scissors,
-    defaultOpen: true,
-    items: [
-      {
         to: '/app/studio/montage',
         label: 'Montage vidéo',
         description: 'Assemblage, sous-titres et export',
@@ -109,29 +98,25 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
         keywords: ['montage', 'editeur', 'sous-titres', 'export'],
       },
       {
-        to: '/app/presets',
-        label: 'Réglages vidéo',
-        description: 'Formats, durées et préférences de rendu',
-        icon: SlidersHorizontal,
-        keywords: ['reglages', 'formats', 'presets', 'rendu'],
+        to: '/app/studio/classique',
+        label: 'Génération simplifiée',
+        description: 'Interface de génération réduite à l’essentiel',
+        icon: Film,
+        keywords: ['classique', 'simple', 'video'],
+      },
+      {
+        to: '/app/studio/avance',
+        label: 'Options avancées',
+        description: 'Parcours historique et réglages experts',
+        icon: Wand2,
+        keywords: ['avance', 'legacy', 'options'],
       },
     ],
   },
   {
-    id: 'avatars',
-    label: 'Avatars et personnages IA',
-    icon: Users,
-    items: [{
-      to: '/app/avatars',
-      label: 'Avatars IA',
-      description: 'Personnages et cohérence visuelle',
-      icon: Users,
-      keywords: ['avatar', 'personnage', 'visage', 'ia'],
-    }],
-  },
-  {
-    id: 'content',
-    label: 'Scripts et contenus',
+    id: 'contenus',
+    label: 'Contenus',
+    hint: 'Scripts, prompts et avatars',
     icon: BookOpen,
     items: [
       {
@@ -148,11 +133,26 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
         icon: BookOpen,
         keywords: ['prompt', 'bibliotheque', 'idees'],
       },
+      {
+        to: '/app/avatars',
+        label: 'Avatars IA',
+        description: 'Personnages et cohérence visuelle',
+        icon: Users,
+        keywords: ['avatar', 'personnage', 'visage', 'ia'],
+      },
+      {
+        to: '/app/presets',
+        label: 'Réglages vidéo',
+        description: 'Formats, durées et préférences de rendu',
+        icon: Sparkles,
+        keywords: ['reglages', 'formats', 'presets', 'rendu'],
+      },
     ],
   },
   {
-    id: 'library',
-    label: 'Projets et bibliothèque',
+    id: 'bibliotheque',
+    label: 'Bibliothèque',
+    hint: 'Projets, créations et médias',
     icon: FolderKanban,
     items: [
       {
@@ -165,10 +165,10 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
       },
       {
         to: '/app/bibliotheque',
-        label: 'Bibliothèque',
-        description: 'Créations enregistrées et fichiers privés',
+        label: 'Créations enregistrées',
+        description: 'Vidéos et contenus prêts à réutiliser',
         icon: Sparkles,
-        keywords: ['bibliotheque', 'fichiers', 'creations', 'saved'],
+        keywords: ['bibliotheque', 'creations', 'saved'],
       },
       {
         to: '/app/fichiers',
@@ -180,21 +180,10 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
     ],
   },
   {
-    id: 'history',
-    label: 'Historique',
-    icon: History,
-    items: [{
-      to: '/app/historique',
-      label: 'Générations récentes',
-      description: 'Statuts, coûts et résultats de génération',
-      icon: History,
-      keywords: ['historique', 'generations', 'jobs', 'statut'],
-    }],
-  },
-  {
-    id: 'account',
-    label: 'Crédits et paramètres',
-    icon: CreditCard,
+    id: 'compte',
+    label: 'Compte',
+    hint: 'Formule, crédits et préférences',
+    icon: Settings,
     items: [
       {
         to: '/app/abonnement',
@@ -221,155 +210,45 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
   },
 ];
 
+/**
+ * Navigation SORAHNEX Grow.
+ *
+ * Dérivée du Growth OS : une seule source de vérité pour les modules métier.
+ * Les anciens groupes dupliqués (`config.ts` vs `os/modules.ts`) divergeaient à
+ * chaque ajout de module ; ce n'est plus possible.
+ */
 export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
+  ...GROWTH_OS_NAV.map((group, index) => ({
+    id: group.id,
+    label: group.label,
+    icon: group.items[0]?.icon ?? Boxes,
+    defaultOpen: index < 2,
+    items: group.items.map((item): WorkspaceNavItem => ({
+      to: item.path,
+      label: item.label,
+      description: item.description,
+      icon: item.icon,
+      keywords: [item.shortLabel.toLowerCase(), item.key],
+    })),
+  })),
   {
-    id: 'pilotage',
-    label: 'Pilotage',
-    icon: LayoutDashboard,
-    defaultOpen: true,
+    id: 'outils',
+    label: 'Outils et compte',
+    hint: 'Catalogue de modules, formule et préférences',
+    icon: Boxes,
     items: [
-      {
-        to: '/app/business',
-        label: 'Vue générale',
-        description: 'Chiffres clés, alertes et activité du jour',
-        icon: LayoutDashboard,
-        keywords: ['dashboard', 'accueil', 'pilotage', 'indicateurs', 'growth os'],
-      },
-      {
-        to: '/app/business/reports',
-        label: 'Rapports et analyses',
-        description: 'Conversion, sources, encaissements et recouvrement',
-        icon: BarChart3,
-        keywords: ['rapports', 'analyses', 'conversion', 'sources', 'exports'],
-      },
       {
         to: '/app/business/modules',
         label: 'Modules métier',
-        description: 'Outils opérationnels, données persistées',
+        description: 'Catalogue complet des modules et de leurs données',
         icon: Boxes,
-        badge: '13',
+        badge: '21',
         matchPrefix: true,
         keywords: ['modules', 'outils', 'metier', 'catalogue'],
       },
-    ],
-  },
-  {
-    id: 'commercial',
-    label: 'Commercial',
-    icon: Users,
-    defaultOpen: true,
-    items: [
-      {
-        to: '/app/business/crm',
-        label: 'CRM',
-        description: 'Contacts, fiches, segments, doublons et imports',
-        icon: Users,
-        keywords: ['crm', 'contacts', 'clients', 'prospects', 'segments', 'doublons'],
-      },
-      {
-        to: '/app/business/pipeline',
-        label: 'Pipeline commercial',
-        description: 'Opportunités, étapes et prévisions',
-        icon: Target,
-        keywords: ['pipeline', 'opportunites', 'kanban', 'ventes'],
-      },
-      {
-        to: '/app/business/tasks',
-        label: 'Tâches et activités',
-        description: 'Aujourd’hui, retards, agenda et suivi',
-        icon: ClipboardList,
-        keywords: ['taches', 'activites', 'agenda', 'rappels'],
-      },
-      {
-        to: '/app/business/relances',
-        label: 'Relances',
-        description: 'Messages préparés, canaux et historique',
-        icon: Mail,
-        keywords: ['relances', 'messages', 'whatsapp', 'email', 'sms'],
-      },
-    ],
-  },
-  {
-    id: 'finance',
-    label: 'Finance',
-    icon: Wallet,
-    defaultOpen: true,
-    items: [
-      {
-        to: '/app/business/finance',
-        label: 'Finance',
-        description: 'Créances, paiements, soldes et échéances',
-        icon: Wallet,
-        keywords: ['finance', 'creances', 'paiements', 'soldes', 'echeances', 'recus'],
-      },
-      {
-        to: '/app/business/recouvrement',
-        label: 'Recouvrement',
-        description: 'Priorités, promesses, litiges et risques',
-        icon: BellRing,
-        keywords: ['recouvrement', 'dettes', 'promesses', 'litiges', 'risque'],
-      },
-    ],
-  },
-  {
-    id: 'assistant',
-    label: 'Assistant IA',
-    icon: Brain,
-    defaultOpen: true,
-    items: [
-      {
-        to: '/app/business/assistant',
-        label: 'Assistant IA',
-        description: 'Conversation reliée au CRM et aux finances',
-        icon: Brain,
-        badge: 'IA',
-        keywords: ['assistant', 'chat', 'agent', 'ia', 'conversation'],
-      },
-      {
-        to: '/app/business/company',
-        label: 'Contexte entreprise',
-        description: 'Activité, offre, clients et priorités',
-        icon: Building2,
-        keywords: ['entreprise', 'societe', 'contexte', 'offre'],
-      },
-    ],
-  },
-  {
-    id: 'settings',
-    label: 'Configuration',
-    icon: Settings,
-    items: [
-      {
-        to: '/app/business/memory',
-        label: 'Mémoire métier',
-        description: 'Faits consentis utilisés par l’assistant',
-        icon: Brain,
-        keywords: ['memoire', 'memory', 'consentement', 'contexte'],
-      },
-      {
-        to: '/app/business/providers',
-        label: 'Services IA',
-        description: 'Fournisseurs vérifiés et routage des modèles',
-        icon: Zap,
-        keywords: ['fournisseur', 'provider', 'modele', 'routage'],
-      },
-      {
-        to: '/app/business/integrations',
-        label: 'Intégrations',
-        description: 'Connecteurs, autorisations et état réel',
-        icon: Plug,
-        keywords: ['integrations', 'connecteurs', 'oauth', 'shopify', 'meta'],
-      },
-      {
-        to: '/app/business/ai',
-        label: 'Contrôle IA',
-        description: 'Mémoire de l’agent et consentement',
-        icon: Shield,
-        keywords: ['controle', 'ia', 'agent', 'consentement'],
-      },
       {
         to: '/app/business/abonnement',
-        label: 'Formules Business Growth',
+        label: 'Formule SORAHNEX Grow',
         description: 'Abonnement et limites de l’espace métier',
         icon: CreditCard,
         keywords: ['formule', 'abonnement', 'plan', 'prix'],
@@ -388,29 +267,45 @@ export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
 export const STUDIO_SHORTCUTS: WorkspaceShortcut[] = [
   { to: '/app/studio', label: 'Créer', icon: Clapperboard },
   { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  { to: '/app/bibliotheque', label: 'Bibliothèque', icon: Sparkles },
+  { to: '/app/bibliotheque', label: 'Créations', icon: Sparkles },
 ];
 
 export const BUSINESS_SHORTCUTS: WorkspaceShortcut[] = [
-  { to: '/app/business', label: 'Vue générale', icon: LayoutDashboard },
-  { to: '/app/business/crm', label: 'CRM', icon: Users },
-  { to: '/app/business/pipeline', label: 'Pipeline', icon: Target },
-  { to: '/app/business/finance', label: 'Finance', icon: Wallet },
-];
-
-export const STUDIO_MOBILE_NAV = [
-  { to: '/app/studio/accueil', label: 'Vue d’ensemble', icon: LayoutDashboard },
-  { to: '/app/studio', label: 'Créer', icon: Clapperboard },
-  { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  { to: '/app/historique', label: 'Historique', icon: History },
-];
-
-export const BUSINESS_MOBILE_NAV = [
   { to: '/app/business', label: 'Vue', icon: LayoutDashboard },
   { to: '/app/business/crm', label: 'CRM', icon: Users },
-  { to: '/app/business/pipeline', label: 'Pipeline', icon: Target },
-  { to: '/app/business/finance', label: 'Finance', icon: Wallet },
+  { to: '/app/business/pipeline', label: 'Pipeline', icon: Boxes },
+];
+
+export interface MobileNavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  /** Ouvre le tiroir complet au lieu de naviguer (entrée « Plus »). */
+  opensDrawer?: boolean;
+}
+
+/**
+ * Barre du bas de SORAHNEX Studio.
+ *
+ * Quatre destinations réelles et une entrée « Plus » : les outils secondaires
+ * (scripts, avatars, crédits, paramètres) restent dans le tiroir sans encombrer
+ * l'écran d'un téléphone.
+ */
+export const STUDIO_MOBILE_NAV: MobileNavItem[] = [
+  { to: '/app/studio/accueil', label: 'Accueil', icon: LayoutDashboard },
+  { to: '/app/studio', label: 'Créer', icon: Clapperboard },
+  { to: '/app/projets', label: 'Projets', icon: FolderKanban },
+  { to: '/app/ai', label: 'Assistant', icon: Bot },
+  { to: '', label: 'Plus', icon: Menu, opensDrawer: true },
+];
+
+/** Barre du bas de SORAHNEX Grow sur Android : quatre destinations + tiroir. */
+export const BUSINESS_MOBILE_NAV: MobileNavItem[] = [
+  { to: '/app/business', label: 'Accueil', icon: LayoutDashboard },
+  { to: '/app/business/crm', label: 'Prospects', icon: Users },
+  { to: '/app/business/pipeline', label: 'Ventes', icon: Boxes },
   { to: '/app/business/assistant', label: 'Assistant', icon: Brain },
+  { to: '', label: 'Plus', icon: Menu, opensDrawer: true },
 ];
 
 export function normalizeSearch(value: string): string {
@@ -454,13 +349,6 @@ export function isNavItemActive(item: WorkspaceNavItem, pathname: string, search
 
   for (const [key, value] of target.params.entries()) {
     if (current.get(key) !== value) return false;
-  }
-  // Un lien sans paramètre ne doit pas s'allumer sur une autre sous-section.
-  if (target.params.toString() === '' && item.onlyWithoutParams?.length) {
-    return true;
-  }
-  if (target.params.toString() === '') {
-    return item.matchPrefix ? true : true;
   }
   return true;
 }

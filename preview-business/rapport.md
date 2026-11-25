@@ -30,8 +30,8 @@
 
 - Salutation issue du profil authentifié (`Bonjour, Awa.`), avec repli neutre si le prénom manque.
 - Deux cartes d’espace indépendantes, sans tarif Business Growth et sans redirection d’abonnement :
-  - **VYORA Studio** → `/app/studio/accueil` ;
-  - **VYORA Business Growth** → `/app/business`.
+  - **SORAHNEX Studio** → `/app/studio/accueil` ;
+  - **SORAHNEX Grow** → `/app/business`.
 - Bandeau de garanties : crédits séparés, données isolées, retour possible au sélecteur.
 - Nav du hub sans les entrées Studio/Business ; la sidebar de chaque espace conserve **« Tous les espaces »**.
 - Le libellé de marque de la sidebar est revenu à une seule source (`BrandLockup`) et ne s’affiche plus sur deux lignes.

@@ -36,9 +36,9 @@ const IDEES = [
 ] as const;
 
 /**
- * État fourni par la page hôte (Business Grow).
+ * État fourni par la page hôte (SORAHNEX Grow).
  *
- * Business Grow possède déjà les conversations, les messages, les mutations et
+ * SORAHNEX Grow possède déjà les conversations, les messages, les mutations et
  * les règles d'isolation (révisions, séquences, rechargements). L'interface ne
  * les duplique pas : elle les affiche et déclenche les mêmes rappels.
  */
@@ -62,18 +62,18 @@ export interface BusinessAssistantHost {
 }
 
 /**
- * VYORA AI — interface de conversation, hébergée dans Business Grow.
+ * SORAHNEX AI — interface de conversation, hébergée dans SORAHNEX Grow.
  *
  * ## Un seul espace métier
  *
- * Ce composant ne crée ni route propre au-dessus de Business Grow, ni
+ * Ce composant ne crée ni route propre au-dessus de SORAHNEX Grow, ni
  * navigation d'application : il occupe la section « Assistant » de Business
- * Grow et s'appuie sur le socle `business-grow`. Les conversations sont
+ * SORAHNEX Grow et s'appuie sur le socle `business-grow`. Les conversations sont
  * rattachées à l'entreprise active.
  *
- * Le panneau latéral est celui de VYORA AI, utilisé en mode `embedded` : il ne
+ * Le panneau latéral est celui de SORAHNEX AI, utilisé en mode `embedded` : il ne
  * propose plus de liens vers d'autres espaces (sinon il reconstituerait la
- * navigation globale à côté de celle de Business Grow), seulement les
+ * navigation globale à côté de celle de SORAHNEX Grow), seulement les
  * conversations et le raccourci vers la rubrique Intégrations.
  *
  * ## Ce qui n'est pas simulé
@@ -86,10 +86,10 @@ export interface BusinessAssistantHost {
  *
  * ## Deux modes
  *
- * - **Piloté** (`host` fourni) : Business Grow possède l'état. C'est le mode
+ * - **Piloté** (`host` fourni) : SORAHNEX Grow possède l'état. C'est le mode
  *   utilisé dans l'application.
  * - **Autonome** (`host` absent) : le composant charge lui-même via
- *   `useAssistant`. Utile pour les tests et pour un usage hors Business Grow.
+ *   `useAssistant`. Utile pour les tests et pour un usage hors SORAHNEX Grow.
  */
 export function BusinessAssistant({
   workspaceId,
@@ -102,9 +102,9 @@ export function BusinessAssistant({
   onDraftConsumed,
 }: {
   workspaceId: string | null;
-  /** État géré par Business Grow. Absent, le composant est autonome. */
+  /** État géré par SORAHNEX Grow. Absent, le composant est autonome. */
   host?: BusinessAssistantHost;
-  /** Ouvre la rubrique Intégrations de Business Grow. */
+  /** Ouvre la rubrique Intégrations de SORAHNEX Grow. */
   onOpenIntegrations?: () => void;
   backendReady?: boolean;
   backendLoading?: boolean;
@@ -274,7 +274,7 @@ export function BusinessAssistant({
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium text-slate-200">{titreActif}</p>
             <p className="text-[0.62rem] text-slate-500">
-              {workspaceId ? 'Entreprise active · AI Director VYORA' : 'Conversation personnelle'}
+              {workspaceId ? 'Entreprise active · AI Director SORAHNEX' : 'Conversation personnelle'}
               {' · '}
               {backendLoading
                 ? 'vérification des services IA…'
@@ -298,11 +298,11 @@ export function BusinessAssistant({
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
             <div>
               <p className="font-medium">
-                {blocage === 'chargement' ? 'Connexion à Business Grow…' : 'Business Grow ne répond pas pour le moment'}
+                {blocage === 'chargement' ? 'Connexion à SORAHNEX Grow…' : 'SORAHNEX Grow ne répond pas pour le moment'}
               </p>
               <p className="mt-1 text-amber-100/70">
                 {blocage === 'chargement'
-                  ? 'L’historique et la mémoire se chargent dès que la session VYORA est confirmée.'
+                  ? 'L’historique et la mémoire se chargent dès que la session SORAHNEX est confirmée.'
                   : 'La connexion a été retentée automatiquement. Vérifiez votre connexion puis utilisez « Réessayer » : aucune donnée n’est inventée ni enregistrée localement.'}
               </p>
             </div>
@@ -378,7 +378,7 @@ export function BusinessAssistant({
             onModeChange={setMode}
             suggestion={suggestion}
             onSuggestionUsed={() => setSuggestion(null)}
-            // Le vocabulaire métier de Business Grow, conservé de l'interface
+            // Le vocabulaire métier de SORAHNEX Grow, conservé de l'interface
             // précédente : on ne demande pas « votre message » au même endroit
             // qu'un assistant personnel.
             label="Votre demande"

@@ -37,7 +37,7 @@ jobs:
           # définir la variable de dépôt `VYORA_SITE_URL` (Settings → Secrets and
           # variables → Actions → Variables ; valeur publique, pas un secret) :
           # aucun commit n'est nécessaire pour viser le nouveau domaine. Tant
-          # qu'elle est absente, le domaine VYORA actuel est mesuré.
+          # qu'elle est absente, le domaine SORAHNEX actuel est mesuré.
           SITE: ${{ inputs.site_url || vars.VYORA_SITE_URL || 'https://vyora-saas-ugc.netlify.app' }}
           FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
           VIDEO_FN: https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/reelora-video

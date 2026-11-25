@@ -616,7 +616,7 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader title="Tentatives par fournisseur" description="Business Growth — appels réellement journalisés." />
+          <CardHeader title="Tentatives par fournisseur" description="SORAHNEX Grow — appels réellement journalisés." />
           {attempts.length === 0 ? <EmptyState icon={<Sparkles size={22} />} title="Aucune tentative" description="Aucun appel IA n’a encore été journalisé." /> : (
             <div className="table-wrap">
               <table className="table">
@@ -656,7 +656,7 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
 }
 
 /* -------------------------------------------------------------------------- */
-/* Activité Studio / Business Growth                                          */
+/* Activité Studio / SORAHNEX Grow                                          */
 /* -------------------------------------------------------------------------- */
 
 export function StudioActivitySection({ metrics, loading }: { metrics: AdminMetrics | null; loading: boolean }) {
@@ -701,8 +701,8 @@ export function GrowthActivitySection({ metrics, loading }: { metrics: AdminMetr
         <StatCard label="Mémoire métier" value={metrics.business_growth.memory_items} icon={<Coins size={19} />} tone="emerald" hint="faits consentis enregistrés" />
         <StatCard label="Tokens consommés" value={metrics.business_growth.tokens_total} icon={<TrendingUp size={19} />} tone="amber" hint={`${metrics.business_growth.tool_executions} action(s) proposée(s)`} />
       </div>
-      <Card><CardHeader title="Requêtes Business Growth par mois" description="Requêtes réellement journalisées." />
-        <div className="p-5"><BarChart labels={monthLabels(rows)} values={rows.map((row) => row.requests)} label="Requêtes Business Growth par mois" color="#22d3ee" /></div>
+      <Card><CardHeader title="Requêtes SORAHNEX Grow par mois" description="Requêtes réellement journalisées." />
+        <div className="p-5"><BarChart labels={monthLabels(rows)} values={rows.map((row) => row.requests)} label="Requêtes SORAHNEX Grow par mois" color="#22d3ee" /></div>
       </Card>
     </div>
   );

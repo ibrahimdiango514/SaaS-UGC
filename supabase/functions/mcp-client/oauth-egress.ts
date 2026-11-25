@@ -1,5 +1,5 @@
 /**
- * VYORA — sortie réseau dédiée à OAuth 2.1.
+ * SORAHNEX — sortie réseau dédiée à OAuth 2.1.
  *
  * ## Pourquoi une seconde sortie, et pas `safe-egress`
  *
@@ -94,7 +94,7 @@ export function requeteOAuth(
 
   const lignes = [`${methode} ${chemin || '/'} HTTP/1.1`];
   lignes.push(`Host: ${hostname}`);
-  lignes.push('User-Agent: VYORA-MCP/1.0 (+https://vyora.app)');
+  lignes.push('User-Agent: SORAHNEX-MCP/1.0 (+https://vyora.app)');
   lignes.push(`Accept: ${accept}`);
   lignes.push('Accept-Encoding: identity');
   if (methode === 'POST') lignes.push(`Content-Type: ${typeContenu}`);

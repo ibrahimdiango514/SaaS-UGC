@@ -1,4 +1,4 @@
-# Business Grow en production — cause, correctif et preuves (2026-11-12)
+# Grow en production — cause, correctif et preuves (2026-11-12)
 
 Projet Supabase : `xbuuhfwobrafcbgtdgjx` — fonction Edge `business-grow`
 (`6e29e1f3-a9e1-4258-a399-460ed2576d07`), **version 13**, `ACTIVE`, `verify_jwt: true`.
@@ -7,7 +7,7 @@ Projet Supabase : `xbuuhfwobrafcbgtdgjx` — fonction Edge `business-grow`
 
 | Symptôme écran | Message source | Cause réelle |
 | --- | --- | --- |
-| « Backend Business Grow indisponible » | `src/business/BusinessGrowWorkspace.tsx` (bandeau backend) | La fonction renvoyait **503 `BOOT_ERROR`** : le déploiement en base était tronqué à ~20 000 caractères. |
+| « Backend Grow indisponible » | `src/business/BusinessGrowWorkspace.tsx` (bandeau backend) | La fonction renvoyait **503 `BOOT_ERROR`** : le déploiement en base était tronqué à ~20 000 caractères. |
 | « Le service IA est indisponible » | `BusinessGrowWorkspace.tsx` l. 265 | Correcteur : plus aucun fournisseur routable (`NO_VERIFIED_PROVIDER`, 503) ou requête refusée par CORS (403). |
 
 Après le correctif de démarrage, il restait **deux causes distinctes**, toutes deux
@@ -45,7 +45,7 @@ const allowedOrigins = [
 ```
 
 Le secret **s'ajoute** désormais à la liste au lieu de la remplacer. CORS n'est pas une
-frontière d'authentification : chaque requête exige toujours un JWT VYORA valide (401 sinon).
+frontière d'authentification : chaque requête exige toujours un JWT SORAHNEX valide (401 sinon).
 
 Secret `BUSINESS_GROW_ALLOWED_ORIGINS` repassé à une valeur **superset** explicite
 (localhost 5173/4173, `vyora-ugc`, `saas-ugc-growth`, deploy-preview, `sbc-ai-agency-dashbord`,

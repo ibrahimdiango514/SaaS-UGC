@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur PrestaShop : lecture du catalogue par API officielle.
+ * SORAHNEX — connecteur PrestaShop : lecture du catalogue par API officielle.
  *
  * ## Pourquoi l'API et pas le HTML
  * PrestaShop n'expose aucun catalogue public normalisé : `accessFor('prestashop')`

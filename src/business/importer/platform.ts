@@ -1,5 +1,5 @@
 /**
- * VYORA — détection de plateforme e-commerce.
+ * SORAHNEX — détection de plateforme e-commerce.
  *
  * ## Principe : des indices observables, jamais une supposition
  *

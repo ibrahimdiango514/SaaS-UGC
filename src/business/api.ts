@@ -216,7 +216,7 @@ export class BusinessGrowApiError extends Error {
 }
 
 /**
- * Motif d'un refus d'abonnement Business Grow transporté par l'erreur, ou
+ * Motif d'un refus d'abonnement SORAHNEX Grow transporté par l'erreur, ou
  * `null` si l'erreur n'est pas un refus d'abonnement.
  */
 export function subscriptionRefusalOf(error: unknown): {
@@ -345,7 +345,7 @@ async function readFunctionResponse<T>(response: Response): Promise<TransportOut
       kind: 'fatal',
       error: error instanceof BusinessGrowApiError
         ? error
-        : new BusinessGrowApiError('Réponse Business Grow invalide.', 'INVALID_RESPONSE', response.status),
+        : new BusinessGrowApiError('Réponse SORAHNEX Grow invalide.', 'INVALID_RESPONSE', response.status),
     };
   }
 }
@@ -357,10 +357,10 @@ function toApiError(payload: unknown, status: number): BusinessGrowApiError {
     : body; // La passerelle Supabase renvoie aussi { code, message } à la racine.
   const code = typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED';
   if (status === 401 && /^(?:UNAUTHORIZED|INVALID_JWT)/i.test(code)) {
-    return new BusinessGrowApiError('Session VYORA invalide ou expirée. Reconnectez-vous.', 'UNAUTHENTICATED', status);
+    return new BusinessGrowApiError('Session SORAHNEX invalide ou expirée. Reconnectez-vous.', 'UNAUTHENTICATED', status);
   }
   return new BusinessGrowApiError(
-    typeof detail.message === 'string' ? detail.message : 'La demande Business Grow a échoué.',
+    typeof detail.message === 'string' ? detail.message : 'La demande SORAHNEX Grow a échoué.',
     code,
     status,
   );
@@ -426,7 +426,7 @@ async function invokeWithFallback<T>(
   // Diagnostic sans JWT, contenu utilisateur ni affirmation sur l'état du déploiement.
   console.warn('[business-grow] connexion impossible', { action, failures });
   throw new BusinessGrowApiError(
-    'Impossible de joindre Business Grow depuis cet appareil. Vérifiez votre connexion puis réessayez.',
+    'Impossible de joindre SORAHNEX Grow depuis cet appareil. Vérifiez votre connexion puis réessayez.',
     'BUSINESS_GROW_UNREACHABLE',
   );
 }
@@ -434,7 +434,7 @@ async function invokeWithFallback<T>(
 async function invoke<T>(action: string, values: Record<string, unknown> = {}): Promise<T> {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) throw new BusinessGrowApiError(sessionError.message, 'SESSION_ERROR');
-  if (!sessionData.session) throw new BusinessGrowApiError('Connectez-vous pour utiliser Business Grow.', 'UNAUTHENTICATED', 401);
+  if (!sessionData.session) throw new BusinessGrowApiError('Connectez-vous pour utiliser SORAHNEX Grow.', 'UNAUTHENTICATED', 401);
 
   const localOnly = useLocalFunction();
   const accessToken = sessionData.session.access_token;
@@ -457,7 +457,7 @@ async function invoke<T>(action: string, values: Record<string, unknown> = {}): 
 
 function parseResponse<T>(payload: unknown, status: number): T {
   if (!payload || typeof payload !== 'object') {
-    throw new BusinessGrowApiError('Réponse Business Grow invalide.', 'INVALID_RESPONSE', status);
+    throw new BusinessGrowApiError('Réponse SORAHNEX Grow invalide.', 'INVALID_RESPONSE', status);
   }
   const response = payload as Record<string, unknown>;
   if (status < 200 || status >= 300 || response.error) {
@@ -465,7 +465,7 @@ function parseResponse<T>(payload: unknown, status: number): T {
       ? response.error as Record<string, unknown>
       : {};
     throw new BusinessGrowApiError(
-      typeof detail.message === 'string' ? detail.message : 'La demande Business Grow a échoué.',
+      typeof detail.message === 'string' ? detail.message : 'La demande SORAHNEX Grow a échoué.',
       typeof detail.code === 'string' ? detail.code : 'BUSINESS_GROW_REQUEST_FAILED',
       status,
       // Le serveur place les détails à la racine de `error` (à côté de `code`
@@ -474,7 +474,7 @@ function parseResponse<T>(payload: unknown, status: number): T {
     );
   }
   if (!('data' in response)) {
-    throw new BusinessGrowApiError('Réponse Business Grow invalide.', 'INVALID_RESPONSE', status);
+    throw new BusinessGrowApiError('Réponse SORAHNEX Grow invalide.', 'INVALID_RESPONSE', status);
   }
   return response.data as T;
 }
@@ -578,7 +578,7 @@ export const businessGrowApi = {
     invoke<{ itemId: string }>('memory.item.put', { itemId, category, content, ...(workspaceId ? { workspaceId } : {}) }),
   deleteMemoryItem: (itemId: string, workspaceId?: string | null) =>
     invoke<{ deleted: boolean }>('memory.item.delete', { itemId, ...(workspaceId ? { workspaceId } : {}) }),
-  /** Mémoire persistante de l'agent (VYORA AI CORE, saas_business.ai_memories). */
+  /** Mémoire persistante de l'agent (SORAHNEX AI CORE, saas_business.ai_memories). */
   listAgentMemories: (options?: { category?: string; limit?: number; workspaceId?: string | null }) =>
     invoke<{ memories: BusinessAgentMemory[] }>('agentMemory.list', {
       ...(options?.category ? { category: options.category } : {}),

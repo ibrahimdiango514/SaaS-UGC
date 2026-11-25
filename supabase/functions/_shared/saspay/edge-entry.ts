@@ -1,4 +1,4 @@
-// VYORA — point d'entrée du bundle de production des trois fonctions de paiement.
+// SORAHNEX — point d'entrée du bundle de production des trois fonctions de paiement.
 //
 // Les sources `vyora-payments/index.ts`, `vyora-saspay-webhook/index.ts` et
 // `vyora-payments-reconcile/index.ts` importent ce dossier : le canal de

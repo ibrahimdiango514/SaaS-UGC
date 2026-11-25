@@ -39,7 +39,7 @@ const supabaseUrl = env('SUPABASE_URL');
 const anonKey = env('SUPABASE_ANON_KEY') || env('SUPABASE_PUBLISHABLE_KEY');
 const databaseUrl = env('STORE_IMPORT_DATABASE_URL') || env('BUSINESS_GROW_DATABASE_URL') || env('SUPABASE_DB_URL');
 
-// CORS : les mêmes origines que Business Grow. CORS n'est pas la frontière
+// CORS : les mêmes origines que Grow. CORS n'est pas la frontière
 // d'authentification (chaque requête exige un JWT), mais une origine inconnue
 // n'est pas traitée.
 // La liste (et la correspondance des motifs) est partagée avec `store-connect` :
@@ -203,7 +203,7 @@ const store: StoreImportDependencies = {
   getUserId,
 
   /**
-   * Abonnement Business Grow — la SEULE source de vérité.
+   * Abonnement Grow — la SEULE source de vérité.
    *
    * Appel à `saas_business.bg_import_access`, qui lit `subscriptions` et
    * `plans` et applique la règle (statut actif, période en cours, formule
@@ -225,7 +225,7 @@ const store: StoreImportDependencies = {
       reason: typeof droits.reason === 'string' ? droits.reason : 'UNKNOWN',
       message: typeof droits.message === 'string'
         ? droits.message
-        : 'Un abonnement Business Grow actif est requis.',
+        : 'Un abonnement Grow actif est requis.',
       status: typeof droits.status === 'string' ? droits.status : null,
       planKey: typeof droits.plan_key === 'string' ? droits.plan_key : null,
       currentPeriodEnd: typeof droits.current_period_end === 'string'

@@ -252,7 +252,7 @@ export function buildRequest(
   return [
     `${methodeFinale} ${path || '/'} HTTP/1.1`,
     `Host: ${hostname}`,
-    'User-Agent: VYORA-CatalogImporter/1.0 (+https://vyora.app)',
+    'User-Agent: SORAHNEX-CatalogImporter/1.0 (+https://vyora.app)',
     `Accept: ${accept}`,
     'Accept-Language: fr,en;q=0.8',
     'Accept-Encoding: identity',

@@ -1,4 +1,4 @@
-# Correction — « assistance IA indisponible » et « backend Business Grow injoignable »
+# Correction — « assistance IA indisponible » et « backend Grow injoignable »
 
 Date : 2026-11-11 · Branche `arena/323bad30-saas-ugc` · Aucune migration, aucun crédit, aucune clé modifiée.
 
@@ -37,9 +37,9 @@ groq: Boolean(Deno.env.get("BUSINESS_GROW_GROQ_API_KEY") || Deno.env.get("GROQ_A
 `BUSINESS_GROW_GROQ_API_KEY` / `BUSINESS_GROW_GROQ_MODEL` avec repli. Vérifié par un appel authentifié :
 pg_net id 4537 → `400 INVALID_INPUT` (validation applicative atteinte, donc le contrôle de clé passe).
 
-## 2. « Le backend Business Grow est absent ou injoignable »
+## 2. « Le backend Grow est absent ou injoignable »
 
-**Symptôme** : onglet Business Grow, panneau « Backend Business Grow indisponible », compteurs « — ».
+**Symptôme** : onglet Grow, panneau « Backend Grow indisponible », compteurs « — ».
 
 **Cause racine** : l'allowlist CORS de `business-grow` listait des identifiants de sandbox figés
 (`5173-iu476i6ok9qrn5o47a39w.e2b.app`). L'aperçu courant vit sur un autre hôte
@@ -54,7 +54,7 @@ pg_net id 4537 → `400 INVALID_INPUT` (validation applicative atteinte, donc le
 
 **Correction** : `defaultAllowedOrigins` contient désormais le motif `https://*.e2b.app` (les hôtes
 d'aperçu changent à chaque session), en plus des origines Netlify déjà autorisées. CORS n'est pas une
-frontière d'authentification ici : chaque requête exige de toute façon un JWT VYORA.
+frontière d'authentification ici : chaque requête exige de toute façon un JWT SORAHNEX.
 
 **Preuve après** (pg_net id 4530, session réelle du compte A, `Origin: https://4180-ia19ukd7j0vjzx70dsuks.e2b.app`) :
 

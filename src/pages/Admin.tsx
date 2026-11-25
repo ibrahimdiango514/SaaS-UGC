@@ -250,7 +250,7 @@ export default function Admin() {
         { id: 'providers', label: 'Fournisseurs IA', icon: <Bot size={14} /> },
         { id: 'ai-core', label: 'Contrôle IA', icon: <Cpu size={14} /> },
         { id: 'studio-activity', label: 'Activité Studio', icon: <Video size={14} /> },
-        { id: 'growth-activity', label: 'Activité Business Growth', icon: <Sparkles size={14} /> },
+        { id: 'growth-activity', label: 'Activité SORAHNEX Grow', icon: <Sparkles size={14} /> },
         { id: 'video-pricing', label: 'Tarifs vidéo', icon: <Video size={14} /> },
         { id: 'settings', label: 'Paramètres', icon: <Settings2 size={14} /> },
         { id: 'audit', label: 'Journal', icon: <FileClock size={14} /> },
@@ -323,7 +323,7 @@ export default function Admin() {
                   <td><div className="flex flex-wrap gap-1">
                     <Button size="sm" variant="outline" icon={<Coins size={12} />} onClick={() => setCreditsModal(u)}>Crédits</Button>
                     {!u.roles.includes('admin') && (
-                      <Button size="sm" variant="outline" icon={<Brain size={12} />} onClick={() => setBusinessGrowModal(u)} title="Attribution manuelle d’une formule Business Grow (journalisée)">Business Grow</Button>
+                      <Button size="sm" variant="outline" icon={<Brain size={12} />} onClick={() => setBusinessGrowModal(u)} title="Attribution manuelle d’une formule SORAHNEX Grow (journalisée)">SORAHNEX Grow</Button>
                     )}
                     <Button size="sm" variant="ghost" loading={busy === `role-${u.id}`} onClick={() => void run(`role-${u.id}`, () => adminSetRole(u.id, u.roles.includes('admin') ? 'user' : 'admin'), 'Rôle modifié.')}>{u.roles.includes('admin') ? 'Retirer admin' : 'Promouvoir'}</Button>
                     <Button size="sm" variant="ghost" loading={busy === `status-${u.id}`} onClick={() => void run(`status-${u.id}`, () => adminSetAccountStatus(u.id, u.subscription_status === 'suspended' ? 'active' : 'suspended'), 'Statut modifié.')}>{u.subscription_status === 'suspended' ? 'Réactiver' : 'Suspendre'}</Button>
@@ -374,7 +374,7 @@ export default function Admin() {
       {tab === 'video-pricing' && (
         <div className="space-y-5">
           <Card>
-            <CardHeader title="Tarification interne — VYORA Studio" description="Les coûts fournisseur et les conversions restent visibles uniquement dans cette console." />
+            <CardHeader title="Tarification interne — SORAHNEX Studio" description="Les coûts fournisseur et les conversions restent visibles uniquement dans cette console." />
             <form onSubmit={(e) => void onVideoPricing(e)} className="space-y-4 p-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <Input label="Taux USD → FCFA (XOF)" type="number" min="0.0001" step="0.0001" required

@@ -22,7 +22,7 @@ export function PreviewStage({ state, referenceUrl, videoUrl, children, onClearR
               <div className="absolute inset-0 animate-pulse rounded-2xl bg-brand-500/10 blur-xl" />
               <Clapperboard size={32} strokeWidth={1.4} className="relative" />
             </div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-brand-200/80">VYORA Studio</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-brand-200/80">SORAHNEX Studio</p>
             <h2 className="mt-3 max-w-md text-balance text-xl font-semibold leading-snug text-white sm:text-2xl">
               Votre prochaine scène commence ici
             </h2>
@@ -63,13 +63,13 @@ export function PreviewStage({ state, referenceUrl, videoUrl, children, onClearR
         {state === 'result' && videoUrl && (
           <div className="animate-fadeUp w-full">
             <video key={videoUrl} src={videoUrl} controls playsInline preload="metadata" className="max-h-[520px] w-full rounded-xl border border-white/10 bg-black" />
-            <p className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-slate-500"><Play size={11} /> Lecture dans VYORA · fichier conservé dans votre espace privé</p>
+            <p className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-slate-500"><Play size={11} /> Lecture dans SORAHNEX · fichier conservé dans votre espace privé</p>
           </div>
         )}
       </div>
 
       <div className="relative flex items-center justify-between gap-3 border-t border-white/[0.06] bg-black/20 px-4 py-2.5 text-[10px] uppercase tracking-[0.14em] text-slate-600">
-        <span className="flex items-center gap-1.5"><Sparkles size={11} /> Aperçu VYORA</span>
+        <span className="flex items-center gap-1.5"><Sparkles size={11} /> Aperçu SORAHNEX</span>
         <span>{state === 'result' ? 'Résultat final' : state === 'reference' ? 'Image de référence' : state === 'generating' ? 'Suivi live' : 'En attente de création'}</span>
       </div>
     </div>

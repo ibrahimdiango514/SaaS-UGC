@@ -1,5 +1,5 @@
 /**
- * VYORA Growth OS — Lot H : intelligence et automatisations.
+ * SORAHNEX Growth OS — Lot H : intelligence et automatisations.
  *
  * Aucune IA n'est simulée : les signaux sont des règles déterministes sur des
  * données réelles. Une automatisation propose une action ; seule une action

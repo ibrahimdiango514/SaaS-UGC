@@ -1,11 +1,11 @@
 /**
- * Single-prompt production planner (VYORA UGC Studio).
+ * Single-prompt production planner (SORAHNEX UGC Studio).
  *
  * `buildLocalPlan` is a DETERMINISTIC local planner: it assembles the user's own
  * instruction into a structured plan (objective, sector, narrative scenes,
  * visual instructions). It is explicitly NOT an AI response and is labelled as
  * such in the UI. The optional AI path (`mapAiScriptToPlan`) uses the EXISTING
- * `vyora-ai` Edge function (VYORA AI GATEWAY → FreeLLMAPI) and is only reachable
+ * `vyora-ai` Edge function (SORAHNEX AI → FreeLLMAPI) and is only reachable
  * when the central provider is configured; otherwise the UI shows an explicit
  * unavailability state and never simulates.
  *
@@ -236,7 +236,7 @@ export function mapAiScriptToPlan(raw: unknown, fallback: ProductionPlan): Retur
     version: PLAN_VERSION, source: 'ai',
     objective: str(r.script_text ?? r.script ?? fallback.objective).slice(0, 4000) || fallback.objective,
     sector: fallback.sector, product: fallback.product, ratio: fallback.ratio,
-    scenes, warnings: ['Plan proposé par l’assistant VYORA : relisez et ajustez chaque scène avant génération.'],
+    scenes, warnings: ['Plan proposé par l’assistant SORAHNEX : relisez et ajustez chaque scène avant génération.'],
   });
 }
 
@@ -248,7 +248,7 @@ export function planToEditorProject(plan: ProductionPlan, meta: {
   return {
     version: 1,
     projectId: meta.projectId ?? null,
-    title: (plan.product || plan.objective).slice(0, 90) || 'Montage VYORA',
+    title: (plan.product || plan.objective).slice(0, 90) || 'Montage SORAHNEX',
     prompt: plan.objective,
     sector: plan.sector,
     quality: meta.quality,

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { humanizeError } from '../src/lib/errors';
 
 /*
- * Une seule passerelle IA pour Studio : VYORA AI GATEWAY -> FreeLLMAPI.
+ * Une seule passerelle IA pour Studio : SORAHNEX AI -> FreeLLMAPI.
  *
  * L'ancienne passerelle Groq (`reelora-ai`) est supprimée : ses actions
  * (script, prompt, accroches, visuel, scènes) sont servies par `vyora-ai`, qui
@@ -24,7 +24,8 @@ describe('Une seule passerelle IA', () => {
 
   it('le client ne connaît que `vyora-ai`, sans repli nommant un fournisseur', () => {
     const api = read('src/lib/api.ts');
-    expect(api).toContain("invokeEdge<T>('vyora-ai', body)");
+    expect(api).toContain("invokeEdge<T>(edgeFunctionName('ai'), body)");
+    expect(api).toContain("import { edgeFunctionName } from './platform-identity'");
     expect(api).not.toContain("'reelora-ai'");
     expect(api).not.toMatch(/api\.groq\.com|generativelanguage\.googleapis\.com/i);
   });

@@ -1,5 +1,5 @@
 // Création softpay dont la réponse s'est perdue : le paiement a pu être
-// encaissé sans que VYORA n'en connaisse l'identifiant.
+// encaissé sans que SORAHNEX n'en connaisse l'identifiant.
 //
 // Règle vérifiée ici : une telle commande n'est jamais déclarée « non payée »
 // par un automate, jamais « payée » sans vérification SasPay, et le client ne
@@ -151,7 +151,7 @@ describe('réponse de création perdue — aucun second paiement', () => {
     expect(ctx.saspay.transactions.size).toBe(1);
   });
 
-  it('un abonnement Business Grow est refusé aussi (et réciproquement)', async () => {
+  it('un abonnement SORAHNEX Grow est refusé aussi (et réciproquement)', async () => {
     const ctx = setup();
     await lostResponse(ctx);
     await expectError(ctx.service.create(alice, plan('idem-bg-0001')), 'PAYMENT_UNDER_REVIEW', 409);

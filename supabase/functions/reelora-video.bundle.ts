@@ -149,7 +149,7 @@ function isCatalogStale(syncedAt, now, maxAgeHours = 36) {
   return now.getTime() - timestamp > maxAgeHours * 36e5;
 }
 var PROVIDER_ERROR_MESSAGES = {
-  MODEL_NOT_FOUND: "Ce mod\xE8le vid\xE9o n\u2019existe pas dans le catalogue VYORA.",
+  MODEL_NOT_FOUND: "Ce mod\xE8le vid\xE9o n\u2019existe pas dans le catalogue SORAHNEX.",
   MODEL_UNAVAILABLE: "Ce mod\xE8le n\u2019est pas disponible pour votre compte.",
   PROVIDER_KEY_MISSING: "Le service de g\xE9n\xE9ration n\u2019est pas configur\xE9 c\xF4t\xE9 serveur.",
   ESTIMATE_ENDPOINT_MISSING: "Ce mod\xE8le n\u2019expose pas d\u2019endpoint de devis v\xE9rifi\xE9.",
@@ -286,7 +286,7 @@ function customerQuote(quote) {
     available: false,
     verified: quote.available === true,
     error_code: quote.error_code === "PROMPT_REQUIRED" ? "PROMPT_REQUIRED" : null,
-    error_message: "Consultez le co\xFBt en cr\xE9dits VYORA avant de confirmer.",
+    error_message: "Consultez le co\xFBt en cr\xE9dits SORAHNEX avant de confirmer.",
     billing_units: []
   };
 }
@@ -397,7 +397,7 @@ function customerModel(model, index, status, reason) {
   const modelStatus = status ?? statusFor(model).status;
   return {
     model_id: str(model.public_id, 80),
-    display_name: `VYORA ${category === "Image to Video" ? "Image" : "Video"} ${String(index + 1).padStart(2, "0")}`,
+    display_name: `SORAHNEX ${category === "Image to Video" ? "Image" : "Video"} ${String(index + 1).padStart(2, "0")}`,
     description: category === "Image to Video" ? "Animez un visuel de r\xE9f\xE9rence avec des param\xE8tres de cr\xE9ation v\xE9rifi\xE9s." : "Cr\xE9ez une vid\xE9o \xE0 partir d'une instruction et de param\xE8tres v\xE9rifi\xE9s.",
     category,
     input_fields: asArray(model.input_fields),
@@ -408,7 +408,7 @@ function customerModel(model, index, status, reason) {
     is_coming_soon: bool(model.is_coming_soon, false),
     sort_order: finite(model.sort_order) ?? index,
     reelora_status: modelStatus,
-    reelora_reason: reason ?? (modelStatus === "active" ? "Disponible dans VYORA." : modelStatus === "coming_soon" ? "Bient\xF4t disponible." : "Indisponible momentan\xE9ment.")
+    reelora_reason: reason ?? (modelStatus === "active" ? "Disponible dans SORAHNEX." : modelStatus === "coming_soon" ? "Bient\xF4t disponible." : "Indisponible momentan\xE9ment.")
   };
 }
 function pricingParameters(values) {
@@ -670,7 +670,7 @@ function quoteMetaFromRow(row, modelId) {
   return {
     modelId,
     publicId,
-    displayName: `VYORA ${category === "Image to Video" ? "Image" : "Video"}`,
+    displayName: `SORAHNEX ${category === "Image to Video" ? "Image" : "Video"}`,
     catalogCostUsd: finite(row.cost_usd),
     catalogCurrency: str(row.cost_currency, 10) || "USD",
     dynamicPricing: bool(meta.dynamic_pricing, false),
@@ -753,11 +753,11 @@ function mapDbRow(row, access) {
   };
 }
 function statusFor(model) {
-  if (!bool(model.active, true)) return { status: "disabled", reason: "D\xE9sactiv\xE9 dans le catalogue VYORA." };
+  if (!bool(model.active, true)) return { status: "disabled", reason: "D\xE9sactiv\xE9 dans le catalogue SORAHNEX." };
   if (!bool(model.is_enabled, true)) return { status: "disabled", reason: "D\xE9sactiv\xE9 dans le catalogue MuAPI." };
   if (bool(model.is_coming_soon, false)) return { status: "coming_soon", reason: "Annonc\xE9 par MuAPI, pas encore lanc\xE9." };
   const unsupported = asArray(model.required_fields).filter((f) => !SUPPORTED_REQUIRED_FIELDS.has(f.toLowerCase()));
-  if (unsupported.length) return { status: "unsupported", reason: `Entr\xE9e non connect\xE9e dans VYORA : ${unsupported.join(", ")}.` };
+  if (unsupported.length) return { status: "unsupported", reason: `Entr\xE9e non connect\xE9e dans SORAHNEX : ${unsupported.join(", ")}.` };
   if (model.account_access === "unverified") return { status: "unverified", reason: "Cl\xE9 / compte MuAPI non valid\xE9e c\xF4t\xE9 serveur." };
   if (model.account_access === "public_only") return { status: "unverified", reason: "Mod\xE8le public MuAPI absent du catalogue retourn\xE9 avec la cl\xE9." };
   return { status: "active", reason: "Mod\xE8le actif et s\xE9lectionnable." };
@@ -1113,7 +1113,7 @@ function friendly(code, _detail) {
     PROVIDER_SPEND_CAP_EXCEEDED: "Le budget fournisseur disponible ne couvre pas cette g\xE9n\xE9ration.",
     PROVIDER_SPEND_UNAVAILABLE: "La v\xE9rification du budget fournisseur est indisponible. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9.",
     PROVIDER_SPEND_ALREADY_RESERVED: "La r\xE9servation du budget est d\xE9j\xE0 utilis\xE9e ou n\xE9cessite une v\xE9rification administrative.",
-    PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED: "Le plafond VYORA de ce fournisseur est atteint. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9.",
+    PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED: "Le plafond SORAHNEX de ce fournisseur est atteint. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9.",
     PROVIDER_SPEND_PROVIDER_CAP_UNAVAILABLE: "Le plafond de ce fournisseur n\u2019a pas pu \xEAtre v\xE9rifi\xE9. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9.",
     PROVIDER_BALANCE_INSUFFICIENT: "Le solde fournisseur MuAPI est insuffisant pour cette g\xE9n\xE9ration. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9 : rechargez le compte MuAPI depuis l\u2019espace administration.",
     PROVIDER_BALANCE_UNAVAILABLE: "Impossible de v\xE9rifier le solde MuAPI. Aucun appel payant n\u2019a \xE9t\xE9 lanc\xE9. R\xE9essayez ou v\xE9rifiez la cl\xE9 et la connexion au fournisseur."
@@ -1391,7 +1391,7 @@ async function resolveProviderQuote(body) {
     catalogSyncedAt: meta.syncedAt,
     pricingBasis
   };
-  const modelReason = unsupported.length ? "Ce mod\xE8le n\xE9cessite un r\xE9glage qui n\u2019est pas encore pris en charge." : modelAvailable ? "Disponible dans VYORA." : status.reason || "Indisponible momentan\xE9ment.";
+  const modelReason = unsupported.length ? "Ce mod\xE8le n\xE9cessite un r\xE9glage qui n\u2019est pas encore pris en charge." : modelAvailable ? "Disponible dans SORAHNEX." : status.reason || "Indisponible momentan\xE9ment.";
   const finish = (quote) => ({
     quote,
     quoteParams,

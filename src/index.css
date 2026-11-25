@@ -90,7 +90,7 @@
   .gradient-text { @apply bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent; }
   .glass { @apply border border-line bg-white/[0.03] backdrop-blur-sm; }
 
-  /* VYORA Video Studio — dark, cyan accent, compact mobile-first controls. */
+  /* SORAHNEX Video Studio — dark, cyan accent, compact mobile-first controls. */
   .studio-v2 { @apply text-slate-200; color-scheme: dark; }
   .studio-v2 select option { @apply bg-[#0b111a] text-white; }
   .studio-icon-link {
@@ -118,7 +118,7 @@
   }
 
   /* --------------------------------------------------------------------- */
-  /* VYORA — langage visuel premium (vitrine + espaces connectés)           */
+  /* SORAHNEX — langage visuel premium (vitrine + espaces connectés)           */
   /* --------------------------------------------------------------------- */
   .vyora-display {
     @apply font-display font-semibold tracking-[-0.04em];
@@ -202,7 +202,7 @@
 }
 
 /* --------------------------------------------------------------------------- */
-/* VYORA Studio — coque immersive (référence : canvas noir, nav horizontale,    */
+/* SORAHNEX Studio — coque immersive (référence : canvas noir, nav horizontale,    */
 /* composer docké). Aucune carte décorative : la zone de création est nue.      */
 /* --------------------------------------------------------------------------- */
 @layer components {
@@ -225,20 +225,21 @@
   .studio-immersive-bar {
     @apply sticky top-0 z-40 border-b border-white/[0.06] bg-[#050505]/[0.92] backdrop-blur-xl;
   }
+  /* Cibles tactiles : 44 px sur téléphone, densité retrouvée dès 640 px. */
   .studio-bar-tab {
-    @apply inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-1.5 text-[12px] font-medium text-slate-400 transition-colors hover:border-white/[0.07] hover:text-white sm:text-[12.5px];
+    @apply inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-[12px] font-medium text-slate-400 transition-colors hover:border-white/[0.07] hover:text-white sm:min-h-9 sm:py-1.5 sm:text-[12.5px];
   }
   .studio-bar-tab-active {
     @apply border-white/[0.09] bg-white/[0.06] text-white;
   }
   .studio-bar-icon {
-    @apply inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:border-white/[0.08] hover:bg-white/[0.04] hover:text-white;
+    @apply inline-flex h-11 w-11 items-center justify-center rounded-lg border border-transparent text-slate-400 transition-colors hover:border-white/[0.08] hover:bg-white/[0.04] hover:text-white sm:h-8 sm:w-8;
   }
   .studio-credit-pill {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-cyan-400/25 bg-cyan-400/[0.08] px-2.5 py-1.5 text-[12px] font-bold text-cyan-200 transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.14];
+    @apply inline-flex min-h-11 items-center gap-1.5 rounded-full border border-cyan-400/25 bg-cyan-400/[0.08] px-2.5 text-[12px] font-bold text-cyan-200 transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.14] sm:min-h-8 sm:py-1.5;
   }
   .studio-account-pill {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-[12px] font-medium text-slate-300 transition hover:border-white/20 hover:text-white;
+    @apply inline-flex min-h-11 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 text-[12px] font-medium text-slate-300 transition hover:border-white/20 hover:text-white sm:min-h-8 sm:py-1.5;
   }
   /* Composer docké : un seul bloc, comme la zone de prompt de la référence. */
   /* Zone de création : elle absorbe la hauteur restante (`flex-1`) pour que le
@@ -284,7 +285,7 @@
 }
 
 /* --------------------------------------------------------------------------- */
-/* VYORA — vitrine d’accueil premium                                           */
+/* SORAHNEX — vitrine d’accueil premium                                           */
 /* Uniquement des animations `opacity` / `transform` ; tout le contenu reste    */
 /* lisible si une animation ne joue pas (filet de sécurité côté composant).     */
 /* --------------------------------------------------------------------------- */
@@ -495,7 +496,7 @@
 }
 
 /* =========================================================================
-   VYORA — DESIGN SYSTEM PREMIUM (phase « expérience »)
+   SORAHNEX — DESIGN SYSTEM PREMIUM (phase « expérience »)
    -------------------------------------------------------------------------
    Ajout strictement additif : aucune règle existante n'est modifiée.
    Principes :
@@ -506,7 +507,7 @@
    ========================================================================= */
 
 :root {
-  /* Accent par défaut = cyan VYORA (Studio). */
+  /* Accent par défaut = cyan SORAHNEX (Studio). */
   --vy-accent: 34 211 238;
   --vy-accent-2: 139 92 246;
   --vy-accent-ink: 10 22 30;
@@ -723,7 +724,7 @@
 }
 
 /* =========================================================================
-   VYORA — PARCOURS D'AUTHENTIFICATION IMMERSIF
+   SORAHNEX — PARCOURS D'AUTHENTIFICATION IMMERSIF
    -------------------------------------------------------------------------
    Composition « atrium » : une scène 3D (ou son repli statique) à gauche,
    un formulaire net et respirant à droite. Toutes les animations reposent
@@ -917,7 +918,7 @@
 
 
 /* =========================================================================
-   VYORA — BARRE D'ESPACE (dock d'identité)
+   SORAHNEX — BARRE D'ESPACE (dock d'identité)
    -------------------------------------------------------------------------
    Rappel permanent de l'espace courant : univers, nom, retour au sélecteur.
    Sur mobile elle devient un bandeau compact au-dessus du contenu.

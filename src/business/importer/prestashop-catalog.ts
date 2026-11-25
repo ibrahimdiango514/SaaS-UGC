@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur PrestaShop : assemblage du catalogue.
+ * SORAHNEX — connecteur PrestaShop : assemblage du catalogue.
  *
  * Ce module transforme les ressources PrestaShop (produits, déclinaisons,
  * valeurs d'attribut, stock) en `RawCatalogProduct[]`, la forme que le moteur

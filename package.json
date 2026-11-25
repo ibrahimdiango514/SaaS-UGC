@@ -1,9 +1,9 @@
 {
-  "name": "vyora",
+  "name": "sorahnex",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "VYORA — SaaS de création de contenus UGC et de croissance assistée par IA",
+  "description": "SORAHNEX — Studio (vidéos UGC, contenus, avatars) et Grow (prospects, ventes, stocks, trésorerie) assistés par IA",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "check:edge-imports": "node scripts/check-edge-imports.mjs",
     "audit:business-rls": "node supabase/tests/business-agent/rls-ownership.mjs",
-    "preview:studio": "node scripts/studio-preview.mjs"
+    "preview:studio": "node scripts/studio-preview.mjs",
+    "preview:spaces": "node scripts/spaces-preview.mjs",
+    "verify:sorahnex-aliases": "node scripts/verify-sorahnex-aliases.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

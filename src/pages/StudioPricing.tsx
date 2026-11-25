@@ -1,5 +1,5 @@
 /**
- * Tarification du Studio VYORA.
+ * Tarification du Studio SORAHNEX.
  *
  * Sources de vérité :
  *  - Les packs (prix + crédits + recommandation) viennent de la base via
@@ -13,7 +13,7 @@
  * Sinon, le parcours historique est conservé : commande validée par un
  * administrateur.
  *
- * Périmètre : Studio uniquement. Business Grow a ses propres abonnements.
+ * Périmètre : Studio uniquement. SORAHNEX Grow a ses propres abonnements.
  */
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
@@ -431,11 +431,11 @@ export default function StudioPricing() {
         </p>
         <p className="mt-1 text-[11px] leading-relaxed text-violet-100/70">
           Ces crédits concernent uniquement le <strong className="font-semibold text-violet-50">Studio vidéo</strong>.
-          Business Grow fonctionne avec ses propres abonnements et son propre portefeuille : aucun crédit,
+          SORAHNEX Grow fonctionne avec ses propres abonnements et son propre portefeuille : aucun crédit,
           aucun historique et aucune règle de marge ne sont partagés entre les deux produits.
         </p>
         <Link to="/app/business" className="mt-2 inline-flex items-center gap-1 text-[11px] text-violet-200 hover:text-white">
-          <Wand2 size={11} /> Voir Business Grow
+          <Wand2 size={11} /> Voir SORAHNEX Grow
         </Link>
       </section>
 

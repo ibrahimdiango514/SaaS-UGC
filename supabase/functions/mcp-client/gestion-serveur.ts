@@ -1,5 +1,5 @@
 /**
- * VYORA — gestion des connexions MCP sortantes contre la base réelle (P6).
+ * SORAHNEX — gestion des connexions MCP sortantes contre la base réelle (P6).
  *
  * ## Le secret traverse exactement deux fois
  *

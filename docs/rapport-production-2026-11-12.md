@@ -1,4 +1,4 @@
-# VYORA Studio — Rapport final de production
+# SORAHNEX Studio — Rapport final de production
 
 **Date** : 2026-11-12
 **Branche** : `arena/323bad30-saas-ugc` (issue de `1a572be`)
@@ -13,7 +13,7 @@ Le message n'existe pas littéralement dans le code. Le seul libellé d'indispon
 
 Cause racine trouvée et **corrigée** : l'appel `estimate`/`quote` échouait lorsque le corps envoyé ne correspondait pas au modèle. Deux défauts distincts ont été isolés :
 
-1. **Identifiant de modèle** : `estimate` recevait un `model_id` technique (`creatify-lipsync`) au lieu du `public_id` UUID. Résultat : `MODEL_NOT_FOUND` (« Ce modèle vidéo n'existe pas dans le catalogue VYORA »).
+1. **Identifiant de modèle** : `estimate` recevait un `model_id` technique (`creatify-lipsync`) au lieu du `public_id` UUID. Résultat : `MODEL_NOT_FOUND` (« Ce modèle vidéo n'existe pas dans le catalogue SORAHNEX »).
 2. **Nom de modèle transmis au fournisseur** : avec un UUID à la place du nom technique, `POST /api/v1/models/{name}/estimate-cost` renvoyait **404 `Unknown model: 5fa1a3b3-…`**, ce que le classifieur traduisait par `PROVIDER_BAD_RESPONSE` (« Le fournisseur a renvoyé une réponse illisible »). L'endpoint existait et la clé était valide : c'était bien l'identifiant qui était faux.
 
 Preuve : le même endpoint, appelé avec le **nom technique** (`creatify-lipsync`), renvoie `200 {"cost":0.11,"currency":"USD"}`.
@@ -55,7 +55,7 @@ Le cycle réservation → capture → restitution avait déjà été prouvé tra
 - Nouvelle table `saas_ugc.ugc_provider_balance` + RPC `reelora_admin_provider_balance()` (service_role uniquement, aucune policy pour `anon`/`authenticated`).
 - **Solde réel mesuré le 2026-11-12** : `GET /api/v1/account/balance` → **`200`**, `balance = 0`, `currency = USD`, compte `babergang009@gmail.com`, clé de 64 caractères valide.
 
-**Conséquence décisive : le solde MuAPI est à 0 USD.** Les générations payantes échoueraient de toute façon ; VYORA les bloque désormais **avant** l'appel fournisseur.
+**Conséquence décisive : le solde MuAPI est à 0 USD.** Les générations payantes échoueraient de toute façon ; SORAHNEX les bloque désormais **avant** l'appel fournisseur.
 
 ## 6. Rechargement : portail officiel uniquement, aucun faux bouton
 
@@ -69,7 +69,7 @@ Quatre messages explicites, côté serveur, avant tout appel payant :
 
 - `PROVIDER_BALANCE_INSUFFICIENT` — « Le solde fournisseur MuAPI est insuffisant pour cette génération. Aucun appel payant n'a été lancé… »
 - `PROVIDER_BALANCE_UNAVAILABLE` — « Impossible de vérifier le solde MuAPI. Aucun appel payant n'a été lancé… »
-- `PROVIDER_SPEND_CAP_EXCEEDED` / `PROVIDER_SPEND_DISABLED` — plafond VYORA atteint ou tests payants désactivés.
+- `PROVIDER_SPEND_CAP_EXCEEDED` / `PROVIDER_SPEND_DISABLED` — plafond SORAHNEX atteint ou tests payants désactivés.
 - `PROVIDER_SPEND_PROVIDER_CAP_EXCEEDED` / `_UNAVAILABLE` — plafond par fournisseur (mapping manquant, désormais ajouté).
 
 Une synchro en échec écrit aussi une alerte `balance_sync_failed` exploitable en administration.
@@ -128,4 +128,4 @@ Une synchro en échec écrit aussi une alerte `balance_sync_failed` exploitable 
 
 ### Ce qui reste bloqué, sans détour
 
-Le Studio **calcule, devis et bloque correctement**, mais il **ne peut pas encore produire de vidéo réelle** : le solde MuAPI est à **0 USD**. Dès que le compte est rechargé (par vous, sur le portail officiel), la chaîne est prête : devis vérifié → réservation → double contrôle (plafond VYORA **et** solde MuAPI) → génération → capture ou restitution. Aucune recharge n'a été faite et aucune génération payante n'a été lancée.
+Le Studio **calcule, devis et bloque correctement**, mais il **ne peut pas encore produire de vidéo réelle** : le solde MuAPI est à **0 USD**. Dès que le compte est rechargé (par vous, sur le portail officiel), la chaîne est prête : devis vérifié → réservation → double contrôle (plafond SORAHNEX **et** solde MuAPI) → génération → capture ou restitution. Aucune recharge n'a été faite et aucune génération payante n'a été lancée.

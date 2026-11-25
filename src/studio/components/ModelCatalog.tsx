@@ -32,7 +32,7 @@ export function ModelCatalog({ models, selectedId, onSelect, busy, onRefresh, es
         <div className="flex items-start gap-2.5">
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-500/15 text-brand-200"><Database size={15} /></span>
           <div>
-            <h3 className="text-sm font-semibold text-white">Modèles vidéo VYORA</h3>
+            <h3 className="text-sm font-semibold text-white">Modèles vidéo SORAHNEX</h3>
             <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
               Explorez les modèles disponibles et leurs capacités réelles.
             </p>

@@ -1,5 +1,5 @@
 /**
- * VYORA — devis vidéo fournisseur (MuAPI / « MyAPI »).
+ * SORAHNEX — devis vidéo fournisseur (MuAPI / « MyAPI »).
  *
  * Ce module est VOLONTAIREMENT pur (aucun accès réseau, aucun secret, aucune
  * dépendance Deno/Node) afin d'être :
@@ -229,7 +229,7 @@ export function isCatalogStale(syncedAt: string | null | undefined, now: Date, m
 }
 
 const PROVIDER_ERROR_MESSAGES: Record<ProviderQuoteErrorCode, string> = {
-  MODEL_NOT_FOUND: 'Ce modèle vidéo n’existe pas dans le catalogue VYORA.',
+  MODEL_NOT_FOUND: 'Ce modèle vidéo n’existe pas dans le catalogue SORAHNEX.',
   MODEL_UNAVAILABLE: 'Ce modèle n’est pas disponible pour votre compte.',
   PROVIDER_KEY_MISSING: 'Le service de génération n’est pas configuré côté serveur.',
   ESTIMATE_ENDPOINT_MISSING: 'Ce modèle n’expose pas d’endpoint de devis vérifié.',

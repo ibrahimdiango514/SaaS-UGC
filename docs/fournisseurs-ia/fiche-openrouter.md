@@ -22,7 +22,7 @@
 | Élément | Valeur |
 |---|---|
 | Variable de secret (déposée) | `BUSINESS_GROW_OPENROUTER_API_KEY` |
-| Présence vérifiée | Oui — par **nom** uniquement, dans les Edge Function Secrets VYORA (projet `xbuuhfwobrafcbgtdgjx`) |
+| Présence vérifiée | Oui — par **nom** uniquement, dans les Edge Function Secrets SORAHNEX (projet `xbuuhfwobrafcbgtdgjx`) |
 | Valeur | **jamais recopiée** ici, ni dans un commit, un log, un rapport ou le frontend |
 | Rotation | aucune rotation systématique prévue |
 
@@ -112,7 +112,7 @@ sonde de disponibilité **non facturée** le jour de l'intégration.
 ## 8. Informations manquantes / points à confirmer
 
 1. **Taux des frais de service** OpenRouter (non vérifié ici).
-2. Modèle par défaut à retenir pour VYORA (à décider via le registre, pas par défaut).
+2. Modèle par défaut à retenir pour SORAHNEX (à décider via le registre, pas par défaut).
 3. Éligibilité au **routage UE** (offre Business/Enterprise) — à confirmer si la
    résidence européenne devient une exigence.
 4. Capacités multimodales réelles : à lire dans `GET /api/v1/models` au moment de

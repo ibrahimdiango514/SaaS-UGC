@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur Chariow : conversion des produits vers la forme commune.
+ * SORAHNEX — connecteur Chariow : conversion des produits vers la forme commune.
  *
  * ## Le piège central de Chariow : les prix
  *
@@ -180,7 +180,7 @@ function texte(raw: unknown, max = 2000): string | null {
  *
  * Seules les URL `https` publiques sont conservées : une `data:` ou une
  * `javascript:` dans un catalogue distant n'a rien à faire dans une fiche
- * produit VYORA.
+ * produit SORAHNEX.
  */
 export function safeImageUrl(raw: unknown): string | null {
   const valeur = texte(raw, 2000);

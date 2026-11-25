@@ -73,7 +73,7 @@ export function CatalogBrowser({ models, catalog, selectedId, onSelect, onClose,
     <section id="catalog-muapi" data-testid="catalog-muapi" className="studio-v2 mt-5 rounded-[24px] border border-cyan-400/20 bg-[#05090e] p-3 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Création vidéo VYORA</p>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-300">Création vidéo SORAHNEX</p>
           <h2 className="mt-1 text-lg font-bold text-white sm:text-xl">Explorer les capacités vidéo</h2>
           <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500">
             Parcourez les modes, formats, durées et résolutions disponibles. Les options non compatibles ne peuvent pas être sélectionnées.
@@ -96,7 +96,7 @@ export function CatalogBrowser({ models, catalog, selectedId, onSelect, onClose,
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {[
             ['Modèles répertoriés', catalog.detected_video, 'text-white'],
-            ['Disponibles dans VYORA', catalog.active, 'text-emerald-300'],
+            ['Disponibles dans SORAHNEX', catalog.active, 'text-emerald-300'],
             ['Indisponibles', catalog.unavailable, 'text-amber-300'],
           ].map(([label, value, tone]) => (
             <div key={String(label)} className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
@@ -271,7 +271,7 @@ export function CatalogBrowser({ models, catalog, selectedId, onSelect, onClose,
               <div data-testid="catalog-quote" className={cn('mt-3 rounded-xl border p-3 text-[11px]',
                 summary.quoteToConfirm || estimateError ? 'border-amber-400/25 bg-amber-400/[0.05] text-amber-100' : 'border-cyan-400/20 bg-cyan-400/[0.05] text-cyan-100')}>
                 <p className="flex items-center gap-1.5 font-semibold"><Coins size={12} />
-                  {quoteBusy ? 'Estimation des crédits en cours…' : estimate ? `Coût VYORA : ${estimate.credits_cost} crédits Studio` : 'Coût en crédits indisponible'}
+                  {quoteBusy ? 'Estimation des crédits en cours…' : estimate ? `Coût SORAHNEX : ${estimate.credits_cost} crédits Studio` : 'Coût en crédits indisponible'}
                 </p>
                 {estimate && <p className="mt-1 text-slate-300">Solde {balance} · après réservation {summary.remaining ?? '—'}</p>}
                 {estimateError && <p data-testid="catalog-quote-error" className="mt-1 text-amber-200">Impossible de confirmer le coût en crédits. Réessayez.</p>}
@@ -327,7 +327,7 @@ export function CatalogBrowser({ models, catalog, selectedId, onSelect, onClose,
           )}
 
           <p className="flex items-start gap-1.5 text-[10px] leading-relaxed text-slate-600">
-            <Info size={11} className="mt-0.5 shrink-0" /> Les modèles, paramètres et disponibilités sont vérifiés en temps réel. Seul le coût en crédits VYORA est présenté.
+            <Info size={11} className="mt-0.5 shrink-0" /> Les modèles, paramètres et disponibilités sont vérifiés en temps réel. Seul le coût en crédits SORAHNEX est présenté.
           </p>
         </aside>
       </div>

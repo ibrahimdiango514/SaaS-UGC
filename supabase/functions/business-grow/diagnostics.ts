@@ -1,5 +1,5 @@
 /**
- * Analyse déterministe des données Business Growth. Aucun SQL, aucun appel IA,
+ * Analyse déterministe des données Grow. Aucun SQL, aucun appel IA,
  * aucune donnée de démonstration. Les stocks/encours sont un instantané ; les
  * mouvements financiers sont filtrés sur la période explicitement demandée.
  */
@@ -110,7 +110,7 @@ export function buildBusinessReport(snapshot: BusinessSnapshot, type: ReportType
   });
   const warnings: string[] = [
     'Les encours, stocks et tâches sont un instantané à la date du diagnostic, indépendamment de la période financière.',
-    'Données saisies dans VYORA uniquement ; les connecteurs externes ne sont pas présumés actifs. Les montants de modules différents peuvent se recouper.',
+    'Données saisies dans SORAHNEX uniquement ; les connecteurs externes ne sont pas présumés actifs. Les montants de modules différents peuvent se recouper.',
   ];
   if (coverage.some((c) => c.status === 'consent_required')) warnings.push('Smart CRM indisponible : le consentement mémoire de cette entreprise est désactivé.');
   if (coverage.some((c) => c.status === 'empty')) warnings.push('Certains modules sont vides : absence de données ne signifie pas absence de problème.');

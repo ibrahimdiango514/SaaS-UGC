@@ -1,6 +1,7 @@
 import {invalidateCatalog} from '../hooks/useCatalogRevision';
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
+import { edgeFunctionName } from './platform-identity';
 import type {
   AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiCoreAdminSettings, AiCoreCallEntry, AiCoreRegistrySnapshot, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
@@ -634,22 +635,31 @@ export async function startGeneration(
 
 /** Full live MuAPI video catalogue with explicit public/account diagnostics. */
 export function getVideoCatalog(): Promise<VideoCatalogResponse> {
-  return invokeEdge<VideoCatalogResponse>('reelora-video', { action: 'catalog' });
+  return invokeEdge<VideoCatalogResponse>(edgeFunctionName('video'), { action: 'catalog' });
 }
 
 export function adminVideoCatalog(): Promise<AdminVideoCatalogResponse> {
-  return invokeEdge<AdminVideoCatalogResponse>('reelora-video', { action: 'admin-catalog' });
+  return invokeEdge<AdminVideoCatalogResponse>(edgeFunctionName('video'), { action: 'admin-catalog' }).then((data) => {
+    // Une erreur de la fonction Edge peut revenir avec un corps partiel : la
+    // section Catalogue MuAPI ne doit jamais planter sur un champ absent.
+    const catalog = data?.catalog;
+    if (!data || !Array.isArray(data.models) || !catalog || typeof catalog.detected_video !== 'number' ||
+        typeof catalog.fetched_at !== 'string' || !catalog.account || typeof catalog.account !== 'object') {
+      throw new AppError('Le catalogue vidéo historique n’a pas renvoyé une réponse exploitable.', 'CATALOG_INVALID_RESPONSE');
+    }
+    return data;
+  });
 }
 
 /** Verified MuAPI video models (kept for the classical Studio and existing tests). */
 export async function listVideoModels(): Promise<MuApiModel[]> {
-  const result = await invokeEdge<{ models: MuApiModel[] }>('reelora-video', { action: 'models' });
+  const result = await invokeEdge<{ models: MuApiModel[] }>(edgeFunctionName('video'), { action: 'models' });
   return result.models ?? [];
 }
 
 /** Full input_schema of one real model, fetched by the server with its own key. */
 export function getVideoModelDetail(modelId: string): Promise<{ model: MuApiModel }> {
-  return invokeEdge<{ model: MuApiModel }>('reelora-video', { action: 'model-detail', model_id: modelId });
+  return invokeEdge<{ model: MuApiModel }>(edgeFunctionName('video'), { action: 'model-detail', model_id: modelId });
 }
 
 export interface VideoProviderQuoteResponse {
@@ -681,7 +691,7 @@ export async function getVideoProviderQuote(modelId: string, quote?: VideoQuoteI
   } catch (error) {
     if (error instanceof AppError && error.code !== 'EDGE_ERROR' && error.code !== 'QUOTE_INTERNAL_ERROR') throw error;
     // Repli : action `quote` de la passerelle pour les environnements où le service dédié n'est pas déployé.
-    return invokeEdge<VideoProviderQuoteResponse>('reelora-video', { ...body, action: 'quote' });
+    return invokeEdge<VideoProviderQuoteResponse>(edgeFunctionName('video'), { ...body, action: 'quote' });
   }
 }
 
@@ -712,7 +722,7 @@ export async function estimateVideo(serviceKey: string, modelId: string, quote?:
   if (quote?.video_url) body.video_url = quote.video_url;
   if (quote?.audio_url) body.audio_url = quote.audio_url;
   if (quote?.param_schema) body.param_schema = quote.param_schema;
-  const estimate = await invokeEdge<VideoCostEstimate>('reelora-video', body);
+  const estimate = await invokeEdge<VideoCostEstimate>(edgeFunctionName('video'), body);
   if (estimate.provider_quote) return estimate;
   try {
     // La passerelle de génération peut être antérieure au devis fournisseur :
@@ -729,11 +739,11 @@ export async function cancelGeneration(jobId: string): Promise<boolean> {
 }
 
 export function videoStart(jobId: string): Promise<VideoActionResult> {
-  return invokeEdge<VideoActionResult>('reelora-video', { action: 'start', job_id: jobId });
+  return invokeEdge<VideoActionResult>(edgeFunctionName('video'), { action: 'start', job_id: jobId });
 }
 
 export function videoStatus(jobId: string): Promise<VideoActionResult> {
-  return invokeEdge<VideoActionResult>('reelora-video', { action: 'status', job_id: jobId });
+  return invokeEdge<VideoActionResult>(edgeFunctionName('video'), { action: 'status', job_id: jobId });
 }
 
 export async function listJobs(
@@ -883,7 +893,7 @@ export interface AiEngineHealth {
 
 /** Real server-side probe of the central AI engine (model names, no keys). */
 export async function aiEngineHealth(): Promise<AiEngineHealth> {
-  return invokeEdge<AiEngineHealth>('vyora-ai', { action: 'health' });
+  return invokeEdge<AiEngineHealth>(edgeFunctionName('ai'), { action: 'health' });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -968,7 +978,7 @@ export async function adminSetPlan(userId: string, planKey: string) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Business Grow — attribution manuelle d'une formule (administration)        */
+/* SORAHNEX Grow — attribution manuelle d'une formule (administration)        */
 /* -------------------------------------------------------------------------- */
 
 /** Résultat de `vyora_admin_set_business_subscription` / `..._revoke_...`. */
@@ -987,7 +997,7 @@ export interface AdminBusinessSubscriptionResult {
 }
 
 /**
- * Attribue ou renouvelle manuellement une formule Business Grow à un compte
+ * Attribue ou renouvelle manuellement une formule SORAHNEX Grow à un compte
  * client. La RPC revérifie le rôle administrateur, la cible, la formule et la
  * date de fin ; elle journalise et notifie. Aucune facturation n'est engagée.
  */
@@ -1002,7 +1012,7 @@ export async function adminSetBusinessSubscription(input: {
   });
 }
 
-/** Résilie l'attribution manuelle Business Grow d'un compte (accès fermé immédiatement). */
+/** Résilie l'attribution manuelle SORAHNEX Grow d'un compte (accès fermé immédiatement). */
 export async function adminRevokeBusinessSubscription(userId: string, note?: string): Promise<AdminBusinessSubscriptionResult> {
   return rpc<AdminBusinessSubscriptionResult>('vyora_admin_revoke_business_subscription', {
     p_user_id: userId,
@@ -1010,7 +1020,7 @@ export async function adminRevokeBusinessSubscription(userId: string, note?: str
   });
 }
 
-/** Formules Business Grow visibles (catalogue public, formules actives uniquement). */
+/** Formules SORAHNEX Grow visibles (catalogue public, formules actives uniquement). */
 export async function listBusinessGrowPlans(): Promise<Array<{ plan_key: string; display_name: string; active: boolean }>> {
   const catalog = await rpc<{ plans?: Array<{ plan_key: string; display_name: string; active: boolean }> }>('business_grow_catalog');
   return Array.isArray(catalog?.plans) ? catalog.plans : [];
@@ -1085,14 +1095,14 @@ export function adminProviderBalance(): Promise<AdminProviderBalance> {
  */
 export async function adminRefreshProviderBalance(): Promise<AdminProviderBalance> {
   const data = await invokeEdge<{ balance: AdminProviderBalance; spend: AdminProviderSpendSummary | null }>(
-    'reelora-video',
+    edgeFunctionName('video'),
     { action: 'admin-provider-balance', refresh: true },
   );
   return data.balance;
 }
 
 /**
- * VYORA AI CORE — lecture admin du registre multi-fournisseurs (fournisseurs,
+ * SORAHNEX AI CORE — lecture admin du registre multi-fournisseurs (fournisseurs,
  * modèles vérifiés, rôles, règles, budgets, dépense du mois). Réservé à
  * l'administrateur vérifié côté serveur (ugc_is_admin).
  */
@@ -1100,13 +1110,13 @@ export function adminAiCoreRegistry(): Promise<AiCoreRegistrySnapshot> {
   return rpc<AiCoreRegistrySnapshot>('vyora_ai_admin_registry_get');
 }
 
-/** VYORA AI CORE — journal des appels IA récents (lecture admin). */
+/** SORAHNEX AI CORE — journal des appels IA récents (lecture admin). */
 export function adminAiCoreCalls(limit = 50): Promise<AiCoreCallEntry[]> {
   return rpc<AiCoreCallEntry[]>('vyora_ai_admin_calls_list', { p_limit: limit });
 }
 
 /**
- * VYORA AI CORE — enregistrement d'un fournisseur dans le registre.
+ * SORAHNEX AI CORE — enregistrement d'un fournisseur dans le registre.
  *
  * Seul le DESCRIPTEUR est transmis (gabarit de protocole, URL, nom de la
  * variable de secret). La clé elle-même reste un secret Edge : elle n'est
@@ -1125,17 +1135,17 @@ export function adminAiCoreProviderUpsert(args: {
   return rpc('vyora_ai_admin_provider_upsert', { p_payload: args });
 }
 
-/** VYORA AI CORE — désactivation d'un fournisseur (jamais de suppression). */
+/** SORAHNEX AI CORE — désactivation d'un fournisseur (jamais de suppression). */
 export function adminAiCoreProviderDisable(providerKey: string): Promise<{ provider_key: string; enabled: boolean }> {
   return rpc('vyora_ai_admin_provider_disable', { p_provider_key: providerKey });
 }
 
-/** VYORA AI CORE — réglages d'administration IA (lecture). */
+/** SORAHNEX AI CORE — réglages d'administration IA (lecture). */
 export function adminAiCoreSettingsGet(): Promise<AiCoreAdminSettings> {
   return rpc<AiCoreAdminSettings>('vyora_ai_admin_settings_get');
 }
 
-/** VYORA AI CORE — réglages d'administration IA (écriture, admin vérifié). */
+/** SORAHNEX AI CORE — réglages d'administration IA (écriture, admin vérifié). */
 export function adminAiCoreSettingsSet(args: {
   monthly_budget_usd: number | null;
   alert_threshold_pct: number;
@@ -1204,16 +1214,16 @@ export async function adminListAuditLogs() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* AI (VYORA AI GATEWAY -> FreeLLMAPI)                                        */
+/* AI (SORAHNEX AI -> FreeLLMAPI)                                        */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Moteur IA central VYORA : point d'entrée unique de toutes les fonctions IA.
+ * Moteur IA central SORAHNEX : point d'entrée unique de toutes les fonctions IA.
  * Le fournisseur central (FreeLLMAPI), le modèle et le secours sont décidés
  * côté serveur par le registre ; aucune passerelle de secours n'est nommée ici.
  */
 async function invokeAi<T>(body: Record<string, unknown>): Promise<T> {
-  return invokeEdge<T>('vyora-ai', body);
+  return invokeEdge<T>(edgeFunctionName('ai'), body);
 }
 
 export async function generateScript(payload: {
@@ -1255,10 +1265,14 @@ export function newGenerationIdempotencyKey(): string {
 export interface UniversalStudioModel {
   model_id:string;display_name:string;category:string;provider:string;schema:unknown;
   credits:number|null;operational:boolean;blockers:string[];
+  plan_allowed?:boolean;technical_blockers?:string[];quota_family?:string|null;
+  billing?:'free'|'metered';
 }
-export interface UniversalStudioPage {total:number;categories:Record<string,number>;items:UniversalStudioModel[];next_cursor:string|null;credits:number;workspace_id:string}
+export interface UniversalStudioPage {total:number;categories:Record<string,number>;items:UniversalStudioModel[];next_cursor:string|null;credits:number;workspace_id:string;plan?:string}
 export interface UniversalStudioJob {id:string;status:string;credits:number;display_name:string;provider_model_id:string;created_at:string;error_code:string|null;outputs:{kind:'file'|'text';path?:string;url?:string;mime?:string;text?:string}[]}
 export interface UniversalStudioQuote {quote_id:string;credits:number;expires_at:string;balance:number}
+export interface UniversalQuotaItem {family:string;display_name:string;generator:boolean;limit:number|null;used:number;remaining:number|null;policy:'active'|'pending_approval'|'disabled'|'missing'}
+export interface UniversalQuotas {plan:string;period:string;items:UniversalQuotaItem[]}
 export const universalRuntime = async <T>(action:string,body:Record<string,unknown>={}) => {
  const result=await invokeEdge<T>('studio-runtime',{...body,action});
  if(action==='admin_limits'||action==='admin_reconcile'||action==='admin_config'&&body.config!=null)invalidateCatalog();
@@ -1275,12 +1289,12 @@ export async function uploadUniversalInput(workspaceId:string,file:File):Promise
 }
 
 export interface UniversalCatalogHealth extends UniversalCatalogSummary {
- prepared:number;integrated:number;operational:number;studio_available:number;problems:number;
+ prepared:number;configurable:number;technical_test_passed:number;integrated:number;operational:number;studio_available:number;problems:number;
  present:number;removed:number;pricing_missing:number;real_tests_missing:number;measured_at:string;
 }
 export async function getUniversalCatalogHealth():Promise<UniversalCatalogHealth>{
  const data=await getUniversalCatalogSummary() as UniversalCatalogHealth;
- if(![data.prepared,data.integrated,data.operational,data.studio_available,data.problems,data.present,data.removed,data.pricing_missing,data.real_tests_missing].every(nonnegativeInteger)||typeof data.measured_at!=='string')
+ if(![data.prepared,data.configurable,data.technical_test_passed,data.integrated,data.operational,data.studio_available,data.problems,data.present,data.removed,data.pricing_missing,data.real_tests_missing].every(nonnegativeInteger)||typeof data.measured_at!=='string')
   throw new AppError('Les compteurs universels ne sont pas disponibles. Aucun compteur vidéo historique n’est utilisé en remplacement.','CATALOG_INVALID_RESPONSE');
  return data;
 }

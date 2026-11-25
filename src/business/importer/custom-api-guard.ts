@@ -4,7 +4,7 @@
  * ## Le problème, énoncé sans détour
  *
  * Ce connecteur laisse un utilisateur désigner **lui-même** l'adresse que le
- * serveur VYORA va interroger. C'est exactement la définition d'une SSRF : si
+ * serveur SORAHNEX va interroger. C'est exactement la définition d'une SSRF : si
  * l'adresse n'est pas contrôlée, un utilisateur peut faire appeler par nos
  * serveurs `https://169.254.169.254/latest/meta-data/` (métadonnées cloud),
  * `https://10.0.0.5/` (réseau interne) ou `https://interne.entreprise.local/`,

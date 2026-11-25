@@ -59,7 +59,7 @@ function messageOf(error: unknown): string {
 
 /**
  * @param workspaceId Entreprise active lorsque l'interface est hébergée dans
- *   Business Grow. `null` conserve l'assistant autonome. Les conversations
+ *   SORAHNEX Grow. `null` conserve l'assistant autonome. Les conversations
  *   sont alors rattachées à cette entreprise côté serveur.
  */
 export function useAssistant(workspaceId: string | null = null): AssistantState {

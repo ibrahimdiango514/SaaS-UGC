@@ -24,7 +24,10 @@ describe('evidence-bound family integrations',()=>{
   expect(p.blockers).toContain('CONSTRAINT_REVIEW_REQUIRED');expect(p).not.toHaveProperty('operational',true);
  });
  it('blocks conflicting endpoint evidence, unknown schema and unsafe upload formats separately',()=>{
-  expect(progress({...model,endpoint_evidence:{endpoint:'different'}}).status).toBe('blocked');
+  // A contradictory declaration is resolved only when the official document proves one path.
+  expect(progress({...model,endpoint_evidence:{endpoint:'different'}}).stages.endpoint_confirmed).toBe(true);
+  const unproven={...model,input_schema:{schemas:{input_data:{type:'object',endpoint_url:'undocumented-a',properties:{prompt:{type:'string',minLength:2}}}}},endpoint_evidence:{endpoint:'undocumented-b'}};
+  expect(progress(unproven).blockers).toContain('ENDPOINT_CONFLICT');
   const unsupported=structuredClone(model);(unsupported.input_schema.schemas.input_data as any).oneOf=[];
   expect(progress(unsupported).stages.technical_test_succeeded).toBe(false);
   expect(progress({...model,input_schema:{schemas:{input_data:{type:'object',endpoint_url:'official-path',properties:{zip:{type:'string',field:'zip'}}}}}}).blockers).toContain('UPLOAD_FORMAT_UNSUPPORTED');

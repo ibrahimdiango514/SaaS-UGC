@@ -1,5 +1,5 @@
 /**
- * VYORA Growth OS — Lot I : marketing et fidélisation.
+ * SORAHNEX Growth OS — Lot I : marketing et fidélisation.
  *
  * Une campagne prépare un message par contact à partir d'un segment CRM. Aucun
  * envoi automatique n'existe : l'utilisateur copie, ouvre son application

@@ -1,5 +1,5 @@
 /**
- * VYORA Growth OS — Lot J : fournisseurs, achats et réceptions.
+ * SORAHNEX Growth OS — Lot J : fournisseurs, achats et réceptions.
  *
  * Les achats réutilisent les lignes de vente, le stock et les dépenses. Une
  * réception crée un mouvement d'entrée par ligne ; les clés d'idempotence

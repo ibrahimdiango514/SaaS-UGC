@@ -115,7 +115,7 @@ describe('admin — revenus et MRR', () => {
     expect(screen.getByLabelText('Tendance du MRR')).toBeTruthy();
   });
 
-  it('affiche l’activité Studio et Business Growth à partir des compteurs réels', () => {
+  it('affiche l’activité Studio et SORAHNEX Grow à partir des compteurs réels', () => {
     render(<StudioActivitySection metrics={metrics} loading={false} />);
     expect(screen.getByTestId('admin-studio-activity')).toBeTruthy();
     expect(screen.getByText('script')).toBeTruthy();

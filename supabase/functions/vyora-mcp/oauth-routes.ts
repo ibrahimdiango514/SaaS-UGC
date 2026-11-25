@@ -1,5 +1,5 @@
 /**
- * VYORA — routes HTTP du serveur d'autorisation OAuth 2.1.
+ * SORAHNEX — routes HTTP du serveur d'autorisation OAuth 2.1.
  *
  * Ce module traduit des requêtes HTTP en appels aux fonctions de `oauth.ts`
  * (validation) et aux dépendances injectées (base de données). Il ne contient
@@ -13,7 +13,7 @@
  *   GET  /.well-known/oauth-protected-resource   → RFC 9728
  *   GET  /.well-known/oauth-authorization-server → RFC 8414
  *   POST /oauth/register                         → RFC 7591
- *   GET  /oauth/authorize                        → page de consentement VYORA
+ *   GET  /oauth/authorize                        → page de consentement SORAHNEX
  *   POST /oauth/authorize                        → consentement donné
  *   POST /oauth/token                            → code ou rafraîchissement
  *
@@ -23,7 +23,7 @@
  *
  * ## Le consentement n'est pas implicite
  *
- * `/oauth/authorize` avec une session VYORA valide n'émet PAS de code : elle
+ * `/oauth/authorize` avec une session SORAHNEX valide n'émet PAS de code : elle
  * rend une page qui énonce les portées demandées et le nom du client. Le code
  * n'est émis qu'après un `POST` explicite avec un jeton anti-rejeu. Un lien
  * forgé ne peut donc pas connecter un client IA au compte d'un utilisateur qui
@@ -57,8 +57,8 @@ export interface ReponseOAuth {
   redirectTo?: string;
 }
 
-/** Utilisateur authentifié sur la page de consentement (session VYORA). */
-export interface SessionVYORA {
+/** Utilisateur authentifié sur la page de consentement (session SORAHNEX). */
+export interface SessionSORAHNEX {
   userId: string;
   /** Jeton anti-rejeu lié au formulaire de consentement. */
   csrfToken: string;
@@ -215,7 +215,7 @@ export async function traiterEnregistrement(
 export async function preparerConsentement(
   deps: DependancesOAuth,
   parametres: Record<string, string | null>,
-  session: SessionVYORA | null,
+  session: SessionSORAHNEX | null,
 ): Promise<
   | { type: 'erreur'; reponse: ReponseOAuth }
   | {
@@ -255,14 +255,14 @@ export async function preparerConsentement(
     return { type: 'erreur', reponse: erreurOAuth(validation.error) };
   }
 
-  // Sans session VYORA, on ne peut pas savoir POUR QUI émettre le code : on
+  // Sans session SORAHNEX, on ne peut pas savoir POUR QUI émettre le code : on
   // renvoie 401 en laissant le client redemander après authentification.
   if (!session) {
     return {
       type: 'erreur',
       reponse: {
         status: 401,
-        body: corpsErreur('login_required', 'Connectez-vous à VYORA avant d’autoriser un client MCP.'),
+        body: corpsErreur('login_required', 'Connectez-vous à SORAHNEX avant d’autoriser un client MCP.'),
         headers: { ...ENTETES_CORS_OAUTH, 'Content-Type': 'application/json; charset=utf-8' },
       },
     };
@@ -308,7 +308,7 @@ function safeHost(uri: string): string {
 export async function donnerConsentement(
   deps: DependancesOAuth,
   parametres: Record<string, string | null>,
-  session: SessionVYORA | null,
+  session: SessionSORAHNEX | null,
 ): Promise<ReponseOAuth> {
   const clientId = parametres.client_id ?? '';
   const client = clientId ? await deps.chargerClient(clientId) : null;
@@ -331,7 +331,7 @@ export async function donnerConsentement(
   if (!session) {
     return {
       status: 401,
-      body: corpsErreur('login_required', 'Session VYORA absente.'),
+      body: corpsErreur('login_required', 'Session SORAHNEX absente.'),
       headers: { ...ENTETES_CORS_OAUTH, 'Content-Type': 'application/json; charset=utf-8' },
     };
   }

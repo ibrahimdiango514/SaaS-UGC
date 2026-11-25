@@ -1,7 +1,8 @@
 import { integrationProgress,protocolBinding,submissionId,familyResult,type Protocol } from './families.ts';
 import { assessment,customerModel,fileType,parsePrediction,predictionId,record,UUID,type Json } from './core.ts';
-import { validateMuapiInput,muapiDefaults } from '../universal-catalog/schema.ts';
+import { validateMuapiInput,muapiDefaults,declaredExternalLink } from '../universal-catalog/schema.ts';
 import { extractProviderCostUsd,extractProviderCurrency } from '../_shared/video-quote.ts';
+import { isHttpsInput } from '../universal-catalog/schema.ts';
 import { fetchMuapiCatalog } from '../universal-catalog/catalog.ts';
 import { fetchMuapiDetail } from '../universal-catalog/details.ts';
 import { MAX_BYTES } from './media.ts';
@@ -18,17 +19,34 @@ export function createHandler(deps:Dependencies) {
   const res=await fetcher(`${base()}/rest/v1/rpc/${name}`,{method:'POST',headers:headers(jwt),body:JSON.stringify(args),signal:AbortSignal.timeout(20000)});
   if (!res.ok) {
    const raw=record(await res.json().catch(()=>({})));
-   const allowed=['subscription_required','not_authenticated','admin_not_customer','not_vyora_customer','account_not_active','verification_required','quote_expired','model_unavailable','daily_budget_exceeded','concurrency_limit','runtime_disabled','quote_unavailable','invalid_plan'];
-   error(allowed.includes(raw.message)?raw.message.toUpperCase():'ACCESS_OR_STATE_REJECTED',res.status===401?401:409);
+   const allowed=['subscription_required','not_authenticated','admin_not_customer','not_vyora_customer','account_not_active','verification_required','quote_expired','model_unavailable','daily_budget_exceeded','concurrency_limit','runtime_disabled','quote_unavailable','invalid_plan','quota_policy_missing','quota_exceeded','invalid_quota_kind','invalid_family','invalid_policy','approved_quota_incomplete','no_derivation_rule','approval_note_required'];
+   const message=String(raw.message??'');
+   // Les refus de quota portent la famille et les compteurs (`quota_exceeded:audio:5:5`).
+   const reason=allowed.find(code=>message===code||message.startsWith(code+':'));
+   error(reason?reason.toUpperCase():'ACCESS_OR_STATE_REJECTED',res.status===401?401:409);
   }
   return res.json();
  }
  async function provider(path:string,body?:Json) {
   const key=env('MUAPI_API_KEY'); if(!key) error('PROVIDER_NOT_CONFIGURED',503);
-  const res=await fetcher(`https://api.muapi.ai${path}`,{method:body?'POST':'GET',headers:{'x-api-key':key,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.timeout(30000)});
+  let res:Response;
+  try {
+   res=await fetcher(`https://api.muapi.ai${path}`,{method:body?'POST':'GET',headers:{'x-api-key':key,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.timeout(30000)});
+  } catch(e) {
+   // Aucun message fournisseur n'est journalisé : un délai réseau et une panne
+   // restent deux codes distincts, sans URL ni corps de requête.
+   const name=e&&typeof e==='object'&&'name' in e?String((e as {name?:unknown}).name):'';
+   throw new RuntimeError(name==='TimeoutError'||name==='AbortError'?'PROVIDER_TIMEOUT':'PROVIDER_REQUEST_FAILED',503);
+  }
   if(!res.ok) error('PROVIDER_REQUEST_FAILED',503);
-  const text=await res.text(); if(text.length>1048576) error('PROVIDER_RESPONSE_INVALID',503);
-  return record(JSON.parse(text));
+  const text=await res.text();
+  if(!text.trim()||text.length>1048576) error('PROVIDER_RESPONSE_INVALID',503);
+  let parsed:unknown;
+  try { parsed=JSON.parse(text); } catch { parsed=undefined; }
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)) error('PROVIDER_RESPONSE_INVALID',503);
+  // Une réponse vide, non JSON ou d'un autre type n'est jamais assimilée à un
+  // succès : le job reste réessayable, la soumission n'est pas rejouée.
+  return record(parsed);
  }
  async function sign(path:string) {
   const encoded=path.split('/').map(encodeURIComponent).join('/');
@@ -64,6 +82,15 @@ export function createHandler(deps:Dependencies) {
     return Promise.all((value as unknown[]).map(v=>resolve(record(d.items),v)));
    }
    if(!d.field&&d.format!=='uri'&&d.format!=='url')return value;
+   // Une fiche qui déclare « public URL » attend un lien HTTPS fourni par le
+   // client, pas un fichier privé : rien n'est signé, téléversé NI TÉLÉCHARGÉ.
+   // Le lien est seulement validé (HTTPS, hôte public, sans SSRF) puis transmis
+   // au fournisseur — jamais ouvert par SORAHNEX.
+   if(declaredExternalLink(d)){
+    const links:unknown[]=d.type==='array'?(Array.isArray(value)?value:[]):[value];
+    if(links.length===0||links.length>256||links.some(x=>typeof x!=='string'||!isHttpsInput(x)))error('PARAMETER_INVALID');
+    return d.type==='array'?links:links[0];
+   }
    const values=d.type==='array'?value:[value];
    if(!Array.isArray(values)||values.length>256)error('PARAMETER_INVALID');
    const signed:string[]=[];
@@ -154,9 +181,15 @@ export function createHandler(deps:Dependencies) {
    for(const candidate of candidates) {
     const detail=await fetchMuapiDetail(fetcher,candidate.provider_model_id);
     if(await rpc('studio_save_muapi_detail',{p_model_id:detail.model_id,p_status:detail.status,p_http_status:detail.http_status,
-      p_input_schema:detail.input_schema?{...detail.input_schema,vyora_endpoint_evidence:detail.endpoint_evidence}:null,p_output_schema:detail.output_schema}))ok++;
+      p_input_schema:detail.input_schema?{...detail.input_schema,vyora_endpoint_evidence:detail.endpoint_evidence}:null,p_output_schema:detail.output_schema,
+      p_provider_pricing:detail.provider_pricing??null}))ok++;
    }
    return {attempted:candidates.length,saved:ok};
+  }
+  if(body.task==='prepare_runtime') {
+   // Prépare les configurations runtime depuis les preuves déjà persistées.
+   // N'active rien : `enabled` reste faux, `verified_*` reste nul.
+   return await rpc('studio_prepare_runtime_batch',{p_limit:Number(body.limit)||500});
   }
   if(body.task!=='poll')error('INVALID_ACTION');
   const jobs=await rpc('studio_runtime_due');let reconciled=0;
@@ -178,8 +211,31 @@ export function createHandler(deps:Dependencies) {
    const user=record(await auth.json());if(!UUID.test(user.id))error('UNAUTHENTICATED',401);
    if(action==='admin_progress')return reply(await rpc('studio_integration_progress',{p_after:body!.after??'',p_family:body!.family??'',p_status:body!.status??'',p_query:body!.query??''},jwt));
    if(action==='admin_report')return reply(await rpc('studio_runtime_sync_report',{},jwt));
+   if(action==='admin_summary')return reply(await rpc('studio_catalog_admin_summary',{},jwt));
+   if(action==='admin_plan_matrix')return reply({plans:await rpc('studio_runtime_plan_matrix',{},jwt)});
+   if(action==='admin_plan_family')return reply({saved:await rpc('studio_set_plan_family',{p_plan_key:body!.plan_key,p_family:body!.family,p_allowed:body!.allowed,p_approved:body!.approved},jwt)});
+   if(action==='admin_plan_quota')return reply({saved:await rpc('studio_set_plan_quota',{p_plan_key:body!.plan_key,p_family:body!.family,p_limit:body!.limit??null,p_enabled:body!.enabled,p_approved:body!.approved},jwt)});
+   if(action==='admin_plan_proposals')return reply(await rpc('studio_family_policy_proposals',{},jwt));
+   if(action==='admin_plan_propose')return reply(await rpc('studio_propose_family_policy',{p_family:typeof body!.family==='string'&&body!.family?body!.family:null},jwt));
+   if(action==='admin_plan_approve')return reply({saved:await rpc('studio_approve_family_policy',{p_family:body!.family,p_approve_entitlements:body!.approve_entitlements===true,p_note:typeof body!.note==='string'?body!.note:null},jwt)});
    if(action==='admin_reconcile')return reply({saved:await rpc('studio_runtime_admin_reconcile',{p_job_id:body!.job_id,p_provider_id:body!.provider_id,p_reference:body!.reference},jwt)});
    if(action==='admin_limits')return reply({saved:await rpc('studio_runtime_admin_limits',{p_enabled:body!.enabled,p_daily_usd:body!.daily_usd},jwt)});
+   // Actions externes : le Edge ne fait que relayer les RPC de demande,
+   // confirmation et annulation. Aucun appel fournisseur, aucun crédit, aucune
+   // exécution — même après confirmation.
+   if(action==='external_actions')return reply({actions:await rpc('studio_external_action_list',{p_limit:Number(body!.limit)||50},jwt)});
+   if(action==='external_request') {
+    if(!UUID.test(body!.model_id??''))error('INVALID_REQUEST');
+    return reply(await rpc('studio_external_action_request',{p_model_id:body!.model_id,p_params:body!.params??{}},jwt));
+   }
+   if(action==='external_confirm') {
+    if(!UUID.test(body!.action_id??''))error('INVALID_REQUEST');
+    return reply(await rpc('studio_external_action_confirm',{p_action_id:body!.action_id,p_confirm:body!.confirm===true,p_note:typeof body!.note==='string'?body!.note:null},jwt));
+   }
+   if(action==='external_cancel') {
+    if(!UUID.test(body!.action_id??''))error('INVALID_REQUEST');
+    return reply(await rpc('studio_external_action_cancel',{p_action_id:body!.action_id},jwt));
+   }
    if(action==='admin_config') {
     const config=await rpc('studio_runtime_admin_config',{p_model_id:body!.model_id,p_config:body!.config??null},jwt);
     const model=await rpc('studio_runtime_model',{p_model_id:body!.model_id});
@@ -188,8 +244,9 @@ export function createHandler(deps:Dependencies) {
    const ctx=await rpc('studio_runtime_access',{},jwt);
    if(action==='models') {
     const page=await rpc('studio_runtime_models',{p_after:typeof body!.after==='string'?body!.after:'',p_query:typeof body!.query==='string'?body!.query:'',p_category:typeof body!.category==='string'?body!.category:'',p_limit:50});
-    return reply({total:page.total,categories:page.categories,items:page.items.map((m:Json)=>customerModel(m,ctx.plan)),next_cursor:page.items.length===50?page.items[49].provider_model_id:null,credits:ctx.credits,workspace_id:ctx.workspace_id});
+    return reply({total:page.total,categories:page.categories,items:page.items.map((m:Json)=>customerModel(m,ctx.plan)),next_cursor:page.items.length===50?page.items[49].provider_model_id:null,credits:ctx.credits,workspace_id:ctx.workspace_id,plan:ctx.plan});
    }
+   if(action==='quotas')return reply(await rpc('studio_runtime_quotas',{},jwt));
    if(action==='history')return reply({jobs:await history(jwt,body!.before)});
    if(action==='quote') {
     if(!await rpc('studio_runtime_rate',{p_user_id:user.id,p_action:'quote'}))error('RATE_LIMITED',429);
@@ -198,7 +255,10 @@ export function createHandler(deps:Dependencies) {
     const params=await inputParams(model,body!.params,jwt,ctx);
     const estimated=await provider(model.runtime_config.estimate_path,params);
     const cost=extractProviderCostUsd(estimated);
-    if(extractProviderCurrency(estimated,'')!=='USD'||cost===null||cost<=0||cost>Number(model.runtime_config.max_cost_usd))error('QUOTE_UNAVAILABLE',409);
+    // Un modèle gratuit déclaré doit estimer 0 USD ; sinon le devis est refusé
+    // plutôt que de facturer un coût que la fiche officielle ne déclare pas.
+    const free=model.runtime_config.billing==='free';
+    if(extractProviderCurrency(estimated,'')!=='USD'||cost===null||(free?cost!==0:cost<=0)||(!free&&cost>Number(model.runtime_config.max_cost_usd)))error('QUOTE_UNAVAILABLE',409);
     const quote=await rpc('studio_runtime_issue_quote',{p_user_id:user.id,p_model_id:model.id,p_params:params,p_cost:cost,p_hash:model.spec_hash,p_revision:model.runtime_config.revision});
     return reply({...quote,balance:ctx.credits});
    }

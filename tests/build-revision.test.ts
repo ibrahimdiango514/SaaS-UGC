@@ -39,7 +39,7 @@ describe('cachet de révision du build', () => {
       .find((item) => item?.name === 'vyora-build-revision');
     expect(plugin?.transformIndexHtml).toBeTypeOf('function');
 
-    const html = plugin!.transformIndexHtml!('<html><head><title>VYORA</title></head><body></body></html>');
+    const html = plugin!.transformIndexHtml!('<html><head><title>SORAHNEX</title></head><body></body></html>');
     expect(html).toContain('<meta name="vyora-revision" content="');
     // Le cachet est bien dans <head>, pas après </head>.
     expect(html.indexOf('vyora-revision')).toBeLessThan(html.indexOf('</head>'));

@@ -1,4 +1,4 @@
-# VYORA — Architecture du moteur IA multi-fournisseurs
+# SORAHNEX — Architecture du moteur IA multi-fournisseurs
 
 > Document d'architecture, vérifié sur le code présent dans ce dépôt (2026-11-14).
 > Il décrit **ce qui existe déjà** et **ce qu'il reste à faire** pour accueillir les
@@ -119,10 +119,10 @@ Résultat : `{ steps, skipReason }`. `skipReason` est explicite :
 ### Ce qui reste à brancher pour le routage par tâche
 
 - [ ] Table de correspondance **tâche → rôle** (aujourd'hui les rôles sont les 7 rôles
-      métier Business Grow + les actions Studio).
+      métier Grow + les actions Studio).
 - [ ] Politique de **coût maximum par tâche** (le budget est global/mensuel).
 - [ ] Priorité par **latence observée** (le journal stocke `latency_ms`, pas encore exploité).
-- [ ] Préférence **par espace** : Studio et Business Growth partagent le registre mais
+- [ ] Préférence **par espace** : Studio et Grow partagent le registre mais
       gardent des secrets et des quotas distincts.
 
 ---

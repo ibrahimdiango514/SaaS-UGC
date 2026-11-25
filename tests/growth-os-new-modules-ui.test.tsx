@@ -177,7 +177,7 @@ describe('Growth OS — nouveaux modules connectés', () => {
   });
 
   it('convertit une demande de vitrine en prospect CRM sans doublon', async () => {
-    wrap(<StorefrontWorkspace workspaceId="w1" workspaceName="Atelier VYORA" onOpenContact={() => {}} />);
+    wrap(<StorefrontWorkspace workspaceId="w1" workspaceName="Atelier SORAHNEX" onOpenContact={() => {}} />);
     fireEvent.click(await screen.findByRole('button', { name: /Demandes/ }));
     expect(await screen.findByText('Fatou Diarra')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Prospect' }));

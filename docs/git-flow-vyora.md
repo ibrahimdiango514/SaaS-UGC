@@ -1,7 +1,7 @@
-# VYORA — Git flow : `develop` ↔ `main`
+# SORAHNEX — Git flow : `develop` ↔ `main`
 
 > Adopté le 2026-11-14 (mission de centralisation du développement).
-> Source canonique de l'organisation Git de VYORA. Toute livraison de production est
+> Source canonique de l'organisation Git de SORAHNEX. Toute livraison de production est
 > soumise à la procédure §5 et à l'autorisation explicite du propriétaire.
 
 ## 1. Modèle à deux branches permanentes
@@ -9,7 +9,7 @@
 | Branche | Rôle | Déploiement Netlify |
 |---|---|---|
 | `main` | **Production uniquement** (`vyora-ugc.netlify.app`) | Auto-publish activé : chaque commit publié déclenche un build de production |
-| `develop` | **Développement unique permanent** de VYORA | Jamais de publication de production (branch deploy / preview uniquement) |
+| `develop` | **Développement unique permanent** de SORAHNEX | Jamais de publication de production (branch deploy / preview uniquement) |
 
 Règles :
 
@@ -108,7 +108,7 @@ Après fusion :
   épinglé par SHA-256 + longueur dans le loader court. Tout changement de bundle exige
   la régénération de l'artefact (`scripts/build-business-grow-artifact.mjs`) et la
   mise à jour du loader **avant** la publication du frontend qui l'utilise.
-- Fonctions Edge legacy / Reelora : jamais redéployées aveuglément, hors périmètre
+- Fonctions Edge legacy / SORAHNEX Studio : jamais redéployées aveuglément, hors périmètre
   explicite d'une mission.
 
 ## 7. Points à maintenir manuellement (hors capacité de l'agent Arena)

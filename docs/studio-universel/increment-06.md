@@ -17,7 +17,7 @@
 - Migration additive : conserve ces sept déclarations dans `endpoint_evidence`,
   avec URL source, date et HTTP. Le RPC admin retourne l'évidence avec les gardes
   existantes. Les synchronisations futures conservent aussi les déclarations de
-  premier niveau ; le schéma brut reste séparé des métadonnées VYORA.
+  premier niveau ; le schéma brut reste séparé des métadonnées SORAHNEX.
 - Formulaire dans la fiche admin : paramètres typés, enums, booléens, tableaux
   JSON, valeurs par défaut, ordre fournisseur, types `int`/`float`/`text`, bornes,
   longueurs, pas numérique et médias HTTPS. Validation locale puis serveur.

@@ -96,12 +96,12 @@ describe('interface — non-abonné', () => {
       </ImportConnectGate>,
     );
 
-    await waitFor(() => expect(screen.getByText(/Abonnement Business Grow requis/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Abonnement SORAHNEX Grow requis/i)).toBeTruthy());
 
     // Le contenu réservé n'est pas rendu du tout.
     expect(screen.queryByTestId('module-reel')).toBeNull();
     // Et l'utilisateur voit le chemin de sortie.
-    const lien = screen.getByRole('link', { name: /offres Business Grow/i });
+    const lien = screen.getByRole('link', { name: /offres SORAHNEX Grow/i });
     expect(lien.getAttribute('href')).toBe('/app/business/abonnement');
     expect(screen.getByText(/Aucune importation ni connexion n’a été lancée/i)).toBeTruthy();
   });
@@ -134,7 +134,7 @@ describe('interface — abonné', () => {
     acces({ allowed: true, reason: 'OK', current_period_end: '2027-01-01T00:00:00Z' });
     rendre(<ImportConnectGate><div data-testid="module-reel" /></ImportConnectGate>);
     await waitFor(() => expect(screen.getByTestId('module-reel')).toBeTruthy());
-    expect(screen.queryByText(/Abonnement Business Grow requis/i)).toBeNull();
+    expect(screen.queryByText(/Abonnement SORAHNEX Grow requis/i)).toBeNull();
   });
 
   it('rouvre l’accès après renouvellement, sans recharger la page', async () => {

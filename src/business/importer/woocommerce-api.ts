@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur WooCommerce : client de l'API REST officielle.
+ * SORAHNEX — connecteur WooCommerce : client de l'API REST officielle.
  *
  * ## Mécanisme d'authentification retenu
  *
@@ -296,7 +296,7 @@ export async function fetchWooResource(
       }
       const code = (cause as { code?: string })?.code;
       if (code === 'blocked_url') {
-        return fail('blocked_url', 'Cette adresse n’est pas accessible depuis VYORA.');
+        return fail('blocked_url', 'Cette adresse n’est pas accessible depuis SORAHNEX.');
       }
       if (code === 'dns_failed' || code === 'no_resolver') {
         return fail('dns_failed', 'Le domaine du site n’a pas pu être résolu.');
