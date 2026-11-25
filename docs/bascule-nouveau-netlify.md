@@ -46,19 +46,28 @@ les entrées existantes ont été préservées (Supabase exige la liste complèt
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | clé `sb_publishable_…` du projet | Clé **publique** ; la clé secrète ne doit jamais entrer dans un build frontend |
 | `VITE_SITE_URL` | `https://<nouveau-site>.netlify.app` | Origine des redirections e-mail ; sans elle le code se replie sur `window.location.origin`, ce qui fonctionne mais reste ambigu |
 | `VYORA_BUILD_ENABLED` | `true` | Rideau 1 de la garde |
-| `SORAHNEX_DEPLOY_AUTHORIZED` | **`true`, en dernier** | Rideau 2 : autorisation humaine explicite. Tant qu'elle manque, aucun build ne part |
+| `SORAHNEX_DEPLOY_AUTHORIZED` | **`true`, en dernier** | Autorisation humaine explicite (verrou de crédits) |
+| `SORAHNEX_DEPLOY_AUTHORIZED_NAME` | `sorahnex-deploy` | Second facteur du verrou : sans lui, l'autorisation seule ne suffit pas |
 
-### 2.2 Identité du site — DEUX endroits à mettre à jour
+### 2.2 Identité du site — UN SEUL fichier
 
-La garde compare le nom **et** l'identifiant du site. Une seule mise à jour laisse
-la publication bloquée (c'est le comportement voulu) :
+L'identité autorisée vit dans **`netlify.site.conf`** (SITE_ID, SITE_NAME,
+ANCIEN_SITE_NAME). Les deux rideaux de la garde le lisent : `scripts/netlify-ignore.sh`
+et `scripts/netlify-build-guard.sh`, via `scripts/netlify-guard-lib.sh`.
 
-1. `netlify.toml`, ligne `ignore` : remplacer
-   `SITE_ID` (`fc88d197-fe0b-47c7-a6e3-fba44eeccda9`) et `SITE_NAME`
-   (`vyora-saas-ugc`) par ceux du nouveau site ;
-2. `scripts/netlify-build-guard.sh` : les mêmes deux valeurs.
-3. **Par PR, jamais par un push direct sur `main`.**
-4. Conserver `SITE_NAME != "vyora-ugc"` : c'est le refus explicite de l'ancien site.
+```sh
+SITE_ID=<NOUVEAU_SITE_ID>
+SITE_NAME=<nouveau-nom>
+ANCIEN_SITE_NAME=vyora-ugc     # ne pas modifier
+```
+
+- **Par PR, jamais par un push direct sur `main`.**
+- Aucun autre fichier à modifier : `netlify.toml` ne contient plus aucun
+  identifiant (un test le vérifie sur les directives).
+- Le refus explicite de l'ancien site est conservé.
+- Le test « après remplacement de l'identité, le NOUVEAU site passe et l'ancien
+  est refusé » (`tests/netlify-deployment-guard.test.ts`) valide ce changement
+  avant même de créer le site.
 
 ### 2.3 Côté Supabase, à faire au moment de la bascule
 

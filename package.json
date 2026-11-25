@@ -16,7 +16,8 @@
     "audit:business-rls": "node supabase/tests/business-agent/rls-ownership.mjs",
     "preview:studio": "node scripts/studio-preview.mjs",
     "preview:spaces": "node scripts/spaces-preview.mjs",
-    "verify:sorahnex-aliases": "node scripts/verify-sorahnex-aliases.mjs"
+    "verify:sorahnex-aliases": "node scripts/verify-sorahnex-aliases.mjs",
+    "audit:origins": "node scripts/audit-origins.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
