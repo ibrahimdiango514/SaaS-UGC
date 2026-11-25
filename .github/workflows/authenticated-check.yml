@@ -52,3 +52,11 @@ jobs:
           SORAHNEX_TEST_PASSWORD: ${{ secrets.SORAHNEX_TEST_PASSWORD }}
           SORAHNEX_QA_SIGNUP: "1"
         run: node scripts/verify-authenticated.mjs
+      - name: Publier le rapport complet
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-verification-authentifiee
+          path: rapport-verification-authentifiee.md
+          if-no-files-found: warn
+          retention-days: 30

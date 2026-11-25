@@ -159,11 +159,10 @@ export function sondes(jeton, workspaceId = null) {
       url: `${SUPABASE_URL}/functions/v1/mcp-client/gestion/lister`,
       init: { method: 'POST', headers: entetes(jeton), body: '{}' },
     },
-    {
-      nom: 'universal-catalog · catalog',
-      url: `${SUPABASE_URL}/functions/v1/universal-catalog`,
-      init: { method: 'POST', headers: entetes(jeton), body: JSON.stringify({ action: 'catalog' }) },
-    },
+    // `universal-catalog` n'expose AUCUNE action de lecture : ses seules actions
+    // (sync_muapi, sync_muapi_details, validate_muapi_input) écrivent ou
+    // déclenchent un travail fournisseur. On ne les sonde donc pas ici — la
+    // vérification de production couvre déjà sa présence et son refus anonyme.
     {
       nom: 'reelora-video · catalog',
       url: `${SUPABASE_URL}/functions/v1/reelora-video`,
@@ -218,15 +217,40 @@ async function principal() {
 
   let echecs = 0;
   const tableau = ['| Sonde | HTTP | Verdict | Extrait |', '| --- | --- | --- | --- |'];
+  const enEchec = [];
+  const parVerdict = new Map();
   for (const sonde of sondes(session.jeton, workspaceId)) {
     const { statut, corps } = await appeler(sonde.url, sonde.init);
     const verdict = classer(statut, corps);
     const extrait = rediger(corps).replace(/\|/g, '/').replace(/\n/g, ' ');
-    if (estEchec(verdict)) echecs++;
-    const niveau = estEchec(verdict) ? 'error' : verdict === 'OK' ? 'notice' : 'warning';
-    console.log(`::${niveau}::${sonde.nom} HTTP ${statut} · ${verdict} · ${extrait}`);
+    parVerdict.set(verdict, (parVerdict.get(verdict) ?? 0) + 1);
+    if (estEchec(verdict)) {
+      echecs++;
+      enEchec.push(`${sonde.nom} → ${verdict} (HTTP ${statut})`);
+    }
     tableau.push(`| ${sonde.nom} | ${statut} | ${verdict} | \`${extrait}\` |`);
   }
+
+  // GitHub ne conserve que ~10 annotations par étape : le détail complet part donc
+  // dans un rapport téléchargeable, et le journal ne garde qu'un résumé.
+  const rapport = [
+    '# Vérification authentifiée SORAHNEX — lecture seule',
+    '',
+    `- Date : ${new Date().toISOString()}`,
+    `- Compte : ${compte}`,
+    `- Périmètre : ${portee}`,
+    `- Sondes : ${tableau.length - 2}`,
+    '',
+    ...(enEchec.length ? ['## Échecs réels', '', ...enEchec.map((l) => `- ${l}`), ''] : []),
+    ...tableau,
+    '',
+  ].join('\n');
+  await ecrire('rapport-verification-authentifiee.md', rapport);
+
+  const resumeParVerdict = [...parVerdict.entries()].map(([v, n]) => `${v} ${n}`).join(' · ');
+  console.log(`::notice::${tableau.length - 2} sondes · ${resumeParVerdict} · rapport complet : rapport-verification-authentifiee.md (artefact)`);
+  for (const ligne of enEchec.slice(0, 5)) console.log(`::error::${ligne}`);
+  if (enEchec.length > 5) console.log(`::error::… et ${enEchec.length - 5} autre(s) échec(s), tous listés dans le rapport.`);
 
   if (resume) {
     await ecrire(resume, [
@@ -237,6 +261,8 @@ async function principal() {
       ...tableau,
       '',
       echecs ? `**${echecs} sonde(s) en échec réel.**` : 'Aucune panne : toutes les sondes ont obtenu une réponse du handler.',
+      '',
+      `Détail complet : artefact \`rapport-verification-authentifiee\` de cette exécution.`,
       '',
     ].join('\n'));
   }

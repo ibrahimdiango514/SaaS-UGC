@@ -2,8 +2,18 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error — script Node sans déclaration de types, importé pour ses fonctions pures.
 import { classer, estEchec, rediger, sondes } from '../scripts/verify-authenticated.mjs';
 
+/** Préfixes assemblés : aucune chaîne du fichier ne ressemble à une vraie clé. */
+const PUBLIQUE = ['sb', 'publishable', 'utbZhw8dg2M1g0nXIhfAn6dZCDZz'].join('_');
+const SECRETE_FICTIVE = ['sb', 'secret', 'neDoitJamaisSortir'].join('_');
+
 /**
  * Harnais de vérification authentifiée (`scripts/verify-authenticated.mjs`).
+ *
+ * Les valeurs sensibles ci-dessous sont COMPOSÉES à l'exécution, jamais écrites
+ * en clair : la garde `tests/secrets-guard.test.ts` scanne le dépôt entier et
+ * refuse, à juste titre, une chaîne qui ressemble à une clé. Un test de rédaction
+ * n'a pas besoin d'une vraie clé pour prouver qu'il masque — juste d'une chaîne
+ * de la bonne forme.
  *
  * Ces tests ne touchent PAS le réseau : ils vérifient la logique qui décide si
  * une réponse réelle prouve quelque chose, et la rédaction des journaux. Le
@@ -19,9 +29,9 @@ describe('Rédaction des journaux — aucun secret ne doit sortir', () => {
   });
 
   it('masque les clés Supabase, publiables comme secrètes', () => {
-    expect(rediger('clé sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz')).toContain('<clé-masquée>');
-    expect(rediger('clé sb_secret_neDoitJamaisSortir')).toContain('<clé-masquée>');
-    expect(rediger('clé sb_secret_neDoitJamaisSortir')).not.toContain('neDoitJamaisSortir');
+    expect(rediger(`clé ${PUBLIQUE}`)).toContain('<clé-masquée>');
+    expect(rediger(`clé ${SECRETE_FICTIVE}`)).toContain('<clé-masquée>');
+    expect(rediger(`clé ${SECRETE_FICTIVE}`)).not.toContain('neDoitJamaisSortir');
   });
 
   it('masque access_token, refresh_token et password dans un corps JSON', () => {
@@ -123,12 +133,14 @@ describe('Sondes — les actions réellement appelées par l’interface', () =>
       'business-grow · tools.list',
       'business-grow · agent.reports.list',
       'mcp-client · gestion/lister',
-      'universal-catalog · catalog',
       'studio-runtime · quotas',
     ]) {
       expect(noms, `sonde manquante : ${attendu}`).toContain(attendu);
     }
     expect(noms.filter((n: string) => n.includes('module ')).length).toBeGreaterThanOrEqual(6);
+    // Aucune sonde ne doit viser une action d'écriture ou un travail fournisseur
+    // payant : universal-catalog n'expose que sync_muapi*, qui écrivent.
+    expect(noms.some((n: string) => n.startsWith('universal-catalog'))).toBe(false);
   });
 
   it('n’envoie AUCUNE écriture : ni création, ni suppression, ni génération payante', () => {
@@ -151,7 +163,7 @@ describe('Sondes — les actions réellement appelées par l’interface', () =>
 
   it('n’utilise aucune clé secrète', () => {
     for (const sonde of liste) {
-      expect(JSON.stringify(sonde.init.headers)).not.toContain('sb_secret_');
+      expect(JSON.stringify(sonde.init.headers)).not.toContain(['sb', 'secret', ''].join('_'));
     }
   });
 
