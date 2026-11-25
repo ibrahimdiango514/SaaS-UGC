@@ -386,3 +386,47 @@ describe('Défense en profondeur — ce que la garde NE doit pas permettre', () 
     }
   });
 });
+
+// ===========================================================================
+describe('Documentation des variables — cohérente avec le code', () => {
+  it('.env.example n’assigne AUCUNE variable hors VITE_ (une valeur réelle finirait par y être collée)', () => {
+    const assignables = lire('.env.example')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => /^[A-Z0-9_]+=/.test(l));
+    expect(assignables.length).toBeGreaterThan(0);
+    for (const ligne of assignables) {
+      expect(ligne.split('=')[0], `variable non publique assignable : ${ligne}`).toMatch(/^VITE_/);
+    }
+  });
+
+  it('les variables frontend réellement lues sont toutes documentées', () => {
+    const lues = new Set<string>();
+    const parcourir = (chemin: string) => {
+      const { readdirSync, statSync, readFileSync } = require('node:fs') as typeof import('node:fs');
+      for (const entree of readdirSync(join(RACINE, chemin))) {
+        const complet = join(chemin, entree);
+        if (statSync(join(RACINE, complet)).isDirectory()) parcourir(complet);
+        else if (/\.(ts|tsx)$/.test(entree)) {
+          for (const m of readFileSync(join(RACINE, complet), 'utf8').matchAll(/VITE_[A-Z0-9_]+/g)) lues.add(m[0]);
+        }
+      }
+    };
+    parcourir('src');
+    const exemple = lire('.env.example');
+    for (const nom of lues) {
+      expect(exemple, `variable lue mais non documentée : ${nom}`).toContain(nom);
+    }
+  });
+
+  it('la checklist d’environnement cite les quatre familles et le jeton d’autorisation', () => {
+    const checklist = lire('docs/NETLIFY_ENVIRONMENT_CHECKLIST.md');
+    expect(checklist).toContain('VITE_SITE_URL');
+    expect(checklist).toContain('VYORA_BUILD_ENABLED');
+    expect(checklist).toContain('SORAHNEX_DEPLOY_AUTHORIZED_NAME');
+    expect(checklist).toContain('BUSINESS_GROW_');
+    expect(checklist).toContain('CORS');
+    // Le piège des deux noms d'IA doit rester documenté.
+    expect(checklist).toMatch(/FREE_LLM_.*\n?.*BUSINESS_GROW_|BUSINESS_GROW_.*\n?.*FREE_LLM_/);
+  });
+});
