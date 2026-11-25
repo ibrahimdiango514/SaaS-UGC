@@ -12,7 +12,7 @@
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "12927d41b30e1de94e61e9f284b7a16289e7f0e9";
+const COMMIT = "0e497732e62010fe847c8e035c3f3ec45b74a4f3";
 const PATH = "supabase/functions/_artifacts/store-connect.js";
 const ARTIFACT_SHA256 = "5448e1d78b76873cb13dc47cd3c155f8b42e69c5e7aff3caaf1ab4ea3ee655b9";
 const ARTIFACT_CHARS = 81320;
