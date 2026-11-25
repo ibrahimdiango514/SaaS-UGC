@@ -20,6 +20,7 @@ import {
   type PaymentPromise, type PromiseStatus, type Receivable, type ReceivableDispute,
   type ReceivableView, type RecoveryRisk,
 } from './model';
+import { useGrandEcran } from '../../lib/media-query';
 
 export type FinanceTab = 'dashboard' | 'creances' | 'echeancier' | 'recouvrement' | 'promesses' | 'litiges';
 
@@ -79,6 +80,8 @@ export default function FinanceWorkspace({
   initialTab?: FinanceTab;
   lockTab?: boolean;
 }) {
+  // Une seule vue montée à la fois : liste tactile ou tableau.
+  const grandEcran = useGrandEcran();
   const toast = useToast();
   const [tab, setTab] = useState<FinanceTab>(initialTab);
   const contactsStore = useRecords(CRM_CATEGORIES.contacts, workspaceId);
@@ -507,10 +510,47 @@ export default function FinanceWorkspace({
               description={receivables.length ? 'Ajustez le filtre de statut ou la recherche.' : 'Créez une créance reliée à un contact CRM.'}
               action={<Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => openReceivable()}>Nouvelle créance</Button>} />
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-white/[0.07]">
+            /*
+             * Sur téléphone, une créance = une ligne lisible : référence,
+             * client, solde, statut et échéance. Le tableau desktop imposait
+             * `min-w-[560px]`, donc un défilement horizontal sur tout écran
+             * Android, avec des colonnes masquées (`hidden sm:table-cell`) dont
+             * l'information n'était alors **inaccessible nulle part**.
+             *
+             * Le bouton « Paiement » reste sur la ligne : c'est l'action
+             * fréquente, elle ne doit pas demander d'ouvrir la fiche.
+             */
+            !grandEcran ? (
+              <ul className="liste-mobile overflow-hidden rounded-xl border border-white/[0.07]" data-testid="creances-liste">
+                {filteredViews.map((view) => (
+                  <li key={view.receivable.id} className="px-3 py-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(view.receivable.id)}
+                        className="min-w-0 flex-1 truncate text-left text-[13px] font-semibold text-white"
+                      >
+                        {view.receivable.reference || 'Sans référence'}
+                      </button>
+                      <span className="shrink-0 text-[13px] font-semibold text-white">{money(view.balance)}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-[11.5px] text-slate-400">
+                      {contactName(view.receivable.contactId)}
+                      {view.receivable.dueDate ? ` · échéance ${view.receivable.dueDate}` : ''}
+                    </p>
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <Badge status={view.effectiveStatus} tone={statusTone(view.effectiveStatus)}>{statusLabel(view.effectiveStatus)}</Badge>
+                      {view.balance > 0 && !['annulee', 'litige', 'brouillon'].includes(view.effectiveStatus)
+                        && <Button size="sm" variant="outline" onClick={() => openPayment(view)}>Paiement</Button>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+            <div className="table-defile rounded-xl border border-white/[0.07]">
               <table className="w-full min-w-[560px] text-left text-[11px]">
                 <thead className="bg-white/[0.03] text-[10px] uppercase tracking-wide text-slate-500">
-                  <tr><th className="px-3 py-2">Référence</th><th className="px-3 py-2">Client</th><th className="hidden px-3 py-2 md:table-cell">Échéance</th><th className="px-3 py-2">Solde</th><th className="hidden px-3 py-2 sm:table-cell">Statut</th><th className="px-3 py-2" /></tr>
+                  <tr><th className="px-3 py-2">Référence</th><th className="px-3 py-2">Client</th><th className="px-3 py-2">Échéance</th><th className="px-3 py-2">Solde</th><th className="px-3 py-2">Statut</th><th className="px-3 py-2" /></tr>
                 </thead>
                 <tbody>
                   {filteredViews.map((view) => (
@@ -520,9 +560,9 @@ export default function FinanceWorkspace({
                         <span className="block text-[10px] text-slate-500">{view.receivable.description || '—'}</span>
                       </td>
                       <td className="px-3 py-2 text-slate-300">{contactName(view.receivable.contactId)}</td>
-                      <td className="hidden px-3 py-2 text-slate-400 md:table-cell">{view.receivable.dueDate || '—'}</td>
+                      <td className="px-3 py-2 text-slate-400">{view.receivable.dueDate || '—'}</td>
                       <td className="px-3 py-2 font-semibold text-white">{money(view.balance)}</td>
-                      <td className="hidden px-3 py-2 sm:table-cell"><Badge status={view.effectiveStatus} tone={statusTone(view.effectiveStatus)}>{statusLabel(view.effectiveStatus)}</Badge></td>
+                      <td className="px-3 py-2"><Badge status={view.effectiveStatus} tone={statusTone(view.effectiveStatus)}>{statusLabel(view.effectiveStatus)}</Badge></td>
                       <td className="px-3 py-2 text-right">
                         {view.balance > 0 && !['annulee', 'litige', 'brouillon'].includes(view.effectiveStatus)
                           && <Button size="sm" variant="outline" onClick={() => openPayment(view)}>Paiement</Button>}
@@ -532,6 +572,7 @@ export default function FinanceWorkspace({
                 </tbody>
               </table>
             </div>
+            )
           )}
         </div>
       )}

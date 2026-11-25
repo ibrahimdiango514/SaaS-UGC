@@ -219,8 +219,21 @@ verifier_garde() {
   fi
 
   # 5. Branche de production.
+  #
+  # Ce refus s'applique AUSSI aux Deploy Previews de pull request. Conséquence
+  # voulue : chaque PR affiche un déploiement Netlify « failed » (code 2) sur le
+  # site sorahnex. Ce n'est PAS une erreur de code — le journal s'arrête ici et
+  # `npm ci` n'a jamais démarré.
+  #
+  # Constaté le 25/11/2026 sur la PR #59 (commit 5ea68e8) : l'échec a été pris
+  # pour un build cassé, alors que la commande complète, rejouée avec
+  # BRANCH=main dans le même clone, rend 0 et produit `dist/`.
+  #
+  # Pourquoi on ne lève pas la règle : autoriser une branche de PR à construire
+  # ouvrirait un build sur le site de PRODUCTION depuis n'importe quelle branche.
+  # La validation des PR se fait par la CI GitHub (`validate`), pas par Netlify.
   if [ "${BRANCH:-}" != "main" ]; then
-    refuser "seule la branche main est déployée (branche reçue : ${BRANCH:-<absente>})." || return 1
+    refuser "seule la branche main est déployée (branche reçue : ${BRANCH:-<absente>}). Un Deploy Preview de pull request est donc REFUSÉ PAR CONCEPTION : ce n'est pas une erreur de build, et le code n'est pas en cause. La validation d'une PR se fait par la CI GitHub, pas par Netlify." || return 1
   fi
 
   # 6-7. Autorisation humaine.

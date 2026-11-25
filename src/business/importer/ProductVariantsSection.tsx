@@ -185,7 +185,10 @@ export function ProductVariantsSection({
               rattachées à « {productName} », sans créer de produit séparé.
             </p>
           ) : (
-            <div className="vy-scroll overflow-x-auto">
+            /* `table-defile` borne le défilement horizontal à cette boîte :
+               sans lui, un tableau de 420 px de large élargissait la page
+               entière sur un écran de 360 px. */
+            <div className="table-defile vy-scroll">
               <table className="w-full min-w-[420px] border-collapse text-[10px]" data-testid={`variants-table-${productId}`}>
                 <thead>
                   <tr className="text-left text-[9px] uppercase tracking-wide text-slate-500">
