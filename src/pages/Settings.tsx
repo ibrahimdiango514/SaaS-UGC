@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Building2, KeyRound, Mail, Package, Pencil, PlugZap, Plus, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowUpRight, Bot, Building2, KeyRound, Link2, Mail, Package, Pencil, PlugZap, Plus, Server, Trash2, UserRound, Users, X } from 'lucide-react';
 import { PageHeader, Card, CardHeader, Button, Input, Select, Textarea, Badge, Banner, LoadingState, ErrorState, EmptyState, Tabs, ConfirmDialog } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
@@ -360,6 +361,57 @@ export default function Settings() {
                   <Badge tone={ok ? 'success' : 'warning'}>{ok ? 'Disponible' : 'Indisponible'}</Badge>
                 </div>
               ))}
+            </div>
+          </Card>
+          <Card>
+            <CardHeader
+              title="Connexion MCP"
+              description="Le protocole qui relie SORAHNEX à vos assistants IA et à vos outils métier."
+            />
+            <div className="grid gap-3 p-5 sm:grid-cols-2">
+              {[
+                {
+                  to: '/app/connexions-mcp',
+                  icon: Link2,
+                  title: 'Connexions MCP',
+                  detail: 'Les deux sens du protocole au même endroit : ce que vos IA peuvent faire ici, ce que SORAHNEX peut faire ailleurs.',
+                },
+                {
+                  to: '/app/connexions-ia',
+                  icon: Bot,
+                  title: 'Serveur MCP SORAHNEX',
+                  detail: 'Activer l’accès, choisir les permissions et révoquer les jetons des assistants connectés.',
+                },
+                {
+                  to: '/app/mes-serveurs-mcp',
+                  icon: Server,
+                  title: 'Mes serveurs MCP',
+                  detail: 'Connecter vos propres serveurs distants et autoriser leurs outils un par un.',
+                },
+              ].map((entry) => (
+                <Link
+                  key={entry.to}
+                  to={entry.to}
+                  className="group flex min-h-11 items-start gap-3 rounded-xl border border-line bg-white/[0.03] p-4 transition hover:border-cyan-300/30 hover:bg-cyan-400/[0.05]"
+                >
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-cyan-200">
+                    <entry.icon size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1 text-sm font-semibold text-white">
+                      {entry.title}
+                      <ArrowUpRight size={13} className="text-slate-500 transition group-hover:text-cyan-200" />
+                    </span>
+                    <span className="mt-1 block text-xs leading-relaxed text-slate-400">{entry.detail}</span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+            <div className="px-5 pb-5">
+              <Banner tone="info" title="Ce que l’écran ne peut pas promettre">
+                Une connexion n’est affichée comme active qu’après une réponse réelle du serveur ; un jeton se révoque à tout
+                moment, et chaque appel reste isolé sur l’entreprise qui l’a autorisé.
+              </Banner>
             </div>
           </Card>
           <Card>
