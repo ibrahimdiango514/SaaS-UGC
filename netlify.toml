@@ -18,15 +18,17 @@
   # Logique commune : `scripts/netlify-guard-lib.sh` (les deux rideaux ne peuvent
   # pas diverger). Huit conditions, toutes exigées, FERMÉ par défaut :
   #   SITE_ID = identifiant de netlify.site.conf   SITE_NAME = nom de netlify.site.conf
-  #   SITE_NAME ≠ vyora-ugc (ancien site, refus explicite)
+  #   SITE_ID/SITE_NAME ∉ liste ANCIEN_SITE_* (hébergements abandonnés, refus
+  #                                              explicite ; plusieurs lignes)
   #   BRANCH = main                                VYORA_BUILD_ENABLED = true
   #   SORAHNEX_DEPLOY_AUTHORIZED = true            SORAHNEX_DEPLOY_AUTHORIZED_NAME = sorahnex-deploy
   #
   # Les deux dernières variables forment le VERROU DE CRÉDITS : un déploiement
   # de production réussi coûte 15 crédits Netlify, et le pool épuisé met tous les
-  # sites de l'équipe en pause. Elles ne sont déclarées NULLE PART : publier
-  # exige un acte humain explicite, jamais un effet de bord d'un push ou d'une
-  # fusion. Voir docs/NETLIFY_DEPLOYMENT_CHECKLIST.md.
+  # sites de l'équipe en pause. La consigne reste : les RETIRER après le
+  # déploiement voulu. Tant qu'elles sont déclarées, chaque poussée sur `main`
+  # publie — c'est l'état à ne pas laisser traîner. Voir
+  # docs/NETLIFY_DEPLOYMENT_CHECKLIST.md.
   #
   # Constat de terrain (journal du déploiement ca410d5, 2026-11-18) : Netlify
   # expose bien BRANCH, SITE_ID et SITE_NAME à l'étape `ignore`.
@@ -41,6 +43,31 @@
 [build.environment]
   NODE_VERSION = "22"
   NPM_FLAGS = "--no-audit --no-fund"
+  # ---------------------------------------------------------------------------
+  # SCANNER DE SECRETS NETLIFY — un seul faux positif, neutralisé à la source
+  # ---------------------------------------------------------------------------
+  # `SORAHNEX_DEPLOY_AUTHORIZED_NAME` vaut le jeton `sorahnex-deploy`. Ce n'est
+  # PAS un secret : c'est un jeton public, documenté à dessein dans
+  # `netlify.toml`, `scripts/netlify-guard-lib.sh`, `.env.example` et la
+  # checklist. Il ne donne aucun accès à lui seul — l'autorisation exige
+  # `SORAHNEX_DEPLOY_AUTHORIZED=true`, qui elle n'est écrite nulle part.
+  #
+  # Sans cette ligne, le build échoue APRÈS une compilation réussie (constaté le
+  # 25/11/2026, build de production) : le scanner trouve le jeton dans 26
+  # emplacements et refuse de publier. Il ne s'agit pas d'une fuite.
+  #
+  # On neutralise la DÉTECTION pour ces clés précises, pas le scanner : toute
+  # autre valeur marquée secrète reste surveillée. `SECRETS_SCAN_ENABLED=false`
+  # serait la solution paresseuse — elle désactiverait la protection entière.
+  #
+  # Les trois VITE_ sont dans la même situation, pour une raison plus radicale :
+  # elles sont PUBLIÉES dans le bundle (vérifié : `index-*.js` de `dist/`
+  # contient l'URL Supabase, la clé publiable et l'URL du site). Un client
+  # Supabase a besoin de ces valeurs dans le navigateur — c'est leur seul rôle.
+  # Les marquer « secrètes » rendrait donc tout build impossible, puisque le
+  # scanner inspecte aussi les fichiers produits. Ce sont des valeurs publiques,
+  # pas des fuites : aucune clé serveur n'est jamais placée ici.
+  SECRETS_SCAN_OMIT_KEYS = "SORAHNEX_DEPLOY_AUTHORIZED_NAME,VITE_SUPABASE_URL,VITE_SUPABASE_PUBLISHABLE_KEY,VITE_SITE_URL"
 
 # Relais zero-secret vers Supabase Edge Function business-grow pour les Deploy Previews Netlify
 [[edge_functions]]

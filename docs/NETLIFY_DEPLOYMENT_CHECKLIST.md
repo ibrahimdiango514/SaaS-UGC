@@ -98,14 +98,45 @@ SITE_NAME=<nouveau-nom>
 
 ### Après le premier déploiement réussi — refermer l'ouverture
 
+> ✅ **FAIT le 25 novembre 2026.** Le premier build a présenté l'identité
+> `8d485fbd-ec54-4068-b3db-cd28145c6007` (nom `saas-ugc`), relevée dans le
+> journal Netlify — pas recopiée du tableau de bord. Elle est déclarée dans
+> `netlify.site.conf` et `PREMIER_DEPLOIEMENT` a été retiré.
+
 - [ ] Relever le Site ID : **Site configuration → General → Site ID**.
 - [ ] Le déclarer : `SITE_ID=<valeur relevée>` dans `netlify.site.conf`.
 - [ ] **Retirer `PREMIER_DEPLOIEMENT=true`** de ce même fichier. Tant qu'il est
       là, l'identité n'est pas vérifiée : n'importe quel site du compte pourrait
       construire ce dépôt.
-- [ ] `npx vitest run tests/netlify-deployment-guard.test.ts` → le test
-      « le dépôt est actuellement en mode premier déploiement » doit maintenant
-      **échouer** : c'est la confirmation que le verrou est refermé.
+
+### Le scanner de secrets fait échouer un build RÉUSSI
+
+> **Cas vécu le 25/11/2026, à connaître absolument.** Le premier déploiement de
+> production a compilé (`✓ built in 9.52s`, `dist/` produit, 2 Edge Functions
+> empaquetées), puis le build a échoué avec
+> `Failed during stage 'building site': Build script returned non-zero exit code: 2`.
+>
+> Cause : le scanner de secrets Netlify cherche la valeur de chaque variable
+> marquée secrète dans le dépôt **et dans les fichiers produits**. Il a trouvé
+> `sorahnex-deploy` — le jeton public d'autorisation, documenté à dessein dans
+> 26 emplacements.
+>
+> Ce n'était pas une fuite : `SORAHNEX_DEPLOY_AUTHORIZED_NAME` seul ne donne
+> aucun accès. L'autorisation exige aussi `SORAHNEX_DEPLOY_AUTHORIZED=true`,
+> qui n'est écrit nulle part dans le dépôt.
+>
+> Correction, dans `netlify.toml` : `SECRETS_SCAN_OMIT_KEYS` déclare les clés
+> qui ne sont pas des secrets. **Le scanner reste actif** pour toutes les autres
+> — en particulier les vraies clés fournisseur et de paiement
+> (`MUAPI_API_KEY`, `SASPAY_*`, la clé serveur Supabase…). Un test le vérifie dans
+> `tests/secrets-guard.test.ts`.
+>
+> Deux principes à retenir :
+> 1. Ne **jamais** mettre `SECRETS_SCAN_ENABLED=false` pour passer : cela
+>    supprime toute la protection, y compris sur les vraies clés.
+> 2. Ne jamais marquer « secrète » une variable `VITE_` : elle est publiée dans
+>    `dist/assets/index-*.js` par construction, le scanner la trouverait donc
+>    toujours et le build échouerait à chaque fois.
 - [ ] Ouvrir une PR. **Ne pas fusionner** tant que l'étape 4 n'est pas atteinte.
 
 ---

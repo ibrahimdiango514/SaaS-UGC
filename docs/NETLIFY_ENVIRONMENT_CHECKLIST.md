@@ -150,10 +150,11 @@ Aucune n'est nécessaire pour que l'application fonctionne.
 
 | # | Action | Où | Pourquoi |
 | --- | --- | --- | --- |
-| 1 | Créer le site et **importer le dépôt** | Netlify | Le dépôt est en mode premier déploiement : aucun Site ID n'est exigé au préalable, puisque Netlify l'attribue à l'import |
-| 2 | Relever le **Site ID** et le déclarer après le premier build réussi | Netlify → `netlify.site.conf` | À faire **dans cet ordre**, puis retirer `PREMIER_DEPLOIEMENT=true` |
+| 1 | Créer le site et **importer le dépôt** | Netlify | Fait le 25/11/2026 |
+| 2 | Relever le **Site ID** et le déclarer | Netlify → `netlify.site.conf` | Fait : `8d485fbd-ec54-4068-b3db-cd28145c6007`, `PREMIER_DEPLOIEMENT` retiré |
 | 3 | Déclarer les 3 variables `VITE_*` | Netlify | Sans elles, le site ne joint pas le backend |
 | 4 | Déclarer `VYORA_BUILD_ENABLED=true` | Netlify | Opt-in de build |
+| 4 bis | Ne **jamais** cocher « Contains secret values » sur une variable `VITE_` ni sur `SORAHNEX_DEPLOY_AUTHORIZED_NAME` | Netlify | Ces valeurs sont publiques (ou documentées) : le scanner les trouverait toujours et ferait échouer un build pourtant réussi. Elles sont déclarées dans `SECRETS_SCAN_OMIT_KEYS` (`netlify.toml`) |
 | 5 | Déclarer les 2 variables d'autorisation **au dernier moment** | Netlify | Verrou de crédits |
 | 6 | Mettre à jour `site_url` et `uri_allow_list` | Supabase Auth | Liens de confirmation et de réinitialisation |
 | 7 | Ajouter la nouvelle origine aux 4 variables CORS | Supabase secrets | Sinon le navigateur bloque Grow, MCP, import et paiement |
