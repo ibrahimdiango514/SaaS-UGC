@@ -142,3 +142,70 @@ describe('sécurité — aucun secret dans le dépôt', () => {
     }
   });
 });
+
+// ===========================================================================
+describe('scanner de secrets Netlify — échec du 25/11/2026', () => {
+  /**
+   * Le premier build de production a compilé avec succès, puis a ÉCHOUÉ au
+   * scanner de secrets de Netlify. Cause : `SORAHNEX_DEPLOY_AUTHORIZED_NAME`
+   * vaut le jeton public `sorahnex-deploy`, documenté à dessein partout.
+   *
+   * La correction n'est pas de retirer la documentation — c'est de dire au
+   * scanner quelles clés ne sont PAS des secrets. Ce test verrouille cette
+   * déclaration, sinon un futur nettoyage de `netlify.toml` recasserait le
+   * déploiement pour la même raison, après une compilation réussie.
+   */
+  const tomL = readFileSync(join(ROOT, 'netlify.toml'), 'utf8');
+
+  const clesOmises = (): string[] => {
+    const ligne = tomL.split('\n').find((l) => l.trim().startsWith('SECRETS_SCAN_OMIT_KEYS'));
+    if (!ligne) return [];
+    return ligne
+      .split('=')
+      .slice(1)
+      .join('=')
+      .replace(/"/g, '')
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
+  };
+
+  it('le jeton public d’autorisation est déclaré NON scanné', () => {
+    expect(clesOmises()).toContain('SORAHNEX_DEPLOY_AUTHORIZED_NAME');
+  });
+
+  it('les valeurs VITE_ publiées dans le bundle sont déclarées NON scannées', () => {
+    // Elles finissent dans `dist/assets/index-*.js` : impossible de les
+    // protéger, et inutile de les chercher. Les marquer « secrètes » casserait
+    // chaque build, y compris ceux qui compilent parfaitement.
+    const omises = clesOmises();
+    for (const cle of ['VITE_SUPABASE_URL', 'VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_SITE_URL']) {
+      expect(omises, `${cle} doit être omise du scanner`).toContain(cle);
+    }
+  });
+
+  it('le scanner n’est PAS désactivé globalement', () => {
+    // `SECRETS_SCAN_ENABLED=false` supprimerait toute protection, y compris
+    // pour les vraies clés fournisseurs. C'est la solution paresseuse : refusée.
+    // On cherche une AFFECTATION en début de ligne, pas une simple mention :
+    // le commentaire qui explique pourquoi on la refuse contient le mot.
+    const affecte = tomL
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => !l.startsWith('#'))
+      .some((l) => /^SECRETS_SCAN_ENABLED\s*=\s*"?false/i.test(l));
+    expect(affecte).toBe(false);
+  });
+
+  it('aucune clé réellement secrète n’est omise du scanner', () => {
+    const interdites = [
+      'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEYS', 'SASPAY_SECRET_KEY',
+      'MUAPI_API_KEY', 'FREE_LLM_API_KEY', 'VYORA_OAUTH_ENCRYPTION_KEY',
+      'BUSINESS_GROW_ALLOWED_ORIGINS', 'SUPABASE_DB_URL',
+    ];
+    const omises = clesOmises();
+    for (const cle of interdites) {
+      expect(omises, `${cle} est un vrai secret : ne jamais l'omettre`).not.toContain(cle);
+    }
+  });
+});

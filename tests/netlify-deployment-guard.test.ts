@@ -881,10 +881,11 @@ describe('Bascule d’identité — un seul geste, vérifié', () => {
 
   it('le vrai netlify.site.conf n’a pas été modifié par les tests', () => {
     const conf = lire('netlify.site.conf');
-    // Tant qu'aucun site n'existe, c'est le mode premier déploiement qui est
-    // attendu — et surtout PAS une identité inventée par un test.
-    expect(conf).toMatch(/^PREMIER_DEPLOIEMENT=true$/m);
-    expect(conf.split('\n').filter((l) => /^SITE_ID=/.test(l))).toHaveLength(0);
+    // L'identité est déclarée et le verrou est refermé : le mode premier
+    // déploiement a été retiré après le premier build réussi.
+    const actives = conf.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+    expect(actives.filter((l) => /^SITE_ID=/.test(l))).toHaveLength(1);
+    expect(conf).not.toMatch(/^PREMIER_DEPLOIEMENT=/m);
   });
 });
 
@@ -895,6 +896,9 @@ describe('PREMIER DÉPLOIEMENT — ouverture unique, jamais un abandon', () => {
    * Netlify à l'import, donc inconnu au moment du premier build. Le refuser
    * rendrait le déploiement impossible. Le drapeau ouvre l'identité, RIEN
    * d'autre — et doit être retiré juste après.
+   *
+   * Éprouvé ici sur une copie : le parcours a réellement eu lieu le 25/11/2026
+   * (build autorisé sur le site 8d485fbd-…), et le drapeau a été retiré.
    */
   const env = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -905,12 +909,33 @@ describe('PREMIER DÉPLOIEMENT — ouverture unique, jamais un abandon', () => {
     SORAHNEX_DEPLOY_AUTHORIZED: 'true',
     SORAHNEX_DEPLOY_AUTHORIZED_NAME: 'sorahnex-deploy',
   } as Env;
-  // Le VRAI dépôt : c'est son mode premier déploiement qui est vérifié ici.
+  /**
+   * Copie du dépôt portant `PREMIER_DEPLOIEMENT=true`.
+   *
+   * Le vrai `netlify.site.conf` ne l'a plus : il a été retiré après le premier
+   * build réussi (25/11/2026). On continue pourtant de vérifier ce mode — un
+   * futur import sur un compte neuf le réactivera. Le tester sur une copie
+   * garantit qu'on n'oublie pas les verrous qu'il ne doit PAS ouvrir.
+   */
+  const DEPOT_OUVERT = mkdtempSync(join(tmpdir(), 'garde-ouverte-'));
+  cpSync(join(RACINE, 'scripts'), join(DEPOT_OUVERT, 'scripts'), { recursive: true });
+  const confOuverte = lire('netlify.site.conf')
+    .replace(/^SITE_ID=.*$/m, '# SITE_ID retiré : simulation du tout premier import')
+    .replace(/^SITE_NAME=.*$/m, '');
+  writeFileSync(
+    join(DEPOT_OUVERT, 'netlify.site.conf'),
+    `${confOuverte}\nPREMIER_DEPLOIEMENT=true\n`,
+  );
+  afterAll(() => rmSync(DEPOT_OUVERT, { recursive: true, force: true }));
   const lancer = (e: Env) =>
-    spawnSync('sh', ['scripts/netlify-build-guard.sh'], { cwd: RACINE, encoding: 'utf8', env: e });
+    spawnSync('sh', ['scripts/netlify-build-guard.sh'], { cwd: DEPOT_OUVERT, encoding: 'utf8', env: e });
 
-  it('le dépôt est actuellement en mode premier déploiement', () => {
-    expect(lire('netlify.site.conf')).toMatch(/^PREMIER_DEPLOIEMENT=true$/m);
+  it('le dépôt n’est PLUS en mode premier déploiement (verrou refermé)', () => {
+    expect(lire('netlify.site.conf')).not.toMatch(/^PREMIER_DEPLOIEMENT=/m);
+    // Et l'identité relevée au premier build est bien celle qui est déclarée.
+    expect(lire('netlify.site.conf')).toMatch(
+      /^SITE_ID=8d485fbd-ec54-4068-b3db-cd28145c6007$/m,
+    );
   });
 
   it('avec les trois variables, un site dont l’identité est inconnue passe', () => {
@@ -947,7 +972,7 @@ describe('PREMIER DÉPLOIEMENT — ouverture unique, jamais un abandon', () => {
     const r = spawnSync('sh', ['scripts/netlify-ignore.sh'], {
       encoding: 'utf8',
       env: sans(env, 'SORAHNEX_DEPLOY_AUTHORIZED', 'SORAHNEX_DEPLOY_AUTHORIZED_NAME'),
-      cwd: RACINE,
+      cwd: DEPOT_OUVERT,
       timeout: 20_000,
     });
     expect(r.status).toBe(0);
