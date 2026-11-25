@@ -12,9 +12,9 @@
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "25385118f1ebc3e418fbae17d07e5262dafe3db9";
+const COMMIT = "cf92ca35939549b1e2621200791c574ea3dbe6a8";
 const PATH = "supabase/functions/_artifacts/store-import.js";
-const ARTIFACT_SHA256 = "e23ed55a950d16d482b7c93867b8272bb98ae34b6ceda22f7bdd6cbb4fb39954";
+const ARTIFACT_SHA256 = "f9d120584b7e8ea0894485484f877ece9a5018dd2e9c29b96b0c4c409daae26a";
 const ARTIFACT_CHARS = 113906;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
