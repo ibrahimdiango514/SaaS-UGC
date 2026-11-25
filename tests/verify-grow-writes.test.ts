@@ -11,8 +11,6 @@ import { executerEcritures, nettoyer, rediger } from '../scripts/verify-grow-wri
  * produit fonctionne — c'est pire que pas de harnais.
  */
 
-type Reponse = { statut: number; corps: unknown };
-
 /** Backend simulé, avec un magasin en mémoire. */
 function fauxBackend(options: {
   /** Répond 200 à la création mais n'enregistre rien (écriture fantôme). */
