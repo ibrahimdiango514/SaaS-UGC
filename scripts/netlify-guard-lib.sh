@@ -68,6 +68,32 @@ charger_identite() {
   done < "$_fichier"
 }
 
+# --- Comparaison EXACTE, avec diagnostic des pièges de saisie ---------------
+# Constat : « la variable est déclarée, la garde refuse quand même » vient
+# presque toujours d'un caractère invisible — espace final collé au copier-coller,
+# retour chariot d'un éditeur Windows, guillemets ajoutés par le tableau de bord.
+# Comparer à l'identique est la bonne règle ; ne pas dire POURQUOI c'est
+# différent est le défaut. Cette fonction nomme le piège.
+# $1 = valeur reçue, $2 = valeur attendue, $3 = nom de la variable.
+# Rend 0 si identique, 1 sinon (et explique sur stderr).
+comparer_exact() {
+  _recue=$1
+  _attendue=$2
+  _nom=$3
+  if [ "$_recue" = "$_attendue" ]; then
+    return 0
+  fi
+  # Retire espaces/tabulations/retours chariot de bord, puis compare.
+  _nete=$(printf '%s' "$_recue" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  if [ "$_nete" = "$_attendue" ]; then
+    echo "DIAGNOSTIC : $_nom contient des espaces ou un retour chariot de bord. La valeur est bonne, la saisie ne l'est pas. Corrige la variable dans Netlify (Site configuration → Environment variables), sans espace ni retour à la ligne." >&2
+  else
+    _longueur=$(printf '%s' "$_recue" | wc -c | tr -d ' ')
+    echo "DIAGNOSTIC : $_nom vaut « $_recue » ($_longueur caractères), alors que la valeur exacte attendue est « $_attendue ». La comparaison est stricte, y compris la casse : c'est ce qui empêche de contourner la garde en renommant." >&2
+  fi
+  return 1
+}
+
 # --- Verrou d'autorisation humaine ------------------------------------------
 # Le second jeton (`AUTORISATION_DEPLOIEMENT_NOM`) n'est pas décoratif : il
 # garantit que la variable a été déclarée POUR CE MÉCANISME, avec la valeur
@@ -145,16 +171,16 @@ verifier_garde() {
   fi
 
   # 6-7. Autorisation humaine.
-  if [ "${SORAHNEX_DEPLOY_AUTHORIZED:-}" != "true" ]; then
-    refuser "AUTORISATION HUMAINE ABSENTE. Un déploiement de production réussi coûte 15 crédits Netlify. Déclarez $AUTORISATION_DEPLOIEMENT=true sur CE site, juste avant de publier, puis retirez-la. Voir docs/NETLIFY_DEPLOYMENT_CHECKLIST.md." || return 1
+  if ! comparer_exact "${SORAHNEX_DEPLOY_AUTHORIZED:-}" "true" "$AUTORISATION_DEPLOIEMENT"; then
+    refuser "règle 6/8 — AUTORISATION HUMAINE ABSENTE. Un déploiement de production réussi coûte 15 crédits Netlify. Déclarez $AUTORISATION_DEPLOIEMENT=true sur CE site, juste avant de publier, puis retirez-la. Voir docs/NETLIFY_DEPLOYMENT_CHECKLIST.md." || return 1
   fi
-  if [ "${SORAHNEX_DEPLOY_AUTHORIZED_NAME:-}" != "$AUTORISATION_DEPLOIEMENT_NOM" ]; then
-    refuser "jeton d'autorisation absent ou incorrect. La variable $AUTORISATION_DEPLOIEMENT doit être accompagnée de SORAHNEX_DEPLOY_AUTHORIZED_NAME=$AUTORISATION_DEPLOIEMENT_NOM (les deux, ensemble)." || return 1
+  if ! comparer_exact "${SORAHNEX_DEPLOY_AUTHORIZED_NAME:-}" "$AUTORISATION_DEPLOIEMENT_NOM" "SORAHNEX_DEPLOY_AUTHORIZED_NAME"; then
+    refuser "règle 7/8 — jeton d'autorisation incorrect. SORAHNEX_DEPLOY_AUTHORIZED_NAME doit valoir EXACTEMENT « $AUTORISATION_DEPLOIEMENT_NOM » (minuscules, un seul tiret, aucun espace). Ce nom est une constante du code, volontairement non configurable : sans cela, n'importe quel site pourrait se déclarer autorisé en renommant sa variable." || return 1
   fi
 
   # 8. Opt-in de build du site.
-  if [ "${VYORA_BUILD_ENABLED:-}" != "true" ]; then
-    refuser "$OPT_IN_BUILD doit valoir exactement « true » sur ce site (Site configuration → Environment variables)." || return 1
+  if ! comparer_exact "${VYORA_BUILD_ENABLED:-}" "true" "$OPT_IN_BUILD"; then
+    refuser "règle 8/8 — $OPT_IN_BUILD doit valoir exactement « true » sur ce site (Site configuration → Environment variables)." || return 1
   fi
 
   return 0
@@ -184,6 +210,12 @@ refuser() {
     echo
     echo "Aucun déploiement n'a eu lieu, aucun crédit n'a été consommé."
     echo "Procédure : docs/NETLIFY_DEPLOYMENT_CHECKLIST.md"
+    echo "----------------------------------------------------------------------"
+    # La raison est RÉPÉTÉE ICI, en dernière ligne. Netlify plafonne les journaux
+    # affichés : l'extrait transmis ne contenait que les 8 dernières lignes, donc
+    # tout le diagnostic utile (placé en tête) avait disparu. Cette répétition est
+    # la seule partie qu'on est certain de voir.
+    echo "À CORRIGER : $1"
     echo "======================================================================"
   } >&2
   return 1

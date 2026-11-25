@@ -164,8 +164,10 @@ describe('Verrou de crédits — autorisation humaine', () => {
   it('sans le jeton, l’autorisation seule ne suffit pas (pas de contournement par le nom)', () => {
     const env = sans(autorise(), 'SORAHNEX_DEPLOY_AUTHORIZED_NAME');
     expect(publicationAutorisee(env)).toBe(false);
+    // Le message doit nommer la valeur EXACTE attendue, en clair, pas seulement
+    // le nom de la variable : c'est ce qui permet de corriger sans deviner.
     expect(executer(commandeBuild!.split(' && ')[0], env).sortie)
-      .toContain('SORAHNEX_DEPLOY_AUTHORIZED_NAME=sorahnex-deploy');
+      .toMatch(/SORAHNEX_DEPLOY_AUTHORIZED_NAME doit valoir EXACTEMENT « sorahnex-deploy »/);
   });
 
   it.each(['sorahnex', 'SORAHNEX-DEPLOY', 'sorahnex-deploy ', 'true', 'autorise'])(
@@ -585,5 +587,96 @@ describe('Identité autorisée — le site choisi, et les anciens écartés', ()
     const checklist = lire('docs/NETLIFY_DEPLOYMENT_CHECKLIST.md');
     expect(checklist).toMatch(/ANCIEN_SITE_ID/);
     expect(checklist).toMatch(/par PR/i);
+  });
+});
+
+// ===========================================================================
+describe('Diagnostic d’une valeur PRESQUE correcte — le cas du 25/11 07:2x', () => {
+  /**
+   * Contexte réel : Netlify a affiché VYORA_BUILD_ENABLED=true,
+   * SORAHNEX_DEPLOY_AUTHORIZED=true et un nom masqué « **** », puis a refusé.
+   * Le site et les trois variables étaient bons. La cause était donc une
+   * comparaison de valeur EXACTE — et elle était écrite AVANT les lignes que
+   * Netlify a conservées, donc invisible. Ces tests vérifient que le diagnostic
+   * est désormais impossible à manquer.
+   */
+  const base = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
+    SITE_NAME: 'saas-ugc',
+    BRANCH: 'main',
+    VYORA_BUILD_ENABLED: 'true',
+    SORAHNEX_DEPLOY_AUTHORIZED: 'true',
+  } as NodeJS.ProcessEnv;
+
+  const lancer = (nom: string) =>
+    spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      encoding: 'utf8',
+      env: { ...base, SORAHNEX_DEPLOY_AUTHORIZED_NAME: nom },
+    });
+
+  it('la valeur exacte passe (le verrou reste utilisable)', () => {
+    const r = lancer('sorahnex-deploy');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/build autorisé/);
+  });
+
+  it('un espace final est nommé comme un problème de SAISIE, pas de valeur', () => {
+    const r = lancer('sorahnex-deploy ');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/contient des espaces ou un retour chariot/);
+    expect(r.stderr).toMatch(/La valeur est bonne, la saisie ne l'est pas/);
+  });
+
+  it('un retour chariot (copier-coller depuis Windows) est nommé aussi', () => {
+    const r = lancer('sorahnex-deploy\r');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/retour chariot/);
+  });
+
+  it('une majuscule est signalée avec la casse et la longueur', () => {
+    const r = lancer('SORAHNEX-DEPLOY');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/vaut « SORAHNEX-DEPLOY » \(15 caractères\)/);
+    expect(r.stderr).toMatch(/y compris la casse/);
+  });
+
+  it('un tiret oublié est signalé avec le nombre de caractères', () => {
+    const r = lancer('sorahnexdeploy');
+    expect(r.stderr).toMatch(/\(14 caractères\)/);
+    expect(r.stderr).toMatch(/sorahnex-deploy/);
+  });
+
+  it('la raison est RÉPÉTÉE en dernière ligne (Netlify tronque le début)', () => {
+    const r = lancer('sorahnex-deploy ');
+    const lignes = r.stderr.trim().split('\n');
+    // La dernière ligne utile doit suffire à comprendre quoi corriger.
+    const fin = lignes.slice(-2).join('\n');
+    expect(fin).toMatch(/À CORRIGER/);
+    expect(fin).toMatch(/SORAHNEX_DEPLOY_AUTHORIZED_NAME/);
+  });
+
+  it('chaque refus commence par un numéro de règle, pour se repérer', () => {
+    const r = lancer('sorahnex-deploy ');
+    expect(r.stderr).toMatch(/règle 7\/8/);
+  });
+
+  it('un refus garde un code de sortie 1, distinct d’une erreur shell', () => {
+    // Le journal Netlify annonçait « exit code 2 » : c'était le code du shell
+    // appelant, pas celui de la garde. La garde sort TOUJOURS en 1.
+    const r = lancer('mauvais-nom');
+    expect(r.status).toBe(1);
+  });
+});
+
+describe('La documentation couvre le refus « variables bonnes mais saisie fausse »', () => {
+  it('explique le piège de l’espace final et déconseille de retirer la garde', () => {
+    const doc = lire('docs/NETLIFY_DEPLOYMENT_CHECKLIST.md');
+    expect(doc).toMatch(/espace final/);
+    expect(doc).toMatch(/À CORRIGER/);
+    // Retirer la garde est la « solution » proposée par les outils automatiques :
+    // la documentation doit dire explicitement que c'est le contraire à faire.
+    expect(doc).toMatch(/ne faut surtout pas faire/);
+    expect(doc).toMatch(/command = "npm ci && npm run build"/);
   });
 });

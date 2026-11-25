@@ -85,6 +85,32 @@ SITE_NAME=<nouveau-nom>
 
 ---
 
+### Si le build est refusé alors que les trois variables sont déclarées
+
+Cas vécu le 25/11/2026 : le site et les trois variables étaient bons, et le build
+était quand même refusé. La cause était une **comparaison de valeur exacte**, et
+elle était écrite *avant* les lignes que Netlify conserve dans son journal — donc
+invisible dans l'extrait de 8 lignes.
+
+Deux corrections ont été apportées à la garde :
+
+1. **La raison est répétée en dernière ligne**, préfixée `À CORRIGER :`. C'est la
+   seule partie qu'on est certain de voir quand Netlify tronque.
+2. **Un diagnostic nomme le piège de saisie** quand la valeur est *presque*
+   correcte : espace final, retour chariot d'un copier-coller Windows, majuscule,
+   tiret oublié. La longueur en caractères est affichée pour lever le doute.
+
+Le cas le plus fréquent, et le plus invisible : `sorahnex-deploy ` avec un espace
+final. La valeur paraît juste à l'écran. La garde compare à l'identique — c'est
+ce qui empêche de contourner le verrou en renommant — et le dit désormais.
+
+**Ce qu'il ne faut surtout pas faire** : retirer la garde de `netlify.toml`
+(`command = "npm ci && npm run build"`) pour « tester ». Cela supprimerait le
+verrou de crédits sur le seul site de production, et un push publierait seul. Si
+le refus persiste, lire la ligne `À CORRIGER` et corriger la variable.
+
+---
+
 ## Étape 3 — Créer le site Netlify (aucune publication)
 
 - [ ] Netlify › Add new site › **Import an existing project** › GitHub ›
