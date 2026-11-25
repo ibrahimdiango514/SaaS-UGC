@@ -430,3 +430,27 @@ describe('Documentation des variables — cohérente avec le code', () => {
     expect(checklist).toMatch(/FREE_LLM_.*\n?.*BUSINESS_GROW_|BUSINESS_GROW_.*\n?.*FREE_LLM_/);
   });
 });
+
+// ===========================================================================
+describe('Harnais de vérification — aucun repli vers un site mort', () => {
+  it('verify-production refuse de deviner l’adresse du site', () => {
+    const source = lire('scripts/verify-production.mjs');
+    // Un repli sur l'ancien domaine produirait un rapport vert contre un site
+    // fermé : c'est un faux positif, pire que pas de vérification du tout.
+    expect(source).not.toMatch(/vyora-ugc\.netlify\.app/);
+    expect(source).toContain('Adresse du site inconnue');
+  });
+
+  it('verify-production sort en code 2 (mesure impossible) sans adresse', () => {
+    const r = spawnSync('node', ['scripts/verify-production.mjs'], { encoding: 'utf8' });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('Aucun repli');
+  });
+
+  it('l’audit d’origines signale l’ancien domaine quand il est encore codé en dur', () => {
+    const r = spawnSync('node', ['scripts/audit-origins.mjs', '--json'], { encoding: 'utf8' });
+    const rapport = JSON.parse(r.stdout);
+    const mortes = rapport.constats.filter((c: { message: string }) => c.message.includes('HISTORIQUE'));
+    expect(mortes.length).toBeGreaterThan(0);
+  });
+});
