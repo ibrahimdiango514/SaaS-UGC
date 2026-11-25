@@ -202,7 +202,7 @@ export default function Landing() {
           <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 pb-10 pt-14 sm:px-6 sm:pb-14 sm:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
             <div className="relative z-10 max-w-2xl">
               <div className="vyora-eyebrow animate-riseIn">
-                <Sparkles size={13} /> Create. Evolve. SORAHNEX Grow.
+                <Sparkles size={13} /> Create. Evolve. Grow.
               </div>
               <h1 className="vyora-display mt-6 text-[2.6rem] leading-[1.02] text-white sm:text-[3.4rem] lg:text-[3.9rem]">
                 Vos idées prennent forme.<br />
@@ -232,7 +232,7 @@ export default function Landing() {
                 </span>
                 <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
                   <div className="rounded-2xl border border-white/10 bg-[#05080e]/85 p-3.5 backdrop-blur-xl">
-                    <p className="text-[10px] uppercase tracking-[0.22em] text-cyan-200">SORAHNEX · Studio &amp; Business</p>
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-cyan-200">SORAHNEX · Studio &amp; Grow</p>
                     <p className="mt-1 text-sm font-semibold text-white">Une seule mémoire, deux espaces de travail.</p>
                   </div>
                 </div>
@@ -535,7 +535,7 @@ export default function Landing() {
           </div>
         </div>
         <div className="mx-auto mt-5 flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 text-[10px] text-slate-600 sm:px-6">
-          <span>© {new Date().getFullYear()} SORAHNEX — Create. Evolve. SORAHNEX Grow.</span>
+          <span>© {new Date().getFullYear()} SORAHNEX — Create. Evolve. Grow.</span>
           <Link to="/proprietaire" className="transition-colors hover:text-slate-400">Espace propriétaire</Link>
         </div>
       </footer>
