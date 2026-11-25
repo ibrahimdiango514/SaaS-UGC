@@ -211,10 +211,12 @@ refuser() {
     echo "Aucun déploiement n'a eu lieu, aucun crédit n'a été consommé."
     echo "Procédure : docs/NETLIFY_DEPLOYMENT_CHECKLIST.md"
     echo "----------------------------------------------------------------------"
-    # La raison est RÉPÉTÉE ICI, en dernière ligne. Netlify plafonne les journaux
-    # affichés : l'extrait transmis ne contenait que les 8 dernières lignes, donc
-    # tout le diagnostic utile (placé en tête) avait disparu. Cette répétition est
-    # la seule partie qu'on est certain de voir.
+    # La raison ET l'identité réelle sont RÉPÉTÉES ICI, en fin de bloc. Netlify ne
+    # conserve qu'une partie du journal : sur les deux déploiements refusés du
+    # 25/11, l'extrait commençait à « État observé » et la ligne « Raison », juste
+    # au-dessus, était perdue. Le BAS du bloc est ce qui survit — donc c'est là
+    # que doit tenir tout ce qu'il faut pour agir.
+    echo "Site déployé : SITE_ID=${SITE_ID:-<absent>} SITE_NAME=${SITE_NAME:-<absent>} BRANCHE=${BRANCH:-<absente>}"
     echo "À CORRIGER : $1"
     echo "======================================================================"
   } >&2

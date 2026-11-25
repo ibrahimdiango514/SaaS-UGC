@@ -680,3 +680,56 @@ describe('La documentation couvre le refus « variables bonnes mais saisie fauss
     expect(doc).toMatch(/command = "npm ci && npm run build"/);
   });
 });
+
+describe('Le journal tronqué suffit encore à agir', () => {
+  /**
+   * Constat sur DEUX journaux Netlify (25/11, matin et 7h38) : les deux extraits
+   * transmis commençaient à « État observé » et s'arrêtaient juste après
+   * « Site autorisé ». La ligne `Raison :`, située au-dessus, n'a jamais été
+   * visible. Résultat : deux diagnostics successifs ont accusé les variables
+   * alors que le script s'était arrêté AVANT de les examiner, sur l'identité.
+   *
+   * Le bas du bloc est donc la seule zone sur laquelle compter.
+   */
+  const journal = (env: NodeJS.ProcessEnv) =>
+    spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env }).stderr;
+
+  it('un site non autorisé : les 2 dernières lignes disent l’identité ET la cause', () => {
+    const r = journal({
+      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      SITE_ID: '09412497-1111-2222-3333-444444444444',
+      SITE_NAME: 'saas-ugc-0d54',
+      BRANCH: 'main',
+      VYORA_BUILD_ENABLED: 'true',
+      SORAHNEX_DEPLOY_AUTHORIZED: 'true',
+      SORAHNEX_DEPLOY_AUTHORIZED_NAME: 'sorahnex-deploy',
+    });
+    // Les deux dernières lignes utiles : l'identité, puis la cause. La toute
+    // dernière est le trait de fermeture.
+    const fin = r.trim().split('\n').slice(-3, -1).join('\n');
+    expect(fin).toMatch(/Site déployé : SITE_ID=09412497/);
+    expect(fin).toMatch(/À CORRIGER : .*n'est pas le site autorisé/);
+    // Et surtout : le lecteur ne peut plus croire que la cause est une variable.
+    expect(fin).not.toMatch(/VYORA_BUILD_ENABLED doit valoir/);
+  });
+
+  it('un refus n’est jamais suivi d’un second bloc (une seule cause à la fois)', () => {
+    const r = journal({
+      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      SITE_ID: '09412497-1111-2222-3333-444444444444',
+      SITE_NAME: 'saas-ugc-0d54',
+      BRANCH: 'main',
+    });
+    expect(r.match(/déploiement REFUSÉ/g) ?? []).toHaveLength(1);
+    expect(r.match(/À CORRIGER/g) ?? []).toHaveLength(1);
+  });
+
+  it('netlify.site.conf tolère un préfixe // sans casser l’identité', () => {
+    // Certains éditeurs enregistrent un « // » de commentaire différent du « # ».
+    // La conf doit rester inerte : aucune ligne non reconnue ne doit être
+    // interprétée comme une identité.
+    const conf = lire('netlify.site.conf');
+    const lignesIdentite = conf.split('\n').filter((l) => /^\s*(SITE_ID|SITE_NAME|ANCIEN_SITE_ID|ANCIEN_SITE_NAME)=/.test(l));
+    expect(lignesIdentite).toHaveLength(4);
+  });
+});
