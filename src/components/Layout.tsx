@@ -353,7 +353,9 @@ export default function Layout() {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', isHub ? 'hidden' : 'lg:hidden')}>
+      {/* Sur tablette, le Growth OS affiche déjà sa barre latérale : garder la
+          barre basse donnerait deux navigations identiques à l'écran. */}
+      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', isHub ? 'hidden' : isGrowthOs ? 'md:hidden' : 'lg:hidden')}>
         {mobileNav.map((item) => {
           const itemClass =
             'flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition';
