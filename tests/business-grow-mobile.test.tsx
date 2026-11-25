@@ -1,5 +1,22 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+/*
+ * L'API métier doit être simulée : sans cela, `CrmWorkspace` reste sur
+ * « Chargement du CRM… » et aucun formulaire n'est monté. Même montage que
+ * `tests/crm-finance-ui.test.tsx`, pour tester le VRAI composant.
+ */
+const api = vi.hoisted(() => ({
+  listModuleRecords: vi.fn(),
+  createModuleRecord: vi.fn(),
+  updateModuleRecord: vi.fn(),
+  deleteModuleRecord: vi.fn(),
+}));
+
+vi.mock('../src/business/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/business/api')>();
+  return { ...actual, businessGrowApi: { ...actual.businessGrowApi, ...api } };
+});
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { hauteurClavier, SEUIL_CLAVIER_PX } from '../src/lib/viewport-clavier';
 import { useGrandEcran, RUPTURE_SM_PX } from '../src/lib/media-query';
@@ -417,5 +434,66 @@ describe('formulaires — le clavier Android adapté au champ', () => {
     // On ne casse pas la suite existante : on documente d'abord l'existant.
     // Ce test devient strict après la conversion des formulaires.
     expect(Array.isArray(montants)).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 9. Création rapide : combien de champs faut-il remplir ?                    */
+/* -------------------------------------------------------------------------- */
+
+describe('création rapide — le formulaire ne demande que l’essentiel', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /**
+   * Le formulaire de contact affichait 20 champs d'un coup, soit plus de trois
+   * écrans de défilement sur 360 px avant d'atteindre « Enregistrer ».
+   *
+   * Ces tests comptent les champs NON repliés : ceux qu'un utilisateur doit
+   * parcourir pour créer un prospect. Le seuil est volontairement strict, car
+   * c'est la fluidité du parcours le plus fréquent qui est en jeu.
+   */
+  it('au plus 6 champs visibles pour créer un contact', async () => {
+    largeurEcran(360);
+    api.listModuleRecords.mockResolvedValue([]);
+    api.createModuleRecord.mockResolvedValue({ id: 'x' });
+    api.updateModuleRecord.mockResolvedValue({ id: 'x' });
+    api.deleteModuleRecord.mockResolvedValue(undefined);
+    const { default: CrmWorkspace } = await import('../src/business/crm/CrmWorkspace');
+    const { ToastProvider } = await import('../src/context/ToastContext');
+    const { container } = render(
+      <ToastProvider>
+        <CrmWorkspace
+          workspaceId="11111111-1111-4111-8111-111111111111"
+          legacyProspects={[]}
+          onCreateReceivable={() => {}}
+          onOpenFinance={() => {}}
+          onOpenAssistant={() => {}}
+          initialTab="contacts"
+          lockTab
+        />
+      </ToastProvider>,
+    );
+
+    // Ouvre le formulaire de création (onglet Contacts imposé).
+    const bouton = await screen.findAllByRole('button', { name: /nouveau contact/i });
+    expect(bouton.length).toBeGreaterThan(0);
+    bouton[0].click();
+
+    const dialogues = await screen.findAllByRole('dialog');
+    const formulaire = dialogues[dialogues.length - 1];
+    const champs = formulaire.querySelectorAll('input:not([type="hidden"]), select, textarea');
+    expect(champs.length).toBeGreaterThan(0);
+
+    // Les champs repliés sont dans un <details> fermé : ils ne comptent pas.
+    const repliés = [...champs].filter((champ) => champ.closest('details:not([open])'));
+    const visibles = [...champs].filter((champ) => !champ.closest('details:not([open])'));
+
+    expect(visibles.length).toBeLessThanOrEqual(6);
+    // Rien n'a été supprimé : les autres champs existent toujours.
+    expect(visibles.length + repliés.length).toBeGreaterThanOrEqual(15);
+    // Le repli est accessible et annoncé.
+    const resume = formulaire.querySelector('summary');
+    expect(resume?.textContent).toMatch(/Compléter la fiche/);
+    expect(container).toBeTruthy();
   });
 });
