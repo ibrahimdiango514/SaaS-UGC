@@ -7,6 +7,7 @@ import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Sele
 import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { FINANCE_CATEGORIES, CRM_CATEGORIES, useRecords } from '../records/useRecords';
+import { useGrandEcran } from '../../lib/media-query';
 import {
   OPPORTUNITY_STAGES, PRIORITY_LABELS, TASK_TYPES, contactDisplayName, contactFromRecord,
   contactMatchesFilters, contactToData, computeCrmDashboard, contactsToCsv,
@@ -87,6 +88,8 @@ export default function CrmWorkspace({
   lockTab?: boolean;
 }) {
   const toast = useToast();
+  // Une seule vue montée à la fois : liste tactile (téléphone) ou tableau.
+  const grandEcran = useGrandEcran();
   const [tab, setTab] = useState<CrmTab>(initialTab);
   const contactsStore = useRecords(CRM_CATEGORIES.contacts, workspaceId);
   const opportunitiesStore = useRecords(CRM_CATEGORIES.opportunities, workspaceId);
@@ -568,7 +571,47 @@ export default function CrmWorkspace({
               description={contacts.length ? 'Ajustez vos filtres ou enregistrez un autre segment.' : 'Créez un contact, importez un CSV ou reprenez vos prospects existants.'}
               action={<Button size="sm" variant="primary" icon={<Plus size={13} />} onClick={() => openContact()}>Nouveau contact</Button>} />
           ) : (
-            <div className="overflow-hidden rounded-xl border border-white/[0.07]">
+            /* Sur téléphone, une ligne par contact : entreprise, prochaine
+               action et valeur du pipeline étaient MASQUÉES (hidden sm:table-cell),
+               donc invisibles sur Android. Elles sont maintenant toutes lisibles
+               sans ouvrir la fiche, et la ligne entière est cliquable.
+               Une seule vue est montée à la fois (voir `useGrandEcran`). */
+            !grandEcran ? (
+            <>
+            <ul className="liste-mobile overflow-hidden rounded-xl border border-white/[0.07]">
+              {filteredContacts.map((contact) => {
+                const score = scores.get(contact.id)!;
+                return (
+                  <li key={contact.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedContactId(contact.id)}
+                      className="liste-mobile-ligne w-full items-start"
+                    >
+                      <ScoreChip score={score.score} priority={score.priority} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-semibold text-white">{contactDisplayName(contact)}</span>
+                        <span className="mt-0.5 block truncate text-[11.5px] text-slate-400">
+                          {[contact.company, contact.phone || contact.email].filter(Boolean).join(' · ') || '—'}
+                        </span>
+                        {contact.nextAction && (
+                          <span className="mt-0.5 block truncate text-[11px] text-cyan-100">
+                            {contact.nextAction}{contact.nextActionAt ? ` · ${contact.nextActionAt}` : ''}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-right">
+                        {score.openValue ? <span className="block text-[11.5px] font-semibold text-cyan-100">{money(score.openValue)}</span> : null}
+                        <ChevronRight size={13} className="ml-auto mt-0.5 text-slate-500" />
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            </>
+            ) : (
+            <div className="table-defile rounded-xl border border-white/[0.07]">
               <table className="w-full text-left text-[11px]">
                 <thead className="bg-white/[0.03] text-[10px] uppercase tracking-wide text-slate-500">
                   <tr><th className="px-3 py-2">Contact</th><th className="hidden px-3 py-2 sm:table-cell">Entreprise</th><th className="px-3 py-2">Score</th><th className="hidden px-3 py-2 md:table-cell">Prochaine action</th><th className="hidden px-3 py-2 lg:table-cell">Pipeline</th><th className="px-3 py-2" /></tr>
@@ -595,6 +638,7 @@ export default function CrmWorkspace({
                 </tbody>
               </table>
             </div>
+            )
           )}
         </div>
       )}

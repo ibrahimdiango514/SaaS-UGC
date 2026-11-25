@@ -189,8 +189,52 @@
      `.safe-bottom`, et le composeur Studio s'appuie dessus avec `bottom`.
      Une seule source de vérité : une valeur devinée à un seul endroit laissait le
      composeur passer sous la barre. */
-  :root { --nav-basse-hauteur: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+  :root {
+    --nav-basse-hauteur: calc(4rem + env(safe-area-inset-bottom, 0px));
+    /* Hauteur réelle du clavier Android quand il est ouvert.
+       Mise à jour par `useViewportClavier` (voir src/lib/viewport-clavier.ts).
+       Réserve : la valeur reste 0 tant qu'aucun clavier n'est détecté, donc
+       aucun navigateur de bureau n'est affecté. */
+    --clavier-hauteur: 0px;
+  }
   .safe-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+
+  /* Conteneur de tableau : le seul endroit où un défilement horizontal est
+     autorisé. Sur Android, un tableau plus large que l'écran ne doit jamais
+     élargir la PAGE (ce qui décalait toute l'interface et coupait les textes) :
+     il défile dans sa propre boîte, avec une butée visible. */
+  .table-defile {
+    @apply w-full overflow-x-auto overscroll-x-contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .table-defile > table { @apply w-full min-w-full; }
+  /* Tableau volontairement large (colonnes nombreuses) : largeur minimale
+     explicite, pour qu'il défile au lieu de comprimer ses colonnes. */
+  .table-defile--large > table { min-width: 34rem; }
+
+  /* Une liste mobile remplace un tableau : elle est la source de vérité
+     tactile, jamais une copie dégradée du tableau. */
+  .liste-mobile { @apply flex flex-col divide-y divide-white/[0.06]; }
+  .liste-mobile-ligne {
+    @apply flex min-h-[3.25rem] w-full items-center gap-3 px-3 py-2.5 text-left transition-colors;
+  }
+  .liste-mobile-ligne:active { @apply bg-white/[0.05]; }
+
+  /* Zone cliquable minimale de 44 px : Android recommande 48 dp, Tailwind
+     `min-h-11` vaut 44 px. On garde une seule constante réutilisable. */
+  .cible-tactile { @apply inline-flex min-h-11 min-w-11 items-center justify-center; }
+
+  /* Modal qui tient compte du clavier : sans cela, le bouton de validation
+     passe DERRIÈRE le clavier Android et l'enregistrement devient impossible.
+     `--clavier-hauteur` vaut 0 hors clavier, donc rien ne change ailleurs. */
+  .modale-clavier { padding-bottom: var(--clavier-hauteur, 0px); }
+  .modale-clavier-panneau { max-height: calc(100dvh - var(--clavier-hauteur, 0px) - 1rem); }
+  .modale-clavier-corps { max-height: calc(100dvh - var(--clavier-hauteur, 0px) - 12rem); }
+
+  /* Le champ actif reste visible au-dessus du clavier. */
+  .champ-actif-visible { scroll-margin-bottom: calc(var(--clavier-hauteur, 0px) + 1rem); }
+
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 }

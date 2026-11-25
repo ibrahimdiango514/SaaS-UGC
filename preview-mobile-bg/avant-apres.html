@@ -1,0 +1,85 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Business Grow — avant / après (mobile 360 px)</title>
+<style>
+  :root { --fond:#05080e; --panneau:#0e141d; --ligne:rgba(255,255,255,.07); --texte:#e2e8f0; --muet:#64748b; }
+  *{box-sizing:border-box} body{margin:0;background:#0b0f16;color:var(--texte);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
+  h1{font-size:15px;margin:0 0 4px} .intro{font-size:11.5px;color:var(--muet);margin:0 0 16px;max-width:760px;line-height:1.5}
+  .duo{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  .ecran{width:360px;background:var(--fond);border:1px solid var(--ligne);border-radius:16px;overflow:hidden;flex:0 0 auto}
+  .etiquette{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--muet);padding:8px 10px;border-bottom:1px solid var(--ligne)}
+  .etiquette b{color:#67e8f9} .etiquette i{color:#fca5a5;font-style:normal}
+  .zone{padding:12px} .titre{font-size:21px;font-weight:700;margin:0 0 6px}
+  .desc{font-size:12px;color:var(--muet);margin:0 0 12px;line-height:1.45}
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:12px;
+    border:1px solid rgba(103,232,249,.25);background:rgba(103,232,249,.10);color:#a5f3fc;font-size:12px;font-weight:600}
+  .btn-neutre{background:rgba(255,255,255,.03);border-color:var(--ligne);color:#cbd5e1}
+  /* AVANT : tableau 6 colonnes dans 360 px -> débordement */
+  .debordement{overflow:hidden;border:1px solid var(--ligne);border-radius:10px}
+  table{border-collapse:collapse;font-size:11px;white-space:nowrap}
+  th{background:rgba(255,255,255,.03);color:var(--muet);font-size:9px;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;text-align:left}
+  td{padding:7px 8px;border-top:1px solid rgba(255,255,255,.05)}
+  .coupe{position:relative}
+  .coupe::after{content:"";position:absolute;top:0;right:0;width:34px;height:100%;
+    background:linear-gradient(90deg,transparent,var(--fond))}
+  /* APRES : liste tactile */
+  .liste{border:1px solid var(--ligne);border-radius:12px;overflow:hidden}
+  .ligne{display:flex;gap:10px;align-items:flex-start;min-height:52px;padding:10px 12px;border-top:1px solid var(--ligne)}
+  .ligne:first-child{border-top:0}
+  .pastille{min-width:34px;height:18px;border-radius:99px;background:rgba(251,191,36,.15);color:#fcd34d;
+    font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .nom{font-size:13px;font-weight:600;color:#fff} .meta{font-size:11.5px;color:var(--muet);margin-top:1px}
+  .suite{font-size:11px;color:#a5f3fc;margin-top:2px}
+  .droite{margin-left:auto;text-align:right;font-size:11.5px;font-weight:600;color:#a5f3fc}
+  .note{font-size:10.5px;color:var(--muet);padding:8px 12px;border-top:1px solid var(--ligne);line-height:1.45}
+  .barre{position:sticky;top:0;background:rgba(5,8,14,.94);border-bottom:1px solid var(--ligne);
+    padding:9px 12px;display:flex;gap:8px;align-items:center}
+  .barre .btn{flex:1} .barre .plus{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--ligne);border-radius:12px;background:rgba(255,255,255,.03);color:#94a3b8}
+</style></head><body>
+<h1>Business Grow — comparaison sur écran Android 360 × 800</h1>
+<p class="intro">Rendu statique des composants livrés. À gauche l'interface précédente, à droite la refonte. Le tableau débordait de la page (les montants sortaient de l'écran) ; la liste porte les mêmes informations, en colonne unique. L'action principale remonte dans une barre collante au lieu d'être sous trois lignes de description.</p>
+
+<div class="duo">
+  <div class="ecran">
+    <div class="etiquette"><i>Avant</i> — CRM, liste des contacts</div>
+    <div class="zone">
+      <h2 class="titre">CRM</h2>
+      <p class="desc">Contacts, fiches, segments et doublons. Gérez votre base clients et suivez chaque relation commerciale.</p>
+      <div class="btn">Nouveau contact</div>
+      <div class="debordement coupe" style="margin-top:12px">
+        <table><thead><tr><th>Contact</th><th>Score</th><th>Entreprise</th><th>Prochaine action</th><th>Pipeline</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>Awa Traoré</td><td>72</td><td>Sahel Mode</td><td>Rappeler</td><td>250 000</td><td>›</td></tr>
+          <tr><td>Moussa Diarra</td><td>45</td><td>—</td><td>—</td><td>—</td><td>›</td></tr>
+          <tr><td>Fatou Keïta</td><td>88</td><td>Keïta Shop</td><td>Envoyer devis</td><td>1 200 000</td><td>›</td></tr>
+        </tbody></table>
+      </div>
+      <p class="note">Entreprise, prochaine action et pipeline étaient masqués sur mobile. Le tableau élargissait la page : le titre « CRM » défilait horizontalement avec elle.</p>
+    </div>
+  </div>
+
+  <div class="ecran">
+    <div class="etiquette"><b>Après</b> — CRM, liste tactile</div>
+    <div class="barre">
+      <div class="btn">+ Nouveau contact</div><div class="plus">•••</div>
+    </div>
+    <div class="zone" style="padding-top:8px">
+      <h2 class="titre" style="font-size:17px;margin-bottom:2px">CRM</h2>
+      <p class="desc" style="margin-bottom:10px">Contacts, fiches, segments et doublons.</p>
+      <div class="liste">
+        <div class="ligne"><div class="pastille">72</div>
+          <div><div class="nom">Awa Traoré</div><div class="meta">Sahel Mode · +223 76 00 00 00</div>
+          <div class="suite">Rappeler · 12/12</div></div><div class="droite">250 000</div></div>
+        <div class="ligne"><div class="pastille">45</div>
+          <div><div class="nom">Moussa Diarra</div><div class="meta">moussa@exemple.ml</div></div><div class="droite">—</div></div>
+        <div class="ligne"><div class="pastille">88</div>
+          <div><div class="nom">Fatou Keïta</div><div class="meta">Keïta Shop · fatou@exemple.ml</div>
+          <div class="suite">Envoyer devis · 28/11</div></div><div class="droite">1 200 000</div></div>
+      </div>
+      <p class="note">Aucun débordement. Entreprise, prochaine action et montant sont visibles sans ouvrir la fiche. La ligne entière est cliquable (52 px).</p>
+    </div>
+  </div>
+</div>
+</body></html>
