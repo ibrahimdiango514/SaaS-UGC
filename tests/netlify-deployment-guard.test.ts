@@ -194,7 +194,9 @@ describe('Identité du site — positive, sans liste noire', () => {
   it('un site INCONNU est refusé, même avec toutes les autorisations', () => {
     const env = autorise({ SITE_ID: SITE_ID_AUTRE });
     expect(publicationAutorisee(env)).toBe(false);
-    expect(executer(commandeBuild!.split(' && ')[0], env).sortie).toContain('n\'est pas le site autorisé');
+    // Message enrichi depuis le refus saas-ugc du 25/11/2026 : un site ni
+    // autorisé ni déclaré se voit nommé, avec les deux identités en regard.
+    expect(executer(commandeBuild!.split(' && ')[0], env).sortie).toMatch(/ni le site autorisé .* ni le site à déclarer/);
   });
 
   it('un nom inconnu est refusé même avec le bon identifiant', () => {
@@ -308,7 +310,7 @@ describe('Diagnostic — le message dit exactement ce qui manque', () => {
 
   it('chaque condition manquante a son message propre, pas un refus muet', () => {
     const cas: [Env, string][] = [
-      [autorise({ SITE_ID: SITE_ID_AUTRE }), 'n\'est pas le site autorisé'],
+      [autorise({ SITE_ID: SITE_ID_AUTRE }), 'ni le site autorisé'],
       [autorise({ SITE_NAME: 'autre-site' }), 'le site autorisé s\'appelle'],
       [autorise({ BRANCH: 'dev' }), 'seule la branche main'],
       [sans(autorise(), 'VYORA_BUILD_ENABLED'), 'VYORA_BUILD_ENABLED doit valoir'],
@@ -452,5 +454,109 @@ describe('Harnais de vérification — aucun repli vers un site mort', () => {
     const rapport = JSON.parse(r.stdout);
     const mortes = rapport.constats.filter((c: { message: string }) => c.message.includes('HISTORIQUE'));
     expect(mortes.length).toBeGreaterThan(0);
+  });
+});
+
+// ===========================================================================
+describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', () => {
+  /** Reproduit l'environnement exact du déploiement refusé du 25/11/2026. */
+  const envJournal = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
+    SITE_NAME: 'saas-ugc',
+    BRANCH: 'main',
+  };
+
+  it('ne reproche PAS une variable absente quand le site n’est simplement pas autorisé', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envJournal as NodeJS.ProcessEnv });
+    expect(r.status).toBe(1);
+    // C'était le défaut : « VYORA_BUILD_ENABLED doit valoir true » accusait une
+    // variable alors que la vraie cause était « ce site n'est pas autorisé ».
+    expect(r.stderr).not.toMatch(/Raison : VYORA_BUILD_ENABLED/);
+    expect(r.stderr).toMatch(/n'est pas encore AUTORISÉ/);
+    expect(r.stderr).toContain('6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803');
+  });
+
+  it('cite le site autorisé ET le site à déclarer, pour lever l’ambiguïté', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envJournal as NodeJS.ProcessEnv });
+    expect(r.stderr).toMatch(/Site autorisé/);
+    expect(r.stderr).toContain('fc88d197-fe0b-47c7-a6e3-fba44eeccda9');
+  });
+
+  it('n’accuse pas la variable d’opt-in pour un site totalement inconnu', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', SITE_ID: '11111111-2222-3333-4444-555555555555', SITE_NAME: 'autre', BRANCH: 'main' },
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/ni le site autorisé .* ni le site à déclarer/);
+  });
+
+  it('pour le site autorisé sans autorisation humaine, dit la vraie raison', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        SITE_ID: 'fc88d197-fe0b-47c7-a6e3-fba44eeccda9',
+        SITE_NAME: 'vyora-saas-ugc',
+        BRANCH: 'main',
+        VYORA_BUILD_ENABLED: 'true',
+      },
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/AUTORISATION HUMAINE ABSENTE/);
+    expect(r.stderr).not.toMatch(/VYORA_BUILD_ENABLED doit valoir/);
+  });
+
+  it('le cas entièrement autorisé passe (le durcissement n’a rien cassé)', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        SITE_ID: 'fc88d197-fe0b-47c7-a6e3-fba44eeccda9',
+        SITE_NAME: 'vyora-saas-ugc',
+        BRANCH: 'main',
+        VYORA_BUILD_ENABLED: 'true',
+        SORAHNEX_DEPLOY_AUTHORIZED: 'true',
+        SORAHNEX_DEPLOY_AUTHORIZED_NAME: 'sorahnex-deploy',
+      },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/build autorisé/);
+  });
+
+  it('le rideau 1 ANNULE (code 0) pour le site non autorisé : zéro crédit', () => {
+    const r = spawnSync('sh', ['scripts/netlify-ignore.sh'], { encoding: 'utf8', env: envJournal as NodeJS.ProcessEnv, timeout: 20_000 });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/build annule/);
+  });
+
+  it('netlify.toml de la branche ne contient AUCUN identifiant de site en dur', () => {
+    // La version de main envoyait l'identifiant en argument de la commande : une
+    // migration imposait de modifier deux endroits. La garde lit le fichier.
+    const directives = lire('netlify.toml')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .join('\n');
+    expect(directives).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
+    expect(directives).toMatch(/command = "sh scripts\/netlify-build-guard\.sh && npm ci && npm run build"/);
+    expect(directives).toMatch(/ignore = "sh scripts\/netlify-ignore\.sh"/);
+  });
+});
+
+describe('Identité déclarée mais non autorisée', () => {
+  it('netlify.site.conf consigne le site refusé, commenté, sans l’autoriser', () => {
+    const conf = lire('netlify.site.conf');
+    expect(conf).toContain('A_DECLARER=6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803');
+    // Et surtout : il n'est PAS sur la ligne d'autorisation.
+    const autorise = conf.split('\n').find((l) => /^SITE_ID=/.test(l.trim()));
+    expect(autorise).toContain('fc88d197');
+    expect(autorise).not.toContain('6ec85a76');
+  });
+
+  it('la documentation explique comment autoriser le site, par PR', () => {
+    const checklist = lire('docs/NETLIFY_DEPLOYMENT_CHECKLIST.md');
+    expect(checklist).toMatch(/A_DECLARER/);
+    expect(checklist).toMatch(/par PR/i);
   });
 });

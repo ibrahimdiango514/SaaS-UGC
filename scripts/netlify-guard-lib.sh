@@ -43,6 +43,7 @@ charger_identite() {
   ID_ATTENDU=""
   NOM_ATTENDU=""
   ANCIEN_NOM=""
+  ID_DECLARE=""
   _fichier="$1/$FICHIER_IDENTITE"
   if [ ! -f "$_fichier" ]; then
     echo "GARDE NETLIFY — configuration introuvable : $FICHIER_IDENTITE" >&2
@@ -60,6 +61,7 @@ charger_identite() {
       SITE_ID) ID_ATTENDU=$_valeur ;;
       SITE_NAME) NOM_ATTENDU=$_valeur ;;
       ANCIEN_SITE_NAME) ANCIEN_NOM=$_valeur ;;
+      A_DECLARER) ID_DECLARE=$_valeur ;;
     esac
   done < "$_fichier"
 }
@@ -97,6 +99,20 @@ verifier_garde() {
   esac
   if [ -n "$ANCIEN_NOM" ] && [ "$NOM_ATTENDU" = "$ANCIEN_NOM" ]; then
     refuser "le nom autorisé ne peut pas être celui de l'ancien site ($ANCIEN_NOM)" || return 1
+  fi
+
+  # 0. Aucun site n'est encore déclaré : le cas NORMAL avant une migration.
+  # Sans cette règle, un dépôt pas encore configuré accuse l'absence d'une
+  # variable (VYORA_BUILD_ENABLED) et envoie l'utilisateur régler un réglage qui
+  # ne changera rien : la vraie cause est « aucun site n'est autorisé », et elle
+  # est visible ici sans avoir à lire les seize autres lignes d'état.
+  if [ -n "${ID_DECLARE:-}" ] && [ "${SITE_ID:-}" != "${ID_ATTENDU:-}" ]; then
+    if [ -n "${SITE_ID:-}" ] && [ "$SITE_ID" = "$ID_DECLARE" ]; then
+      refuser "le site ${SITE_ID} existe déjà et n'est pas encore AUTORISÉ. C'est volontaire : l'autorisation se donne à l'étape 2 de docs/NETLIFY_DEPLOYMENT_CHECKLIST.md, quand tu me fournis son identité. Rien ne se publie sur un site non déclaré." || return 1
+    fi
+    if [ -n "${SITE_ID:-}" ]; then
+      refuser "ce site (${SITE_ID}) n'est ni le site autorisé (${ID_ATTENDU}) ni le site à déclarer (${ID_DECLARE}). La liste des sites autorisés ne se devine pas." || return 1
+    fi
   fi
 
   # 2-4. Identité réelle du site.

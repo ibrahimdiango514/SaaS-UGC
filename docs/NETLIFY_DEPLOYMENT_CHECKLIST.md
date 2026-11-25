@@ -56,6 +56,15 @@ SITE_NAME=<nouveau-nom>
 ANCIEN_SITE_NAME=vyora-ugc     # ne pas modifier
 ```
 
+- [ ] Si le site existait déjà et s'est fait refuser, sa valeur figure sur la
+      ligne `A_DECLARER` de `netlify.site.conf` : la **déplacer** sur `SITE_ID`
+      et `SITE_NAME`, puis **supprimer** les deux lignes `A_DECLARER` — le tout dans
+      la PR de migration (par PR, jamais à la main dans l'interface). C'est ce
+      qui distingue « site connu mais pas encore autorisé » (le cas normal d'une
+      migration) de « site totalement inconnu » (le refus de sécurité).
+      Exemple vécu le 25/11/2026 : `saas-ugc` / `6ec85a76-…` a tenté un
+      déploiement de production depuis `main`. Refusé, zéro crédit consommé,
+      et le journal disait exactement pourquoi.
 - [ ] Vérifier qu'aucune autre modification n'est nécessaire :
       `grep -rn "fc88d197\|vyora-saas-ugc" --include=*.toml --include=*.sh --include=*.conf .`
       → ne doit apparaître **que** dans des commentaires historiques.
