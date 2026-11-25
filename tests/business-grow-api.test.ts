@@ -632,7 +632,10 @@ describe('SORAHNEX Grow browser API', () => {
   });
 
   it('keeps the Netlify preview relays free of server secrets and locked to the canonical Supabase project', () => {
-    for (const rel of ['netlify/edge-functions/business-grow.js', 'netlify/functions/business-grow.mjs']) {
+    // Le doublon « netlify/functions/business-grow.mjs » a été supprimé : une
+    // Netlify Function classique n'accepte pas `export const config = { path }`,
+    // et le déploiement échouait à l'empaquetage. Un seul relais, l'Edge.
+    for (const rel of ['netlify/edge-functions/business-grow.js']) {
       const src = readFileSync(join(process.cwd(), rel), 'utf8');
       expect(src).toContain('https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/business-grow');
       expect(src).not.toMatch(/GROQ_API_KEY|GEMINI_API_KEY|SERVICE_ROLE|Deno\.env\.get|process\.env/);

@@ -43,6 +43,7 @@ charger_identite() {
   ID_ATTENDU=""
   NOM_ATTENDU=""
   NOM_FACULTATIF=""
+  PREMIER_DEPLOIEMENT=""
   ANCIEN_NOM=""
   ANCIEN_ID=""
   ID_DECLARE=""
@@ -63,6 +64,7 @@ charger_identite() {
       SITE_ID) ID_ATTENDU=$_valeur ;;
       SITE_NAME) NOM_ATTENDU=$_valeur ;;
       SITE_NAME_FACULTATIF) NOM_FACULTATIF=$_valeur ;;
+      PREMIER_DEPLOIEMENT) PREMIER_DEPLOIEMENT=$_valeur ;;
       ANCIEN_SITE_NAME) ANCIEN_NOM=$_valeur ;;
       ANCIEN_SITE_ID) ANCIEN_ID=$_valeur ;;
       A_DECLARER) ID_DECLARE=$_valeur ;;
@@ -120,9 +122,36 @@ verifier_garde() {
   if ! charger_identite "$ICI_DEPOT"; then
     return 1
   fi
+  # 0. PREMIER DÉPLOIEMENT : ouverture UNIQUE, et seulement pour l'identité.
+  if [ "$PREMIER_DEPLOIEMENT" = "true" ]; then
+    {
+      echo "======================================================================"
+      echo "GARDE NETLIFY — MODE PREMIER DÉPLOIEMENT (PREMIER_DEPLOIEMENT=true)"
+      echo "L'identité du site n'est pas encore déclarée : Netlify l'attribue à"
+      echo "l'import. L'identité n'est donc PAS vérifiée pour ce build."
+      echo "APRÈS succès : relever le Site ID (Site configuration → General), le"
+      echo "déclarer dans netlify.site.conf, puis RETIRER PREMIER_DEPLOIEMENT=true."
+      echo "======================================================================"
+    } >&2
+    # Tout le reste reste EXIGÉ : branche, autorisation humaine, opt-in.
+    if [ "${BRANCH:-}" != "main" ]; then
+      refuser "premier déploiement : seule la branche main est acceptée (branche reçue : ${BRANCH:-<absente>})." || return 1
+    fi
+    if [ "${SORAHNEX_DEPLOY_AUTHORIZED:-}" != "true" ]; then
+      refuser "premier déploiement : l'autorisation humaine reste EXIGÉE. Déclarez SORAHNEX_DEPLOY_AUTHORIZED=true, puis SORAHNEX_DEPLOY_AUTHORIZED_NAME=$AUTORISATION_DEPLOIEMENT_NOM." || return 1
+    fi
+    if [ "${SORAHNEX_DEPLOY_AUTHORIZED_NAME:-}" != "$AUTORISATION_DEPLOIEMENT_NOM" ]; then
+      refuser "premier déploiement : jeton d'autorisation absent ou incorrect (SORAHNEX_DEPLOY_AUTHORIZED_NAME=$AUTORISATION_DEPLOIEMENT_NOM)." || return 1
+    fi
+    if [ "${VYORA_BUILD_ENABLED:-}" != "true" ]; then
+      refuser "premier déploiement : VYORA_BUILD_ENABLED doit valoir exactement « true »." || return 1
+    fi
+    return 0
+  fi
+
   case "$ID_ATTENDU" in
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-    *) refuser "SITE_ID autorisé absent ou mal formé dans $FICHIER_IDENTITE (UUID minuscule attendu)" || return 1 ;;
+    *) refuser "SITE_ID autorisé absent ou mal formé dans $FICHIER_IDENTITE (UUID minuscule attendu). Pour un premier déploiement, déclarez PREMIER_DEPLOIEMENT=true." || return 1 ;;
   esac
   if [ -z "$NOM_ATTENDU" ] && [ "$NOM_FACULTATIF" != "true" ]; then
     refuser "SITE_NAME autorisé absent de $FICHIER_IDENTITE, et le nom n'est pas déclaré facultatif. Rien ne se publie sur une identité incomplète." || return 1

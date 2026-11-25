@@ -48,11 +48,25 @@ Tout ce qui suit ne consomme aucun crédit et ne dépend pas du nouveau site.
 
 ## Étape 2 — Préparer le dépôt pour le nouveau site (PR, sans fusionner)
 
-> ✅ **FAIT le 25 novembre 2026.** Le site autorisé est `2135cb38-c4ba-4be2-9392-4b75ff414364`
-> (identité fournie par le propriétaire après recréation du site par Netlify).
-> Le nom n'est **pas** contraint (`SITE_NAME_FACULTATIF=true`) : l'identifiant,
-> unique et attribué par Netlify, fait foi. `vyora-saas-ugc` (`fc88d197-…`) est
-> passé en `ANCIEN_SITE_ID` et reste refusé nommément.
+> ✅ **FAIT le 25 novembre 2026 (compte Netlify neuf).** Le dépôt est en **mode
+> premier déploiement** : `PREMIER_DEPLOIEMENT=true` dans `netlify.site.conf`,
+> et **aucun** `SITE_ID` déclaré — c'est Netlify qui attribue l'identifiant à
+> l'import, donc on ne peut pas le connaître à l'avance.
+>
+> Dans ce mode, **seule la vérification d'identité est suspendue**. Les trois
+> autres verrous restent exigés :
+>
+> | Verrou | Valeur exigée |
+> |---|---|
+> | Branche | `main` uniquement |
+> | Opt-in de build | `VYORA_BUILD_ENABLED=true` |
+> | Autorisation humaine | `SORAHNEX_DEPLOY_AUTHORIZED=true` + `SORAHNEX_DEPLOY_AUTHORIZED_NAME=sorahnex-deploy` |
+>
+> Conséquence utile : un simple `git push` sur `main` **sans** ces variables
+> reste annulé par le rideau 1 (0 crédit). Le premier build ne part donc que
+> d'un acte volontaire (« Trigger deploy » dans l'interface, ou déclaration des
+> variables puis push). `vyora-ugc` (`fc88d197-…`) reste refusé nommément dans
+> tous les cas.
 
 - [ ] Pour un futur changement, remplacer les **deux** valeurs dans `netlify.site.conf` :
 
@@ -79,8 +93,19 @@ SITE_NAME=<nouveau-nom>
       `grep -rn "fc88d197\|vyora-saas-ugc" --include=*.toml --include=*.sh --include=*.conf .`
       → ne doit apparaître **que** dans des commentaires historiques.
 - [ ] `npx vitest run tests/netlify-deployment-guard.test.ts` → vert.
-      Le test « après remplacement de l'identité, le NOUVEAU site passe et
-      l'ancien est refusé » couvre exactement ce changement.
+      Deux blocs distincts : les règles ordinaires sont vérifiées sur une copie
+      au verrouillage complet, et le mode premier déploiement sur le vrai dépôt.
+
+### Après le premier déploiement réussi — refermer l'ouverture
+
+- [ ] Relever le Site ID : **Site configuration → General → Site ID**.
+- [ ] Le déclarer : `SITE_ID=<valeur relevée>` dans `netlify.site.conf`.
+- [ ] **Retirer `PREMIER_DEPLOIEMENT=true`** de ce même fichier. Tant qu'il est
+      là, l'identité n'est pas vérifiée : n'importe quel site du compte pourrait
+      construire ce dépôt.
+- [ ] `npx vitest run tests/netlify-deployment-guard.test.ts` → le test
+      « le dépôt est actuellement en mode premier déploiement » doit maintenant
+      **échouer** : c'est la confirmation que le verrou est refermé.
 - [ ] Ouvrir une PR. **Ne pas fusionner** tant que l'étape 4 n'est pas atteinte.
 
 ---

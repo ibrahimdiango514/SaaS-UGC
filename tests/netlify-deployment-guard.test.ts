@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, cpSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -21,17 +21,62 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 const RACINE = process.cwd();
 const lire = (chemin: string) => readFileSync(join(RACINE, chemin), 'utf8');
+
+/**
+ * Dépôt de référence VERROUILLÉ, utilisé par les tests qui décrivent le
+ * fonctionnement normal de la garde.
+ *
+ * Pourquoi une copie : le dépôt peut légitimement se trouver en mode
+ * `PREMIER_DEPLOIEMENT=true` — le temps d'un premier déploiement sur un compte
+ * neuf. Les règles ordinaires (refus d'un site inconnu, de l'ancien site, d'une
+ * identité absente…) doivent rester vérifiées DANS CE MODE-LÀ, sur une identité
+ * déclarée. Elles sont donc testées contre cette copie, pas contre un état
+ * transitoire du dépôt.
+ */
+const DEPOT_VERROUILLE = mkdtempSync(join(tmpdir(), 'garde-verrouillee-'));
+const RACINE_VERROUILLEE = join(DEPOT_VERROUILLE, 'depot');
+mkdirSync(RACINE_VERROUILLEE, { recursive: true });
+mkdirSync(join(RACINE_VERROUILLEE, 'scripts'), { recursive: true });
+for (const f of ['netlify-ignore.sh', 'netlify-build-guard.sh', 'netlify-guard-lib.sh']) {
+  cpSync(join(RACINE, 'scripts', f), join(RACINE_VERROUILLEE, 'scripts', f));
+}
+const IDENTITE_REFERENCE = {
+  SITE_ID: 'aaaaaaaa-1111-4111-8111-111111111111',
+  SITE_NAME: 'site-de-reference',
+};
+writeFileSync(
+  join(RACINE_VERROUILLEE, 'netlify.site.conf'),
+  [
+    '# Configuration de RÉFÉRENCE des tests : identité déclarée, pas de mode premier déploiement.',
+    `SITE_ID=${IDENTITE_REFERENCE.SITE_ID}`,
+    `SITE_NAME=${IDENTITE_REFERENCE.SITE_NAME}`,
+    'ANCIEN_SITE_NAME=vyora-ugc',
+    'ANCIEN_SITE_ID=fc88d197-fe0b-47c7-a6e3-fba44eeccda9',
+    '',
+  ].join('\n'),
+);
+/** Lit l'identité de référence (équivalent de `identite` pour la copie). */
+const IDENTITE_REF = IDENTITE_REFERENCE;
+
+afterAll(() => {
+  rmSync(DEPOT_VERROUILLE, { recursive: true, force: true });
+});
 const config = lire('netlify.toml');
 const commandeBuild = config.match(/^\s*command\s*=\s*"([^"]+)"\s*$/m)?.[1];
 const commandeIgnore = config.match(/^\s*ignore\s*=\s*"([^"]+)"\s*$/m)?.[1];
 
-/** Identité lue dans le fichier de configuration : la source de vérité. */
-const identite = Object.fromEntries(
-  lire('netlify.site.conf')
-    .split('\n')
-    .filter((l) => l.trim() && !l.trim().startsWith('#'))
-    .map((l) => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]),
-) as { SITE_ID: string; SITE_NAME?: string; SITE_NAME_FACULTATIF?: string; ANCIEN_SITE_NAME: string };
+/**
+ * Identité de RÉFÉRENCE (celle de la copie verrouillée). Les tests décrivent le
+ * fonctionnement normal de la garde : une identité déclarée, aucun mode
+ * transitoire. La configuration RÉELLE du dépôt est inspectée séparément, par
+ * les tests « Configuration du dépôt ».
+ */
+const identite = {
+  SITE_ID: IDENTITE_REF.SITE_ID,
+  SITE_NAME: IDENTITE_REF.SITE_NAME as string | undefined,
+  SITE_NAME_FACULTATIF: undefined as string | undefined,
+  ANCIEN_SITE_NAME: 'vyora-ugc',
+};
 
 /**
  * Nom utilisé par les scénarios « site légitime ». Quand le nom n'est pas
@@ -49,8 +94,8 @@ type Env = Record<string, string>;
 
 /** Environnement d'un déploiement LÉGITIME : toutes les conditions réunies. */
 const autorise = (extra: Env = {}): Env => ({
-  SITE_ID: identite.SITE_ID,
-  SITE_NAME: NOM_UTILISE,
+  SITE_ID: IDENTITE_REF.SITE_ID,
+  SITE_NAME: IDENTITE_REF.SITE_NAME,
   BRANCH: 'main',
   VYORA_BUILD_ENABLED: 'true',
   SORAHNEX_DEPLOY_AUTHORIZED: 'true',
@@ -64,7 +109,7 @@ const sans = (env: Env, ...cles: string[]): Env =>
 
 function executer(commande: string, env: Env) {
   const r = spawnSync('sh', ['-c', commande], {
-    cwd: RACINE,
+    cwd: RACINE_VERROUILLEE,
     // PATH minimal : reproduit un environnement Netlify, sans variables héritées.
     env: { PATH: process.env.PATH ?? '' , ...env },
     encoding: 'utf8',
@@ -499,13 +544,13 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
   };
 
   it('un ANCIEN site est refusé pour cette raison précise, pas par un message générique', () => {
-    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { cwd: RACINE_VERROUILLEE, encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/ANCIEN site, explicitement écarté/);
   });
 
   it('le refus ne reproche JAMAIS une variable absente quand la cause est l’identité', () => {
-    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { cwd: RACINE_VERROUILLEE, encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
     // C'était le défaut du 25/11 : « VYORA_BUILD_ENABLED doit valoir true »
     // accusait une variable alors que le site n'était pas le bon.
     expect(r.stderr).not.toMatch(/Raison : VYORA_BUILD_ENABLED/);
@@ -516,6 +561,7 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
     // Le scénario dangereux : quelqu'un déclare les trois variables d'autorisation
     // sur l'ancien site « pour voir ». L'identité doit primer sur le verrou.
     const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      cwd: RACINE_VERROUILLEE,
       encoding: 'utf8',
       env: {
         ...envAncienSite,
@@ -528,13 +574,14 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
   });
 
   it('cite le site autorisé dans l’état du refus', () => {
-    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { cwd: RACINE_VERROUILLEE, encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
     expect(r.stderr).toMatch(/Site autorisé/);
-    expect(r.stderr).toContain('2135cb38-c4ba-4be2-9392-4b75ff414364');
+    expect(r.stderr).toContain(IDENTITE_REF.SITE_ID);
   });
 
   it('n’accuse pas la variable d’opt-in pour un site totalement inconnu', () => {
     const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      cwd: RACINE_VERROUILLEE,
       encoding: 'utf8',
       env: { PATH: process.env.PATH ?? '/usr/bin:/bin', SITE_ID: '11111111-2222-3333-4444-555555555555', SITE_NAME: 'autre', BRANCH: 'main' },
     });
@@ -546,11 +593,12 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
 
   it('pour le site autorisé sans autorisation humaine, dit la vraie raison', () => {
     const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      cwd: RACINE_VERROUILLEE,
       encoding: 'utf8',
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
-        SITE_ID: '2135cb38-c4ba-4be2-9392-4b75ff414364',
-        SITE_NAME: 'saas-ugc',
+        SITE_ID: IDENTITE_REF.SITE_ID,
+        SITE_NAME: IDENTITE_REF.SITE_NAME,
         BRANCH: 'main',
         VYORA_BUILD_ENABLED: 'true',
       },
@@ -562,11 +610,12 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
 
   it('le cas entièrement autorisé passe (le durcissement n’a rien cassé)', () => {
     const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      cwd: RACINE_VERROUILLEE,
       encoding: 'utf8',
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
-        SITE_ID: '2135cb38-c4ba-4be2-9392-4b75ff414364',
-        SITE_NAME: 'saas-ugc',
+        SITE_ID: IDENTITE_REF.SITE_ID,
+        SITE_NAME: IDENTITE_REF.SITE_NAME,
         BRANCH: 'main',
         VYORA_BUILD_ENABLED: 'true',
         SORAHNEX_DEPLOY_AUTHORIZED: 'true',
@@ -578,7 +627,7 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
   });
 
   it('le rideau 1 ANNULE (code 0) pour l’ancien site : zéro crédit', () => {
-    const r = spawnSync('sh', ['scripts/netlify-ignore.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv, timeout: 20_000 });
+    const r = spawnSync('sh', ['scripts/netlify-ignore.sh'], { cwd: RACINE_VERROUILLEE, encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv, timeout: 20_000 });
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/build annule/);
   });
@@ -597,10 +646,10 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
 });
 
 describe('Identité autorisée — le site choisi, et les anciens écartés', () => {
-  it('netlify.site.conf autorise saas-ugc et écarte explicitement l’ancien site', () => {
-    const conf = lire('netlify.site.conf');
+  it('la configuration de référence autorise son site et écarte explicitement l’ancien', () => {
+    const conf = readFileSync(join(RACINE_VERROUILLEE, 'netlify.site.conf'), 'utf8');
     const autorise = conf.split('\n').find((l) => /^SITE_ID=/.test(l.trim()));
-    expect(autorise).toContain('2135cb38');
+    expect(autorise).toContain(IDENTITE_REF.SITE_ID);
     expect(autorise).not.toContain('fc88d197');
     // L'ancien identifiant n'est pas supprimé : il est REFUSÉ nommément.
     expect(conf).toContain('ANCIEN_SITE_ID=fc88d197-fe0b-47c7-a6e3-fba44eeccda9');
@@ -626,8 +675,8 @@ describe('Diagnostic d’une valeur PRESQUE correcte — le cas du 25/11 07:2x',
    */
   const base = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
-    SITE_ID: '2135cb38-c4ba-4be2-9392-4b75ff414364',
-    SITE_NAME: 'saas-ugc',
+    SITE_ID: IDENTITE_REF.SITE_ID,
+    SITE_NAME: IDENTITE_REF.SITE_NAME,
     BRANCH: 'main',
     VYORA_BUILD_ENABLED: 'true',
     SORAHNEX_DEPLOY_AUTHORIZED: 'true',
@@ -635,6 +684,7 @@ describe('Diagnostic d’une valeur PRESQUE correcte — le cas du 25/11 07:2x',
 
   const lancer = (nom: string) =>
     spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      cwd: RACINE_VERROUILLEE,
       encoding: 'utf8',
       env: { ...base, SORAHNEX_DEPLOY_AUTHORIZED_NAME: nom },
     });
@@ -716,7 +766,7 @@ describe('Le journal tronqué suffit encore à agir', () => {
    * Le bas du bloc est donc la seule zone sur laquelle compter.
    */
   const journal = (env: NodeJS.ProcessEnv) =>
-    spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env }).stderr;
+    spawnSync('sh', ['scripts/netlify-build-guard.sh'], { cwd: RACINE_VERROUILLEE, encoding: 'utf8', env }).stderr;
 
   it('un site non autorisé : les 2 dernières lignes disent l’identité ET la cause', () => {
     const r = journal({
@@ -748,15 +798,13 @@ describe('Le journal tronqué suffit encore à agir', () => {
     expect(r.match(/À CORRIGER/g) ?? []).toHaveLength(1);
   });
 
-  it('netlify.site.conf tolère un préfixe // sans casser l’identité', () => {
-    // Certains éditeurs enregistrent un « // » de commentaire différent du « # ».
-    // La conf doit rester inerte : aucune ligne non reconnue ne doit être
-    // interprétée comme une identité.
+  it('la conf réelle reste inerte : aucune ligne non reconnue n’est une identité', () => {
     const conf = lire('netlify.site.conf');
-    const lignesIdentite = conf.split('\n').filter((l) => /^\s*(SITE_ID|SITE_NAME|SITE_NAME_FACULTATIF|ANCIEN_SITE_ID|ANCIEN_SITE_NAME)=/.test(l));
-    expect(lignesIdentite.length).toBeGreaterThanOrEqual(3);
-    // Une seule ligne SITE_ID : aucune ambiguïté sur l'identité autorisée.
-    expect(lignesIdentite.filter((l) => /^SITE_ID=/.test(l))).toHaveLength(1);
+    // Une seule ligne SITE_ID active, au plus : aucune ambiguïté possible.
+    expect(conf.split('\n').filter((l) => /^SITE_ID=/.test(l)).length).toBeLessThanOrEqual(1);
+    // Et le mode premier déploiement est soit absent, soit explicitement true.
+    const flag = conf.split('\n').find((l) => /^PREMIER_DEPLOIEMENT=/.test(l));
+    if (flag) expect(flag).toBe('PREMIER_DEPLOIEMENT=true');
   });
 });
 
@@ -771,7 +819,9 @@ describe('Bascule d’identité — un seul geste, vérifié', () => {
     for (const f of ['netlify-autoriser-site.sh', 'netlify-build-guard.sh', 'netlify-guard-lib.sh']) {
       copyFileSync(joindre(process.cwd(), 'scripts', f), joindre(dir, 'scripts', f));
     }
-    copyFileSync(joindre(process.cwd(), 'netlify.site.conf'), joindre(dir, 'netlify.site.conf'));
+    // Conf de référence (identité déclarée) : la bascule n'a de sens qu'à partir
+    // d'un site déjà autorisé.
+    copyFileSync(joindre(RACINE_VERROUILLEE, 'netlify.site.conf'), joindre(dir, 'netlify.site.conf'));
     return dir;
   }
 
@@ -831,6 +881,82 @@ describe('Bascule d’identité — un seul geste, vérifié', () => {
 
   it('le vrai netlify.site.conf n’a pas été modifié par les tests', () => {
     const conf = lire('netlify.site.conf');
-    expect(conf.split('\n').find((l) => /^SITE_ID=/.test(l))).toContain('2135cb38');
+    // Tant qu'aucun site n'existe, c'est le mode premier déploiement qui est
+    // attendu — et surtout PAS une identité inventée par un test.
+    expect(conf).toMatch(/^PREMIER_DEPLOIEMENT=true$/m);
+    expect(conf.split('\n').filter((l) => /^SITE_ID=/.test(l))).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+describe('PREMIER DÉPLOIEMENT — ouverture unique, jamais un abandon', () => {
+  /**
+   * Compte Netlify neuf, projet neuf : l'identifiant du site est attribué par
+   * Netlify à l'import, donc inconnu au moment du premier build. Le refuser
+   * rendrait le déploiement impossible. Le drapeau ouvre l'identité, RIEN
+   * d'autre — et doit être retiré juste après.
+   */
+  const env = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    SITE_ID: 'identifiant-inconnu-attribue-par-netlify',
+    SITE_NAME: 'site-tout-neuf',
+    BRANCH: 'main',
+    VYORA_BUILD_ENABLED: 'true',
+    SORAHNEX_DEPLOY_AUTHORIZED: 'true',
+    SORAHNEX_DEPLOY_AUTHORIZED_NAME: 'sorahnex-deploy',
+  } as Env;
+  // Le VRAI dépôt : c'est son mode premier déploiement qui est vérifié ici.
+  const lancer = (e: Env) =>
+    spawnSync('sh', ['scripts/netlify-build-guard.sh'], { cwd: RACINE, encoding: 'utf8', env: e });
+
+  it('le dépôt est actuellement en mode premier déploiement', () => {
+    expect(lire('netlify.site.conf')).toMatch(/^PREMIER_DEPLOIEMENT=true$/m);
+  });
+
+  it('avec les trois variables, un site dont l’identité est inconnue passe', () => {
+    const r = lancer(env);
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/MODE PREMIER DÉPLOIEMENT/);
+    expect(r.stdout ?? '').toBeDefined();
+  });
+
+  it('l’annonce dit que l’identité n’est PAS vérifiée (aucune ambiguïté)', () => {
+    const r = lancer(env);
+    expect(r.stderr).toMatch(/n'est donc PAS vérifiée|n'est pas vérifiée/i);
+  });
+
+  it('SANS autorisation humaine, le premier déploiement est refusé', () => {
+    const r = lancer(sans(env, 'SORAHNEX_DEPLOY_AUTHORIZED', 'SORAHNEX_DEPLOY_AUTHORIZED_NAME'));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/l'autorisation humaine reste EXIGÉE/);
+  });
+
+  it('sans l’opt-in de build, refusé', () => {
+    const r = lancer(sans(env, 'VYORA_BUILD_ENABLED'));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/VYORA_BUILD_ENABLED doit valoir exactement/);
+  });
+
+  it('sur une branche autre que main, refusé', () => {
+    const r = lancer({ ...env, BRANCH: 'develop' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/seule la branche main est acceptée/);
+  });
+
+  it('le rideau 1 annule toujours un push sans autorisation (zéro crédit)', () => {
+    const r = spawnSync('sh', ['scripts/netlify-ignore.sh'], {
+      encoding: 'utf8',
+      env: sans(env, 'SORAHNEX_DEPLOY_AUTHORIZED', 'SORAHNEX_DEPLOY_AUTHORIZED_NAME'),
+      cwd: RACINE,
+      timeout: 20_000,
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/build annule/);
+  });
+
+  it('le drapeau est documenté comme TEMPORAIRE, avec la marche à suivre', () => {
+    const conf = lire('netlify.site.conf');
+    expect(conf).toMatch(/APRÈS LE PREMIER DÉPLOIEMENT RÉUSSI/);
+    expect(conf).toMatch(/RETIRER `PREMIER_DEPLOIEMENT=true`/);
   });
 });
