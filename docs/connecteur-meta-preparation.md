@@ -1,12 +1,12 @@
 # Connecteur Meta (Facebook Pages / Instagram) — préparation
 
 > État au 2026-11-14 : **aucune application Meta n'existe encore**. Ce document fixe ce qui est
-> prêt côté VYORA, ce qu'il reste à faire côté Meta for Developers, et les règles de manipulation
+> prêt côté SORAHNEX, ce qu'il reste à faire côté Meta for Developers, et les règles de manipulation
 > des secrets. Rien de ce qui suit n'active le connecteur : `facebook` et `instagram` restent
 > `implemented = false` dans `saas_business.integration_providers` et `engine: null` dans
 > `src/integrations/catalog.ts` tant que l'App Review n'est pas obtenue.
 
-## 1. Ce qui est déjà en place dans VYORA
+## 1. Ce qui est déjà en place dans SORAHNEX
 
 | Élément | Où | État |
 | --- | --- | --- |
@@ -33,12 +33,12 @@ Règles :
 ## 3. Étapes Meta for Developers (à réaliser par le titulaire du compte Meta)
 
 1. **Compte développeur** : <https://developers.facebook.com> → s'inscrire avec le compte Facebook
-   qui administre la Page VYORA (vérification téléphone/e-mail exigée).
+   qui administre la Page SORAHNEX (vérification téléphone/e-mail exigée).
 2. **Portefeuille Business** : <https://business.facebook.com> → créer (ou réutiliser) le
-   portefeuille « VYORA » ; y rattacher la Page Facebook et le compte Instagram professionnel qui
+   portefeuille « SORAHNEX » ; y rattacher la Page Facebook et le compte Instagram professionnel qui
    serviront aux tests. Lancer la **vérification d'entreprise** (documents officiels) : elle est
    exigée avant l'accès avancé aux permissions.
-3. **Créer l'application** : *My Apps → Create App* → type **Business** → nom « VYORA » →
+3. **Créer l'application** : *My Apps → Create App* → type **Business** → nom « SORAHNEX » →
    rattacher au portefeuille Business. Noter l'**App ID** (public). L'**App Secret** s'affiche dans
    *App settings → Basic* : le copier **directement** dans le secret Edge `META_APP_SECRET`, sans
    passage par un intermédiaire.
@@ -55,7 +55,7 @@ Règles :
    - Pages : `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `pages_read_user_content`
    - Instagram : `instagram_basic`, `instagram_content_publish`, `instagram_manage_insights`
    - Business : `business_management` (si la sélection de Page passe par le portefeuille)
-   Pour chaque permission : vidéo de démonstration du parcours réel dans VYORA, justification
+   Pour chaque permission : vidéo de démonstration du parcours réel dans SORAHNEX, justification
    d'usage, compte de test. L'accès **Standard** suffit pour nos propres Pages pendant le
    développement ; l'accès **Avancé** (App Review + vérification d'entreprise) est obligatoire
    pour des Pages de clients.
@@ -63,14 +63,14 @@ Règles :
    (ils doivent accepter l'invitation dans leur propre compte Facebook).
 9. **Passage en Live** : *App Mode → Live* uniquement après : politique de confidentialité en
    ligne, vérification d'entreprise validée, App Review accordé pour les permissions ci-dessus.
-10. **Après obtention** : nous activons côté VYORA (dans cet ordre) : secrets Edge → fonction OAuth
+10. **Après obtention** : nous activons côté SORAHNEX (dans cet ordre) : secrets Edge → fonction OAuth
     déployée → `integration_providers.implemented = true` pour `facebook`/`instagram` par
     migration → fiche catalogue `engine` renseigné → tests de bout en bout sur un compte test →
     annonce aux clients ayant une demande `pending`.
 
-## 4. Ce que VYORA fera au moment de l'activation (pour information)
+## 4. Ce que SORAHNEX fera au moment de l'activation (pour information)
 
-- Flux OAuth « Authorization Code » côté serveur, `state` signé et lié à l'entreprise VYORA
+- Flux OAuth « Authorization Code » côté serveur, `state` signé et lié à l'entreprise SORAHNEX
   (`workspace_id`) pour empêcher toute association croisée entre comptes.
 - Jeton utilisateur court → jeton long (60 j) → **jetons de Page** (sans expiration tant que le
   jeton long est valide), chiffrés en base ; jamais renvoyés au navigateur.

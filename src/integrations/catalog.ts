@@ -1,5 +1,5 @@
 /**
- * VYORA — catalogue des intégrations.
+ * SORAHNEX — catalogue des intégrations.
  *
  * ## Ce que ce fichier est, et n'est pas
  *
@@ -14,7 +14,7 @@
  * calculés — jamais saisis à la main :
  *
  *   - `available`      : un mode de connexion existe et ses prérequis sont remplis ;
- *   - `needs_config`   : le mode existe mais les identifiants VYORA manquent ;
+ *   - `needs_config`   : le mode existe mais les identifiants SORAHNEX manquent ;
  *   - `needs_approval` : le fournisseur exige une validation externe (Meta, TikTok…) ;
  *   - `unavailable`    : aucun mode légal n'existe pour l'instant.
  *
@@ -312,7 +312,7 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     engine: 'api-key',
     docsUrl: 'https://shopify.dev/docs/api',
     caveat:
-      'Lecture seule : VYORA ne crée, ne modifie et ne supprime rien dans Shopify. Le jeton se révoque '
+      'Lecture seule : SORAHNEX ne crée, ne modifie et ne supprime rien dans Shopify. Le jeton se révoque '
       + 'en désinstallant l’application. Les produits en brouillon et archivés sont écartés et comptés. '
       + 'Le catalogue public reste lisible sans connexion, pour les boutiques qui le publient.',
   },
@@ -342,7 +342,7 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     engine: 'api-key',
     docsUrl: 'https://woocommerce.github.io/woocommerce-rest-api-docs/',
     caveat:
-      'Lecture seule : le droit « Lecture » suffit, et VYORA n’émet que des requêtes de lecture. '
+      'Lecture seule : le droit « Lecture » suffit, et SORAHNEX n’émet que des requêtes de lecture. '
       + 'L’API REST exige des permaliens autres que « Simple » — sinon /wp-json/ renvoie 404. '
       + 'Aucune commande n’est lue : les commandes contiennent des données personnelles d’acheteurs.',
   },
@@ -372,7 +372,7 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     // serveur, rangée dans Vault, et le catalogue est lu par l'API officielle.
     engine: 'api-key',
     docsUrl: 'https://devdocs.prestashop-project.org/',
-    caveat: 'La clé Webservice se crée dans PrestaShop : Paramètres avancés → Webservice. Elle ne doit jamais transiter par le navigateur : VYORA la vérifie et la range côté serveur.',
+    caveat: 'La clé Webservice se crée dans PrestaShop : Paramètres avancés → Webservice. Elle ne doit jamais transiter par le navigateur : SORAHNEX la vérifie et la range côté serveur.',
   },
   {
     id: 'chariow',
@@ -409,7 +409,7 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     docsUrl: 'https://chariow.dev',
     caveat:
       'La clé se crée dans app.chariow.com → Settings → API Keys, et n’est affichée qu’une seule fois. '
-      + 'Cochez uniquement « store.read » et « products.read » : VYORA n’a besoin d’aucun autre droit. '
+      + 'Cochez uniquement « store.read » et « products.read » : SORAHNEX n’a besoin d’aucun autre droit. '
       + 'Chariow n’expose pas les variantes détaillées ni de SKU : les produits à tarifs par variante sont importés '
       + 'comme des fiches simples, avec un avertissement dans l’aperçu.',
   },
@@ -526,7 +526,7 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     ],
     engine: 'custom-api',
     caveat:
-      'Nécessite une API HTTPS qui renvoie vos produits en JSON. VYORA lit la première page, '
+      'Nécessite une API HTTPS qui renvoie vos produits en JSON. SORAHNEX lit la première page, '
       + 'propose une correspondance des champs, et n’enregistre rien avant un test réussi. '
       + 'Si votre boutique n’expose pas d’API, utilisez l’import d’un export CSV : il n’existe '
       + 'aucun moyen d’inventer les produits d’un site qui ne les publie pas.',
@@ -674,14 +674,14 @@ export const INTEGRATIONS: IntegrationEntry[] = [
     id: 'saspay',
     name: 'SasPay',
     category: 'business',
-    description: 'Encaissement mobile money déjà intégré à VYORA.',
+    description: 'Encaissement mobile money déjà intégré à SORAHNEX.',
     capabilities: ['account-read', 'orders-read'],
     auth: [
       { mode: 'api-key', label: 'Clé marchand SasPay', serverConfigKey: 'SASPAY_API_KEY' },
     ],
     engine: null,
     docsUrl: 'https://saspay.com',
-    caveat: 'Déjà utilisé pour les abonnements VYORA ; le catalogue n’expose que la lecture.',
+    caveat: 'Déjà utilisé pour les abonnements SORAHNEX ; le catalogue n’expose que la lecture.',
   },
   {
     id: 'odoo',

@@ -1,4 +1,4 @@
-// VYORA AI CORE — tests unitaires : adaptateurs (7 fournisseurs), registre,
+// SORAHNEX AI CORE — tests unitaires : adaptateurs (7 fournisseurs), registre,
 // routage intelligent, moteur d'exécution (secours plafonné, journalisation).
 //
 // Aucune clé réelle : chaque appel réseau est un fetch simulé ; on vérifie le
@@ -38,7 +38,7 @@ const DESCRIPTORS: Record<string, { kind: AiProviderDescriptor['kind']; baseUrl:
   cloudflare: { kind: 'cloudflare', baseUrl: 'https://api.cloudflare.com/client/v4', modelsUrl: null },
   openrouter: {
     kind: 'openai', baseUrl: 'https://openrouter.ai/api/v1', modelsUrl: null,
-    headers: { 'HTTP-Referer': 'https://vyora-ugc.netlify.app', 'X-Title': 'VYORA' },
+    headers: { 'HTTP-Referer': 'https://vyora-ugc.netlify.app', 'X-Title': 'SORAHNEX' },
   },
 };
 
@@ -249,7 +249,7 @@ describe('adaptateurs — contrats de transport', () => {
     const req = adapterFor('openrouter')!.buildRequest({ credentials: creds, model: 'openai/gpt-oss-20b', messages });
     expect(req.url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect(req.headers['HTTP-Referer']).toBeTruthy();
-    expect(req.headers['X-Title']).toBe('VYORA');
+    expect(req.headers['X-Title']).toBe('SORAHNEX');
     expect(req.headers.Authorization).toBe('Bearer test-key');
   });
 
@@ -869,14 +869,14 @@ describe('moteur — fournisseurs déclarés par le registre uniquement', () => 
     const parsed = parseRegistrySnapshot({
       version: 3,
       providers: [
-        { key: 'x1', name: 'X1', adapter_kind: 'gemini', base_url: 'https://x1.test/v1', api_key_env: 'X1_API_KEY', account_id_env: null, headers: { 'X-Title': 'VYORA', ignore: 42 } },
+        { key: 'x1', name: 'X1', adapter_kind: 'gemini', base_url: 'https://x1.test/v1', api_key_env: 'X1_API_KEY', account_id_env: null, headers: { 'X-Title': 'SORAHNEX', ignore: 42 } },
         { key: 'x2', adapter_kind: 'protocole-inconnu' },
         { key: 'X3!' },
       ],
     });
     expect(parsed?.providers).toHaveLength(2);
     expect(parsed?.providers[0]).toMatchObject({
-      key: 'x1', adapterKind: 'gemini', baseUrl: 'https://x1.test/v1', apiKeyEnv: 'X1_API_KEY', headers: { 'X-Title': 'VYORA' },
+      key: 'x1', adapterKind: 'gemini', baseUrl: 'https://x1.test/v1', apiKeyEnv: 'X1_API_KEY', headers: { 'X-Title': 'SORAHNEX' },
     });
     // Gabarit inconnu → repli sur le protocole majoritaire, jamais une erreur.
     expect(parsed?.providers[1]).toMatchObject({ key: 'x2', adapterKind: 'openai', baseUrl: null, headers: {} });

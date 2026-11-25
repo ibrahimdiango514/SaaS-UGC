@@ -1,4 +1,4 @@
-// VYORA — surveillance planifiée des fournisseurs IA (descripteurs du registre).
+// SORAHNEX — surveillance planifiée des fournisseurs IA (descripteurs du registre).
 //
 // Appelée uniquement par le job pg_cron `vyora-provider-health-*` via pg_net.
 // Deux protections, dans cet ordre :
@@ -17,7 +17,7 @@
 //
 // Le verdict est écrit par la RPC `vyora_record_provider_verification`
 // (service_role) qui réutilise les fonctions de santé existantes : le routage
-// Business Grow voit exactement le même état que via `providers.verify`.
+// Grow voit exactement le même état que via `providers.verify`.
 
 type Json = Record<string, unknown>;
 
@@ -39,7 +39,7 @@ function env(name: string): string {
 const SUPABASE_URL = () => env("SUPABASE_URL");
 const SERVICE_KEY = () => env("SUPABASE_SERVICE_ROLE_KEY");
 
-// VYORA AI CORE — AUCUNE liste de fournisseurs ici.
+// SORAHNEX AI CORE — AUCUNE liste de fournisseurs ici.
 //
 // La surveillance interroge les DESCRIPTEURS du registre
 // (`public.vyora_ai_provider_descriptors()`) : clé, gabarit de protocole, URL

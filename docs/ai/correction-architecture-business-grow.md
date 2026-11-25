@@ -1,4 +1,4 @@
-# Correction architecturale — VYORA AI intégré dans Business Grow
+# Correction architecturale — SORAHNEX AI intégré dans Grow
 
 **Branche** : `arena/bfcedd89-saas-ugc` · **Base** : `6f0decd` (`develop`)
 
@@ -10,7 +10,7 @@ La Livraison 1 avait produit `/app/ai` : un **espace assistant autonome**, avec 
 propre route, sa propre sidebar et sa propre navigation d'application. Le
 catalogue d'intégrations vivait sur `/app/connect`, également à part.
 
-C'était la mauvaise direction. Business Grow est l'espace métier de VYORA ; il
+C'était la mauvaise direction. Grow est l'espace métier de SORAHNEX ; il
 avait déjà une section « Assistant ». La demande était de **remplacer cette
 section**, pas d'ouvrir un second espace à côté.
 
@@ -40,14 +40,14 @@ Ce qu'elle faisait, et qui n'a **pas** été perdu :
 ```
 /app/business                       ← un seul espace métier
 └── BusinessGrowWorkspace
-    ├── en-tête « VYORA · Business Grow »
+    ├── en-tête « SORAHNEX · Grow »
     ├── 4 indicateurs + accès aux 13 modules métier
     ├── nav métier (7 rubriques)  ← inchangée
     └── section « Assistant »
         └── AssistantView
             ├── barre AI Director (rôle, routage, service, modèle, quota)
             ├── suggestions métier
-            └── BusinessAssistant  ← interface VYORA AI
+            └── BusinessAssistant  ← interface SORAHNEX AI
                 ├── Sidebar (mode `embedded`)
                 ├── MessageList
                 └── Composer
@@ -55,7 +55,7 @@ Ce qu'elle faisait, et qui n'a **pas** été perdu :
 
 `BusinessAssistant` est un **composant de rendu**, pas un espace. Il ne possède
 ni route, ni navigation d'application, ni connexion propre : il reçoit son état
-par le paramètre `host` et déclenche les rappels de Business Grow.
+par le paramètre `host` et déclenche les rappels de Grow.
 
 ### Le mode `embedded` de la sidebar
 
@@ -65,7 +65,7 @@ navigation métier — soit exactement le second espace qu'on refuse. En mode
 `embedded`, elle ne propose que :
 
 - les conversations (recherche, regroupement, actions)
-- un raccourci vers la rubrique **Intégrations** de Business Grow
+- un raccourci vers la rubrique **Intégrations** de Grow
 
 Vérifié dans le bundle : la chaîne « Espace Business » est **absente** du chunk
 `BusinessGrow-*.js`.
@@ -77,12 +77,12 @@ Vérifié dans le bundle : la chaîne « Espace Business » est **absente** du c
 dépendances `useCallback` ont été corrigées : changer d'entreprise recharge la
 liste au lieu de conserver celle de la précédente.
 
-En mode piloté (`host`), Business Grow garde la main sur ses révisions et ses
+En mode piloté (`host`), Grow garde la main sur ses révisions et ses
 séquences de chargement — la logique d'isolation existante n'est pas dupliquée.
 
 ## 4. Catalogue d'intégrations
 
-Accessible depuis Business Grow, à deux endroits :
+Accessible depuis Grow, à deux endroits :
 
 1. la rubrique **Intégrations** de la navigation métier (existante, conservée) ;
 2. le raccourci de la sidebar de l'assistant, qui bascule sur cette rubrique.
@@ -90,7 +90,7 @@ Accessible depuis Business Grow, à deux endroits :
 Rien n'est dupliqué : le raccourci change de section, il n'ouvre pas une page.
 
 > **Point à trancher.** Le catalogue de 26 fournisseurs (Livraison 2) vit sur
-> `/app/connect`. La rubrique Intégrations de Business Grow affiche le contrat
+> `/app/connect`. La rubrique Intégrations de Grow affiche le contrat
 > préexistant `src/integrations/contracts.ts` (6 fournisseurs, demandes
 > d'activation). Fusionner les deux demande de réconcilier deux modèles de
 > statut : `deriveStatus` (comptes OAuth réels) et les demandes d'activation
@@ -120,7 +120,7 @@ Rien n'est dupliqué : le raccourci change de section, il n'ouvre pas une page.
 |---|---|
 | `npx tsc -b` | 0 erreur |
 | `npm run build` | OK — `BusinessGrow-DNe7jcFc.js` (175,8 kB) |
-| Tests Business Grow existants | **42 / 42** — aucune régression |
+| Tests Grow existants | **42 / 42** — aucune régression |
 | Tests interface AI | **32 / 32** |
 | Tests routage AI | **4 / 4** |
 | Nouveaux tests d'intégration | **11 / 11** |
@@ -138,7 +138,7 @@ Rien n'est dupliqué : le raccourci change de section, il n'ouvre pas une page.
 
 Le test vérifie sur le rendu, pas sur le code :
 
-1. `business-assistant` et la sidebar VYORA sont présents ;
+1. `business-assistant` et la sidebar SORAHNEX sont présents ;
 2. « Espace Business » et « Explorer » sont **absents** ;
 3. les 7 rubriques métier sont présentes ;
 4. l'AI Director et le quota (840 unités) sont là ;

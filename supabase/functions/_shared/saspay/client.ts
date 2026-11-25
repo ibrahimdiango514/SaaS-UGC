@@ -1,4 +1,4 @@
-// VYORA — client SasPay (serveur uniquement).
+// SORAHNEX — client SasPay (serveur uniquement).
 //
 // Seules des routes présentes dans la spécification OpenAPI officielle sont
 // appelées (https://docs.saspay.me/api-reference/openapi.json) :

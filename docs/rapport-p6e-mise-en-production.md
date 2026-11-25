@@ -1,4 +1,4 @@
-# P6e — Mise en production VYORA MCP : intégration `main`, backend, connexion front ↔ backend
+# P6e — Mise en production SORAHNEX MCP : intégration `main`, backend, connexion front ↔ backend
 
 Date : 2026-11-18 · Projet Supabase `xbuuhfwobrafcbgtdgjx` · PR **#22** fusionnée dans `main`.
 
@@ -141,7 +141,7 @@ Depuis cet environnement, **aucun test navigateur n'est possible**. Je ne décla
 | 3 | Création OAuth sans secret | `creer` 201 en P6d (14077) | `creer` → 201, carte en `auth_required` |
 | 4 | Démarrage OAuth Linear | `oauth-demarrer` 200 + DCR réel (14076) | `oauth-demarrer` → 200 `{autorisationUrl, redirectUri}` |
 | 5 | Redirection vers Linear | URL `https://mcp.linear.app/authorize?…code_challenge_method=S256…` | nouvel onglet Linear, page de consentement |
-| 6 | Retour vers VYORA | callback audité (state unique, XSS, code forgé) | page **« Autorisation accordée — VYORA »** servie par `…/functions/v1/mcp-client/oauth/callback` (c'est le retour ; revenez à l'onglet VYORA et cliquez « Tester ») |
+| 6 | Retour vers SORAHNEX | callback audité (state unique, XSS, code forgé) | page **« Autorisation accordée — SORAHNEX »** servie par `…/functions/v1/mcp-client/oauth/callback` (c'est le retour ; revenez à l'onglet SORAHNEX et cliquez « Tester ») |
 | 7 | Jetons dans Vault | `mcp_oauth_stocker` (P6d) | je vérifie sur demande : `vault.secrets` doit contenir `mcp_server_<id>` et `mcp_oauth_refresh_<id>` |
 | 8 | Découverte des outils | `tester` → `tools/list` (P6b/P6c) | « Tester » → statut `connected`, liste d'outils |
 | 9 | Exécution d'un outil de lecture autorisé | `executer` réel (P6b) | autoriser `list_issues` (ou équivalent lecture) → « Exécuter » → résultat JSON |

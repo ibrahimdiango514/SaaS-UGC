@@ -6,7 +6,7 @@ import {UniversalCatalogHealth} from '../src/pages/admin/UniversalCatalogHealth'
 import {getUniversalCatalogHealth} from '../src/lib/api';
 vi.mock('../src/lib/api',()=>({getUniversalCatalogHealth:vi.fn()}));
 afterEach(()=>{cleanup();vi.useRealTimers();vi.resetAllMocks();});
-const snapshot=(models:number)=>({models,prepared:520,integrated:0,operational:0,enabled:0,studio_available:0,problems:models,present:models,removed:0,pricing_missing:models,real_tests_missing:models,details_ok:models,detail_errors:0,last_sync:null,categories:{},measured_at:'2026-11-20T04:00:00Z'});
+const snapshot=(models:number)=>({models,prepared:520,configurable:0,technical_test_passed:0,integrated:0,operational:0,enabled:0,studio_available:0,problems:models,present:models,removed:0,pricing_missing:models,real_tests_missing:models,details_ok:models,detail_errors:0,last_sync:null,categories:{},measured_at:'2026-11-20T04:00:00Z'});
 it('refreshes mounted views on local changes, focus and timer, removing every listener on unmount',()=>{
  vi.useFakeTimers();function Probe(){const revision=useCatalogRevision();return <span>{revision}</span>;}
  const {unmount}=render(<Probe/>);expect(screen.getByText('0')).toBeTruthy();

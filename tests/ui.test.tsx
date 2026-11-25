@@ -5,7 +5,7 @@ import type { Plan } from '../src/lib/types';
 
 const plans: Plan[] = [
   {
-    plan_key: 'free', display_name: 'Découverte', tagline: 'Pour découvrir Reelora',
+    plan_key: 'free', display_name: 'Découverte', tagline: 'Pour découvrir Sorahnnex',
     monthly_price_minor: 0, currency: 'XOF', monthly_credits: 9, max_projects: 2,
     max_scripts_per_month: 5, max_prompts_per_month: 5, max_videos_per_month: 1,
     max_avatars: 1, features: ['9 crédits offerts', '1 vidéo / mois'], active: true, sort_order: 0,
@@ -36,8 +36,8 @@ describe('parcours public', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Vos idées prennent forme');
     expect(screen.getByText('Fonctionnalités')).toBeTruthy();
     // Les deux espaces sont présentés clairement
-    expect(screen.getByText('VYORA Studio')).toBeTruthy();
-    expect(screen.getByText('VYORA Business')).toBeTruthy();
+    expect(screen.getByText('SORAHNEX Studio')).toBeTruthy();
+    expect(screen.getByText('SORAHNEX Grow')).toBeTruthy();
     // La section “défis résolus” remplace l’ancienne section Tarifs
     expect(screen.getByText('Les défis que vous connaissez')).toBeTruthy();
     expect(screen.getByText('Chaque jour, les mêmes obstacles')).toBeTruthy();

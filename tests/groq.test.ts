@@ -6,7 +6,7 @@ import { humanizeError } from '../src/lib/errors';
 
 /*
  * Groq unavailability is tested WITHOUT a real Groq key or a real network call.
- * The point is to prove that Reelora never manufactures an AI answer: when the
+ * The point is to prove that Sorahnnex never manufactures an AI answer: when the
  * provider is missing, errors, or returns nothing, the function fails loudly,
  * refunds the consumed quota unit once, and returns no invented text/scenes.
  */

@@ -4,11 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
-describe('Business Grow integration boundaries', () => {
+describe('Grow integration boundaries', () => {
   it('keeps provider endpoints and credentials out of browser code', () => {
     const api = read('src/business/api.ts');
 
-    // La fonction est appelée directement (fetch + JWT VYORA explicite) et via
+    // La fonction est appelée directement (fetch + JWT SORAHNEX explicite) et via
     // les relais same-origin : jamais un SDK qui pourrait omettre l'authentification.
     expect(api).toContain('/functions/v1/business-grow');
     expect(api).toContain('Bearer ${accessToken}');
@@ -17,7 +17,7 @@ describe('Business Grow integration boundaries', () => {
     expect(api).not.toMatch(/BUSINESS_GROW_.*API_KEY|GROQ_API_KEY|GEMINI_API_KEY/);
   });
 
-  it('does not call Studio credit or quota operations from the Business Grow server', () => {
+  it('does not call Studio credit or quota operations from the Grow server', () => {
     const edge = [
       read('supabase/functions/business-grow/index.ts'),
       read('supabase/functions/business-grow/handler.ts'),
@@ -28,7 +28,7 @@ describe('Business Grow integration boundaries', () => {
     expect(edge).not.toMatch(/credits_balance|credits_cost|monthly_credits/i);
   });
 
-  it('keeps Business Grow usage accounting in its own schema and tables', () => {
+  it('keeps Grow usage accounting in its own schema and tables', () => {
     const design = read('docs/business-grow-sql-design.md');
     const usageTable = design.match(/CREATE TABLE saas_business\.usage_events \([\s\S]*?\n\);/i);
 
@@ -39,7 +39,7 @@ describe('Business Grow integration boundaries', () => {
     expect(design).toContain('ALTER TABLE saas_business.ai_requests FORCE ROW LEVEL SECURITY;');
   });
 
-  it('keeps both Business Grow SQL migrations isolated from Studio credit/quota tables and enforced by RLS', () => {
+  it('keeps both Grow SQL migrations isolated from Studio credit/quota tables and enforced by RLS', () => {
     const m1 = read('supabase/migrations/20261110172827_business_grow_saas_business.sql');
     const m2 = read('supabase/migrations/20261110172909_business_grow_ai_extensions.sql');
     const intelligence = read('supabase/functions/business-grow/intelligence.ts');

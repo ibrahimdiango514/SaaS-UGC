@@ -1,4 +1,4 @@
-// VYORA AI CORE — lecture du registre (snapshot JSON produit par
+// SORAHNEX AI CORE — lecture du registre (snapshot JSON produit par
 // saas_business.bg_ai_registry_snapshot(), réservé au service_role).
 
 import { AI_ADAPTER_KINDS, AI_LEVELS, AiAdapterKind, AiLevel } from './types.ts';

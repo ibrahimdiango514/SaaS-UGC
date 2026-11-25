@@ -5,18 +5,18 @@ import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
 /**
- * Intégration de l'interface VYORA AI dans Business Grow.
+ * Intégration de l'interface SORAHNEX AI dans Grow.
  *
  * ## Ce que ces tests protègent
  *
  * La demande était explicite : **un seul espace métier**. Les tests existants
- * de Business Grow vérifient déjà les fonctions métier (AI Director, mémoire,
+ * de Grow vérifient déjà les fonctions métier (AI Director, mémoire,
  * quota, isolation) ; ceux-ci vérifient la *direction architecturale* :
  *
- * 1. l'interface VYORA remplace réellement l'ancienne section Assistant ;
+ * 1. l'interface SORAHNEX remplace réellement l'ancienne section Assistant ;
  * 2. elle ne recrée pas une navigation d'application concurrente ;
- * 3. elle réutilise le socle de Business Grow (aucun service inventé) ;
- * 4. le catalogue d'intégrations reste accessible depuis Business Grow ;
+ * 3. elle réutilise le socle de Grow (aucun service inventé) ;
+ * 4. le catalogue d'intégrations reste accessible depuis Grow ;
  * 5. les conversations restent rattachées à l'entreprise active.
  */
 
@@ -107,8 +107,8 @@ function monter() {
   );
 }
 
-describe('Business Grow — l’interface VYORA remplace l’ancienne section Assistant', () => {
-  it('rend l’interface VYORA dans la section Assistant', async () => {
+describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistant', () => {
+  it('rend l’interface SORAHNEX dans la section Assistant', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
@@ -130,18 +130,18 @@ describe('Business Grow — l’interface VYORA remplace l’ancienne section As
     expect(screen.queryByText('Images')).toBeNull();
   });
 
-  it('conserve la navigation métier de Business Grow, intacte', async () => {
+  it('conserve la navigation métier de Grow, intacte', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
-    const nav = screen.getByRole('navigation', { name: 'Navigation Business Grow' });
+    const nav = screen.getByRole('navigation', { name: 'Navigation Grow' });
     expect(nav).toBeTruthy();
     for (const rubrique of ['Assistant', 'Croissance', 'Entreprise', 'Mémoire métier', 'Services IA', 'Contrôle IA', 'Intégrations']) {
       expect(screen.getByRole('button', { name: rubrique })).toBeTruthy();
     }
   });
 
-  it('s’appuie sur le socle de Business Grow, pas sur un service inventé', async () => {
+  it('s’appuie sur le socle de Grow, pas sur un service inventé', async () => {
     monter();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Lancement karité' })).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: 'Lancement karité' }));
@@ -155,7 +155,7 @@ describe('Business Grow — l’interface VYORA remplace l’ancienne section As
 
   it('affiche les conversations et le fil de la plus récente', async () => {
     monter();
-    // Business Grow sélectionne la conversation la plus récente à l'ouverture,
+    // Grow sélectionne la conversation la plus récente à l'ouverture,
     // et son fil s'affiche — comportement conservé de l'interface précédente.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Lancement karité' })).toBeTruthy());
     expect(await screen.findByText('Bonjour')).toBeTruthy();
@@ -177,14 +177,14 @@ describe('Business Grow — l’interface VYORA remplace l’ancienne section As
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
-    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de Business Grow/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de Grow/i }));
     await waitFor(() => expect(screen.getByTestId('business-integrations')).toBeTruthy());
   });
 
   it('le catalogue d’intégrations reste accessible et relié au socle réel', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de Business Grow/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Ouvrir les intégrations de Grow/i }));
 
     await waitFor(() => expect(screen.getByTestId('business-integrations')).toBeTruthy());
     // La lecture des connexions a bien été tentée : l'état affiché en découle.

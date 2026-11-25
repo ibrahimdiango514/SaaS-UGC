@@ -9,7 +9,7 @@
 
 ### a. Un seul catalogue pour deux écrans
 
-Business Grow → Intégrations et `/app/connect` rendent le **même composant**
+Grow → Intégrations et `/app/connect` rendent le **même composant**
 (`IntegrationsCenter`), depuis la **même source de vérité**. L'ancien
 `IntegrationsView` (6 fournisseurs, rendu séparé) est supprimé.
 
@@ -26,7 +26,7 @@ dérivés, jamais saisis :
 | Connecté | compte OAuth réel, statut `connected` |
 | Non connecté | connecteur écrit, aucun compte |
 | Activation demandée | demande `pending` sans compte externe |
-| Configuration requise | connecteur absent, identifiants VYORA manquants |
+| Configuration requise | connecteur absent, identifiants SORAHNEX manquants |
 | Validation externe requise | connecteur absent, approbation fournisseur requise |
 | Autorisation manquante | ligne `connected` sans compte OAuth vérifié |
 | Erreur de connexion | compte ou demande en erreur |
@@ -104,7 +104,7 @@ sont **inaccessibles à `anon` et `authenticated`**, réservées à `service_rol
 | `npx vitest run` | **1461 passent / 1 échec préexistant** |
 | dont nouveaux | +19 unification, +56 moteur |
 | `npm run build` | **OK** — `BusinessGrow-aYj8LImQ.js`, 172.01 kB |
-| bundle | un seul `CatalogPage-*.js`, importé par Business Grow |
+| bundle | un seul `CatalogPage-*.js`, importé par Grow |
 
 L'échec restant est `tests/business-modules.test.tsx:84`, présent avant ce
 chantier et sans rapport avec les intégrations.

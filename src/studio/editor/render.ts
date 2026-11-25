@@ -1,5 +1,5 @@
 /**
- * VYORA Phase 4 — Unified Dual-Engine Video Renderer.
+ * SORAHNEX Phase 4 — Unified Dual-Engine Video Renderer.
  *
  * Engine #1 (preferred when supported): WebCodecs (`VideoEncoder` + `AudioEncoder`)
  *   + `OfflineAudioContext` sample-accurate mixer + `mp4-muxer` / `webm-muxer`.

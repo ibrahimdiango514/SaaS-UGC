@@ -1,8 +1,8 @@
 /*
- * Attribution manuelle d'une formule Business Grow (administration).
+ * Attribution manuelle d'une formule Grow (administration).
  *
  * ## Pourquoi ce composant existe
- * Les formules Business Grow n'ont pas de prix et la facturation est
+ * Les formules Grow n'ont pas de prix et la facturation est
  * désactivée : aucun compte ne peut souscrire en ligne. Tant que les tarifs ne
  * sont pas définis, seul un administrateur peut ouvrir l'accès à un compte
  * précis, pour une durée précise, par la RPC `vyora_admin_set_business_subscription`.
@@ -65,7 +65,7 @@ export function describeAdminSubscriptionError(message: string): string {
     case 'not_authenticated': return 'Session expirée : reconnectez-vous.';
     case 'target_required': return 'Aucun compte ciblé.';
     case 'target_not_found': return 'Ce compte n’existe pas.';
-    case 'target_not_vyora_customer': return 'Ce compte n’est pas un compte client VYORA (ou c’est un administrateur) : attribution refusée.';
+    case 'target_not_vyora_customer': return 'Ce compte n’est pas un compte client SORAHNEX (ou c’est un administrateur) : attribution refusée.';
     case 'self_assignment_forbidden': return 'Un administrateur ne peut pas s’attribuer une formule à lui-même.';
     case 'plan_not_found': return 'Formule inconnue.';
     case 'plan_inactive': return 'Cette formule n’est plus proposée.';
@@ -101,7 +101,7 @@ export default function BusinessGrowSubscriptionManager({ user, onClose, onAppli
         setPlans(actives);
         setPlanKey((current) => current || actives[0]?.plan_key || '');
       })
-      .catch((err) => setPlansError(asAppError(err, 'Impossible de charger les formules Business Grow.').message));
+      .catch((err) => setPlansError(asAppError(err, 'Impossible de charger les formules Grow.').message));
   }, [user]);
 
   const periodEndDate = useMemo(() => parsePeriodEndInput(periodEnd), [periodEnd]);
@@ -118,7 +118,7 @@ export default function BusinessGrowSubscriptionManager({ user, onClose, onAppli
     try {
       const res = await adminSetBusinessSubscription({ userId: user.id, planKey, periodEnd: periodEndDate, note });
       setResult(res);
-      toast.success(res.renewed ? 'Formule Business Grow renouvelée.' : 'Formule Business Grow attribuée.');
+      toast.success(res.renewed ? 'Formule Grow renouvelée.' : 'Formule Grow attribuée.');
       onApplied?.();
     } catch (err) {
       toast.error(describeAdminSubscriptionError(asAppError(err).message));
@@ -134,7 +134,7 @@ export default function BusinessGrowSubscriptionManager({ user, onClose, onAppli
       const res = await adminRevokeBusinessSubscription(user.id, note);
       setResult(res);
       setConfirmRevoke(false);
-      toast.success('Attribution Business Grow résiliée : accès fermé.');
+      toast.success('Attribution Grow résiliée : accès fermé.');
       onApplied?.();
     } catch (err) {
       toast.error(describeAdminSubscriptionError(asAppError(err).message));
@@ -147,12 +147,12 @@ export default function BusinessGrowSubscriptionManager({ user, onClose, onAppli
     <Modal
       open={Boolean(user)}
       onClose={onClose}
-      title="Abonnement Business Grow (attribution manuelle)"
+      title="Abonnement Grow (attribution manuelle)"
       description={user?.email ?? ''}
       size="md"
     >
       <Banner tone="info" title="Aucune facturation engagée">
-        Les formules Business Grow n’ont pas de prix et la souscription en ligne est désactivée.
+        Les formules Grow n’ont pas de prix et la souscription en ligne est désactivée.
         Cette attribution ouvre l’accès au compte ciblé jusqu’à la date de fin, puis se ferme seule.
         Elle est journalisée avec votre identité. Le serveur revérifie le rôle administrateur, le compte
         ciblé, la formule et la date.

@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Serveur MCP VYORA — transport HTTP, authentification et révocation.
+ * Serveur MCP SORAHNEX — transport HTTP, authentification et révocation.
  *
  * On teste ici `traiterRequete`, la fonction que le handler Edge appelle pour
  * CHAQUE requête. Les dépendances sont injectées : PostgreSQL est remplacé par

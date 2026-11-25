@@ -14,7 +14,7 @@ export function ProviderQuotePanel({ quote, busy, error, onRefresh, compact = fa
   const message = state === 'loading' ? 'Calcul du devis en cours…'
     : state === 'error' ? 'Impossible de vérifier le devis. Réessayez.'
     : state === 'empty' ? 'Sélectionnez un modèle et des paramètres valides.'
-    : state === 'available' ? 'Vérification effectuée. Consultez le coût en crédits VYORA.'
+    : state === 'available' ? 'Vérification effectuée. Consultez le coût en crédits SORAHNEX.'
     : quote?.error_code === 'PROMPT_REQUIRED' ? 'Ajoutez une instruction pour obtenir un devis.'
     : 'Le coût en crédits est temporairement indisponible.';
   return (

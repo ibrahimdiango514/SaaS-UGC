@@ -158,7 +158,7 @@ une erreur de vérification d'empreinte.
 | 7 | enregistrement sans URI | POST `/oauth/register` | **400** `invalid_redirect_uri` |
 | 8 | consentement — PKCE exigé | GET `/oauth/authorize` sans `code_challenge` | **400**, « Le paramètre code_challenge PKCE est requis (43 à 128 caractères) » |
 | 9 | consentement — resource exigé | GET `/oauth/authorize` sans `resource` | **400**, « Le paramètre resource (RFC 8707) est requis » |
-| 10 | consentement — refus sans session | GET `/oauth/authorize` complet, sans cookie | **401**, « Connectez-vous à VYORA avant d'autoriser un client MCP », `X-Frame-Options: DENY`, CSP `default-src 'none'; sandbox` |
+| 10 | consentement — refus sans session | GET `/oauth/authorize` complet, sans cookie | **401**, « Connectez-vous à SORAHNEX avant d'autoriser un client MCP », `X-Frame-Options: DENY`, CSP `default-src 'none'; sandbox` |
 | 11 | échange de code | POST `/oauth/token` code inconnu | **400** `invalid_grant`, `no-store` |
 | 12 | refresh | POST `/oauth/token` refresh inconnu | **400** `invalid_grant`, `no-store` |
 | 13 | grant non supporté | POST `/oauth/token` `client_credentials` | **400** `unsupported_grant_type` |

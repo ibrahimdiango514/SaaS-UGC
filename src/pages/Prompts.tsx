@@ -214,7 +214,7 @@ export default function Prompts() {
       </Modal>
 
       <ConfirmDialog open={Boolean(toDelete)} title="Supprimer ce prompt ?" danger confirmLabel="Supprimer" onClose={() => setToDelete(null)} onConfirm={() => void onDelete()} message="Ce modèle de prompt sera définitivement supprimé." />
-      <div className="mt-6"><Banner tone="info" title="Modèles système"><Wand2 size={12} className="inline" /> Les modèles fournis par VYORA sont en lecture seule. Dupliquez-les en copiant leur contenu pour les personnaliser.</Banner></div>
+      <div className="mt-6"><Banner tone="info" title="Modèles système"><Wand2 size={12} className="inline" /> Les modèles fournis par SORAHNEX sont en lecture seule. Dupliquez-les en copiant leur contenu pour les personnaliser.</Banner></div>
     </>
   );
 }

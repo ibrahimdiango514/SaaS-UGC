@@ -2,8 +2,8 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Bot, BookOpen, Boxes, Brain, CheckSquare, Clapperboard, Coins, CreditCard,
   Film, FolderKanban, HardDrive, History, LayoutDashboard, LifeBuoy, Megaphone,
-  MessageSquare, Package, Plug, Radar, Scissors, Settings, Shield,
-  ShoppingCart, SlidersHorizontal, Sparkles, Truck, Users, Wallet, Wand2, Workflow,
+  MessageSquare, MoreHorizontal, Package, Plug, Radar, Scissors, Settings, Shield,
+  ShoppingCart, SlidersHorizontal, Sparkles, TrendingUp, Truck, Users, Wallet, Wand2, Workflow,
 } from 'lucide-react';
 
 export type WorkspaceScope = 'studio' | 'business';
@@ -47,7 +47,7 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
     defaultOpen: true,
     items: [{
       to: '/app/ai',
-      label: 'Assistant VYORA',
+      label: 'Assistant SORAHNEX',
       description: 'Conversations, pièces jointes et analyse',
       icon: Bot,
       keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
@@ -491,7 +491,7 @@ export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
     items: [
       {
         to: '/app/business/abonnement',
-        label: 'Formules Business Growth',
+        label: 'Formules Grow',
         description: 'Abonnement et limites de l’espace métier',
         icon: CreditCard,
         keywords: ['formule', 'abonnement', 'plan', 'prix'],
@@ -519,18 +519,32 @@ export const BUSINESS_SHORTCUTS: WorkspaceShortcut[] = [
   { to: '/app/business/modules', label: 'Modules', icon: Boxes },
 ];
 
-export const STUDIO_MOBILE_NAV = [
-  { to: '/app/studio/accueil', label: 'Vue d’ensemble', icon: LayoutDashboard },
-  { to: '/app/studio', label: 'Créer', icon: Clapperboard },
-  { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  { to: '/app/historique', label: 'Historique', icon: History },
+/**
+ * Entrée de la barre de navigation mobile.
+ * `shortLabel` évite de couper le libellé mot à mot à 360 px et `opensDrawer`
+ * permet une entrée « Plus » qui ouvre le tiroir complet au lieu de naviguer.
+ */
+export interface MobileNavItem {
+  to: string;
+  label: string;
+  shortLabel?: string;
+  icon: LucideIcon;
+  opensDrawer?: boolean;
+}
+
+export const STUDIO_MOBILE_NAV: MobileNavItem[] = [
+  { to: '/app/studio/accueil', label: 'Vue d’ensemble', shortLabel: 'Accueil', icon: LayoutDashboard },
+  { to: '/app/studio', label: 'Créer', shortLabel: 'Créer', icon: Clapperboard },
+  { to: '/app/projets', label: 'Projets', shortLabel: 'Projets', icon: FolderKanban },
+  { to: '/app/historique', label: 'Historique', shortLabel: 'Historique', icon: History },
 ];
 
-export const BUSINESS_MOBILE_NAV = [
-  { to: '/app/business', label: 'Vue d’ensemble', icon: LayoutDashboard },
-  { to: '/app/business?section=chat', label: 'Assistant', icon: MessageSquare },
-  { to: '/app/business?section=growth&growthTab=crm', label: 'Smart CRM', icon: Users },
-  { to: '/app/business/modules', label: 'Modules', icon: Boxes },
+export const BUSINESS_MOBILE_NAV: MobileNavItem[] = [
+  { to: '/app/business', label: 'Accueil Grow', shortLabel: 'Accueil', icon: LayoutDashboard },
+  { to: '/app/business?section=growth&growthTab=overview', label: 'Activité et ventes', shortLabel: 'Activité', icon: TrendingUp },
+  { to: '/app/business?section=growth&growthTab=crm', label: 'Prospects (Smart CRM)', shortLabel: 'Prospects', icon: Users },
+  { to: '/app/business?section=chat', label: 'Assistant IA', shortLabel: 'Assistant', icon: MessageSquare },
+  { to: '#plus', label: 'Plus d’options', shortLabel: 'Plus', icon: MoreHorizontal, opensDrawer: true },
 ];
 
 export function normalizeSearch(value: string): string {

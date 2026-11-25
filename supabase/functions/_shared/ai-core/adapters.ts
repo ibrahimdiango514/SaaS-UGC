@@ -1,4 +1,4 @@
-// VYORA AI CORE — adaptateurs de FOURNISSEURS, construits depuis le registre.
+// SORAHNEX AI CORE — adaptateurs de FOURNISSEURS, construits depuis le registre.
 //
 // Il n'existe ici AUCUNE liste de fournisseurs : le module ne connaît que des
 // gabarits de protocole (`openai`, `gemini`, `cloudflare`, `none`). Chaque
@@ -384,7 +384,7 @@ export function resolveAiAdapter(descriptor: AiProviderDescriptor | null | undef
 /**
  * Adaptateur « sans registre » pour les intégrations historiques.
  *
- * Utilisé par les chemins de secours (Business Grow) qui ne chargent pas le
+ * Utilisé par les chemins de secours (Grow) qui ne chargent pas le
  * snapshot. Les appels de production passent par `resolveAiAdapter()` avec la
  * ligne de registre du fournisseur — donc par le même code.
  */

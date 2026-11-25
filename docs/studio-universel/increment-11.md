@@ -17,7 +17,7 @@ Le correctif ne prétend pas résoudre les contrats absents/incohérents (notamm
 
 ## Entrées externes encore nécessaires
 - Secret existant `MUAPI_API_KEY`, dans Supabase Edge Secrets du principal : accès au catalogue constaté, mais ne prouve pas les droits d'exécution individuels. Aucun secret supplémentaire n'est requis pour ce lot ; ne jamais envoyer sa valeur dans le chat.
-- Pour chaque modèle à ouvrir : prix client VYORA en crédits, coût plafond USD, abonnements autorisés ; saisie admin sécurisée existante. Aucun prix arbitraire n'est créé.
+- Pour chaque modèle à ouvrir : prix client SORAHNEX en crédits, coût plafond USD, abonnements autorisés ; saisie admin sécurisée existante. Aucun prix arbitraire n'est créé.
 - Attestation d'une vraie exécution et preuve d'accès modèle : autorisation financière distincte requise avant tout appel facturable. Aucun test de génération lancé ici.
 - Contrat MuAPI officiel corrigé ou exemple officiel fiable pour les endpoints contradictoires et sorties ambiguës ; ne pas inventer ces contrats.
 

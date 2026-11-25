@@ -76,7 +76,7 @@ describe('Bundle de déploiement reelora-video', () => {
     const artifact = buildEdgeArtifact();
     expect(read(EDGE)).toBe(artifact.content);
     // L'empreinte affichée dans la bannière est vérifiable côté production.
-    expect(read(EDGE).split('\n')[0]).toContain(`VYORA-EDGE-SHA256:${artifact.digest}`);
+    expect(read(EDGE).split('\n')[0]).toContain(`SORAHNEX-EDGE-SHA256:${artifact.digest}`);
     expect(artifact.digest).toMatch(/^[0-9a-f]{12}$/);
   });
 

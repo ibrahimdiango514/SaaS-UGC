@@ -1,4 +1,4 @@
-// VYORA AI CORE — sondes de fournisseurs (catalogue + modèle réel).
+// SORAHNEX AI CORE — sondes de fournisseurs (catalogue + modèle réel).
 //
 // Une sonde répond à trois questions, dans cet ordre, et RIEN de plus :
 //   1. la clé est-elle acceptée ? (lecture du catalogue — coût nul) ;

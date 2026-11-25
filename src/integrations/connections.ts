@@ -1,5 +1,5 @@
 /**
- * VYORA — état réel des connexions.
+ * SORAHNEX — état réel des connexions.
  *
  * ## Principe : l'état vient d'une source, il n'est pas déclaré
  *
@@ -83,7 +83,7 @@ export interface ConnectedAccount {
 
 /**
  * Demande d'activation, telle que la rend `integrations.list` du socle
- * Business Grow (`saas_business.bg_list_scoped_integration_connections`).
+ * Grow (`saas_business.bg_list_scoped_integration_connections`).
  *
  * `external_account_ref` vaut `null` pour une simple demande : aucune
  * autorisation fournisseur n'a été obtenue. C'est ce champ qui distingue une
@@ -162,7 +162,7 @@ export interface AuditEntry {
 }
 
 /**
- * Fournisseurs dont VYORA détient réellement un identifiant côté serveur.
+ * Fournisseurs dont SORAHNEX détient réellement un identifiant côté serveur.
  *
  * Cette liste est une **déclaration de configuration**, pas un état de
  * connexion. Elle est utilisée uniquement pour distinguer « il manque nos

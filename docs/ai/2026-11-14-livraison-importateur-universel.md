@@ -6,7 +6,7 @@
 |---|---|
 | `237f596` | Garde SSRF, détection de plateforme, parseurs de fichiers |
 | `f1715d4` | Sources réseau et pipeline d'import |
-| `169b9f0` | Panneau d'import intégré à Business Grow + preuve de rendu |
+| `169b9f0` | Panneau d'import intégré à Grow + preuve de rendu |
 | `a69b367` | Chaînes partagées XLSX (vrais classeurs Excel) |
 
 ---
@@ -41,7 +41,7 @@ par produit, nature du doublon (dans le fichier / déjà au catalogue).
 **Rien n'est écrit avant confirmation** — vérifié par test (`createProduct`
 jamais appelé pendant l'aperçu).
 
-### Intégration Business Grow — **opérationnelle**
+### Intégration Grow — **opérationnelle**
 
 Nouveau bouton « Importer un catalogue » dans Croissance → Catalogue, à côté de
 l'import texte existant, conservé. Le panneau reçoit l'entreprise active et
@@ -101,7 +101,7 @@ Couvert par test : `127.0.0.1`, `127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1
 résolution mixte publique+privée, `content-length` menteur, réponse sans
 `content-length`.
 
-Le `User-Agent` s'annonce comme VYORA — aucun usurpation de navigateur pour
+Le `User-Agent` s'annonce comme SORAHNEX — aucun usurpation de navigateur pour
 franchir une protection.
 
 ### Fichiers

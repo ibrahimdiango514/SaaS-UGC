@@ -79,8 +79,8 @@ const DB_MESSAGES: Array<[RegExp, string]> = [
   [/timeout/i, 'Le service vidéo n’a pas répondu à temps. Vos crédits ont été restitués.'],
   [/GROQ_NOT_CONFIGURED/i, 'L’assistance IA est indisponible pour le moment. Saisissez votre script ou votre prompt manuellement.'],
   [/AI_PROVIDERS_NOT_CONFIGURED/i, 'Aucun service IA n’est disponible pour le moment. Aucune réponse n’est simulée.'],
-  [/BG_INSUFFICIENT_CREDITS|bg_insufficient_credits/i, 'Crédits Business Grow épuisés. Vos crédits Studio UGC ne sont jamais utilisés dans Business Grow.'],
-  [/BG_INSUFFICIENT_QUOTA|bg_insufficient_quota/i, 'Quota Business Grow atteint pour cette période. Vos crédits Studio UGC restent totalement séparés.'],
+  [/BG_INSUFFICIENT_CREDITS|bg_insufficient_credits/i, 'Crédits Grow épuisés. Vos crédits Studio UGC ne sont jamais utilisés dans Grow.'],
+  [/BG_INSUFFICIENT_QUOTA|bg_insufficient_quota/i, 'Quota Grow atteint pour cette période. Vos crédits Studio UGC restent totalement séparés.'],
   [/NO_VERIFIED_PROVIDER/i, 'Aucun service IA n’est disponible pour cette demande. Réessayez plus tard.'],
   [/PROVIDER_NOT_CONFIGURED/i, 'Ce service IA est indisponible pour le moment.'],
   [/PROVIDER_SPEND_DISABLED/i, 'Les générations vidéo payantes sont temporairement suspendues par l’administration. Aucun crédit n’a été débité.'],
@@ -98,7 +98,7 @@ export function humanizeError(raw: string | undefined | null, fallback = 'Une er
   if (!raw) return fallback;
   for (const [pattern, message] of DB_MESSAGES) if (pattern.test(raw)) return message;
   if (/Failed to send a request to the Edge Function|FunctionsFetchError/i.test(raw)) {
-    return 'Impossible de joindre un service VYORA (réseau ou CORS). Vérifiez votre connexion puis réessayez.';
+    return 'Impossible de joindre un service SORAHNEX (réseau ou CORS). Vérifiez votre connexion puis réessayez.';
   }
   if (/fetch failed|network|Failed to fetch|NetworkError/i.test(raw)) return 'Connexion impossible. Vérifiez votre réseau puis réessayez.';
   return raw.length > 260 ? `${raw.slice(0, 260)}…` : raw;

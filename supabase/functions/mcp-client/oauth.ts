@@ -1,5 +1,5 @@
 /**
- * VYORA — OAuth 2.1 SORTANT pour les serveurs MCP externes.
+ * SORAHNEX — OAuth 2.1 SORTANT pour les serveurs MCP externes.
  *
  * ## Ce que ce module fait
  *
@@ -341,7 +341,7 @@ export async function enregistrerClient(
   metadonnees: MetadonneesServeurAutorisation,
   redirectUri: string,
   deps: EgressDeps,
-  nomClient = 'VYORA MCP',
+  nomClient = 'SORAHNEX MCP',
 ): Promise<ResultatOAuth<ClientOAuth>> {
   if (!metadonnees.registration_endpoint) {
     return echec(

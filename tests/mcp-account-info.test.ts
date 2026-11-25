@@ -48,7 +48,7 @@ function sansCommentaires(sql: string): string {
 const CODE = sansCommentaires(FINALE);
 
 describe('mcp_account_info — sources de données', () => {
-  it('lit le portefeuille VYORA, pas celui de Business Grow', () => {
+  it('lit le portefeuille SORAHNEX, pas celui de Grow', () => {
     expect(CODE).toMatch(/from\s+saas_ugc\.ugc_wallets\s+w/i);
     // La régression coûteuse : des chiffres cohérents mais appartenant à un
     // autre produit du même projet Supabase.
@@ -117,7 +117,7 @@ describe('description de l’outil', () => {
 
   it('annonce les champs réellement renvoyés', () => {
     expect(CORE).toContain('abonnement');
-    expect(CORE).toContain('crédits VYORA');
+    expect(CORE).toContain('crédits SORAHNEX');
     // « null signifie aucune ligne » : la distinction qui empêche un modèle
     // de raconter que le compte est vide.
     expect(CORE).toContain('aucune ligne');

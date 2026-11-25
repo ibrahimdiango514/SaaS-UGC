@@ -253,7 +253,7 @@ describe('règle 8 — aucune connexion inventée', () => {
     monter();
     fireEvent.click(await screen.findByTestId('integration-opencart'));
     const fiche = await screen.findByRole('dialog', { name: /Fiche OpenCart/i });
-    expect(within(fiche).getByText(/identifiants VYORA pour ce fournisseur ne sont pas encore configurés/i)).toBeTruthy();
+    expect(within(fiche).getByText(/identifiants SORAHNEX pour ce fournisseur ne sont pas encore configurés/i)).toBeTruthy();
     expect(within(fiche).queryByRole('button', { name: /^Connecter/ })).toBeNull();
   });
 
@@ -283,7 +283,7 @@ describe('règle 3 — les connexions OAuth réelles sont conservées et révoca
     const dialogue = await screen.findByRole('dialog');
     fireEvent.click(within(dialogue).getByRole('button', { name: 'Révoquer' }));
     await waitFor(() => expect(mocks.revokeConnection).toHaveBeenCalledWith('acc-1'));
-    expect(await screen.findByText(/révoquée chez le fournisseur et dans VYORA/i)).toBeTruthy();
+    expect(await screen.findByText(/révoquée chez le fournisseur et dans SORAHNEX/i)).toBeTruthy();
   });
 
   it('un échec de révocation distante est rapporté tel quel, sans le maquiller', async () => {
@@ -305,7 +305,7 @@ describe('source unique — un seul catalogue pour deux points d’entrée', () 
     // Pas de retour vers l'assistant : l'espace hôte fournit sa propre navigation.
     expect(screen.queryByRole('link', { name: /Retour à l’assistant/i })).toBeNull();
     // Le contenu, lui, est identique.
-    expect(screen.getByRole('heading', { name: /Connectez vos outils à VYORA/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Connectez vos outils à SORAHNEX/i })).toBeTruthy();
     expect(screen.getByRole('searchbox', { name: /Rechercher une intégration/i })).toBeTruthy();
   });
 

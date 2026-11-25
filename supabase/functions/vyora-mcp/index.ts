@@ -1,5 +1,5 @@
 /**
- * VYORA — serveur MCP officiel : point d'entrée Edge.
+ * SORAHNEX — serveur MCP officiel : point d'entrée Edge.
  *
  * Ce fichier ne contient AUCUNE logique de protocole : elle vit dans
  * `core.ts` (catalogue et JSON-RPC) et `handler.ts` (transport et
@@ -37,7 +37,7 @@ import {
   ENTETES_CORS_OAUTH,
   type DependancesOAuth,
   type ReponseOAuth,
-  type SessionVYORA,
+  type SessionSORAHNEX,
 } from './oauth-routes.ts';
 import {
   deriverJetonAntiRejeu,
@@ -171,7 +171,7 @@ const RESSOURCE = (
 ).replace(/\/+$/, '');
 
 /**
- * Résout la session VYORA d'une requête navigateur.
+ * Résout la session SORAHNEX d'une requête navigateur.
  *
  * Le cookie de session est présenté tel quel à `/auth/v1/user` : c'est Supabase
  * qui vérifie la signature et l'expiration, on ne fait aucune confiance locale
@@ -180,7 +180,7 @@ const RESSOURCE = (
  * utilisateur — sinon la page de consentement serait ouverte à quiconque
  * possède la clé publique du projet.
  */
-async function resoudreSession(cookieHeader: string | null): Promise<SessionVYORA | null> {
+async function resoudreSession(cookieHeader: string | null): Promise<SessionSORAHNEX | null> {
   const jeton = extraireJetonSession(lireCookies(cookieHeader));
   if (!jeton) return null;
 
@@ -490,14 +490,14 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
       }
 
       if (route === '/oauth/authorize') {
-        let session: SessionVYORA | null = null;
+        let session: SessionSORAHNEX | null = null;
         try {
           session = await resoudreSession(request.headers.get('cookie'));
         } catch {
           // Base injoignable : on ne peut pas distinguer « pas de session » de
           // « session valide ». Répondre 401 serait un mensonge coûteux ; on
           // rend une page d'attente, sans jamais émettre de code.
-          return pageHtml(rendrePageErreur('VYORA est momentanément indisponible. Réessayez dans un instant.'), 503);
+          return pageHtml(rendrePageErreur('SORAHNEX est momentanément indisponible. Réessayez dans un instant.'), 503);
         }
 
         if (request.method === 'GET') {
@@ -525,7 +525,7 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
            */
           const attendu = session?.csrfToken ?? null;
           if (!session) {
-            return pageHtml(rendrePageErreur('Votre session VYORA a expiré. Reconnectez-vous puis recommencez.'), 401);
+            return pageHtml(rendrePageErreur('Votre session SORAHNEX a expiré. Reconnectez-vous puis recommencez.'), 401);
           }
           if (!verifierAntiRejeu(attendu, champs.csrf_token ?? null)) {
             return pageHtml(rendrePageErreur('Formulaire expiré ou invalide. Recommencez l’autorisation depuis votre client.'), 400);

@@ -1,5 +1,5 @@
 /**
- * VYORA Business Growth — modèle de données du cockpit de croissance.
+ * SORAHNEX Grow — modèle de données du cockpit de croissance.
  *
  * Les enregistrements sont persistés dans la mémoire métier consentie
  * (`saas_business.workspace_memory_items`), isolée par utilisateur et entreprise
@@ -488,7 +488,7 @@ export function buildGrowthPrompt(task: GrowthAiTask, snapshot: GrowthSnapshot):
     produits: snapshot.products.slice(0, 20),
   };
   return [
-    'Tu es le moteur d’intelligence commerciale VYORA Business Grow.',
+    'Tu es le moteur d’intelligence commerciale SORAHNEX Grow Grow.',
     TASK_BRIEF[task],
     'Règles strictes :',
     '- Appuie-toi UNIQUEMENT sur les données fournies ci-dessous et sur des connaissances générales clairement identifiables comme telles.',

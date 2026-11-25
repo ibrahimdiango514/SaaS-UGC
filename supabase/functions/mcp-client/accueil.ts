@@ -1,5 +1,5 @@
 /**
- * VYORA — accès réel aux données des connexions MCP externes (P5).
+ * SORAHNEX — accès réel aux données des connexions MCP externes (P5).
  *
  * Ce module implémente `AccesBase` (voir `execution.ts`) contre PostgreSQL et
  * Vault. Il est le seul endroit où un secret sort de Vault, et il le fait par

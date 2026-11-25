@@ -1,4 +1,4 @@
-// VYORA AI CORE — tests des sondes de fournisseurs et du catalogue.
+// SORAHNEX AI CORE — tests des sondes de fournisseurs et du catalogue.
 //
 // Objectif : garantir qu'une sonde ne DÉPENSE jamais pour rien et ne déclare
 // jamais un fournisseur opérationnel sans preuve.
@@ -34,7 +34,7 @@ const openAiDescriptor: AiProbeDescriptor = {
   modelsUrl: 'https://openrouter.ai/api/v1/models',
   apiKeyEnv: 'OPENROUTER_API_KEY',
   accountIdEnv: null,
-  headers: { 'X-Title': 'VYORA' },
+  headers: { 'X-Title': 'SORAHNEX' },
 };
 
 const geminiDescriptor: AiProbeDescriptor = {
@@ -216,7 +216,7 @@ describe('sonde — URL et en-têtes de catalogue', () => {
   });
 
   it('attribution du registre conservée dans les en-têtes', () => {
-    expect(catalogHeaders(openAiDescriptor, { apiKey: 'secret' })['X-Title']).toBe('VYORA');
+    expect(catalogHeaders(openAiDescriptor, { apiKey: 'secret' })['X-Title']).toBe('SORAHNEX');
   });
 });
 

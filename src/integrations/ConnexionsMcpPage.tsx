@@ -1,15 +1,15 @@
 /**
- * VYORA — « Connexions MCP », la page qui réunit les deux sens du protocole.
+ * SORAHNEX — « Connexions MCP », la page qui réunit les deux sens du protocole.
  *
  * ## Deux sections, deux sens opposés
  *
- *   A. **Connecter VYORA à mes IA** — VYORA est le SERVEUR MCP. L'utilisateur
+ *   A. **Connecter SORAHNEX à mes IA** — SORAHNEX est le SERVEUR MCP. L'utilisateur
  *      donne son URL à ChatGPT, Claude Code ou un autre client, et reçoit un
- *      jeton qu'il colle chez ce client. L'utilisateur est le client, VYORA la
+ *      jeton qu'il colle chez ce client. L'utilisateur est le client, SORAHNEX la
  *      ressource.
- *   B. **Connecter mes applications à VYORA** — VYORA est le CLIENT MCP. Il
+ *   B. **Connecter mes applications à SORAHNEX** — SORAHNEX est le CLIENT MCP. Il
  *      appelle un CRM, une boutique, un outil marketing. L'utilisateur autorise
- *      VYORA à agir, outil par outil.
+ *      SORAHNEX à agir, outil par outil.
  *
  * Mélanger les deux dans un seul flux est la source d'erreur la plus fréquente :
  * on ne sait plus qui détient le jeton. La séparation est donc visuelle ET
@@ -55,9 +55,9 @@ export function ConnexionsMcpPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="VYORA · MCP"
+        eyebrow="SORAHNEX · MCP"
         title="Connexions MCP"
-        description="Deux directions, deux réglages distincts : ce que vos IA peuvent faire dans VYORA, et ce que VYORA peut faire dans vos applications."
+        description="Deux directions, deux réglages distincts : ce que vos IA peuvent faire dans SORAHNEX, et ce que SORAHNEX peut faire dans vos applications."
       />
 
       {/* --------------------------- A. Entrant --------------------------- */}
@@ -65,9 +65,9 @@ export function ConnexionsMcpPage() {
         <TitreSection
           id="section-ia"
           icone={<Bot className="h-3.5 w-3.5" />}
-          eyebrow="Section A · VYORA est le serveur"
-          titre="Connecter VYORA à mes IA"
-          description="Vos assistants (ChatGPT, Claude Code, autres clients MCP) accèdent à vos données VYORA avec un jeton que vous créez et révoquez ici. Chaque jeton ne voit que vos données, et son usage est journalisé."
+          eyebrow="Section A · SORAHNEX est le serveur"
+          titre="Connecter SORAHNEX à mes IA"
+          description="Vos assistants (ChatGPT, Claude Code, autres clients MCP) accèdent à vos données SORAHNEX avec un jeton que vous créez et révoquez ici. Chaque jeton ne voit que vos données, et son usage est journalisé."
         />
         <McpConnectionsPage sansEnTete />
       </section>
@@ -77,9 +77,9 @@ export function ConnexionsMcpPage() {
         <TitreSection
           id="section-applications"
           icone={<Boxes className="h-3.5 w-3.5" />}
-          eyebrow="Section B · VYORA est le client"
-          titre="Connecter mes applications à VYORA"
-          description="Vos CRM, boutiques et outils marketing exposent leurs outils en MCP ; VYORA les découvre et n'exécute que ceux que vous autorisez, un par un. Les écritures restent désactivées."
+          eyebrow="Section B · SORAHNEX est le client"
+          titre="Connecter mes applications à SORAHNEX"
+          description="Vos CRM, boutiques et outils marketing exposent leurs outils en MCP ; SORAHNEX les découvre et n'exécute que ceux que vous autorisez, un par un. Les écritures restent désactivées."
         />
         <MesServeursMcpPage sansEnTete />
       </section>

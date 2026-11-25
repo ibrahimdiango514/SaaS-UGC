@@ -34,7 +34,7 @@ export function BrandSymbol({ className, size = 36 }: { className?: string; size
 export function BrandName({ className }: { className?: string }) {
   return (
     <span className={cn('font-display font-bold tracking-[0.12em] text-white', className)}>
-      VYORA
+      SORAHNEX
     </span>
   );
 }

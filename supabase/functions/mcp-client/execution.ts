@@ -1,5 +1,5 @@
 /**
- * VYORA — porte d'exécution des outils MCP externes (P5).
+ * SORAHNEX — porte d'exécution des outils MCP externes (P5).
  *
  * ## Le principe : un seul chemin, sans exception
  *

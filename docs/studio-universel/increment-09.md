@@ -104,7 +104,7 @@ réelle : affichage authentifié en production non revendiqué comme testé E2E.
 **298 préparés ne signifie pas298 opérationnels.** Pour ces modèles : contrat
 lié, formulaire/validation structurelle, chemin média pris en charge, parseur
 et cycle simulés. Restent la revue des contraintes exprimées en prose,
-la tarification VYORA, le coût plafond, les droits par modèle et le test réel
+la tarification SORAHNEX, le coût plafond, les droits par modèle et le test réel
 sous autorisation financière distincte. Aucun test de génération réel réalisé.
 
 Aucun modèle activé, aucun crédit client débité, aucune génération facturée.

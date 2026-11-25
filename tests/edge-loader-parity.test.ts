@@ -1,4 +1,4 @@
-// VYORA — parité des chargeurs Edge publiés par tranches.
+// SORAHNEX — parité des chargeurs Edge publiés par tranches.
 //
 // Le canal de déploiement altère les sources longues : `vyora-ai`,
 // `vyora-ai-providers` et `vyora-provider-health` sont donc livrés par un

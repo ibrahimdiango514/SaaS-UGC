@@ -1,5 +1,5 @@
 /**
- * VYORA — règles de gestion des connexions MCP SORTANTES (P6).
+ * SORAHNEX — règles de gestion des connexions MCP SORTANTES (P6).
  *
  * ## Ce que ce module est
  *

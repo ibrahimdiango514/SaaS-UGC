@@ -1,4 +1,4 @@
-// VYORA AI CORE — normalisation des catalogues de modèles des fournisseurs.
+// SORAHNEX AI CORE — normalisation des catalogues de modèles des fournisseurs.
 //
 // Le moteur ne tient AUCUN catalogue en dur : il lit le catalogue que chaque
 // fournisseur publie, le normalise, puis l'écrit au registre central
@@ -94,7 +94,7 @@ function tierFromPrice(costIn: number | null, costOut: number | null): AiCatalog
 }
 
 /**
- * Capacités publiées, traduites dans le vocabulaire de VYORA.
+ * Capacités publiées, traduites dans le vocabulaire de SORAHNEX.
  *
  * On ne devine rien : une capacité n'est posée que si la réponse du fournisseur
  * la déclare explicitement. `writing` (texte) est la seule capacité posée par

@@ -128,7 +128,7 @@ export function CompanyPanel({
           <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3">
             <p className="text-[11px] text-slate-500">
               {consent
-                ? 'Enregistrement réel dans votre mémoire métier VYORA.'
+                ? 'Enregistrement réel dans votre mémoire métier SORAHNEX.'
                 : 'Activez la mémoire métier pour enregistrer ces informations.'}
             </p>
             <Button type="submit" variant="primary" loading={saving} disabled={!consent || busy} icon={<Check size={14} />}>
@@ -139,7 +139,7 @@ export function CompanyPanel({
       </section>
 
       <section className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
-        <p className="flex items-center gap-1.5 text-xs font-semibold text-white"><Search size={13} className="text-cyan-300" /> Ce que VYORA ne fait pas encore</p>
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-white"><Search size={13} className="text-cyan-300" /> Ce que SORAHNEX ne fait pas encore</p>
         <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
           L’import automatique de boutique (Shopify / WooCommerce) et la lecture des réseaux sociaux nécessitent une autorisation OAuth que vous devez accorder.
           Tant que ces connexions ne sont pas actives, aucun contenu ni aucune statistique externe n’est récupéré. Vous pouvez saisir les données manuellement dans les onglets Catalogue, Marché et Prospects.

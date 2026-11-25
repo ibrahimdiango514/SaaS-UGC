@@ -1,5 +1,5 @@
 /**
- * VYORA AI — lecture des pièces jointes côté navigateur.
+ * SORAHNEX AI — lecture des pièces jointes côté navigateur.
  *
  * ## Principe
  *

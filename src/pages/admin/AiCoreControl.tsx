@@ -20,7 +20,7 @@ const formatUsd = (amount: number | null) => {
 };
 
 const SPACE_LABELS: Record<string, string> = {
-  business: 'Business Grow',
+  business: 'Grow',
   studio: 'Studio UGC',
   system: 'Système',
 };
@@ -33,7 +33,7 @@ const STATUS_TONE: Record<string, 'success' | 'danger' | 'warning' | 'neutral'> 
 };
 
 /**
- * A7 — Contrôle IA (admin) : pilotage du VYORA AI CORE par le propriétaire.
+ * A7 — Contrôle IA (admin) : pilotage du SORAHNEX AI CORE par le propriétaire.
  * Budgets, état du registre multi-fournisseurs et journal des appels IA.
  * Les lectures sont servies par les façades admin (ugc_is_admin côté serveur).
  */
@@ -416,7 +416,7 @@ export default function AiCoreControl() {
         ) : calls === null ? (
           <div className="px-5 pb-5"><LoadingState label="Chargement du journal…" /></div>
         ) : calls.length === 0 ? (
-          <div className="px-5 pb-5"><EmptyState icon={<History size={24} />} title="Aucun appel IA enregistré" description="Le journal se remplit au fil des conversations Business Grow et des tâches IA." /></div>
+          <div className="px-5 pb-5"><EmptyState icon={<History size={24} />} title="Aucun appel IA enregistré" description="Le journal se remplit au fil des conversations Grow et des tâches IA." /></div>
         ) : (
           <div className="table-wrap px-5 pb-5">
             <table className="table">

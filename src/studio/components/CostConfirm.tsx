@@ -32,7 +32,7 @@ export function CostSummary({ model, estimate, balance, params, compact }: {
     <div className="space-y-3">
       <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
         <p className="text-[10px] uppercase tracking-wide text-slate-500">Modèle sélectionné</p>
-        <p className="mt-1 text-sm font-semibold text-white">Modèle vidéo VYORA</p>
+        <p className="mt-1 text-sm font-semibold text-white">Modèle vidéo SORAHNEX</p>
         <p className="mt-2 text-[11px] leading-relaxed text-slate-400">{paramsSummary(params)}</p>
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

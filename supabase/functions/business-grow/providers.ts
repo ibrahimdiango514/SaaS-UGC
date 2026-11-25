@@ -1,4 +1,4 @@
-// VYORA AI CORE — clients fournisseurs de Business Grow.
+// SORAHNEX AI CORE — clients fournisseurs de Grow.
 //
 // AUCUNE liste de fournisseurs ici : un fournisseur est une CLÉ (chaîne) dont
 // le registre central (`saas_business.ai_providers`) décrit le protocole —
@@ -259,13 +259,13 @@ function adapterFor(providerId: string, config?: ProviderConfig | null): AiProvi
 }
 
 // ---------------------------------------------------------------------------
-// VYORA AI CORE — adaptateurs locaux de secours.
+// SORAHNEX AI CORE — adaptateurs locaux de secours.
 // Les appels de production passent par le moteur central ; ces adaptateurs
 // couvrent les diagnostics, les sondes et les tests. Ils réutilisent l'AI CORE
 // partagé : même contrat, mêmes normalisations d'erreurs, même lecture des
 // tokens — et donc aucun protocole fournisseur écrit deux fois.
 // ---------------------------------------------------------------------------
-// Import direct (pas le barrel index.ts) : le bundle Business Grow embarque
+// Import direct (pas le barrel index.ts) : le bundle Grow embarque
 // UNIQUEMENT les adaptateurs — le routeur/moteur du registre vit dans le
 // moteur central (vyora-ai) et reste hors de cet artefact (limite de
 // troncature du canal de déploiement : contenu lisible < 20 000 caractères).
@@ -459,13 +459,13 @@ export function getProviderAdapter(provider: string): BusinessProviderAdapter | 
   return created;
 }
 
-/** Moteur IA central VYORA : une seule pile fournisseur pour tout le produit. */
+/** Moteur IA central SORAHNEX : une seule pile fournisseur pour tout le produit. */
 function centralEngineUrl(): string {
   const url = (env('SUPABASE_URL') ?? '').replace(/\/$/, '');
   return url ? `${url}/functions/v1/vyora-ai` : '';
 }
 
-/** Route choisi par Business Grow (registre) : le moteur central l'exécute
+/** Route choisi par Grow (registre) : le moteur central l'exécute
  *  en tête de chaîne et reste libre de basculer sur un secours compatible. */
 export interface CentralRouteMeta {
   model?: string | null;

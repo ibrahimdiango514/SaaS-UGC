@@ -12,10 +12,10 @@ import {
 } from '../lib/payments';
 
 /**
- * Abonnement Business Grow — catalogue PROPRE au produit Business Grow.
+ * Abonnement Grow — catalogue PROPRE au produit Grow.
  *
  * Ce que cette page NE fait pas :
- * - elle n'affiche aucun crédit, pack ou portefeuille VYORA Studio ;
+ * - elle n'affiche aucun crédit, pack ou portefeuille SORAHNEX Studio ;
  * - elle ne montre aucun prix non fixé : une formule sans prix n'est jamais
  *   présentée comme achetable ;
  * - elle ne prétend pas encaisser un paiement : le bouton de souscription n'est
@@ -77,7 +77,7 @@ export default function BusinessGrowSubscription() {
       setSubscription(subscriptionResult);
       setPayments(paymentRows);
     } catch (err) {
-      if (!silent) setError(asAppError(err, 'Impossible de charger les formules Business Grow.').message);
+      if (!silent) setError(asAppError(err, 'Impossible de charger les formules Grow.').message);
     } finally { setLoading(false); }
   }, []);
 
@@ -93,7 +93,7 @@ export default function BusinessGrowSubscription() {
     // Changement de formule en cours de période : non pris en charge.
     && (!subscription?.is_current || subscription.plan_key === plan.plan_key);
   const unavailableHint = !billingEnabled
-    ? 'La facturation Business Grow n’est pas activée'
+    ? 'La facturation Grow n’est pas activée'
     : payment?.message || 'Le paiement en ligne n’est pas disponible pour le moment';
 
   return (
@@ -101,12 +101,12 @@ export default function BusinessGrowSubscription() {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="inline-flex items-center gap-1.5 rounded-full border border-violet-300/25 bg-violet-400/[0.08] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-200">
-            <Brain size={11} /> Business Grow
+            <Brain size={11} /> Grow
           </p>
-          <h1 className="mt-2 text-2xl font-bold tracking-tight text-white">Abonnement Business Grow</h1>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight text-white">Abonnement Grow</h1>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-400">
-            Formules, quotas et unités de consommation propres à Business Grow.
-            Ce catalogue est indépendant de VYORA Studio&nbsp;: aucun crédit, aucun
+            Formules, quotas et unités de consommation propres à Grow.
+            Ce catalogue est indépendant de SORAHNEX Studio&nbsp;: aucun crédit, aucun
             portefeuille et aucune règle de marge ne sont partagés entre les deux produits.
           </p>
         </div>
@@ -116,7 +116,7 @@ export default function BusinessGrowSubscription() {
       </header>
 
       {!billingEnabled && (
-        <Banner tone="info" title="Facturation Business Grow non activée">
+        <Banner tone="info" title="Facturation Grow non activée">
           Les formules ci-dessous décrivent l’offre prévue. Aucun prix n’est affiché tant qu’il
           n’a pas été fixé côté serveur, et aucun paiement ne peut être déclenché : la
           facturation reste désactivée. Rien n’est simulé.
@@ -136,7 +136,7 @@ export default function BusinessGrowSubscription() {
         </Banner>
       )}
 
-      {loading && <LoadingState label="Chargement des formules Business Grow…" />}
+      {loading && <LoadingState label="Chargement des formules Grow…" />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {!loading && !error && plans.length === 0 && (
@@ -144,7 +144,7 @@ export default function BusinessGrowSubscription() {
           <div className="p-6">
             <p className="text-sm font-semibold text-white">Aucune formule commercialisée pour le moment</p>
             <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-              Le catalogue Business Grow existe mais aucune formule n’est encore activée.
+              Le catalogue Grow existe mais aucune formule n’est encore activée.
               Aucune offre, aucun prix et aucun quota ne sont donc présentés comme disponibles.
             </p>
           </div>
@@ -171,7 +171,7 @@ export default function BusinessGrowSubscription() {
                   <p className="mt-1 text-[11px] text-slate-500">
                     {plan.monthly_credit_units === null || plan.monthly_credit_units === undefined
                       ? 'Quota mensuel à définir'
-                      : `${plan.monthly_credit_units.toLocaleString('fr-FR')} unités Business Grow / mois`}
+                      : `${plan.monthly_credit_units.toLocaleString('fr-FR')} unités Grow / mois`}
                   </p>
                   {features.length > 0 && (
                     <ul className="mt-3 space-y-1.5">
@@ -208,12 +208,12 @@ export default function BusinessGrowSubscription() {
       )}
 
       {payments.length > 0 && (
-        <section aria-label="Paiements Business Grow">
-          <h2 className="text-sm font-semibold text-white">Paiements Business Grow</h2>
+        <section aria-label="Paiements Grow">
+          <h2 className="text-sm font-semibold text-white">Paiements Grow</h2>
           <ul className="mt-2 divide-y divide-white/[0.05] rounded-2xl border border-white/[0.08] bg-white/[0.02] px-3">
             {payments.map((row) => (
               <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[11.5px]">
-                <span className="min-w-0 flex-1 truncate text-slate-300">{row.label ?? 'Abonnement Business Grow'}</span>
+                <span className="min-w-0 flex-1 truncate text-slate-300">{row.label ?? 'Abonnement Grow'}</span>
                 <span className="text-slate-500">{formatDate(row.created_at, true)}</span>
                 <span className="text-slate-300">{formatAmount(row.amount, row.currency)}</span>
                 {refundBadge(row)
@@ -244,17 +244,17 @@ export default function BusinessGrowSubscription() {
         <p className="flex items-start gap-1.5 text-[10.5px] leading-relaxed text-slate-600">
           <Info size={11} className="mt-0.5 shrink-0" />
           Renouvellement tous les {catalog.config.renewal_period_days ?? 30} jours.
-          Marge cible Business Grow : {catalog.config.target_margin_percent ?? '—'} %
+          Marge cible Grow : {catalog.config.target_margin_percent ?? '—'} %
           (jamais appliquée au Studio).
         </p>
       )}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-white/[0.06] pt-3 text-[11px]">
         <Link to="/app/business" className="inline-flex items-center gap-1 text-violet-300/80 hover:text-violet-200">
-          Ouvrir Business Grow <ArrowRight size={11} />
+          Ouvrir Grow <ArrowRight size={11} />
         </Link>
         <Link to="/app/credits" className="inline-flex items-center gap-1 text-cyan-400/70 hover:text-cyan-300">
-          <Sparkles size={11} /> Crédits VYORA Studio (produit distinct)
+          <Sparkles size={11} /> Crédits SORAHNEX Studio (produit distinct)
         </Link>
       </div>
 
@@ -262,7 +262,7 @@ export default function BusinessGrowSubscription() {
         open={checkout !== null}
         product="business"
         item={checkout ? { plan_key: checkout.plan_key } : null}
-        title={checkout ? `Business Grow — ${checkout.display_name}` : 'Paiement'}
+        title={checkout ? `Grow — ${checkout.display_name}` : 'Paiement'}
         onClose={() => { setCheckout(null); void load(true); }}
         onConfirmed={() => void load(true)}
       />

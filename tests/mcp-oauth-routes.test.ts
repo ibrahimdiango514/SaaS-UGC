@@ -19,7 +19,7 @@ import {
   traiterEnregistrement,
   traiterJeton,
   type DependancesOAuth,
-  type SessionVYORA,
+  type SessionSORAHNEX,
 } from '../supabase/functions/vyora-mcp/oauth-routes.ts';
 
 const RESSOURCE = 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/vyora-mcp';
@@ -27,7 +27,7 @@ const EMETTEUR = 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/vyora-oa
 
 const VERIFIER = 'v'.repeat(48);
 const CHALLENGE = createHash('sha256').update(VERIFIER, 'utf8').digest('base64url');
-const SESSION: SessionVYORA = { userId: '11111111-1111-4111-8111-111111111111', csrfToken: 'csrf-abc' };
+const SESSION: SessionSORAHNEX = { userId: '11111111-1111-4111-8111-111111111111', csrfToken: 'csrf-abc' };
 
 /** Faux dépôt : même comportement observable que les fonctions SQL. */
 function deps(surcharge: Partial<DependancesOAuth> = {}) {
@@ -223,7 +223,7 @@ describe('page de consentement', () => {
     expect(d.codes.size).toBe(0);
   });
 
-  it('exige une session VYORA', async () => {
+  it('exige une session SORAHNEX', async () => {
     const d = deps();
     const id = await enregistrerClient(d.deps);
     const r = await preparerConsentement(d.deps, PARAMS(id), null);

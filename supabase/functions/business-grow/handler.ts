@@ -256,7 +256,7 @@ export class NoVerifiedProviderRouteError extends Error {
 
 /**
  * Droits d'accès au module Import & Connect, établis côté serveur.
- * `allowed` ne doit être vrai que si l'abonnement Business Grow est payé,
+ * `allowed` ne doit être vrai que si l'abonnement Grow est payé,
  * actif et en cours — la règle elle-même vit en base
  * (`saas_business.bg_import_access`), pas ici.
  */
@@ -311,7 +311,7 @@ const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8' };
 const maxMessageLength = 12_000;
 const maxHistoryMessages = 40;
 const maxHistoryCharacters = 60_000;
-const systemMessage = 'Vous êtes le copilote Business Grow de VYORA. Répondez en français, sauf demande contraire. Distinguez les faits connus des hypothèses et n’inventez pas les données métier absentes.';
+const systemMessage = 'Vous êtes le copilote Grow de SORAHNEX. Répondez en français, sauf demande contraire. Distinguez les faits connus des hypothèses et n’inventez pas les données métier absentes.';
 
 function isOriginAllowed(origin: string | null, allowedOrigins: string[]): boolean {
   if (!origin) return false;
@@ -379,13 +379,13 @@ function object(value: unknown): Record<string, unknown> {
 const INTEGRATION_CONNECTOR_KEYS = new Set(['facebook', 'instagram', 'youtube', 'tiktok', 'shopify', 'woocommerce']);
 
 /**
- * Actions réservées aux abonnés Business Grow : tout ce qui touche à une
+ * Actions réservées aux abonnés Grow : tout ce qui touche à une
  * connexion de boutique (demande, annulation, déconnexion) et la lecture des
  * connexions existantes — l'historique et les clés d'API sont dans ce
  * périmètre.
  *
  * Les connectors sociaux (`facebook`, `instagram`, `youtube`, `tiktok`) sont
- * historiquement dans le catalogue Business Grow et restent hors périmètre :
+ * historiquement dans le catalogue Grow et restent hors périmètre :
  * élargir la garde les casserait sans raison. Ce sont les connecteurs de
  * boutique qui sont visés.
  */
@@ -531,7 +531,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
       );
     }
     if (!userId) {
-      return response(failure('UNAUTHENTICATED', 'Session VYORA invalide ou expirée.'), 401, origin, dependencies.allowedOrigins);
+      return response(failure('UNAUTHENTICATED', 'Session SORAHNEX invalide ou expirée.'), 401, origin, dependencies.allowedOrigins);
     }
 
     let body: Record<string, unknown>;
@@ -546,7 +546,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
     const action = (versionedWorkspaceAction ? rawAction.slice(3) : rawAction) as BusinessAction;
 
     // -----------------------------------------------------------------------
-    // Import & Connect — accès réservé aux abonnés Business Grow.
+    // Import & Connect — accès réservé aux abonnés Grow.
     //
     // Placé AVANT la résolution du périmètre d'entreprise et AVANT toute
     // lecture ou mutation : un non-abonné n'apprend rien sur les connexions
@@ -580,7 +580,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
         return response(
           failure(
             'BUSINESS_GROW_SUBSCRIPTION_REQUIRED',
-            'Import & Connect est réservé aux abonnés Business Grow actifs.',
+            'Import & Connect est réservé aux abonnés Grow actifs.',
             {
               reason: access?.reason ?? 'UNKNOWN',
               subscription_status: access?.status ?? null,
@@ -596,7 +596,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
     try {
       let scopedWorkspace: string | null = null;
       if (versionedWorkspaceAction) {
-        if (!WORKSPACE_ACTIONS.has(action)) return response(failure('UNKNOWN_ACTION', 'Opération Business Grow inconnue.'), 400, origin, dependencies.allowedOrigins);
+        if (!WORKSPACE_ACTIONS.has(action)) return response(failure('UNKNOWN_ACTION', 'Opération Grow inconnue.'), 400, origin, dependencies.allowedOrigins);
         scopedWorkspace = uuid(body.workspaceId);
         if (!scopedWorkspace) return response(failure('INVALID_WORKSPACE', 'Entreprise requise.'), 400, origin, dependencies.allowedOrigins);
         if (!dependencies.store.getWorkspaceProtocol) return response(failure('AGENT_UNAVAILABLE', 'Le stockage par entreprise n’est pas disponible.'), 503, origin, dependencies.allowedOrigins);
@@ -655,7 +655,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
                 error: {
                   code: probeResult.errorCode ?? 'PROVIDER_UNAVAILABLE',
                   message: probeResult.errorCode === 'PROVIDER_NOT_CONFIGURED'
-                    ? 'Clé API ou modèle serveur manquant pour ce fournisseur Business Grow.'
+                    ? 'Clé API ou modèle serveur manquant pour ce fournisseur Grow.'
                     : `La vérification réelle du fournisseur ${providerKey} a échoué (${probeResult.errorCode ?? 'PROVIDER_UNAVAILABLE'}).`,
                 },
                 data: probeResult,
@@ -882,7 +882,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           if (body.workspaceId != null && !workspaceId) return response(failure('INVALID_WORKSPACE', 'Espace de travail invalide.'), 400, origin, dependencies.allowedOrigins);
           // L'ancienne interface envoie l'entreprise à la demande, mais omet
           // ensuite ce périmètre à la lecture/annulation : un succès serait invisible.
-          if (workspaceId && !scopedWorkspace) return response(failure('BUSINESS_GROW_UPGRADE_REQUIRED', 'Actualisez Business Grow avant de demander une intégration pour cette entreprise.'), 409, origin, dependencies.allowedOrigins);
+          if (workspaceId && !scopedWorkspace) return response(failure('BUSINESS_GROW_UPGRADE_REQUIRED', 'Actualisez Grow avant de demander une intégration pour cette entreprise.'), 409, origin, dependencies.allowedOrigins);
           if (workspaceId ? !dependencies.store.requestScopedIntegrationConnection : !dependencies.store.requestIntegrationConnection) {
             return response(failure('INTEGRATIONS_UNAVAILABLE', 'Les demandes de connexion ne sont pas encore disponibles.'), 503, origin, dependencies.allowedOrigins);
           }
@@ -1158,7 +1158,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             }
           }
 
-          // Mémoire persistante de l'agent (VYORA AI CORE) : lecture
+          // Mémoire persistante de l'agent (SORAHNEX AI CORE) : lecture
           // autorisée uniquement avec le consentement mémoire actif, et
           // toujours dans le périmètre utilisateur/workspace (fonction
           // SECURITY DEFINER). La recherche est best-effort : un échec de
@@ -1214,8 +1214,8 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
                 failure(
                   code,
                   code === 'BG_INSUFFICIENT_QUOTA'
-                    ? 'Quota Business Grow épuisé. Vos crédits Studio UGC ne sont jamais utilisés dans Business Grow.'
-                    : 'Impossible de réserver le quota Business Grow.',
+                    ? 'Quota Grow épuisé. Vos crédits Studio UGC ne sont jamais utilisés dans Grow.'
+                    : 'Impossible de réserver le quota Grow.',
                 ),
                 code === 'BG_INSUFFICIENT_QUOTA' ? 402 : 503,
                 origin,
@@ -1351,7 +1351,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
             try {
               // Le route choisi par le registre (modèle + rôle) part avec
               // l'appel : le moteur central l'exécute en tête de chaîne et
-              // peut basculer sur un secours compatible (VYORA AI CORE).
+              // peut basculer sur un secours compatible (SORAHNEX AI CORE).
               result = await dependencies.complete(provider, effectiveConfig, history, {
                 model: selectedModel,
                 roleKey,
@@ -1450,7 +1450,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
               createdTools.push({ id: execId, ...proposal });
             }
 
-            // Mémorisation persistante (VYORA AI CORE) : seule une DÉCLARATION
+            // Mémorisation persistante (SORAHNEX AI CORE) : seule une DÉCLARATION
             // explicite de l'utilisateur (entreprise/décision/préférence) est
             // conservée — jamais la conversation entière (pas
             // d'accumulation). Une déclaration déjà mémorisée est REMPLACÉE
@@ -1558,7 +1558,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           data = { deleted: workspaceId ? await dependencies.store.deleteScopedMemoryItem!(userId, workspaceId, itemId) : await dependencies.store.deleteMemoryItem(userId, itemId) };
           break;
         }
-        // --- Mémoire persistante de l'agent (VYORA AI CORE) -------------------
+        // --- Mémoire persistante de l'agent (SORAHNEX AI CORE) -------------------
         // Contrôle explicite par l'utilisateur : recherche, listing et
         // effacement. Chaque appel passe par la fonction SECURITY DEFINER qui
         // isole strictement l'utilisateur/workspace (aucun accès croisé).
@@ -1609,7 +1609,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           data = await dependencies.store.importLegacyMemory(userId, workspaceId); break;
         }
         default:
-          return response(failure('UNKNOWN_ACTION', 'Opération Business Grow inconnue.'), 400, origin, dependencies.allowedOrigins);
+          return response(failure('UNKNOWN_ACTION', 'Opération Grow inconnue.'), 400, origin, dependencies.allowedOrigins);
       }
 
       return response({ data }, 200, origin, dependencies.allowedOrigins);
@@ -1630,7 +1630,7 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
       }
       if (message.includes('limit reached')) return response(failure('RECORD_LIMIT_REACHED', 'Limite de stockage atteinte pour cette entreprise.'), 409, origin, dependencies.allowedOrigins);
       console.error('business-grow request failed', { action });
-      return response(failure('BUSINESS_GROW_BACKEND_ERROR', 'Le service Business Grow est temporairement indisponible.'), 500, origin, dependencies.allowedOrigins);
+      return response(failure('BUSINESS_GROW_BACKEND_ERROR', 'Le service Grow est temporairement indisponible.'), 500, origin, dependencies.allowedOrigins);
     }
   };
 }

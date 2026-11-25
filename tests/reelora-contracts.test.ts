@@ -34,12 +34,12 @@ vi.mock('../src/business/api', () => ({
 
 import { businessGrowBridge } from '../src/business/bridge';
 
-describe('Reelora AI ↔ Platform contracts', () => {
+describe('Sorahnnex AI ↔ Platform contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('normalizes Business Grow -> Studio UGC handoff briefs with consumesStudioCredits = false', () => {
+  it('normalizes Grow -> Studio UGC handoff briefs with consumesStudioCredits = false', () => {
     const normalized = normalizeUgcHandoffBrief({
       productName: 'Sérum Karité Éclat',
       campaignAngle: 'Routine 7 jours anti-teint terne',

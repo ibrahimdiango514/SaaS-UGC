@@ -68,6 +68,31 @@ vi.mock('../src/mcp/api', async () => {
 import { ConnexionsMcpPage } from '../src/integrations/ConnexionsMcpPage';
 import { ErreurGestion } from '../src/mcp/serveurs';
 
+/*
+ * Stockage navigateur en mémoire.
+ *
+ * Sous Node 26, `localStorage` existe mais sans stockage (`--localstorage-file`
+ * absent) et jsdom n'en installe pas ici : `window.localStorage` vaut
+ * `undefined`. L'assertion « aucun jeton n'est gardé » échouait alors pour une
+ * raison d'environnement, pas de comportement. On installe un `Storage`
+ * partagé : la page et le test voient le même objet, donc l'assertion garde
+ * exactement son sens (elle attraperait une écriture réelle).
+ */
+function stockageMemoire(): Storage {
+  const valeurs = new Map<string, string>();
+  return {
+    get length() { return valeurs.size; },
+    clear: () => valeurs.clear(),
+    getItem: (cle) => valeurs.get(String(cle)) ?? null,
+    key: (index) => [...valeurs.keys()][index] ?? null,
+    removeItem: (cle) => { valeurs.delete(String(cle)); },
+    setItem: (cle, valeur) => { valeurs.set(String(cle), String(valeur)); },
+  } as Storage;
+}
+for (const nom of ['localStorage', 'sessionStorage'] as const) {
+  if (!window[nom]) Object.defineProperty(window, nom, { configurable: true, value: stockageMemoire() });
+}
+
 const WS_ID = '44444444-4444-4444-4444-444444444444';
 
 function serveur(partiel: Record<string, unknown> = {}) {
@@ -110,13 +135,13 @@ describe('Page « Connexions MCP » — deux sections', () => {
   it('présente les deux sens du protocole sous deux titres distincts', async () => {
     render(<ConnexionsMcpPage />);
     expect(screen.getByRole('heading', { name: 'Connexions MCP', level: 1 })).toBeTruthy();
-    expect(await screen.findByRole('heading', { name: 'Connecter VYORA à mes IA' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Connecter mes applications à VYORA' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Connecter SORAHNEX à mes IA' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Connecter mes applications à SORAHNEX' })).toBeTruthy();
   });
 
   it('n’affiche qu’une seule fois l’en-tête de page (pas de titre imbriqué)', async () => {
     render(<ConnexionsMcpPage />);
-    await screen.findByRole('heading', { name: 'Connecter mes applications à VYORA' });
+    await screen.findByRole('heading', { name: 'Connecter mes applications à SORAHNEX' });
     // Les deux composants embarqués reçoivent `sansEnTete` : aucun second h1.
     expect(screen.queryAllByRole('heading', { level: 1 })).toHaveLength(1);
   });

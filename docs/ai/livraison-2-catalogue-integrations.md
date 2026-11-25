@@ -1,4 +1,4 @@
-# Livraison 2 — Catalogue VYORA Integrations
+# Livraison 2 — Catalogue SORAHNEX Integrations
 
 **Branche** : `arena/bfcedd89-saas-ugc` · **Base** : `6f0decd` (`develop`)
 **Route** : `/app/connect` (déclarée hors `<Layout />`, comme `/app/ai`)
@@ -138,6 +138,6 @@ pas avant, pour ne pas casser ce qui fonctionne.
 
 ## 8. Suite
 
-Livraison 3 — VYORA Integration Engine : contrat de connecteur commun,
+Livraison 3 — SORAHNEX Integration Engine : contrat de connecteur commun,
 enregistrement déclaratif, jetons chiffrés côté serveur, journalisation,
 révocation immédiate, ajout d'un connecteur sans toucher au moteur.

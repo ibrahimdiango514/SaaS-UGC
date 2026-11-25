@@ -8,8 +8,8 @@ Ce rapport sépare **simulé** (tests), **réel** (exécuté en production) et *
 
 ## 1. L'objectif, et où il en est
 
-> Un utilisateur VYORA doit pouvoir connecter un serveur MCP externe, autoriser un
-> outil, l'exécuter réellement et recevoir ses données dans VYORA, en toute sécurité.
+> Un utilisateur SORAHNEX doit pouvoir connecter un serveur MCP externe, autoriser un
+> outil, l'exécuter réellement et recevoir ses données dans SORAHNEX, en toute sécurité.
 
 **C'est fait, et prouvé en production** — sur Microsoft Learn MCP, avec de vraies
 données renvoyées par le vrai serveur : 21 555 puis 24 063 octets de documentation
@@ -109,7 +109,7 @@ Un jeton d'un autre mode présenté au mauvais point d'entrée a été refusé (
 
 **Secret incorrect à l'exécution** : une connexion maintenue `connected` avec un
 jeton devenu invalide a reçu un vrai 401 du serveur distant, traduit en
-`authentification` / 401 par VYORA. Couverture dans ce test : l'état de départ a été
+`authentification` / 401 par SORAHNEX. Couverture dans ce test : l'état de départ a été
 **forcé en base** (le scénario « identifiants tournés après un test réussi » n'a pas
 de route dédiée) ; l'appel réseau et le refus, eux, sont réels.
 
@@ -136,7 +136,7 @@ Un client qui envoie `ecritureAutorisee: true` ou `permission: "allowed"` reçoi
 ### 3.5 Erreurs réseau, délais, réponses invalides
 
 - **Délai d'attente réel** : un point d'entrée du banc retenait sa réponse 25 s ;
-  VYORA a coupé à son propre délai et répondu **502 « n'a pas répondu dans le délai
+  SORAHNEX a coupé à son propre délai et répondu **502 « n'a pas répondu dans le délai
   imparti »** (`code: timeout`), sans attendre le serveur.
 - **Réponse illisible** et **délai dépassé** sont couverts par les tests d'intégration
   contre un vrai serveur HTTP local (voir §4).
@@ -175,9 +175,9 @@ Un test écrit contre une hypothèse fausse ne prouve que l'hypothèse.
 
 1. **OAuth n'est validé qu'en mode « jeton d'accès stocké ».** Le parcours complet
    (code d'autorisation, point de terminaison de jeton, `refresh_token`, rotation)
-   n'est **pas** implémenté côté VYORA. Ce qui est prouvé : un serveur protégé par
+   n'est **pas** implémenté côté SORAHNEX. Ce qui est prouvé : un serveur protégé par
    OAuth accepte le jeton fourni, refuse un jeton invalide, et la révocation détruit
-   le secret. Ce qui ne l'est pas : l'obtention du jeton par VYORA lui-même.
+   le secret. Ce qui ne l'est pas : l'obtention du jeton par SORAHNEX lui-même.
 2. **L'interface n'est pas déployée.** Aucun déploiement Netlify (crédits épuisés) :
    l'écran est validé par tests et build, pas dans un navigateur de production.
 3. **Le classement lecture/écriture reste heuristique** (nom + description). Il est
@@ -195,8 +195,8 @@ Un test écrit contre une hypothèse fausse ne prouve que l'hypothèse.
 
 ## 6. Architecture préservée
 
-- **A. VYORA → les IA** : `vyora-mcp` **v6**, inchangée.
-- **B. Applications externes → VYORA** : `mcp-client` **v7**, multi-tenant, une seule
+- **A. SORAHNEX → les IA** : `vyora-mcp` **v6**, inchangée.
+- **B. Applications externes → SORAHNEX** : `mcp-client` **v7**, multi-tenant, une seule
   fonction pour tous les utilisateurs — aucune instance par utilisateur.
 
 La porte d'exécution est **la même** pour la route de gestion et pour le transport

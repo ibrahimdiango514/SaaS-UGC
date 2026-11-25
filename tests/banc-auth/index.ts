@@ -7,7 +7,7 @@
  * ## Ce que c'est
  *
  * Un vrai serveur MCP (HTTP + JSON-RPC) déployé temporairement pour prouver les
- * trois modes d'authentification de VYORA de bout en bout : `bearer`,
+ * trois modes d'authentification de SORAHNEX de bout en bout : `bearer`,
  * `api_key` et `oauth`. Ce n'est PAS un bouchon de test unitaire : c'est un
  * service joignable sur Internet, avec TLS, qui refuse les mauvais identifiants
  * exactement comme un serveur distant réel.
@@ -52,7 +52,7 @@ function jetonAttendu(mode: Mode): string {
 /**
  * Mode `lent` : même jeton que `bearer`, mais la réponse à `initialize` est
  * retardée de 25 s. Sert à prouver qu'un serveur qui ne répond pas est
- * interrompu par le délai de VYORA (et non attendu indéfiniment).
+ * interrompu par le délai de SORAHNEX (et non attendu indéfiniment).
  */
 const DELAI_LENT_MS = 25_000;
 
@@ -109,7 +109,7 @@ Deno.serve(async (request: Request) => {
 
   if (!identifiantsValides(mode, request.headers)) {
     // 401 + WWW-Authenticate : c'est ce qu'un serveur MCP conforme renvoie, et
-    // c'est ce que VYORA doit traduire en « identifiants refusés ».
+    // c'est ce que SORAHNEX doit traduire en « identifiants refusés ».
     return json(
       { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'invalid_token' } },
       401,
@@ -150,7 +150,7 @@ Deno.serve(async (request: Request) => {
     const nom = String(message.params?.name ?? '');
     const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
     if (nom === 'create_item') {
-      // Jamais atteint : VYORA refuse les écritures avant l'appel. S'il l'était,
+      // Jamais atteint : SORAHNEX refuse les écritures avant l'appel. S'il l'était,
       // le fait serait visible dans la réponse.
       return json({
         jsonrpc: '2.0', id: message.id ?? null,

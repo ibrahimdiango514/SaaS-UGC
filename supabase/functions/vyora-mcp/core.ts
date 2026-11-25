@@ -1,5 +1,5 @@
 /**
- * VYORA — cœur du serveur MCP officiel : catalogue d'outils et moteur JSON-RPC.
+ * SORAHNEX — cœur du serveur MCP officiel : catalogue d'outils et moteur JSON-RPC.
  *
  * ## Pourquoi ce fichier existe séparément du handler
  *
@@ -174,10 +174,10 @@ function argsSimple(_e: Record<string, unknown>, userId: string) {
 export const OUTILS_LECTURE: Outil[] = [
   {
     name: 'vyora_account_info',
-    title: 'Mon compte VYORA',
+    title: 'Mon compte SORAHNEX',
     description:
       "Renvoie l'état réel du compte de l'utilisateur du jeton : abonnement (statut, période, "
-      + 'actif ou non), formule (nom, crédits mensuels, prix) et crédits VYORA disponibles. '
+      + 'actif ou non), formule (nom, crédits mensuels, prix) et crédits SORAHNEX disponibles. '
       + 'Chaque valeur vient de la base ; `null` signifie « aucune ligne », jamais « zéro ». '
       + "Aucune donnée d’un autre utilisateur n'est accessible.",
     scope: 'read',
@@ -189,7 +189,7 @@ export const OUTILS_LECTURE: Outil[] = [
     name: 'vyora_stores_list',
     title: 'Lister mes boutiques connectées',
     description:
-      "Liste les boutiques connectées à VYORA pour l'utilisateur du jeton : plateforme, statut "
+      "Liste les boutiques connectées à SORAHNEX pour l'utilisateur du jeton : plateforme, statut "
       + 'de la connexion et date de dernière vérification. Ne renvoie JAMAIS de secret, de clé '
       + "d'API ni de référence de coffre — seulement l'état de la connexion.",
     scope: 'read',
@@ -344,7 +344,7 @@ export const OUTILS_ECRITURE: Outil[] = [
     description:
       "Crée un produit dans l'espace de travail principal de l'utilisateur du jeton. Action "
       + "d'écriture : elle n'est disponible que si elle a été explicitement autorisée pour ce "
-      + 'jeton, et le produit créé n’est jamais poussé vers une boutique — VYORA n’écrit pas chez '
+      + 'jeton, et le produit créé n’est jamais poussé vers une boutique — SORAHNEX n’écrit pas chez '
       + 'les plateformes.',
     scope: 'write',
     rpc: 'mcp_product_create',
@@ -435,7 +435,7 @@ export function descriptionOutils(catalogue: Catalogue) {
       /*
        * Les annotations disent au client ce qu'il peut déduire sans appeler :
        * un outil de lecture ne modifie rien, n'est pas destructeur et ne sort
-       * pas du périmètre VYORA. `openWorldHint: false` signale qu'aucun appel
+       * pas du périmètre SORAHNEX. `openWorldHint: false` signale qu'aucun appel
        * réseau vers un tiers n'est effectué pendant l'outil.
        */
       annotations: {
@@ -662,7 +662,7 @@ export async function traiter(
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: options.serverInfo.name, version: options.serverInfo.version },
           instructions:
-            'Serveur VYORA MCP. Les outils n’accèdent qu’aux ressources de l’utilisateur '
+            'Serveur SORAHNEX MCP. Les outils n’accèdent qu’aux ressources de l’utilisateur '
             + 'propriétaire du jeton. Les outils d’écriture sont désactivés par défaut et, '
             + 'quand ils sont activés, exigent une permission explicite par jeton.',
         }),

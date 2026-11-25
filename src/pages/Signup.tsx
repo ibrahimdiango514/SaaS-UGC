@@ -87,7 +87,7 @@ export default function Signup() {
       const data = await signUp(email.trim(), password, fullName.trim());
       if (data.session) {
         setState('success');
-        toast.success('Votre espace VYORA est prêt !');
+        toast.success('Votre espace SORAHNEX est prêt !');
         window.setTimeout(() => navigate('/app', { replace: true }), 380);
       } else {
         setState('idle');
@@ -161,7 +161,7 @@ export default function Signup() {
                 placeholder="Prénom Nom"
                 icon={<UserRound size={15} />}
                 valid={nameValid}
-                hint="Ce nom personnalisera votre accueil VYORA."
+                hint="Ce nom personnalisera votre accueil SORAHNEX."
               />
               <AuthField
                 label="Adresse e-mail"
@@ -232,8 +232,8 @@ export default function Signup() {
 
               <div className="grid gap-2">
                 {[
-                  { icon: Clapperboard, title: 'VYORA Studio', text: 'Vidéos UGC, scripts, avatars et montage.' },
-                  { icon: Sparkles, title: 'VYORA Business Growth', text: 'Pilotage, revenus et modules métier.' },
+                  { icon: Clapperboard, title: 'SORAHNEX Studio', text: 'Vidéos UGC, scripts, avatars et montage.' },
+                  { icon: Sparkles, title: 'SORAHNEX Grow', text: 'Pilotage, revenus et modules métier.' },
                 ].map((item) => (
                   <div key={item.title} className="flex items-start gap-2.5 rounded-xl border border-white/[0.07] bg-black/20 p-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-cyan-200">

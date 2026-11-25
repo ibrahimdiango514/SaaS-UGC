@@ -1,5 +1,5 @@
 /**
- * VYORA — section « Variantes » d'une fiche produit.
+ * SORAHNEX — section « Variantes » d'une fiche produit.
  *
  * ## Ce que cette section est, et n'est pas
  * Les variantes sont des déclinaisons de LEUR produit parent. Cette section ne
@@ -112,7 +112,7 @@ export function ProductVariantsSection({
         /DUPLICATE_OPTION/.test(message)
           ? 'Cette option existe déjà pour ce produit.'
           : /SUBSCRIPTION|42501/.test(message)
-            ? 'Abonnement Business Grow inactif : les variantes ne peuvent pas être modifiées.'
+            ? 'Abonnement Grow inactif : les variantes ne peuvent pas être modifiées.'
             : message,
       );
     } finally {
@@ -174,7 +174,7 @@ export function ProductVariantsSection({
         <div className="border-t border-white/[0.06] px-3 py-2.5">
           {readOnly && (
             <p className="mb-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.06] px-2 py-1.5 text-[10px] text-amber-100">
-              Lecture seule : votre abonnement Business Grow a expiré. Les variantes restent
+              Lecture seule : votre abonnement Grow a expiré. Les variantes restent
               consultables, mais ne peuvent plus être modifiées.
             </p>
           )}

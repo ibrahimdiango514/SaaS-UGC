@@ -13,7 +13,7 @@ export const TRACK_STEPS: TrackStep[] = [
   { id: 'queued', label: 'En attente', hint: 'Crédits réservés, tâche enregistrée.' },
   { id: 'submitting', label: 'Lancement', hint: 'Votre création est transmise au service vidéo.' },
   { id: 'processing', label: 'En cours de génération', hint: 'Le service vidéo produit votre création. Le suivi continue côté serveur.' },
-  { id: 'finalizing', label: 'Traitement du résultat', hint: 'Téléchargement et stockage sécurisé dans VYORA.' },
+  { id: 'finalizing', label: 'Traitement du résultat', hint: 'Téléchargement et stockage sécurisé dans SORAHNEX.' },
   { id: 'succeeded', label: 'Terminé', hint: 'Votre vidéo est disponible dans la bibliothèque.' },
 ];
 

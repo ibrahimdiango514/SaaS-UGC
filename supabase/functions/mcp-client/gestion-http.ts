@@ -1,5 +1,5 @@
 /**
- * VYORA — routes HTTP de gestion des connexions MCP sortantes (P6).
+ * SORAHNEX — routes HTTP de gestion des connexions MCP sortantes (P6).
  *
  * ## Ordre des contrôles, et pourquoi il compte
  *
@@ -81,7 +81,7 @@ export function traduireErreurSql(message: string): { status: number; code: stri
     return {
       status: 502,
       code: 'reseau_indisponible',
-      message: 'Le serveur MCP n’a pas pu être joint depuis VYORA.',
+      message: 'Le serveur MCP n’a pas pu être joint depuis SORAHNEX.',
     };
   }
   // Jamais de message SQL brut : il décrit le schéma interne.

@@ -22,7 +22,7 @@ describe('requête GET : aucune dérive après l’ajout de POST', () => {
     expect(requete).toBe([
       'GET /admin/api/products.json?limit=5 HTTP/1.1',
       'Host: shopify.example',
-      'User-Agent: VYORA-CatalogImporter/1.0 (+https://vyora.app)',
+      'User-Agent: SORAHNEX-CatalogImporter/1.0 (+https://vyora.app)',
       'Accept: application/json',
       'Accept-Language: fr,en;q=0.8',
       'Accept-Encoding: identity',

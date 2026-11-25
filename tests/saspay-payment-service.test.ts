@@ -415,7 +415,7 @@ describe('paiement SasPay — vérification du statut', () => {
     expect(ctx.credits.studio.size).toBe(0);
   });
 
-  it('une commande Studio est introuvable sous le produit Business Grow', async () => {
+  it('une commande Studio est introuvable sous le produit Grow', async () => {
     const ctx = setup();
     const { orderId } = await pending(ctx);
     await expectError(ctx.service.refresh(alice, { product: 'business', order_id: orderId }), 'PAYMENT_NOT_FOUND', 404);
@@ -497,7 +497,7 @@ describe('paiement SasPay — page de paiement hébergée (checkout)', () => {
     ctx.clock.now += 5_000;
     result = await ctx.service.refresh(alice, { product: 'studio', order_id: orderId });
     expect(result).toMatchObject({ credited: true, order: { state: 'confirmed', charged_amount: '15000.00' } });
-    // Frais déduits : le net reçu par VYORA et les frais ne sont pas transmis au client…
+    // Frais déduits : le net reçu par SORAHNEX et les frais ne sont pas transmis au client…
     expect(result.order).not.toHaveProperty('net_amount');
     expect(result.order).not.toHaveProperty('fee_amount');
     // … mais ils sont bien enregistrés côté serveur.
@@ -698,13 +698,13 @@ describe('paiement SasPay — webhook', () => {
   });
 });
 
-describe('paiement SasPay — séparation Studio / Business Grow', () => {
+describe('paiement SasPay — séparation Studio / Grow', () => {
   const business = (key: string) => ({
     product: 'business', item: { plan_key: 'croissance' }, country: 'ML', flow: 'softpay',
     network: 'orange_ml', phone: '70123456', idempotency_key: key,
   });
 
-  it('un paiement Business Grow n’alimente jamais le solde Studio, et inversement', async () => {
+  it('un paiement Grow n’alimente jamais le solde Studio, et inversement', async () => {
     const ctx = setup();
     const bg = await ctx.service.create(alice, business('idem-key-0500'));
     const studio = await ctx.service.create(alice, softpay('idem-key-0501'));
@@ -729,7 +729,7 @@ describe('paiement SasPay — séparation Studio / Business Grow', () => {
     expect(b.order.amount).toBe('25000.00');
   });
 
-  it('Business Grow reste fermé tant que la facturation n’est pas activée', async () => {
+  it('Grow reste fermé tant que la facturation n’est pas activée', async () => {
     const ctx = setup({ businessEnabled: false });
     expect(await ctx.service.options(alice, { product: 'business' })).toMatchObject({ available: false, reason: 'BUSINESS_BILLING_DISABLED' });
     await expectError(ctx.service.create(alice, business('idem-key-0503')), 'BUSINESS_BILLING_DISABLED', 503);
@@ -744,7 +744,7 @@ describe('paiement SasPay — séparation Studio / Business Grow', () => {
   });
 });
 
-describe('paiement SasPay — Business Grow : encaissement incompatible avec l’abonnement', () => {
+describe('paiement SasPay — Grow : encaissement incompatible avec l’abonnement', () => {
   const business = (key: string) => ({
     product: 'business', item: { plan_key: 'croissance' }, country: 'ML', flow: 'softpay',
     network: 'orange_ml', phone: '70123456', idempotency_key: key,

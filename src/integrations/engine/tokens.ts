@@ -1,5 +1,5 @@
 /**
- * VYORA — échange de jetons OAuth, côté serveur uniquement.
+ * SORAHNEX — échange de jetons OAuth, côté serveur uniquement.
  *
  * ## Ce que ce module refuse de faire
  *

@@ -1,4 +1,4 @@
-# VYORA AI — état des lieux avant livraison 1
+# SORAHNEX AI — état des lieux avant livraison 1
 
 Vérifications faites avant tout développement, conformément à la Partie A.
 
@@ -89,7 +89,7 @@ ferai pas sans votre accord, car c'est un élargissement de surface.
 
 ## 5. Identité visuelle prévue
 
-Le design system VYORA existe déjà et je le réutilise plutôt que d'en créer un
+Le design system SORAHNEX existe déjà et je le réutilise plutôt que d'en créer un
 second :
 
 - fond `#070b12`, panneaux `#0e141d`, bordures `rgba(148,163,184,0.13)`
@@ -99,7 +99,7 @@ second :
   `Skeleton`, `Tabs`, `Banner`
 
 L'interface reprendra le principe d'organisation de la capture (sidebar +
-zone centrale) avec une identité VYORA propre : dégradés cyan/violet discrets,
+zone centrale) avec une identité SORAHNEX propre : dégradés cyan/violet discrets,
 panneaux translucides, micro-animations `riseIn` et `fadeUp` déjà définies.
 
 ## 6. Plan de la Livraison 1

@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur Chariow : client de l'API officielle.
+ * SORAHNEX — connecteur Chariow : client de l'API officielle.
  *
  * ## Ce que Chariow est, et ce que cela impose
  *
@@ -149,7 +149,7 @@ export interface ChariowAmount {
   formatted: string | null;
 }
 
-/** Produit Chariow, réduit aux champs utiles au catalogue VYORA. */
+/** Produit Chariow, réduit aux champs utiles au catalogue SORAHNEX. */
 export interface ChariowProduct {
   /** `prd_…` — identifiant STABLE, seule identité fiable côté Chariow. */
   id: string;

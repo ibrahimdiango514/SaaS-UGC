@@ -1,7 +1,7 @@
-// VYORA AI CORE — types communs (partagés par tous les espaces).
+// SORAHNEX AI CORE — types communs (partagés par tous les espaces).
 //
 // Aucune dépendance d'environnement : le code fonctionne identiquement sous
-// Deno (Edge), Node (tests vitest) et dans le bundle esbuild de Business Grow.
+// Deno (Edge), Node (tests vitest) et dans le bundle esbuild de Grow.
 // Les secrets et l'accès réseau sont TOUJOURS injectés par l'hôte.
 
 export type AiChatRole = 'system' | 'user' | 'assistant';

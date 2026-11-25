@@ -1,5 +1,5 @@
 /**
- * VYORA — accès aux jetons MCP depuis l'application.
+ * SORAHNEX — accès aux jetons MCP depuis l'application.
  *
  * ## Ce que ce module fait, et ne fait pas
  *

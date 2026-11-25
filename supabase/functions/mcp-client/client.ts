@@ -1,5 +1,5 @@
 /**
- * VYORA — client MCP sortant (Streamable HTTP).
+ * SORAHNEX — client MCP sortant (Streamable HTTP).
  *
  * ## Ce que ce module fait, et ce qu'il refuse de faire
  *
@@ -30,7 +30,7 @@
 import type { EgressDeps, EgressResult } from '../store-import/safe-egress.ts';
 import { safePost } from '../store-import/safe-egress.ts';
 
-/** Version de protocole demandée par VYORA. */
+/** Version de protocole demandée par SORAHNEX. */
 export const PROTOCOLE_CLIENT = '2025-06-18';
 
 /** Versions que ce client sait réellement parler, la plus récente d'abord. */
@@ -316,7 +316,7 @@ async function envoyer(
     if (status !== undefined && status >= 300 && status < 400) {
       return echec(
         'protocole',
-        `Le serveur MCP a redirigé la requête (${status}). VYORA ne suit pas une redirection `
+        `Le serveur MCP a redirigé la requête (${status}). SORAHNEX ne suit pas une redirection `
         + 'sur un appel MCP : vérifiez l’URL exacte du serveur.',
         { httpStatus: status },
       );
@@ -436,7 +436,7 @@ export async function initialiser(
     return echec(
       'protocole',
       `Version de protocole non supportée : « ${version.slice(0, 20)} ». `
-      + `VYORA sait parler ${PROTOCOLES_SUPPORTES.join(', ')}.`,
+      + `SORAHNEX sait parler ${PROTOCOLES_SUPPORTES.join(', ')}.`,
     );
   }
 

@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * VYORA AI — tests de l'interface assistant.
+ * SORAHNEX AI — tests de l'interface assistant.
  *
  * Ces tests vérifient trois choses, dans cet ordre d'importance :
  *

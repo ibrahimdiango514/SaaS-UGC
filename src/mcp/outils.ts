@@ -1,5 +1,5 @@
 /**
- * Liste des outils MCP affichée dans l'interface VYORA.
+ * Liste des outils MCP affichée dans l'interface SORAHNEX.
  *
  * ## Pourquoi cette liste existe séparément
  *
@@ -23,7 +23,7 @@ export interface OutilAffiche {
 }
 
 export const OUTILS_AFFICHES: readonly OutilAffiche[] = [
-  { nom: 'vyora_account_info', libelle: 'Mon compte VYORA', ecriture: false },
+  { nom: 'vyora_account_info', libelle: 'Mon compte SORAHNEX', ecriture: false },
   { nom: 'vyora_stores_list', libelle: 'Mes boutiques connectées', ecriture: false },
   { nom: 'vyora_products_list', libelle: 'Parcourir mon catalogue', ecriture: false },
   { nom: 'vyora_product_get', libelle: 'Lire la fiche d’un produit', ecriture: false },

@@ -1,4 +1,4 @@
-// VYORA — moteur IA central (Groq + Gemini) pour tous les espaces.
+// SORAHNEX — moteur IA central (Groq + Gemini) pour tous les espaces.
 //
 // Un seul endpoint serveur, une interface de fournisseur unifiée, un routage
 // explicite et un secours automatique. Les clés restent des secrets Edge :
@@ -9,7 +9,7 @@
 // Actions : health | generate_script | improve_prompt | generate_hooks |
 //           generate_visual | generate_scenes | complete
 // `complete` accepte `messages` (system/user/assistant) pour les espaces qui
-// mènent une conversation (Business Growth) ou `system` + `prompt`.
+// mènent une conversation (Grow) ou `system` + `prompt`.
 //
 // Appels internes serveur à serveur : un appel portant exactement la clé
 // service comme jeton n'est pas facturé en quota (l'espace appelant gère déjà
@@ -49,7 +49,7 @@ const GROQ_KEY = () => env("BUSINESS_GROW_GROQ_API_KEY") || env("GROQ_API_KEY");
 const GEMINI_KEY = () => env("BUSINESS_GROW_GEMINI_API_KEY") || env("GEMINI_API_KEY");
 const GROQ_MODEL = () => env("BUSINESS_GROW_GROQ_MODEL") || env("GROQ_MODEL") || "llama-3.3-70b-versatile";
 const GEMINI_MODEL = () => env("BUSINESS_GROW_GEMINI_MODEL") || env("GEMINI_MODEL") || "gemini-2.0-flash";
-// VYORA AI CORE — fournisseurs additionnels : AUCUNE liste en dur ici.
+// SORAHNEX AI CORE — fournisseurs additionnels : AUCUNE liste en dur ici.
 // Le registre central (`saas_business.ai_providers`) déclare, pour chaque
 // fournisseur, le NOM de la variable d'environnement de sa clé
 // (`api_key_env`) et, si nécessaire, celle de son identifiant de compte
@@ -133,10 +133,10 @@ function redact(text: string): string {
 
 /** Prompts système centralisés : toutes les fonctionnalités partagent la même voix. */
 const SYSTEM = {
-  brand: "Tu es VYORA, l'assistant de création et de croissance des entreprises francophones. Tu réponds en français, avec des conseils concrets, sans jargon inutile.",
+  brand: "Tu es SORAHNEX, l'assistant de création et de croissance des entreprises francophones. Tu réponds en français, avec des conseils concrets, sans jargon inutile.",
   honesty: "N'invente jamais de chiffres, de prix, de clients, de résultats ou de citations. Si une information manque, dis-le. Ne prétends pas avoir consulté le web ou le compte du client.",
-  script: "Tu es VYORA, expert en contenus UGC courts et crédibles. Tu produis des scripts structurés (accroche, scènes, texte dit, texte à l'écran, appel à l'action), sans allégation chiffrée inventée, sans promesse médicale, sans mention de concurrent. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour.",
-  prompt: "Tu es ingénieur prompt pour VYORA. Réécris la demande de l'utilisateur en un prompt de génération vidéo clair, visuel et exploitable. Réponds uniquement en JSON valide.",
+  script: "Tu es SORAHNEX, expert en contenus UGC courts et crédibles. Tu produis des scripts structurés (accroche, scènes, texte dit, texte à l'écran, appel à l'action), sans allégation chiffrée inventée, sans promesse médicale, sans mention de concurrent. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour.",
+  prompt: "Tu es ingénieur prompt pour SORAHNEX. Réécris la demande de l'utilisateur en un prompt de génération vidéo clair, visuel et exploitable. Réponds uniquement en JSON valide.",
   hooks: "Tu es copywriter UGC. Réponds en JSON valide avec une liste d'accroches courtes.",
   scenes: "Tu es réalisateur UGC. Décris des scènes tournables, cohérentes et sobres. Réponds en JSON valide.",
 };
@@ -294,7 +294,7 @@ async function refund(kind: string, referenceId: string | null, userId: string):
 }
 function quotaFailure(raw: string): { code: string; message: string; status: number } {
   if (raw.includes("account_not_active")) return { code: "ACCOUNT_SUSPENDED", message: "Votre compte est suspendu. Contactez l’administration.", status: 403 };
-  if (raw.includes("not_vyora_customer")) return { code: "NOT_A_CUSTOMER", message: "Ce compte n’a pas encore d’espace client VYORA. Terminez votre inscription pour utiliser l’IA.", status: 403 };
+  if (raw.includes("not_vyora_customer")) return { code: "NOT_A_CUSTOMER", message: "Ce compte n’a pas encore d’espace client SORAHNEX. Terminez votre inscription pour utiliser l’IA.", status: 403 };
   if (raw.includes("not_authenticated")) return { code: "UNAUTHENTICATED", message: "Session expirée, reconnectez-vous.", status: 401 };
   if (raw.includes("quota_exceeded")) return { code: "QUOTA_EXCEEDED", message: "Votre limite mensuelle est atteinte. Passez à une formule supérieure depuis l’abonnement.", status: 429 };
   return { code: "QUOTA_ERROR", message: redact(`Limites indisponibles : ${raw}`), status: 400 };
@@ -360,9 +360,9 @@ function readHistory(body: Json): ProviderMessage[] {
 }
 
 /* -------------------------------------------------------------------------- */
-/* VYORA AI CORE — hôte du moteur central                                     */
+/* SORAHNEX AI CORE — hôte du moteur central                                     */
 /*                                                                             */
-/* Le moteur central est le SEUL point d'appel IA du produit : Business Grow  */
+/* Le moteur central est le SEUL point d'appel IA du produit : Grow  */
 /* et Studio UGC y convergent. Il s'appuie sur le registre Supabase (fournis- */
 /* seurs, modèles vérifiés, règles, budgets) et sur les 7 adaptateurs de la   */
 /* pile partagée. Les secrets restent ici (Edge) : le navigateur ne voit       */
@@ -576,7 +576,7 @@ interface CompleteResultEx extends ProviderResult {
 /**
  * Exécute une complétion via le moteur central.
  * - Si une route (modèle et/ou rôle) est fournie, passe par le registre
- *   multi-fournisseurs avec secours plafonné (VYORA AI CORE).
+ *   multi-fournisseurs avec secours plafonné (SORAHNEX AI CORE).
  * - Sinon, conserve le comportement historique (Groq → Gemini).
  */
 async function completeViaCore(
@@ -640,7 +640,7 @@ export async function handler(req: Request): Promise<Response> {
   if (!authorization.startsWith("Bearer ")) return fail("UNAUTHENTICATED", "Authentification requise.", 401);
   if (!SUPABASE_URL() || !SERVICE_KEY() || !ANON_KEY()) return fail("SERVER_NOT_CONFIGURED", "Configuration Supabase absente côté serveur.", 500);
 
-  // Appel interne (Business Growth, workers) : jeton service exact, jamais exposé au client.
+  // Appel interne (Grow, workers) : jeton service exact, jamais exposé au client.
   const internal = authorization.trim() === `Bearer ${SERVICE_KEY()}`;
 
   let body: Json;

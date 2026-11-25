@@ -1,5 +1,5 @@
 /**
- * VYORA — contrat commun des connecteurs.
+ * SORAHNEX — contrat commun des connecteurs.
  *
  * ## Pourquoi un contrat avant une implémentation
  *

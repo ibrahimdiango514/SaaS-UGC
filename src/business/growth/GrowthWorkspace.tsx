@@ -91,7 +91,7 @@ export default function GrowthWorkspace({
   onOpenAssistant: (prompt?: string) => void;
   onOpenIntegrations?: () => void;
   onOpenProviders?: () => void;
-  /** Onglet demandé par une navigation entrante (Business Grow → Croissance). */
+  /** Onglet demandé par une navigation entrante (Grow → Croissance). */
   initialTab?: GrowthTab | null;
 }) {
   const toast = useToast();
@@ -227,7 +227,7 @@ export default function GrowthWorkspace({
     setAiAnswer('');
     setAiProvider('');
     try {
-      const conversation = await businessGrowApi.createConversation(`VYORA Croissance · ${TASK_LABEL[task]}`, workspaceId);
+      const conversation = await businessGrowApi.createConversation(`SORAHNEX Croissance · ${TASK_LABEL[task]}`, workspaceId);
       if (!activeRef.current || workspaceRef.current !== workspaceId) return;
       const sent = await businessGrowApi.sendMessage(
         conversation.conversationId,
@@ -285,7 +285,7 @@ export default function GrowthWorkspace({
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-200">
-              <Brain size={14} /> VYORA · Growth OS
+              <Brain size={14} /> SORAHNEX · Growth OS
             </div>
             <h2 className="font-display text-2xl font-semibold tracking-tight text-white sm:text-3xl">Votre cerveau commercial</h2>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
@@ -324,7 +324,7 @@ export default function GrowthWorkspace({
             <div className="max-w-2xl">
               <p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><ShieldCheck size={15} /> Mémoire métier requise</p>
               <p className="mt-1 text-xs leading-relaxed text-amber-100/80">
-                VYORA conserve le contexte de votre entreprise dans une mémoire privée, isolée par compte et entreprise, supprimable à tout moment.
+                SORAHNEX conserve le contexte de votre entreprise dans une mémoire privée, isolée par compte et entreprise, supprimable à tout moment.
                 Sans consentement, cette mémoire n’est pas utilisée ; les modules et données entreprise accessibles restent distincts.
               </p>
             </div>
@@ -344,7 +344,7 @@ export default function GrowthWorkspace({
       <nav aria-label="Navigation Growth OS" className="no-scrollbar flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#080d15]/70 p-1.5">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button key={id} type="button" onClick={() => openTab(id)} aria-current={tab === id ? 'page' : undefined}
-            className={cn('flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-medium transition',
+            className={cn('flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-medium transition',
               tab === id ? 'bg-gradient-to-r from-cyan-400/15 to-violet-400/10 text-white ring-1 ring-inset ring-cyan-300/20' : 'text-slate-400 hover:bg-white/[0.04] hover:text-white')}>
             <Icon size={14} /> {label}
           </button>
@@ -635,7 +635,7 @@ export default function GrowthWorkspace({
       )}
 
       <footer className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.06] bg-white/[0.015] px-3 py-2.5 text-[10px] text-slate-500">
-        <span className="flex items-center gap-1.5"><Zap size={11} className="text-cyan-300" /> Quota Business Grow distinct des crédits Studio UGC.</span>
+        <span className="flex items-center gap-1.5"><Zap size={11} className="text-cyan-300" /> Quota Grow distinct des crédits Studio UGC.</span>
         <span className="flex items-center gap-1.5"><Plug size={11} /> Connecteurs sociaux et e-commerce : autorisation utilisateur requise avant toute lecture.</span>
       </footer>
 

@@ -99,7 +99,7 @@ export default function App() {
                       <Route path="paiement/retour" element={<PaymentReturn />} />
                       <Route path="parametres" element={<Settings />} />
                     </Route>
-                    {/* L'espace assistant a sa propre coquille : sidebar VYORA AI,
+                    {/* L'espace assistant a sa propre coquille : sidebar SORAHNEX AI,
                         pas la navigation Studio. Imbrique dans <Layout>, il heritait
                         de l'ancienne sidebar et paraissait inchange. Le catalogue
                         d'integrations suit la meme regle. */}
@@ -107,7 +107,7 @@ export default function App() {
                     <Route path="/app/connect" element={<Integrations />} />
                     <Route path="/app/connexions-ia" element={<McpConnections />} />
                     {/* MCP SORTANT : l'utilisateur connecte ses propres serveurs
-                        MCP distants. Distinct de /app/connexions-ia, où VYORA
+                        MCP distants. Distinct de /app/connexions-ia, où SORAHNEX
                         est le serveur et l'utilisateur le client. */}
                     <Route path="/app/mes-serveurs-mcp" element={<MesServeursMcp />} />
                     {/* Page unifiée : les deux sens du protocole, côte à côte

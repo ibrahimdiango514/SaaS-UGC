@@ -1,5 +1,5 @@
 /**
- * VYORA — orchestration d'un import de catalogue.
+ * SORAHNEX — orchestration d'un import de catalogue.
  *
  * ## Le principe : une seule séquence, toujours la même
  *

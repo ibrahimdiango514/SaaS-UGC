@@ -212,7 +212,7 @@ const depsGestionSingleton = () => dependancesGestion();
  * Deux transports sur une seule fonction :
  *
  *   - `/gestion/<route>` : gestion des connexions (créer, tester, permissions,
- *     révoquer). C'est ce que consomme l'interface VYORA.
+ *     révoquer). C'est ce que consomme l'interface SORAHNEX.
  *   - tout le reste : le transport MCP d'appel d'outil, inchangé.
  *
  * L'aiguillage se fait AVANT tout traitement, pour qu'une route de gestion ne

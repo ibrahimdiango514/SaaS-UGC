@@ -90,7 +90,7 @@
   .gradient-text { @apply bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-transparent; }
   .glass { @apply border border-line bg-white/[0.03] backdrop-blur-sm; }
 
-  /* VYORA Video Studio — dark, cyan accent, compact mobile-first controls. */
+  /* SORAHNEX Video Studio — dark, cyan accent, compact mobile-first controls. */
   .studio-v2 { @apply text-slate-200; color-scheme: dark; }
   .studio-v2 select option { @apply bg-[#0b111a] text-white; }
   .studio-icon-link {
@@ -118,7 +118,7 @@
   }
 
   /* --------------------------------------------------------------------- */
-  /* VYORA — langage visuel premium (vitrine + espaces connectés)           */
+  /* SORAHNEX — langage visuel premium (vitrine + espaces connectés)           */
   /* --------------------------------------------------------------------- */
   .vyora-display {
     @apply font-display font-semibold tracking-[-0.04em];
@@ -202,7 +202,7 @@
 }
 
 /* --------------------------------------------------------------------------- */
-/* VYORA Studio — coque immersive (référence : canvas noir, nav horizontale,    */
+/* SORAHNEX Studio — coque immersive (référence : canvas noir, nav horizontale,    */
 /* composer docké). Aucune carte décorative : la zone de création est nue.      */
 /* --------------------------------------------------------------------------- */
 @layer components {
@@ -284,7 +284,7 @@
 }
 
 /* --------------------------------------------------------------------------- */
-/* VYORA — vitrine d’accueil premium                                           */
+/* SORAHNEX — vitrine d’accueil premium                                           */
 /* Uniquement des animations `opacity` / `transform` ; tout le contenu reste    */
 /* lisible si une animation ne joue pas (filet de sécurité côté composant).     */
 /* --------------------------------------------------------------------------- */
@@ -495,7 +495,7 @@
 }
 
 /* =========================================================================
-   VYORA — DESIGN SYSTEM PREMIUM (phase « expérience »)
+   SORAHNEX — DESIGN SYSTEM PREMIUM (phase « expérience »)
    -------------------------------------------------------------------------
    Ajout strictement additif : aucune règle existante n'est modifiée.
    Principes :
@@ -506,7 +506,7 @@
    ========================================================================= */
 
 :root {
-  /* Accent par défaut = cyan VYORA (Studio). */
+  /* Accent par défaut = cyan SORAHNEX (Studio). */
   --vy-accent: 34 211 238;
   --vy-accent-2: 139 92 246;
   --vy-accent-ink: 10 22 30;
@@ -723,7 +723,7 @@
 }
 
 /* =========================================================================
-   VYORA — PARCOURS D'AUTHENTIFICATION IMMERSIF
+   SORAHNEX — PARCOURS D'AUTHENTIFICATION IMMERSIF
    -------------------------------------------------------------------------
    Composition « atrium » : une scène 3D (ou son repli statique) à gauche,
    un formulaire net et respirant à droite. Toutes les animations reposent
@@ -917,7 +917,7 @@
 
 
 /* =========================================================================
-   VYORA — BARRE D'ESPACE (dock d'identité)
+   SORAHNEX — BARRE D'ESPACE (dock d'identité)
    -------------------------------------------------------------------------
    Rappel permanent de l'espace courant : univers, nom, retour au sélecteur.
    Sur mobile elle devient un bandeau compact au-dessus du contenu.

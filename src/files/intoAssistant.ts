@@ -1,5 +1,5 @@
 /**
- * VYORA FILES → assistant : ce que le modèle peut RÉELLEMENT lire.
+ * SORAHNEX FILES → assistant : ce que le modèle peut RÉELLEMENT lire.
  *
  * ## Le problème que ce module résout
  * Avant, une pièce jointe n'existait que dans l'onglet courant : le fichier
@@ -25,7 +25,7 @@
  */
 import type { AiAttachment } from '../ai/api';
 import { MAX_EXCERPT_CHARS } from '../ai/attachments';
-import { upload, validate, type VyoraFile } from './api';
+import { upload, validate, type SorahnnexFile } from './api';
 import { asAppError } from '../lib/errors';
 
 /** Ce que le modèle peut faire d'un fichier, dit à l'utilisateur. */
@@ -41,7 +41,7 @@ export interface ReadCapability {
  *
  * Fonction pure : testable sans réseau ni DOM.
  */
-export function readCapability(kind: VyoraFile['kind'], previewKind: VyoraFile['preview_kind']): ReadCapability {
+export function readCapability(kind: SorahnnexFile['kind'], previewKind: SorahnnexFile['preview_kind']): ReadCapability {
   if (previewKind === 'text') {
     return { transmitted: true, note: 'Contenu texte transmis à l’assistant.' };
   }
@@ -87,7 +87,7 @@ export interface PreparedAttachment {
   /** Pièce jointe compatible avec `composeMessageBody`. */
   attachment: AiAttachment;
   /** Ligne de fichier créée en base (preuve du téléversement). */
-  stored: VyoraFile;
+  stored: SorahnnexFile;
   capability: ReadCapability;
 }
 

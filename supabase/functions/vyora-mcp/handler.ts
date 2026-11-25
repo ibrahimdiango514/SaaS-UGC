@@ -1,12 +1,12 @@
 /**
- * VYORA — serveur MCP officiel : transport HTTP et authentification.
+ * SORAHNEX — serveur MCP officiel : transport HTTP et authentification.
  *
  * ## Transport
  *
  * Streamable HTTP en réponse JSON directe : `POST` uniquement. Il n'y a pas de
  * flux SSE persistant, et c'est un choix assumé, pas une limitation subie :
  *
- *   - tous les outils VYORA sont des lectures courtes (une requête SQL), pas
+ *   - tous les outils SORAHNEX sont des lectures courtes (une requête SQL), pas
  *     des tâches de longue durée qui justifieraient une progression poussée ;
  *   - un flux SSE maintenu ouvert consomme une instance Edge pendant toute la
  *     durée de la connexion, sans rien apporter ici ;
@@ -201,7 +201,7 @@ export async function traiterRequete(
      */
     return {
       status: 405,
-      body: erreur(null, CODES.methodNotFound, 'Aucune session côté serveur à fermer : révoquez le jeton depuis VYORA.'),
+      body: erreur(null, CODES.methodNotFound, 'Aucune session côté serveur à fermer : révoquez le jeton depuis SORAHNEX.'),
       headers: { ...ENTETES_CORS, Allow: 'POST, OPTIONS' },
     };
   }

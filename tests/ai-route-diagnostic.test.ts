@@ -1,4 +1,4 @@
-// VYORA AI CORE — tests du diagnostic de ROUTAGE.
+// SORAHNEX AI CORE — tests du diagnostic de ROUTAGE.
 //
 // La sonde prouve qu'un fournisseur RÉPOND ; ces tests vérifient la question
 // suivante, distincte : le moteur le CHOISIT-il ?

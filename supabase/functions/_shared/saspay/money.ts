@@ -1,4 +1,4 @@
-// VYORA — arithmétique monétaire exacte pour SasPay.
+// SORAHNEX — arithmétique monétaire exacte pour SasPay.
 //
 // SasPay échange les montants sous forme de CHAÎNES décimales (« 2500.00 »).
 // Aucun calcul n'est fait en virgule flottante : tout passe par des entiers

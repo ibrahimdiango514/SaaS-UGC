@@ -1,5 +1,5 @@
 /**
- * B3 — Hero 3D de l'accueil VYORA (react-three/fiber).
+ * B3 — Hero 3D de l'accueil SORAHNEX (react-three/fiber).
  * Scène « aurora » : noyau distordu (violet/cyan), coquille filaire,
  * particules et parallaxe souris. Légère (dpr ≤ 1.5), chargée en lazy,
  * et remplacée par l'image statique quand le motion est réduit ou que

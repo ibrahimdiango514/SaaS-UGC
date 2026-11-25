@@ -213,7 +213,7 @@ describe('surveillance fournisseur — fournisseurs du registre (dynamiques)', (
         base_url: 'https://api.test/v1',
         models_url: 'https://api.test/v1/models',
         api_key_env: 'BUSINESS_GROW_OPENROUTER_API_KEY',
-        headers: { 'X-Title': 'VYORA' },
+        headers: { 'X-Title': 'SORAHNEX' },
       }],
     });
     const handler = await loadHandler({
@@ -234,7 +234,7 @@ describe('surveillance fournisseur — fournisseurs du registre (dynamiques)', (
     expect(catalog[0].method).toBe('GET');
     // Les en-têtes d'attribution du registre sont bien envoyés au fournisseur
     // (la valeur n'est pas journalisée : elle apparaît ici dans le test).
-    expect(catalog[0].headers['x-title']).toBe('VYORA');
+    expect(catalog[0].headers['x-title']).toBe('SORAHNEX');
     expect(catalog[0].headers.authorization).toBe('Bearer or-key');
     // Toujours aucune génération.
     expect(calls.some((call) => call.url.includes('chat/completions'))).toBe(false);

@@ -14,7 +14,7 @@ import '../ai/assistant.css';
 const CLE_REPLI = 'vyora.ai.sidebar.collapsed';
 
 /**
- * Espace assistant VYORA.
+ * Espace assistant SORAHNEX.
  *
  * ## Ce qui fonctionne réellement
  *
@@ -117,7 +117,7 @@ export default function Assistant() {
               {filActif?.title || 'Nouvelle conversation'}
             </h1>
             <p className="truncate text-[0.68rem] text-slate-500">
-              {user?.email ? `Connecté · ${user.email}` : 'Assistant VYORA'}
+              {user?.email ? `Connecté · ${user.email}` : 'Assistant SORAHNEX'}
             </p>
           </div>
 
@@ -192,7 +192,7 @@ function Accueil({ nom, onChoisir }: { nom: string; onChoisir: (texte: string) =
       <div className="vy-enter">
         <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-brand-400/25 bg-brand-500/10 px-3 py-1 text-[0.7rem] text-brand-200">
           <Sparkles size={13} />
-          Assistant VYORA
+          Assistant SORAHNEX
         </div>
 
         <h2 className="font-display text-3xl font-semibold leading-tight tracking-tight text-white sm:text-4xl">

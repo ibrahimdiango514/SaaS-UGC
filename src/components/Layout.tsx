@@ -13,7 +13,7 @@ import type { AppNotification } from '../lib/types';
 import { BrandLockup, BrandSymbol } from './Brand';
 import { WorkspaceNav } from '../navigation/WorkspaceNav';
 import {
-  BUSINESS_MOBILE_NAV, STUDIO_MOBILE_NAV, isNavItemActive,
+  BUSINESS_MOBILE_NAV, STUDIO_MOBILE_NAV, isNavItemActive, type MobileNavItem,
 } from '../navigation/config';
 import { Badge, Button, cn, LoadingState } from './ui';
 import { WorkspaceDock } from './WorkspaceDock';
@@ -22,7 +22,7 @@ const ADMIN_NAV = [{ to: '/admin', label: 'Administration', icon: Shield }];
 
 function Logo({ compact = false, to = '/app' }: { compact?: boolean; to?: string }) {
   return (
-    <NavLink to={to} aria-label="VYORA, tableau de bord" className="flex min-h-11 min-w-11 items-center gap-2.5">
+    <NavLink to={to} aria-label="SORAHNEX, tableau de bord" className="flex min-h-11 min-w-11 items-center gap-2.5">
       {compact ? <BrandSymbol size={36} /> : <BrandLockup />}
     </NavLink>
   );
@@ -38,15 +38,16 @@ export default function Layout() {
   // Périmètre visuel : chaque espace possède sa propre identité chromatique,
   // héritée par toute l'arborescence via `data-vy-scope` (variables CSS).
   const scope: 'studio' | 'business' | 'hub' | 'admin' = isAdmin ? 'admin' : isHub ? 'hub' : isBusiness ? 'business' : 'studio';
-  const mobileNav = isAdmin
+  const mobileNav: MobileNavItem[] = isAdmin
     ? ADMIN_NAV
     : isHub
       ? []
       : isBusiness
         ? BUSINESS_MOBILE_NAV
         : STUDIO_MOBILE_NAV;
-  const mobileItemActive = (item: { to: string; label: string; icon: typeof Shield }) =>
-    isNavItemActive({ to: item.to, label: item.label, description: '', icon: item.icon }, location.pathname, location.search);
+  const mobileItemActive = (item: MobileNavItem) =>
+    !item.opensDrawer
+    && isNavItemActive({ to: item.to, label: item.label, description: '', icon: item.icon }, location.pathname, location.search);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -85,6 +86,23 @@ export default function Layout() {
   }, [user, loadNotifications]);
 
   useEffect(() => { setDrawerOpen(false); setNotifOpen(false); setUserOpen(false); }, [location.pathname]);
+
+  // Tiroir mobile : verrouille le défilement de la page derrière le panneau
+  // (sinon Android fait défiler le contenu quand on atteint le bas du menu)
+  // et autorise la fermeture au clavier.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [drawerOpen]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -138,14 +156,14 @@ export default function Layout() {
 
   return (
     <div
-      className={cn('min-h-screen lg:flex', scope === 'business' && 'vy-scope-business', scope === 'studio' && 'vy-scope-studio')}
+      className={cn('min-h-screen overflow-x-hidden lg:flex', scope === 'business' && 'vy-scope-business', scope === 'studio' && 'vy-scope-studio')}
       data-vy-scope={scope === 'admin' ? 'admin' : scope}
     >
       {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}
       <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', isHub && 'lg:hidden')}>
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
-        {/* Liseré d'identité : cyan en Studio, violet en Business Growth. */}
+        {/* Liseré d'identité : cyan en Studio, violet en Grow. */}
         {!isHub && (
           <div
             aria-hidden="true"
@@ -198,7 +216,7 @@ export default function Layout() {
         </div>}
         {!isAdmin && isBusiness && (
           <div className="relative mt-4 overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-violet-400/[0.10] via-panel/70 to-cyan-400/[0.04] p-3.5">
-            <div className="flex items-center gap-2 text-xs font-semibold text-violet-100"><Brain size={14} /> Espace Business Growth</div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-violet-100"><Brain size={14} /> Espace Grow</div>
             <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">Données métier isolées. Aucun accès aux crédits ni aux fichiers Studio.</p>
             <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/app/business/modules')}>Ouvrir les modules métier</Button>
           </div>
@@ -290,7 +308,7 @@ export default function Layout() {
                     : <>
                       <button onClick={() => navigate('/app/parametres')} className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><Settings size={15} /> Paramètres</button>
                       {!isBusiness && <button onClick={() => navigate('/app/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Abonnement Studio</button>}
-                      {isBusiness && <button onClick={() => navigate('/app/business/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Formules Business Growth</button>}
+                      {isBusiness && <button onClick={() => navigate('/app/business/abonnement')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><CreditCard size={15} /> Formules Grow</button>}
                       {!isHub && <button onClick={() => navigate('/app')} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-white/5"><ArrowLeftRight size={15} /> Tous les espaces</button>}
                     </>}
                   <button onClick={() => void onLogout()} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-rose-300 hover:bg-rose-500/10"><LogOut size={15} /> Déconnexion</button>
@@ -309,8 +327,14 @@ export default function Layout() {
       {/* Mobile drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm lg:hidden" onMouseDown={() => setDrawerOpen(false)}>
-          <div className="flex h-full w-[min(88vw,300px)] flex-col border-r border-line bg-panel px-3 py-5" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="mb-6 flex items-center justify-between px-2"><Logo to={isAdmin ? '/admin' : '/app'} /><button onClick={() => setDrawerOpen(false)} className="btn btn-ghost btn-icon"><X size={18} /></button></div>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation SORAHNEX"
+            className="safe-bottom flex h-full w-[min(92vw,320px)] max-w-full flex-col overflow-y-auto overscroll-contain border-r border-line bg-panel px-3 pt-5"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="mb-6 flex shrink-0 items-center justify-between px-2"><Logo to={isAdmin ? '/admin' : '/app'} /><button onClick={() => setDrawerOpen(false)} className="btn btn-ghost btn-icon" aria-label="Fermer le menu"><X size={18} /></button></div>
             {!isAdmin && (
               <Link to="/app" onClick={() => setDrawerOpen(false)} className="mb-3 flex min-h-11 items-center gap-2 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.06] px-3 py-2 text-xs font-semibold text-slate-200">
                 <ArrowLeftRight size={14} className="text-cyan-300" /> Tous les espaces
@@ -346,11 +370,24 @@ export default function Layout() {
       <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', isHub ? 'hidden' : 'lg:hidden')}>
         {mobileNav.map((item) => {
           const active = mobileItemActive(item);
+          const label = item.shortLabel ?? item.label;
+          const className = cn(
+            'flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition',
+            active ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500',
+          );
+          if (item.opensDrawer) {
+            return (
+              <button key={item.to} type="button" onClick={() => setDrawerOpen(true)}
+                aria-label={item.label} aria-haspopup="dialog" className={className}>
+                <item.icon size={19} /> <span className="w-full truncate text-center">{label}</span>
+              </button>
+            );
+          }
           return (
             <Link key={item.to} to={item.to}
               aria-current={active ? 'page' : undefined}
-              className={cn('flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition', active ? 'bg-cyan-400/[0.08] text-cyan-200' : 'text-slate-500')}>
-              <item.icon size={19} /> <span className="truncate">{item.label.split(' ')[0]}</span>
+              className={className}>
+              <item.icon size={19} /> <span className="w-full truncate text-center">{label}</span>
             </Link>
           );
         })}

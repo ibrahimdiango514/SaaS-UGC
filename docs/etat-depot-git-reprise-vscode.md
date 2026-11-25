@@ -26,7 +26,7 @@ git rev-list --left-right --count origin/main...HEAD
 ```
 
 > ⚠️ **`main` est en retard.** Si vous clonez et restez sur `main`, vous n'aurez **ni** la
-> continuité Business Grow ↔ Studio UGC, **ni** la surveillance `pg_cron`, **ni** les correctifs
+> continuité Grow ↔ Studio UGC, **ni** la surveillance `pg_cron`, **ni** les correctifs
 > CORS/incident du 12 novembre. Ils ne rejoindront `main` qu'à la fusion de la PR #6, que je ne
 > fusionne pas sans votre accord.
 
@@ -66,7 +66,7 @@ après fusion (comportement par défaut de GitHub).
 ```
 1a572be | 2026-11-11 15:26:10 -0500 (20:26 UTC)
 Merge pull request #5 from ibrahimdiango514/arena/ae76dba9-saas-ugc
-Titre : VYORA : moteur IA central, espaces continus, devis fournisseur, admin et crédits réels
+Titre : SORAHNEX : moteur IA central, espaces continus, devis fournisseur, admin et crédits réels
 ```
 
 ### Pull requests
@@ -93,7 +93,7 @@ Une seule PR ouverte : **#6**. Checks Netlify : `deploy-preview` **pass**
 | `a71ac8e` | 11/11 | feat(ops): job pg_cron de surveillance des fournisseurs IA | `vyora-provider-health`, migration cron (775 l.), admin, tests |
 | `7e4ffdc` | 11/11 | docs: preuves de vérification réelle des fournisseurs | Documentation seule |
 | `2318f5b` | 11/11 | fix(edge): aligner la sonde IA sur les secrets réels + origines e2b | `business-grow`, `reelora-ai`, `reelora-health` |
-| `80a0064` | 11/11 | feat(vyora): continuité Business Grow ↔ Studio UGC | Contrats, workspace, alerte péremption, tests |
+| `80a0064` | 11/11 | feat(vyora): continuité Grow ↔ Studio UGC | Contrats, workspace, alerte péremption, tests |
 
 Fichiers les plus significatifs du diff :
 
@@ -121,7 +121,7 @@ Historique complet (42 commits, du plus récent au plus ancien). En **gras** : l
 | **`a71ac8e`** | job pg_cron surveillance IA | `vyora-provider-health`, 4 jobs, panneau admin, 179 tests |
 | `7e4ffdc` | preuves fournisseurs | Preuves Gemini/Groq horodatées |
 | `2318f5b` | sonde IA + origines e2b | Alignement secrets, CORS aperçus |
-| **`80a0064`** | continuité Business Grow ↔ Studio | Contrats partagés, alerte de péremption |
+| **`80a0064`** | continuité Grow ↔ Studio | Contrats partagés, alerte de péremption |
 | **`1a572be`** | *(main)* merge PR #5 | **Tout le socle actuel de `main`** |
 | **`eefddc3`** | moteur IA central, espaces continus, devis, admin, crédits | `vyora-ai`, crédits réels, admin |
 | `38d5da9` | doc état prod | — |
@@ -135,11 +135,11 @@ Historique complet (42 commits, du plus récent au plus ancien). En **gras** : l
 | `83f7aaf` | relais preview Netlify + vérif fournisseur stricte | — |
 | `ad72c11` | routage IA central + contrats plateforme | `ai_routing_rules`, contrats |
 | **`e657843`** | fournisseurs IA centraux, routage, outils | Socle du moteur IA |
-| `915bf43` | merge VS Code Business Grow & Studio | — |
+| `915bf43` | merge VS Code Grow & Studio | — |
 | `9eec20f` | isolation comptes | — |
 | `b487f71` | workspace + fiabilité | — |
-| **`e728a17`** | moteur IA multi-fournisseurs Reelora + Business Grow core | Origine du moteur IA |
-| `068709c` | Business Grow + Studio | — |
+| **`e728a17`** | moteur IA multi-fournisseurs Sorahnnex + Grow core | Origine du moteur IA |
+| `068709c` | Grow + Studio | — |
 | **`930d6af`** | Phase 4 export vidéo pro | WebCodecs MP4/WebM, ExportPanel |
 | `2f9c995` | correctif CORS preflight Edge | — |
 | **`db4b373`** | Phase 3 montage vidéo intelligent | Timeline, éditeur |
@@ -174,14 +174,14 @@ Historique complet (42 commits, du plus récent au plus ancien). En **gras** : l
 | Migrations (16) | `20261108*_reelora_*.sql` (schéma v1, RPC, MuAPI, catalogue, avatars, bibliothèque) |
 | Docs | `docs/phase2-finalisation-studio-ugc.md`, `phase3-montage-intelligent.md`, `phase4-moteur-export-video.md`, `video-studio-v2.md`, `modeles-muapi.md`, `correction-v2-muapi.md`, `devis-fournisseur.md` |
 
-### Business Grow et ses fonctionnalités IA
+### Grow et ses fonctionnalités IA
 
 | Élément | Emplacement |
 | --- | --- |
 | Workspace chat / mémoire métier | `src/business/BusinessGrowWorkspace.tsx` (≈1 500 l.) |
 | **Growth OS** (9 onglets) | `src/business/growth/GrowthWorkspace.tsx` + `GrowthPanels.tsx` + `model.ts` |
 | Contrats partagés | `src/contracts/business-grow.ts` |
-| Pont Studio ↔ Business Grow | `src/business/bridge.ts`, `src/business/index.ts` |
+| Pont Studio ↔ Grow | `src/business/bridge.ts`, `src/business/index.ts` |
 | Client API | `src/business/api.ts` (direct → relais Netlify → fallback) |
 | Registre IA | `src/business/ai/registry.ts` |
 | Edge Function | `supabase/functions/business-grow/` (`index.ts`, `handler.ts` 986 l., `providers.ts`, `intelligence.ts`) |
@@ -210,8 +210,8 @@ explicitement l'état « Catalogue produits partiellement indisponible »
 
 | Lien | Fichier |
 | --- | --- |
-| Studio ↔ Business Grow (continuité de session, contrat partagé) | `src/business/bridge.ts`, `src/contracts/business-grow.ts` |
-| `GenerationStudio` → contexte Business Grow | `src/studio/GenerationStudio.tsx` (+46 l. au commit `80a0064`) |
+| Studio ↔ Grow (continuité de session, contrat partagé) | `src/business/bridge.ts`, `src/contracts/business-grow.ts` |
+| `GenerationStudio` → contexte Grow | `src/studio/GenerationStudio.tsx` (+46 l. au commit `80a0064`) |
 | Budget provider ↔ admin | `src/pages/admin/ProviderBudgetSettings.tsx` |
 | Relais HTTP Netlify (preview) | `netlify/edge-functions/business-grow.js`, `netlify/functions/business-grow.mjs`, `netlify.toml` |
 | Parité frontend ↔ Edge | `tests/integration-parity.test.ts`, `scripts/check-edge-imports.mjs` |
@@ -345,7 +345,7 @@ MuAPI uniquement si le modèle déclare le champ. Deep link `?mode=video-source`
 en production est encore la v10, donc ces deux capacités sont inactives en prod
 tant que la fonction n'est pas redéployée.
 
-### Abonnement Business Grow (commit `20b1533`)
+### Abonnement Grow (commit `20b1533`)
 
 `saas_business.plans` enrichi (prix, devise, quota, avantages, ordre) et
 `saas_business.commercial_config` créée — **périmètre `saas_business` uniquement**.

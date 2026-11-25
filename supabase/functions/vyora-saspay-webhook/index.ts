@@ -1,4 +1,4 @@
-// VYORA — Edge Function `vyora-saspay-webhook` (`verify_jwt = false`).
+// SORAHNEX — Edge Function `vyora-saspay-webhook` (`verify_jwt = false`).
 //
 // Appelée par SasPay. Authentifiée par signature HMAC-SHA256 sur le corps brut
 // (`X-Webhook-Signature`, `X-Webhook-Timestamp`, tolérance 300 s) avec le secret

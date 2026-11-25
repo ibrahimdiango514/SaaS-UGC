@@ -116,7 +116,7 @@ describe('probeStore — une redirection ne contourne pas la garde', () => {
     await probeStore('https://boutique.com/', { fetchImpl, resolveHost: résolveurPublic });
     const init = (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1];
     const ua = String((init.headers as Record<string, string>)['user-agent']);
-    expect(ua).toContain('VYORA');
+    expect(ua).toContain('SORAHNEX');
     expect(ua).not.toMatch(/Mozilla|Chrome|Safari/);
     expect(init.redirect).toBe('manual');
   });

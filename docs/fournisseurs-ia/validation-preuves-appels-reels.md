@@ -1,4 +1,4 @@
-# VYORA — Validation des fournisseurs IA : preuves d'appels réels
+# SORAHNEX — Validation des fournisseurs IA : preuves d'appels réels
 
 > **Date des mesures :** 2026-11-15 (UTC).
 > **Branche :** `arena/bfcedd89-saas-ugc` — PR ouverte vers `develop` (aucune fusion sans autorisation).

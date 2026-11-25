@@ -57,7 +57,7 @@ describe('accueil — hero 3D (B3)', () => {
   it('garde l’image statique quand WebGL est indisponible', async () => {
     renderLanding();
 
-    expect(await screen.findByAltText('Direction artistique VYORA : lumière, matière et profondeur')).toBeTruthy();
+    expect(await screen.findByAltText('Direction artistique SORAHNEX : lumière, matière et profondeur')).toBeTruthy();
     expect(screen.getByText('Vos idées prennent forme.')).toBeTruthy();
   });
 
@@ -67,7 +67,7 @@ describe('accueil — hero 3D (B3)', () => {
     stubWebgl(true);
     renderLanding();
 
-    expect(await screen.findByAltText('Direction artistique VYORA : lumière, matière et profondeur')).toBeTruthy();
+    expect(await screen.findByAltText('Direction artistique SORAHNEX : lumière, matière et profondeur')).toBeTruthy();
   });
 
   it('monte la scène 3D quand WebGL est disponible (canvas présent, page intacte)', async () => {

@@ -1,5 +1,5 @@
 /**
- * VYORA — routes HTTP du flux OAuth 2.1 SORTANT.
+ * SORAHNEX — routes HTTP du flux OAuth 2.1 SORTANT.
  *
  * ## Deux routes, deux niveaux de confiance
  *
@@ -11,13 +11,13 @@
  *   unique, lié à l'utilisateur et à la connexion au moment du démarrage, et
  *   expirant en dix minutes.
  *
- * ## Pourquoi le callback ne prend pas de jeton VYORA
+ * ## Pourquoi le callback ne prend pas de jeton SORAHNEX
  *
  * Un serveur d'autorisation redirige le navigateur par une simple navigation :
  * aucun en-tête personnalisé n'est conservé. Exiger un jeton ici rendrait le
  * flux impossible. Le `state` + PKCE sont la protection prévue par la
  * spécification, et le code d'autorisation n'est utilisable qu'avec le
- * `code_verifier` que seul le serveur VYORA connaît.
+ * `code_verifier` que seul le serveur SORAHNEX connaît.
  */
 import { entetesCors, construireReponse, type ResolveurIdentite } from './http.ts';
 import { validerCible } from './gestion.ts';
@@ -150,7 +150,7 @@ export async function traiterDemarrageOAuth(
   if (!decouverte.pkceS256) {
     return construireReponse(422, {
       error: 'pkce_non_supporte',
-      message: 'Ce serveur d’autorisation n’accepte pas PKCE S256. VYORA refuse de poursuivre : '
+      message: 'Ce serveur d’autorisation n’accepte pas PKCE S256. SORAHNEX refuse de poursuivre : '
         + 'sans PKCE, un code d’autorisation intercepté serait réutilisable.',
     }, cors);
   }
@@ -161,7 +161,7 @@ export async function traiterDemarrageOAuth(
     // en `http://` : le fournisseur la refuserait, ou pire, l'accepterait.
     return construireReponse(500, {
       error: 'callback_non_https',
-      message: 'L’URL de retour OAuth de VYORA n’est pas configurée en https.',
+      message: 'L’URL de retour OAuth de SORAHNEX n’est pas configurée en https.',
     }, cors);
   }
 
@@ -266,7 +266,7 @@ function pageHtml(titre: string, texte: string, statut: number): Response {
   const echapper = echapperHtml;
   const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${echapper(titre)} — VYORA</title>
+<title>${echapper(titre)} — SORAHNEX</title>
 <style>
 :root{color-scheme:dark}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1220;color:#e2e8f0;
@@ -306,7 +306,7 @@ export async function traiterCallbackOAuth(
     return pageHtml(
       'Autorisation refusée',
       `Le serveur d’autorisation a refusé la demande : <code>${echapperHtml((descriptionAs ?? erreurAs).slice(0, 300))}</code>. `
-        + 'Vous pouvez relancer l’autorisation depuis VYORA.',
+        + 'Vous pouvez relancer l’autorisation depuis SORAHNEX.',
       400,
     );
   }
@@ -323,7 +323,7 @@ export async function traiterCallbackOAuth(
     return pageHtml(
       'Autorisation expirée',
       'Ce retour d’autorisation n’est plus valable (état inconnu, déjà utilisé ou expiré). '
-        + 'Relancez la connexion depuis VYORA.',
+        + 'Relancez la connexion depuis SORAHNEX.',
       400,
     );
   }
@@ -397,7 +397,7 @@ export async function traiterCallbackOAuth(
 
   return pageHtml(
     'Autorisation accordée',
-    'VYORA a obtenu un jeton d’accès pour cette connexion. '
+    'SORAHNEX a obtenu un jeton d’accès pour cette connexion. '
       + `Il expire ${expireLe ? `le ${new Date(expireLe).toLocaleString('fr-FR')}` : 'à une date non communiquée'}. `
       + 'Vous pouvez revenir à la page « Connexions MCP » et tester la connexion.',
     200,
@@ -434,7 +434,7 @@ export type RevocationDistante = 'revoque' | 'refuse' | 'indisponible' | 'aucun_
  * Ordre : identité → propriété → révocation DISTANTE (si le fournisseur expose
  * un point RFC 7009) → destruction LOCALE (Vault, flux en attente, colonnes
  * d'état). La destruction locale a lieu même si le distant refuse : un jeton
- * qu'on ne peut plus lire chez nous ne peut plus servir depuis VYORA, et c'est
+ * qu'on ne peut plus lire chez nous ne peut plus servir depuis SORAHNEX, et c'est
  * ce que l'utilisateur demande. Le résultat distant est DIT, pas masqué.
  *
  * La connexion n'est pas supprimée ni marquée `revoked` : elle repasse en

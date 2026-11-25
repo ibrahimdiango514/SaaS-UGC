@@ -100,7 +100,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
     <section className="space-y-4" data-testid="business-company-context">
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/[0.08] bg-panel/50 p-5 sm:p-6">
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-brand-200">Compte VYORA partagé</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-brand-200">Compte SORAHNEX partagé</p>
           <h2 className="mt-1 text-lg font-semibold text-white">{workspace?.name ?? 'Aucun espace de travail actif'}</h2>
           {workspace && (
             <p className="mt-1 text-sm text-slate-400">
@@ -117,7 +117,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
         <EmptyState
           icon={<Building2 size={22} />}
           title="Espace de travail indisponible"
-          description="Reconnectez-vous à VYORA ou réessayez le chargement de votre espace."
+          description="Reconnectez-vous à SORAHNEX ou réessayez le chargement de votre espace."
         />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void load()} />
@@ -149,7 +149,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
                 ))}
               </div>
             ) : (
-              <EmptyState icon={<Building2 size={20} />} title="Aucune marque enregistrée" description="Ajoutez les marques de votre entreprise depuis les paramètres VYORA." />
+              <EmptyState icon={<Building2 size={20} />} title="Aucune marque enregistrée" description="Ajoutez les marques de votre entreprise depuis les paramètres SORAHNEX." />
             )}
           </div>
 
@@ -174,7 +174,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
                 ))}
               </div>
             ) : (
-              <EmptyState icon={<Package size={20} />} title="Aucun produit enregistré" description="Ajoutez vos produits ou services depuis les paramètres VYORA." />
+              <EmptyState icon={<Package size={20} />} title="Aucun produit enregistré" description="Ajoutez vos produits ou services depuis les paramètres SORAHNEX." />
             )}
           </div>
         </div>
@@ -182,7 +182,7 @@ function CompanyContextView({ workspace }: { workspace: Workspace | null }) {
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3">
         <p className="text-xs text-slate-400">
-          Ces données proviennent de l’espace VYORA partagé. Elles ne sont pas copiées dans la mémoire IA.
+          Ces données proviennent de l’espace SORAHNEX partagé. Elles ne sont pas copiées dans la mémoire IA.
         </p>
         <Button size="sm" variant="ghost" icon={<RefreshCw size={14} />} onClick={() => void load()} disabled={loading || !workspace}>
           Actualiser
@@ -259,11 +259,11 @@ function formatProbeTime(checkedAt: string | null | undefined): string {
 function describeProviderFailureHint(code: string | null | undefined): string {
   switch (code) {
     case 'PROVIDER_AUTH_FAILED':
-      return 'La vérification du service IA a échoué. Contactez le support VYORA si le problème persiste.';
+      return 'La vérification du service IA a échoué. Contactez le support SORAHNEX si le problème persiste.';
     case 'PROVIDER_RATE_LIMITED':
       return 'Le service IA est temporairement saturé. Réessayez plus tard.';
     case 'PROVIDER_PAYMENT_REQUIRED':
-      return 'Le crédit du service IA est épuisé. Réessayez plus tard ou contactez le support VYORA.';
+      return 'Le crédit du service IA est épuisé. Réessayez plus tard ou contactez le support SORAHNEX.';
     case 'PROVIDER_REQUEST_REJECTED':
       return 'La demande n’a pas été acceptée. Vérifiez votre message puis réessayez.';
     case 'PROVIDER_NOT_CONFIGURED':
@@ -275,9 +275,9 @@ function describeProviderFailureHint(code: string | null | undefined): string {
     case 'ORIGIN_NOT_ALLOWED':
       return 'Cette connexion n’est pas disponible depuis cet environnement. Réessayez plus tard.';
     case 'BUSINESS_GROW_UNAVAILABLE':
-      return 'Business Grow est momentanément indisponible. Réessayez plus tard.';
+      return 'Grow est momentanément indisponible. Réessayez plus tard.';
     default:
-      return 'Réessayez plus tard ou contactez le support VYORA.';
+      return 'Réessayez plus tard ou contactez le support SORAHNEX.';
   }
 }
 
@@ -353,7 +353,7 @@ function ProviderStatusList({ statuses, compact: _compact = false, loading = fal
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
       <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-200">Assistant IA VYORA</p>
+        <p className="text-sm font-medium text-slate-200">Assistant IA SORAHNEX</p>
         <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
           {loading
             ? 'Le contrôle de disponibilité est en cours.'
@@ -372,10 +372,10 @@ function ProviderStatusList({ statuses, compact: _compact = false, loading = fal
 }
 
 /**
- * Section « Assistant » de Business Grow.
+ * Section « Assistant » de Grow.
  *
  * L'ancienne interface de conversation (fil brut, liste latérale ad hoc,
- * composeur minimal) a été remplacée par le composant VYORA AI commun
+ * composeur minimal) a été remplacée par le composant SORAHNEX AI commun
  * (`BusinessAssistant`), qui fournit la sidebar repliable, les bulles, les
  * pièces jointes, le mode analyse et la synthèse vocale.
  *
@@ -546,7 +546,7 @@ function AssistantView({
                       {verifiedModels
                         .filter((m) => !preferredProviderKey || m.provider_key === preferredProviderKey)
                         .map((model, index) => (
-                          <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{`Modèle VYORA ${index + 1}`}</option>
+                          <option key={`${model.provider_key}:${model.model_key}`} value={model.model_key}>{`Modèle SORAHNEX ${index + 1}`}</option>
                         ))}
                     </select>
                   </label>
@@ -615,8 +615,8 @@ function AssistantView({
           </div>
         )}
 
-        {/* Interface de conversation VYORA AI — remplace l'ancienne.
-            L'état et les mutations restent la propriété de Business Grow :
+        {/* Interface de conversation SORAHNEX AI — remplace l'ancienne.
+            L'état et les mutations restent la propriété de Grow :
             l'interface ne fait qu'afficher et déclencher les mêmes rappels. */}
         <BusinessAssistant
           workspaceId={workspaceId}
@@ -758,7 +758,7 @@ function AssistantView({
         <section className="vy-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <Zap size={15} className="text-cyan-300" />
-            <h2 className="text-sm font-semibold text-white">Services IA VYORA</h2>
+            <h2 className="text-sm font-semibold text-white">Services IA SORAHNEX</h2>
           </div>
           <ProviderStatusList statuses={providers} compact loading={backendLoading} />
           <p className="mt-3 text-[10px] leading-relaxed text-slate-600">
@@ -1026,9 +1026,9 @@ function ProvidersView({
       <section className="vy-surface p-5 sm:p-7">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <h2 className="text-lg font-semibold text-white">Services IA VYORA</h2>
+            <h2 className="text-lg font-semibold text-white">Services IA SORAHNEX</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
-              L’AI Director sélectionne automatiquement le service adapté selon sa disponibilité réelle. Les détails techniques restent internes à VYORA.
+              L’AI Director sélectionne automatiquement le service adapté selon sa disponibilité réelle. Les détails techniques restent internes à SORAHNEX.
             </p>
           </div>
           {quota && quota.available_units !== null && (
@@ -1051,7 +1051,7 @@ function ProvidersView({
             <p className="font-medium">
               {verifyBanner.message}
             </p>
-            {verifyBanner.hint && <p className="mt-1 text-[11px] opacity-85">Réessayez plus tard ou contactez le support VYORA.</p>}
+            {verifyBanner.hint && <p className="mt-1 text-[11px] opacity-85">Réessayez plus tard ou contactez le support SORAHNEX.</p>}
           </div>
         )}
         {!backendReady && backendLoading && (
@@ -1105,7 +1105,7 @@ function ProvidersView({
                           key={model.model_key}
                           type="button"
                           disabled={!canProbe || Boolean(verifyingKey)}
-                          title={canProbe ? 'Vérifier ce modèle IA VYORA' : undefined}
+                          title={canProbe ? 'Vérifier ce modèle IA SORAHNEX' : undefined}
                           onClick={() => {
                             if (canProbe) void onVerifyProvider(provider.provider_key, model.provider_model_key);
                           }}
@@ -1135,7 +1135,7 @@ function ProvidersView({
       <section className="vy-surface p-5 sm:p-7">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal size={16} className="text-brand-300" />
-          <h3 className="text-sm font-semibold text-white">Comment VYORA choisit un service IA</h3>
+          <h3 className="text-sm font-semibold text-white">Comment SORAHNEX choisit un service IA</h3>
         </div>
         <p className="text-xs leading-relaxed text-slate-400">
           Le catalogue des services n’est pas figé : la plateforme lit le registre central, qui décrit pour chaque
@@ -1251,7 +1251,7 @@ function ProvidersView({
               <div className="space-y-1.5 text-[11px]">
                 {requests.slice(0, 6).map((req) => (
                   <div key={String(req.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-slate-300">
-                    <span>{String(req.role_key ?? req.task_role_key ?? 'business_advisor')} · traitement IA VYORA</span>
+                    <span>{String(req.role_key ?? req.task_role_key ?? 'business_advisor')} · traitement IA SORAHNEX</span>
                     <span className="text-slate-500">
                       {String(req.status ?? '')}
                       {req.latency_ms ? ` · ${String(req.latency_ms)} ms` : ''}
@@ -1338,7 +1338,7 @@ function AiControlCenterView({
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-white">Mémoire de l’agent</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
-              Les éléments que VYORA retient de vous pour personnaliser ses réponses : votre entreprise, vos décisions, vos préférences.
+              Les éléments que SORAHNEX retient de vous pour personnaliser ses réponses : votre entreprise, vos décisions, vos préférences.
               Seules vos déclarations explicites sont mémorisées. Vous décidez, vous vérifiez, vous effacez.
             </p>
           </div>
@@ -1383,7 +1383,7 @@ function AiControlCenterView({
             description={
               consent
                 ? 'Vos déclarations explicites (entreprise, décisions, préférences) apparaîtront ici.'
-                : 'Activez la mémoire pour que VYORA retienne vos déclarations explicites.'
+                : 'Activez la mémoire pour que SORAHNEX retienne vos déclarations explicites.'
             }
           />
         ) : (
@@ -1431,7 +1431,7 @@ function AiControlCenterView({
           </Button>
         </div>
         <p className="mb-3 text-xs leading-relaxed text-slate-400">
-          Par défaut, VYORA sélectionne automatiquement le service adapté et le modèle le plus fiable.
+          Par défaut, SORAHNEX sélectionne automatiquement le service adapté et le modèle le plus fiable.
           Vous pouvez imposer un moteur précis par rôle d’assistant.
         </p>
         {savedRouting.length === 0 ? (
@@ -1753,7 +1753,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         setIntegrationNotice({
           tone: 'error',
           text: refus
-            ? 'Opération refusée : abonnement Business Grow requis. Rien n’a été enregistré.'
+            ? 'Opération refusée : abonnement Grow requis. Rien n’a été enregistré.'
             : `${asAppError(error).message} Vérifiez l’état avant de recommencer.`,
         });
       }
@@ -1774,7 +1774,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
       setConversationsLoaded(false);
       setSelectedConversationId(null);
       setMessages([]);
-      setError('Session VYORA indisponible. Reconnectez-vous pour charger Business Grow.');
+      setError('Session SORAHNEX indisponible. Reconnectez-vous pour charger Grow.');
       return;
     }
     setBackendReady(false);
@@ -1805,7 +1805,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
       ? statusResult.reason instanceof Error ? statusResult.reason.message : 'Le registre IA est indisponible.'
       : conversationsResult.status === 'rejected' && conversationsResult.reason instanceof Error
         ? conversationsResult.reason.message
-        : 'Business Grow ne répond pas pour le moment. Réessayez dans quelques instants.');
+        : 'Grow ne répond pas pour le moment. Réessayez dans quelques instants.');
   }, [accountScope, hasSession, loadConversations, loadOperationalDetails, loadStatus, sessionToken]);
 
   useEffect(() => {
@@ -2261,7 +2261,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         await verifyProvider(target.provider_key, undefined, { silent: true });
         if (!cancelled) await Promise.allSettled([loadStatus(), loadOperationalDetails()]);
       } catch {
-        // Échec silencieux : le diagnostic reste dans la carte « Services IA VYORA ».
+        // Échec silencieux : le diagnostic reste dans la carte « Services IA SORAHNEX ».
       } finally {
         if (!cancelled) setVerifyingKey(null);
       }
@@ -2401,7 +2401,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
   return (
     <div className="animate-fadeUp space-y-5" data-testid="business-grow">
       <header className="relative overflow-hidden rounded-[1.6rem] border border-violet-200/[0.14] bg-[#080a12] px-5 py-6 sm:px-7">
-        <img src="/brand/vyora-growth.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 [mask-image:linear-gradient(to_right,transparent,black)]" />
+        <img src="/brand/sorahnnex-growth.jpg" alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-30 [mask-image:linear-gradient(to_right,transparent,black)]" />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,#080d15_20%,rgba(8,13,21,0.4))]" />
         <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-violet-500/25 blur-[90px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 right-0 h-56 w-56 rounded-full bg-cyan-400/15 blur-[90px]" />
@@ -2410,7 +2410,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
           <div>
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-400/15 text-violet-200 ring-1 ring-violet-300/25"><Brain size={14} /></span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-200/90">VYORA · Business Grow</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-200/90">SORAHNEX · Grow</span>
               <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.14em] text-slate-400">Espace pilotage</span>
             </div>
             <h1 className="vy-title text-[1.75rem] leading-tight sm:text-[2.15rem]">Votre copilote business</h1>
@@ -2440,7 +2440,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-white">13 modules métier opérationnels</span>
             <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">
-              Récupération des revenus, intelligence commerciale, opérations et protection, reliées à vos données Business Growth.
+              Récupération des revenus, intelligence commerciale, opérations et protection, reliées à vos données Grow.
             </span>
           </span>
         </span>
@@ -2471,7 +2471,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
         </section>
       )}
 
-      <section aria-label="Indicateurs Business Grow" className="grid gap-3 sm:grid-cols-3">
+      <section aria-label="Indicateurs Grow" className="grid gap-3 sm:grid-cols-3">
         <div className="vy-surface vy-halo p-4">
           <div className="flex items-start justify-between gap-2">
             <p className="vy-metric-label">Conversations</p>
@@ -2506,7 +2506,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[232px_minmax(0,1fr)]">
-        <nav aria-label="Navigation Business Grow" className="no-scrollbar flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
+        <nav aria-label="Navigation Grow" className="no-scrollbar flex gap-1.5 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-2 backdrop-blur-xl lg:flex-col lg:self-start">
           {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -2514,7 +2514,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
               onClick={() => setSection(id)}
               aria-current={section === id ? 'page' : undefined}
               className={cn(
-                'relative flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
+                'relative flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition',
                 section === id
                   ? 'bg-gradient-to-r from-violet-400/20 to-cyan-400/[0.06] text-white shadow-[inset_0_0_0_1px_rgba(196,181,253,0.18)]'
                   : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
@@ -2525,7 +2525,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
           ))}
           <div className="hidden border-t border-white/[0.07] px-2 pt-3 lg:block">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-600">Historique</p>
-            <p className="text-xs leading-relaxed text-slate-500">{conversationsLoaded ? `${conversations.length} conversation(s) dans VYORA.` : 'Historique non chargé.'}</p>
+            <p className="text-xs leading-relaxed text-slate-500">{conversationsLoaded ? `${conversations.length} conversation(s) dans SORAHNEX.` : 'Historique non chargé.'}</p>
           </div>
         </nav>
 
@@ -2645,7 +2645,7 @@ function ScopedBusinessGrowWorkspace({ section, setSection }: { section: Busines
           {workspaceId && section === 'integrations' && (
             /*
              * Même composant que `/app/connect`, même source de vérité : un
-             * seul catalogue. Business Grow fournit ici l'entreprise active et
+             * seul catalogue. Grow fournit ici l'entreprise active et
              * son contrôleur d'état (compteurs de séquence, verrou de mutation).
              */
             <section className="vy-surface p-5 sm:p-7" data-testid="business-integrations">

@@ -254,7 +254,7 @@ export function PromptBar({
                 <Coins size={12} />
                 <span>
                   {cost !== null
-                    ? `${cost} crédits VYORA`
+                    ? `${cost} crédits SORAHNEX`
                     : needsInstruction
                       ? 'En attente d’instruction'
                       : 'Coût en cours…'}

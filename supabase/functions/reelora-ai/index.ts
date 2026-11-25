@@ -1,4 +1,4 @@
-// VYORA AI — Groq-powered script, prompt, hook and scene generation.
+// SORAHNEX AI — Groq-powered script, prompt, hook and scene generation.
 // The GROQ_API_KEY is read only here, server-side. No key is ever sent to the browser.
 // Every call consumes a plan quota through a SECURITY DEFINER RPC executed with the
 // caller's JWT; credits are never handled by this function.
@@ -145,7 +145,7 @@ async function refundQuota(kind: string, referenceId: string | null, userId: str
 const MODEL = () => env("BUSINESS_GROW_GROQ_MODEL") || env("GROQ_MODEL") || "llama-3.3-70b-versatile";
 
 // Groq's answer is returned verbatim (trimmed). An empty / unparsable answer is
-// an explicit failure: VYORA NEVER manufactures an AI response locally.
+// an explicit failure: SORAHNEX NEVER manufactures an AI response locally.
 async function groq(system: string, user: string, jsonMode: boolean, maxTokens = 2400): Promise<string> {
   const key = GROQ_KEY();
   if (!key) throw new Error("GROQ_NOT_CONFIGURED");
@@ -272,7 +272,7 @@ export async function handler(req: Request): Promise<Response> {
       quotaTaken = { kind: "script", referenceId: projectId };
 
       const template = await loadTemplate(templateId, "script", userJwt);
-      const system = "Tu es VYORA, expert en création de contenus UGC francophones. Tu produis des scripts courts, crédibles et conformes : aucune allégation chiffrée inventée, aucune promesse médicale, aucune mention de marque concurrente. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour.";
+      const system = "Tu es SORAHNEX, expert en création de contenus UGC francophones. Tu produis des scripts courts, crédibles et conformes : aucune allégation chiffrée inventée, aucune promesse médicale, aucune mention de marque concurrente. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour.";
       const user = interpolate(template, {
         duree: String(duration), produit: product, audience, plateforme: platform, ton: tone,
       }) + `\n\nBrief complémentaire :\n- Produit : ${product}\n- Audience : ${audience}\n- Plateforme : ${platform}\n- Ton : ${tone}\n- Durée cible : ${duration} secondes\n- Objectif : ${objective || "non précisé"}\n- Marché : ${market || "non précisé"}\n- Langue : français\n- Contraintes : pas de chiffre inventé, pas de promesse irréaliste, 3 à 6 scènes maximum.`;

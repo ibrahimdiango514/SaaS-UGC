@@ -1,5 +1,5 @@
 /**
- * VYORA — panneau d'import de boutique.
+ * SORAHNEX — panneau d'import de boutique.
  *
  * ## Parcours, en trois étapes visibles
  *
@@ -725,7 +725,7 @@ export function StoreImportPanel({ workspaceId, onImported, onClose }: StoreImpo
               <Globe size={13} className="text-slate-500" /> Importer depuis une URL de boutique
             </p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              Lecture effectuée par le serveur VYORA : vérification DNS, refus des
+              Lecture effectuée par le serveur SORAHNEX : vérification DNS, refus des
               adresses internes et connexion épinglée sur l’adresse contrôlée.
               Votre navigateur ne contacte jamais la boutique.
             </p>

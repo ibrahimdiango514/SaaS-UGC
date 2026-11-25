@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur Chariow : sonde de connexion et lecture du catalogue.
+ * SORAHNEX — connecteur Chariow : sonde de connexion et lecture du catalogue.
  *
  * Ce module transforme les réponses de l'API Chariow en la forme que le moteur
  * commun sait déjà traiter. Il ne réinvente rien : le prix, la devise, le stock
@@ -27,7 +27,7 @@
  *
  * `GET /v1/products` renvoie **tous** les produits, y compris `draft` et
  * `suspended`. C'est documenté par Chariow. Importer un brouillon publierait
- * dans VYORA une fiche que le marchand n'a pas encore publiée : on filtre sur
+ * dans SORAHNEX une fiche que le marchand n'a pas encore publiée : on filtre sur
  * `published`, et on **compte** ce qui a été écarté pour pouvoir le dire.
  */
 import {
@@ -184,7 +184,7 @@ export async function readChariowCatalog(
       }
       if (produit.status !== CHARIOW_PUBLISHED) {
         // Compté, jamais importé : un brouillon chez Chariow ne doit pas
-        // devenir une fiche visible dans VYORA.
+        // devenir une fiche visible dans SORAHNEX.
         draftsSkipped += 1;
         continue;
       }
@@ -285,7 +285,7 @@ export function toChariowRawProduct(
      * Chariow annonce des tarifs par variante mais ne publie AUCUNE liste de
      * variantes (ni prix, ni stock, ni identifiant par option). On le dit au
      * lieu de fabriquer des options factices : l'utilisateur peut alors
-     * compléter les déclinaisons dans VYORA en connaissance de cause.
+     * compléter les déclinaisons dans SORAHNEX en connaissance de cause.
      */
     warnings.push(
       'Ce produit a des tarifs par variante chez Chariow, que l’API ne détaille pas : le prix importé est celui affiché, sans les déclinaisons.',

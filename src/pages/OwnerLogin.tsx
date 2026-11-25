@@ -12,7 +12,7 @@ import { asAppError } from '../lib/errors';
  *
  * **Contrôle d'accès inchangé** : la session est fermée si `bootstrap()` ne
  * renvoie pas `is_admin` — un compte ordinaire ne peut pas entrer ici. Seul
- * l'habillage suit désormais le parcours d'authentification VYORA.
+ * l'habillage suit désormais le parcours d'authentification SORAHNEX.
  */
 export default function OwnerLogin() {
   const { user, isAdmin, loading, logout } = useAuth();
