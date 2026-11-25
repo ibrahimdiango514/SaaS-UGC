@@ -106,7 +106,7 @@ export default function Home() {
       <Reveal>
         <section className="relative isolate overflow-hidden rounded-[1.9rem] border border-white/[0.09] bg-[#070c13] px-5 py-7 sm:px-8 sm:py-10 lg:px-11 lg:py-12">
           <img
-            src="/brand/vyora-hero.jpg"
+            src="/brand/sorahnnex-hero.jpg"
             alt=""
             aria-hidden="true"
             className="pointer-events-none absolute inset-y-0 right-0 -z-20 hidden h-full w-[56%] object-cover object-[62%_38%] opacity-40 lg:block [mask-image:linear-gradient(to_right,transparent,black_42%)]"
