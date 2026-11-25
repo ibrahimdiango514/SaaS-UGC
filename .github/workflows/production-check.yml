@@ -33,12 +33,15 @@ jobs:
     steps:
       - name: Constat (site public + Edge Function)
         env:
-          # URL publique mesurée. Après la création du nouveau site Netlify,
-          # définir la variable de dépôt `VYORA_SITE_URL` (Settings → Secrets and
-          # variables → Actions → Variables ; valeur publique, pas un secret) :
-          # aucun commit n'est nécessaire pour viser le nouveau domaine. Tant
-          # qu'elle est absente, le domaine SORAHNEX actuel est mesuré.
-          SITE: ${{ inputs.site_url || vars.VYORA_SITE_URL || 'https://vyora-saas-ugc.netlify.app' }}
+          # URL publique mesurée. `SORAHNEX_SITE_URL` (Settings → Secrets and
+          # variables → Actions → Variables ; valeur publique, pas un secret)
+          # permet de viser un autre domaine sans commit.
+          #
+          # Le repli était `vyora-saas-ugc.netlify.app`, un site supprimé depuis
+          # le 25/11/2026 : sur un runner, la mesure tombait donc systématiquement
+          # en échec sans que personne ne sache pourquoi. Une adresse de repli
+          # doit être le site RÉEL, jamais un vestige.
+          SITE: ${{ inputs.site_url || vars.SORAHNEX_SITE_URL || 'https://sorahnex.netlify.app' }}
           FN: ${{ inputs.function_url || 'https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/store-import' }}
           VIDEO_FN: https://xbuuhfwobrafcbgtdgjx.supabase.co/functions/v1/reelora-video
           # Clé publique, identique à celle livrée au navigateur : aucun secret.
