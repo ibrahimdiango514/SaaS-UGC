@@ -114,7 +114,8 @@ Toutes sont **publiques** (compilées dans le bundle ou lues par le build). Aucu
 
 | Variable | Valeur | Rôle |
 | --- | --- | --- |
-| `VYORA_BUILD_ENABLED` | `true` (exactement, minuscules, sans espace ni guillemets) | Opt-in de la garde de `netlify.toml`. **Absente** (cas de `ca410d5`) ou toute autre valeur (`false`, `TRUE`, `1`) = build annulé. |
+| `VYORA_BUILD_ENABLED` | `true` (exactement, minuscules, sans espace ni guillemets) | Opt-in technique de la garde de `netlify.toml`. **Absente** (cas de `ca410d5`) ou toute autre valeur (`false`, `TRUE`, `1`) = build annulé. |
+| `SORAHNEX_DEPLOY_AUTHORIZED` | `true` (exactement) — **à ne déclarer qu'au moment voulu** | **Autorisation humaine de publier.** Absente = aucun déploiement, même sur `main` avec tout le reste correct. C'est le verrou de crédits du 2026-11-25 : voir §3bis. |
 | `VITE_SUPABASE_URL` | `https://xbuuhfwobrafcbgtdgjx.supabase.co` | Projet Supabase (inchangé). |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz` | Clé publiable (publique, livrée au navigateur). |
 | `VITE_SITE_URL` | `<NOUVELLE_URL_NETLIFY>` sans `/` final | Adresse de retour après connexion / lien magique. Si absente, le code se replie sur `window.location.origin` ; la renseigner évite toute ambiguïté. |
@@ -139,6 +140,74 @@ Facultatif : `NPM_FLAGS` et `NODE_VERSION` sont déjà dans `netlify.toml`.
    `GARDE NETLIFY — build autorisé : site fc88d197-… (vyora-saas-ugc), branche main.` suivi de `npm ci`.
    Pas de *Trigger deploy* manuel.
 
+
+---
+
+## 3bis. Verrou de crédits (2026-11-25) — publier exige une autorisation humaine
+
+### Ce que coûtent réellement les crédits
+
+Tarification Netlify en vigueur (modèle à crédits, depuis le 4 septembre 2025) :
+
+| Action | Coût |
+| --- | --- |
+| **Déploiement de production réussi** | **15 crédits** |
+| Aperçu de PR (*Deploy Preview*), déploiement de branche | **0** |
+| Build **annulé** par `ignore`, build en échec, retour arrière | **0** |
+| Bande passante servie aux visiteurs | 20 crédits / Go |
+| Requêtes web | 2 crédits / 10 000 |
+| Compute des fonctions (dont les relais Edge) | 10 crédit / Go-heure |
+
+Les minutes de build ne sont plus comptées : un build de 10 s et un build de 10 min
+coûtent le même prix s'ils publient en production.
+
+**Conséquence à ne pas ignorer :** la bande passante et les requêtes du site **déjà
+en ligne** consomment le même pool. Avec 4 crédits restants, le site actuel peut
+être **mis en pause par Netlify de lui-même** (épuisement du pool = tous les sites
+de l'équipe en pause), sans qu'aucun déploiement n'ait eu lieu. S'abstenir de
+publier ne garantit donc pas que l'ancienne URL reste servie. C'est une raison de
+plus de préparer la bascule, et de ne pas compter sur l'ancienne URL pour les
+vérifications de long terme.
+
+### Pourquoi un cinquième verrou était nécessaire
+
+Les quatre conditions historiques étaient **toutes vraies** sur le site en service
+(`BRANCH=main`, bon `SITE_ID`, bon `SITE_NAME`, `VYORA_BUILD_ENABLED=true`) : il
+publiait. Une simple fusion de PR vers `main` — geste normal de développement —
+déclenchait donc un déploiement à 15 crédits. La garde protégeait contre les
+**mauvais sites**, pas contre les **publications non désirées**.
+
+`SORAHNEX_DEPLOY_AUTHORIZED` comble exactement ce trou : elle n'est déclarée
+**nulle part**, donc les deux rideaux refusent, et le développement peut continuer
+(pousser, ouvrir des PR, faire tourner la CI) sans qu'aucune fusion puisse publier.
+`tests/business-grow-deployment-guard.test.ts` rejoue ce scénario précis avec le
+vrai `sh` : « site en service + fusion vers `main`, sans autorisation → bloqué par
+les deux rideaux ».
+
+### Ce qui est sûr, ce qui ne l'est pas
+
+| Opération | Effet Netlify | Autorisé pendant le gel |
+| --- | --- | --- |
+| Push sur `arena/**` | aperçu annulé par `BRANCH=main`, et de toute façon gratuit | oui |
+| Ouvrir une PR vers `main` | aperçu annulé, gratuit | oui |
+| CI GitHub (`ci.yml`), constat (`production-check.yml`) | aucun build Netlify ; quelques requêtes HTTP vers le site (≈ 0,002 crédit) | oui |
+| **Fusionner une PR vers `main`** | build de production → **15 crédits** si le verrou est levé | **non** |
+| « Trigger deploy » manuel, build hook | build de production | **non** |
+| Workflow `frontend-cloudflare-pages.yml` | aucun (Cloudflare), `workflow_dispatch` uniquement | sur demande |
+
+### Procédure pour publier, le jour venu (nouveau compte)
+
+1. Créer le site (§2) et relever **son `SITE_ID` et son nom**.
+2. Ouvrir une PR qui remplace l'identité épinglée aux **deux** endroits :
+   `[build].command` (arguments de `netlify-build-guard.sh`) et `[build].ignore`.
+   Les tests vérifient la cohérence des deux.
+3. Déclarer sur le nouveau site : `VYORA_BUILD_ENABLED=true`, les `VITE_*` (§3),
+   et **en dernier, au moment voulu**, `SORAHNEX_DEPLOY_AUTHORIZED=true`.
+4. Fusionner la PR validée : c'est le seul geste qui publie. Un seul déploiement
+   groupé vaut mieux que plusieurs (15 crédits chacun).
+5. Vérifier §7. Puis, pour re-geler, retirer `SORAHNEX_DEPLOY_AUTHORIZED`.
+
+Tant que l'étape 3 n'est pas faite, aucune fusion ne peut consommer de crédit.
 
 ---
 

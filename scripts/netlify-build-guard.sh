@@ -16,10 +16,16 @@
 #
 # Règles (toutes doivent être vraies) :
 #   1. VYORA_BUILD_ENABLED = "true"   — opt-in explicite déclaré sur le site ;
-#   2. BRANCH = "main"                — seule source déployée en production ;
-#   3. SITE_NAME ≠ "vyora-ugc"        — nom de l'ANCIEN site : refus explicite ;
-#   4. SITE_ID présent ET égal à l'identifiant autorisé ;
-#   5. SITE_NAME présent ET égal au nom autorisé (nouveau site).
+#   2. SORAHNEX_DEPLOY_AUTHORIZED = "true" — AUTORISATION HUMAINE de publier ;
+#   3. BRANCH = "main"                — seule source déployée en production ;
+#   4. SITE_NAME ≠ "vyora-ugc"        — nom de l'ANCIEN site : refus explicite ;
+#   5. SITE_ID présent ET égal à l'identifiant autorisé ;
+#   6. SITE_NAME présent ET égal au nom autorisé (nouveau site).
+#
+# 2026-11-25 — verrou de crédits : un déploiement de production réussi coûte
+# 15 crédits Netlify. La règle 2 n'est satisfaite que si un humain a déclaré
+# cette variable sur le site ; absente, elle refuse. Un push, une fusion de PR ou
+# un « Trigger deploy » manuel ne peuvent donc plus publier sans autorisation.
 set -u
 
 attendu_id="${1:-}"
@@ -28,7 +34,7 @@ ANCIEN_SITE_NAME="vyora-ugc"
 
 refuser() {
   echo "GARDE NETLIFY — build refusé : $1" >&2
-  echo "  SITE_ID=${SITE_ID:-<absent>} SITE_NAME=${SITE_NAME:-<absent>} BRANCH=${BRANCH:-<absent>} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-<absent>}" >&2
+  echo "  SITE_ID=${SITE_ID:-<absent>} SITE_NAME=${SITE_NAME:-<absent>} BRANCH=${BRANCH:-<absent>} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-<absent>} SORAHNEX_DEPLOY_AUTHORIZED=${SORAHNEX_DEPLOY_AUTHORIZED:-<absent>}" >&2
   echo "  Site autorisé : ${attendu_id:-<non fourni>} / ${attendu_nom:-<non fourni>} (voir netlify.toml et docs/migration-nouveau-netlify.md §3)." >&2
   exit 1
 }
@@ -43,6 +49,7 @@ case "$attendu_nom" in
 esac
 
 [ "${VYORA_BUILD_ENABLED:-}" = "true" ] || refuser "VYORA_BUILD_ENABLED doit valoir exactement « true » sur ce site (Site configuration → Environment variables)"
+[ "${SORAHNEX_DEPLOY_AUTHORIZED:-}" = "true" ] || refuser "SORAHNEX_DEPLOY_AUTHORIZED doit valoir exactement « true » : publier coûte 15 crédits Netlify et exige une autorisation humaine explicite (variable à déclarer sur le site, voir docs/migration-nouveau-netlify.md)"
 [ "${BRANCH:-}" = "main" ] || refuser "seule la branche main est déployée (branche reçue : ${BRANCH:-<absente>})"
 [ "${SITE_NAME:-}" != "$ANCIEN_SITE_NAME" ] || refuser "ce site porte le nom de l'ANCIEN site (${ANCIEN_SITE_NAME}) : aucun déploiement n'y est autorisé"
 [ -n "${SITE_ID:-}" ] || refuser "SITE_ID absent de l'environnement de build : identité du site invérifiable"

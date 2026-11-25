@@ -18,8 +18,14 @@ import { describe, expect, it } from 'vitest';
  * Preuve de terrain (journal du déploiement `ca410d5`, 2026-11-18) :
  *   BRANCH=main VYORA_BUILD_ENABLED=absent SITE_ID=fc88d197-… SITE_NAME=vyora-saas-ugc
  * Netlify expose donc bien `SITE_ID` et `SITE_NAME` à l'étape `ignore` ; seule
- * la variable d'opt-in manquait. Les deux rideaux exigent désormais les QUATRE
+ * la variable d'opt-in manquait. Les deux rideaux exigent désormais les CINQ
  * conditions, fermés par défaut, et l'ancien site reste refusé explicitement.
+ *
+ * 2026-11-25 — cinquième condition, `SORAHNEX_DEPLOY_AUTHORIZED` : un déploiement
+ * de production réussi coûte 15 crédits Netlify. Les quatre conditions
+ * historiques étaient toutes vraies sur le site en service, donc une fusion vers
+ * `main` suffisait à publier. Cette variable n'est déclarée nulle part : publier
+ * exige maintenant une autorisation humaine, et non un effet de bord de Git.
  */
 const config = readFileSync(new URL('../netlify.toml', import.meta.url), 'utf8');
 const ignoreCommand = config.match(/^\s*ignore\s*=\s*'([^']+)'\s*$/m)?.[1];
@@ -42,10 +48,19 @@ const SITE_ID_TEST_INCONNU = '0b7d3a6e-1c2f-4e5a-9d8b-7f6e5d4c3b2a';
 
 type Env = Record<string, string>;
 const nouveauSite = (extra: Env = {}): Env => ({
-  SITE_ID: NOUVEAU_SITE_ID!, SITE_NAME: NOUVEAU_SITE_NAME!, VYORA_BUILD_ENABLED: 'true', BRANCH: 'main', HEAD: 'main', ...extra,
+  SITE_ID: NOUVEAU_SITE_ID!, SITE_NAME: NOUVEAU_SITE_NAME!, VYORA_BUILD_ENABLED: 'true', SORAHNEX_DEPLOY_AUTHORIZED: 'true', BRANCH: 'main', HEAD: 'main', ...extra,
 });
 const ancienSite = (extra: Env = {}): Env => ({
-  SITE_ID: SITE_ID_TEST_INCONNU, SITE_NAME: ANCIEN_SITE_NAME, VYORA_BUILD_ENABLED: 'true', BRANCH: 'main', HEAD: 'main', ...extra,
+  SITE_ID: SITE_ID_TEST_INCONNU, SITE_NAME: ANCIEN_SITE_NAME, VYORA_BUILD_ENABLED: 'true', SORAHNEX_DEPLOY_AUTHORIZED: 'true', BRANCH: 'main', HEAD: 'main', ...extra,
+});
+/**
+ * État RÉEL du site en service au 2026-11-25 : les quatre conditions historiques
+ * sont vraies (il publie), l'autorisation n'est pas déclarée. C'est exactement la
+ * configuration dans laquelle une fusion vers `main` coûtait 15 crédits.
+ */
+const siteEnServiceSansAutorisation = (extra: Env = {}): Env => ({
+  ...sans(nouveauSite(), 'SORAHNEX_DEPLOY_AUTHORIZED'),
+  ...extra,
 });
 /** Retire des variables de l'environnement (variable non déclarée sur le site). */
 const sans = (env: Env, ...cles: string[]): Env => Object.fromEntries(Object.entries(env).filter(([k]) => !cles.includes(k)));
@@ -127,8 +142,8 @@ describe('Scénarios exigés — les deux rideaux ensemble', () => {
     expect(r.refuse).toBe(false);
     expect(r.sortie).toContain(`build autorisé : site ${SITE_ID_PROD} (${SITE_NAME_PROD}), branche main`);
     expect(publicationAutorisee(env)).toBe(true);
-    // Preuve de terrain : les valeurs exactes du journal + la variable déclarée.
-    expect(publicationAutorisee({ BRANCH: 'main', SITE_ID: SITE_ID_PROD, SITE_NAME: SITE_NAME_PROD, VYORA_BUILD_ENABLED: 'true' })).toBe(true);
+    // Preuve de terrain : les valeurs exactes du journal + les variables déclarées.
+    expect(publicationAutorisee({ BRANCH: 'main', SITE_ID: SITE_ID_PROD, SITE_NAME: SITE_NAME_PROD, VYORA_BUILD_ENABLED: 'true', SORAHNEX_DEPLOY_AUTHORIZED: 'true' })).toBe(true);
   });
 
   it('mauvais Site ID → publication bloquée (autre UUID, casse, préfixe, troncature, absent)', () => {
@@ -156,6 +171,54 @@ describe('Scénarios exigés — les deux rideaux ensemble', () => {
     expect(ignoreAnnule(nouveauSite({ BRANCH: branch, HEAD: 'main' }))).toBe(true); // Deploy Preview visant main
     expect(publicationAutorisee(ancienSite({ BRANCH: branch, HEAD: branch }))).toBe(false);
     expect(garde(nouveauSite({ BRANCH: branch })).sortie).toContain(`branche reçue : ${branch}`);
+  });
+});
+
+describe('Verrou de crédits — autorisation humaine explicite (2026-11-25)', () => {
+  it('le cas qui coûtait 15 crédits : site en service + fusion vers main, SANS autorisation → bloqué par les deux rideaux', () => {
+    const env = siteEnServiceSansAutorisation();
+    // Les quatre conditions historiques sont bien toutes vraies…
+    expect(env.BRANCH).toBe('main');
+    expect(env.SITE_ID).toBe(SITE_ID_PROD);
+    expect(env.SITE_NAME).toBe(SITE_NAME_PROD);
+    expect(env.VYORA_BUILD_ENABLED).toBe('true');
+    // …et pourtant rien ne se publie : l'autorisation manque.
+    expect(ignoreAnnule(env)).toBe(true);
+    const r = garde(env);
+    expect(r.refuse).toBe(true);
+    expect(r.sortie).toContain('SORAHNEX_DEPLOY_AUTHORIZED doit valoir exactement « true »');
+    expect(r.sortie).toContain('15 crédits Netlify');
+    expect(r.sortie).toContain('SORAHNEX_DEPLOY_AUTHORIZED=<absent>');
+    expect(publicationAutorisee(env)).toBe(false);
+  });
+
+  it('déclarer l’autorisation lève le verrou, sans affaiblir aucune autre condition', () => {
+    expect(publicationAutorisee(siteEnServiceSansAutorisation({ SORAHNEX_DEPLOY_AUTHORIZED: 'true' }))).toBe(true);
+    // Autorisation présente mais autre condition manquante : toujours refusé.
+    expect(publicationAutorisee(sans(nouveauSite(), 'VYORA_BUILD_ENABLED'))).toBe(false);
+    expect(publicationAutorisee(nouveauSite({ BRANCH: 'arena/x' }))).toBe(false);
+    expect(publicationAutorisee(nouveauSite({ SITE_ID: SITE_ID_TEST_INCONNU }))).toBe(false);
+    expect(publicationAutorisee(ancienSite())).toBe(false);
+  });
+
+  it.each(['', 'false', '1', 'TRUE', ' true', 'oui'])('valeur « %s » ≠ « true » exact → publication bloquée', (valeur) => {
+    const env = siteEnServiceSansAutorisation({ SORAHNEX_DEPLOY_AUTHORIZED: valeur });
+    expect(ignoreAnnule(env)).toBe(true);
+    expect(garde(env).refuse).toBe(true);
+  });
+
+  it("l’autorisation SEULE ne suffit pas (site relié par erreur, environnement vide)", () => {
+    expect(ignoreAnnule({ SORAHNEX_DEPLOY_AUTHORIZED: 'true' })).toBe(true);
+    expect(garde({ SORAHNEX_DEPLOY_AUTHORIZED: 'true' }).refuse).toBe(true);
+  });
+
+  it('les deux rideaux exigent la même variable, et elle est journalisée pour être diagnostiquable', () => {
+    expect(ignoreCommand).toContain('[ "$SORAHNEX_DEPLOY_AUTHORIZED" = "true" ]');
+    expect(readFileSync('scripts/netlify-build-guard.sh', 'utf8')).toContain('[ "${SORAHNEX_DEPLOY_AUTHORIZED:-}" = "true" ]');
+    expect(run(ignoreCommand!, siteEnServiceSansAutorisation()).stdout)
+      .toContain('SORAHNEX_DEPLOY_AUTHORIZED=absent');
+    expect(run(ignoreCommand!, nouveauSite()).stdout)
+      .toContain('SORAHNEX_DEPLOY_AUTHORIZED=true');
   });
 });
 

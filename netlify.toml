@@ -2,11 +2,23 @@
   # ---------------------------------------------------------------------------
   # GARDE DE BUILD À DEUX RIDEAUX (2026-11-18, nouveau compte Netlify)
   #
-  # Site de production autorisé — les QUATRE conditions sont exigées :
-  #   BRANCH              = main
-  #   SITE_ID             = fc88d197-fe0b-47c7-a6e3-fba44eeccda9
-  #   SITE_NAME           = vyora-saas-ugc   (https://vyora-saas-ugc.netlify.app)
-  #   VYORA_BUILD_ENABLED = true             (variable à déclarer sur le site)
+  # Site de production autorisé — les CINQ conditions sont exigées :
+  #   BRANCH                     = main
+  #   SITE_ID                    = fc88d197-fe0b-47c7-a6e3-fba44eeccda9
+  #   SITE_NAME                  = vyora-saas-ugc   (https://vyora-saas-ugc.netlify.app)
+  #   VYORA_BUILD_ENABLED        = true       (variable à déclarer sur le site)
+  #   SORAHNEX_DEPLOY_AUTHORIZED = true       (AUTORISATION HUMAINE explicite)
+  #
+  # 2026-11-25 — VERROU DE CRÉDITS. Le compte Netlify n'a plus que quelques
+  # crédits ; un déploiement de production réussi en coûte 15. Les quatre
+  # conditions historiques étaient TOUTES vraies sur le site actuel : une fusion
+  # vers `main`, même accidentelle, publierait et consommerait des crédits.
+  # `SORAHNEX_DEPLOY_AUTHORIZED` n'est déclarée NULLE part : elle est donc absente,
+  # et les deux rideaux refusent. Publier redevient possible uniquement quand un
+  # humain déclare cette variable à « true » sur le site voulu — c'est la
+  # signature de l'autorisation, pas un effet de bord d'un push ou d'une fusion.
+  # Les aperçus de PR et déploiements de branche ne coûtent aucun crédit, et de
+  # toute façon `BRANCH=main` les exclut déjà.
   # L'ancien site (nom « vyora-ugc », ancien compte) est refusé explicitement,
   # en plus de l'être par l'identité positive ci-dessus.
   #
@@ -30,7 +42,7 @@
   # ---------------------------------------------------------------------------
   command = "sh scripts/netlify-build-guard.sh fc88d197-fe0b-47c7-a6e3-fba44eeccda9 vyora-saas-ugc && npm ci && npm run build"
   publish = "dist"
-  ignore = 'echo "garde ignore: BRANCH=${BRANCH:-absent} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-absent} SITE_ID=${SITE_ID:-absent} SITE_NAME=${SITE_NAME:-absent}"; if [ "$SITE_NAME" != "vyora-ugc" ] && [ "$VYORA_BUILD_ENABLED" = "true" ] && [ "$BRANCH" = "main" ] && [ "$SITE_ID" = "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ] && [ "$SITE_NAME" = "vyora-saas-ugc" ]; then echo "garde ignore: build autorise"; exit 1; else echo "garde ignore: build annule (conditions non reunies)"; exit 0; fi'
+  ignore = 'echo "garde ignore: BRANCH=${BRANCH:-absent} VYORA_BUILD_ENABLED=${VYORA_BUILD_ENABLED:-absent} SITE_ID=${SITE_ID:-absent} SITE_NAME=${SITE_NAME:-absent} SORAHNEX_DEPLOY_AUTHORIZED=${SORAHNEX_DEPLOY_AUTHORIZED:-absent}"; if [ "$SORAHNEX_DEPLOY_AUTHORIZED" = "true" ] && [ "$SITE_NAME" != "vyora-ugc" ] && [ "$VYORA_BUILD_ENABLED" = "true" ] && [ "$BRANCH" = "main" ] && [ "$SITE_ID" = "fc88d197-fe0b-47c7-a6e3-fba44eeccda9" ] && [ "$SITE_NAME" = "vyora-saas-ugc" ]; then echo "garde ignore: build autorise"; exit 1; else echo "garde ignore: build annule (conditions non reunies)"; exit 0; fi'
 
 [build.environment]
   NODE_VERSION = "22"
