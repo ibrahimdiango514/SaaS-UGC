@@ -48,11 +48,25 @@ Tout ce qui suit ne consomme aucun crédit et ne dépend pas du nouveau site.
 
 ## Étape 2 — Préparer le dépôt pour le nouveau site (PR, sans fusionner)
 
-> ✅ **FAIT le 25 novembre 2026.** Le site autorisé est désormais `saas-ugc`
-> (`6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803`). `vyora-saas-ugc` est passé en
-> `ANCIEN_SITE_ID` : il est refusé nommément, même si ses trois variables
-> d'autorisation étaient déclarées — pour qu'une bascule ne republie jamais par
-> accident sur l'ancien hébergement.
+> ✅ **FAIT le 25 novembre 2026 (compte Netlify neuf).** Le dépôt est en **mode
+> premier déploiement** : `PREMIER_DEPLOIEMENT=true` dans `netlify.site.conf`,
+> et **aucun** `SITE_ID` déclaré — c'est Netlify qui attribue l'identifiant à
+> l'import, donc on ne peut pas le connaître à l'avance.
+>
+> Dans ce mode, **seule la vérification d'identité est suspendue**. Les trois
+> autres verrous restent exigés :
+>
+> | Verrou | Valeur exigée |
+> |---|---|
+> | Branche | `main` uniquement |
+> | Opt-in de build | `VYORA_BUILD_ENABLED=true` |
+> | Autorisation humaine | `SORAHNEX_DEPLOY_AUTHORIZED=true` + `SORAHNEX_DEPLOY_AUTHORIZED_NAME=sorahnex-deploy` |
+>
+> Conséquence utile : un simple `git push` sur `main` **sans** ces variables
+> reste annulé par le rideau 1 (0 crédit). Le premier build ne part donc que
+> d'un acte volontaire (« Trigger deploy » dans l'interface, ou déclaration des
+> variables puis push). `vyora-ugc` (`fc88d197-…`) reste refusé nommément dans
+> tous les cas.
 
 - [ ] Pour un futur changement, remplacer les **deux** valeurs dans `netlify.site.conf` :
 
@@ -79,9 +93,46 @@ SITE_NAME=<nouveau-nom>
       `grep -rn "fc88d197\|vyora-saas-ugc" --include=*.toml --include=*.sh --include=*.conf .`
       → ne doit apparaître **que** dans des commentaires historiques.
 - [ ] `npx vitest run tests/netlify-deployment-guard.test.ts` → vert.
-      Le test « après remplacement de l'identité, le NOUVEAU site passe et
-      l'ancien est refusé » couvre exactement ce changement.
+      Deux blocs distincts : les règles ordinaires sont vérifiées sur une copie
+      au verrouillage complet, et le mode premier déploiement sur le vrai dépôt.
+
+### Après le premier déploiement réussi — refermer l'ouverture
+
+- [ ] Relever le Site ID : **Site configuration → General → Site ID**.
+- [ ] Le déclarer : `SITE_ID=<valeur relevée>` dans `netlify.site.conf`.
+- [ ] **Retirer `PREMIER_DEPLOIEMENT=true`** de ce même fichier. Tant qu'il est
+      là, l'identité n'est pas vérifiée : n'importe quel site du compte pourrait
+      construire ce dépôt.
+- [ ] `npx vitest run tests/netlify-deployment-guard.test.ts` → le test
+      « le dépôt est actuellement en mode premier déploiement » doit maintenant
+      **échouer** : c'est la confirmation que le verrou est refermé.
 - [ ] Ouvrir une PR. **Ne pas fusionner** tant que l'étape 4 n'est pas atteinte.
+
+---
+
+### Si le build est refusé alors que les trois variables sont déclarées
+
+Cas vécu le 25/11/2026 : le site et les trois variables étaient bons, et le build
+était quand même refusé. La cause était une **comparaison de valeur exacte**, et
+elle était écrite *avant* les lignes que Netlify conserve dans son journal — donc
+invisible dans l'extrait de 8 lignes.
+
+Deux corrections ont été apportées à la garde :
+
+1. **La raison est répétée en dernière ligne**, préfixée `À CORRIGER :`. C'est la
+   seule partie qu'on est certain de voir quand Netlify tronque.
+2. **Un diagnostic nomme le piège de saisie** quand la valeur est *presque*
+   correcte : espace final, retour chariot d'un copier-coller Windows, majuscule,
+   tiret oublié. La longueur en caractères est affichée pour lever le doute.
+
+Le cas le plus fréquent, et le plus invisible : `sorahnex-deploy ` avec un espace
+final. La valeur paraît juste à l'écran. La garde compare à l'identique — c'est
+ce qui empêche de contourner le verrou en renommant — et le dit désormais.
+
+**Ce qu'il ne faut surtout pas faire** : retirer la garde de `netlify.toml`
+(`command = "npm ci && npm run build"`) pour « tester ». Cela supprimerait le
+verrou de crédits sur le seul site de production, et un push publierait seul. Si
+le refus persiste, lire la ligne `À CORRIGER` et corriger la variable.
 
 ---
 

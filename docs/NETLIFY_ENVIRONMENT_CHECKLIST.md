@@ -66,7 +66,7 @@ pas les déclarer à la main, cela masquerait la vraie valeur.
 
 | Fichier | Contenu |
 | --- | --- |
-| `netlify.site.conf` | `SITE_ID`, `SITE_NAME`, `ANCIEN_SITE_NAME`, `ANCIEN_SITE_ID`. **Seule source de vérité**, lue par les deux rideaux. Migrer = remplacer deux valeurs et déplacer l'ancienne identité sur `ANCIEN_SITE_ID`, par PR. |
+| `netlify.site.conf` | `SITE_ID` (fait foi), `SITE_NAME` ou `SITE_NAME_FACULTATIF`, `ANCIEN_SITE_NAME`, `ANCIEN_SITE_ID`. **Seule source de vérité**, lue par les deux rideaux. Migrer = `sh scripts/netlify-autoriser-site.sh <SITE_ID> <SITE_NAME>`, qui déplace l'ancien sur `ANCIEN_SITE_ID`. |
 
 ---
 
@@ -150,8 +150,8 @@ Aucune n'est nécessaire pour que l'application fonctionne.
 
 | # | Action | Où | Pourquoi |
 | --- | --- | --- | --- |
-| 1 | Fournir le **nom** et le **Site ID** du nouveau site | — | Nécessaires pour `netlify.site.conf` |
-| 2 | Créer le site et le relier au dépôt | Netlify | Hors dépôt |
+| 1 | Créer le site et **importer le dépôt** | Netlify | Le dépôt est en mode premier déploiement : aucun Site ID n'est exigé au préalable, puisque Netlify l'attribue à l'import |
+| 2 | Relever le **Site ID** et le déclarer après le premier build réussi | Netlify → `netlify.site.conf` | À faire **dans cet ordre**, puis retirer `PREMIER_DEPLOIEMENT=true` |
 | 3 | Déclarer les 3 variables `VITE_*` | Netlify | Sans elles, le site ne joint pas le backend |
 | 4 | Déclarer `VYORA_BUILD_ENABLED=true` | Netlify | Opt-in de build |
 | 5 | Déclarer les 2 variables d'autorisation **au dernier moment** | Netlify | Verrou de crédits |

@@ -42,6 +42,8 @@ FICHIER_IDENTITE="netlify.site.conf"
 charger_identite() {
   ID_ATTENDU=""
   NOM_ATTENDU=""
+  NOM_FACULTATIF=""
+  PREMIER_DEPLOIEMENT=""
   ANCIEN_NOM=""
   ANCIEN_ID=""
   ID_DECLARE=""
@@ -61,11 +63,39 @@ charger_identite() {
     case "$_cle" in
       SITE_ID) ID_ATTENDU=$_valeur ;;
       SITE_NAME) NOM_ATTENDU=$_valeur ;;
+      SITE_NAME_FACULTATIF) NOM_FACULTATIF=$_valeur ;;
+      PREMIER_DEPLOIEMENT) PREMIER_DEPLOIEMENT=$_valeur ;;
       ANCIEN_SITE_NAME) ANCIEN_NOM=$_valeur ;;
       ANCIEN_SITE_ID) ANCIEN_ID=$_valeur ;;
       A_DECLARER) ID_DECLARE=$_valeur ;;
     esac
   done < "$_fichier"
+}
+
+# --- Comparaison EXACTE, avec diagnostic des pièges de saisie ---------------
+# Constat : « la variable est déclarée, la garde refuse quand même » vient
+# presque toujours d'un caractère invisible — espace final collé au copier-coller,
+# retour chariot d'un éditeur Windows, guillemets ajoutés par le tableau de bord.
+# Comparer à l'identique est la bonne règle ; ne pas dire POURQUOI c'est
+# différent est le défaut. Cette fonction nomme le piège.
+# $1 = valeur reçue, $2 = valeur attendue, $3 = nom de la variable.
+# Rend 0 si identique, 1 sinon (et explique sur stderr).
+comparer_exact() {
+  _recue=$1
+  _attendue=$2
+  _nom=$3
+  if [ "$_recue" = "$_attendue" ]; then
+    return 0
+  fi
+  # Retire espaces/tabulations/retours chariot de bord, puis compare.
+  _nete=$(printf '%s' "$_recue" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+  if [ "$_nete" = "$_attendue" ]; then
+    echo "DIAGNOSTIC : $_nom contient des espaces ou un retour chariot de bord. La valeur est bonne, la saisie ne l'est pas. Corrige la variable dans Netlify (Site configuration → Environment variables), sans espace ni retour à la ligne." >&2
+  else
+    _longueur=$(printf '%s' "$_recue" | wc -c | tr -d ' ')
+    echo "DIAGNOSTIC : $_nom vaut « $_recue » ($_longueur caractères), alors que la valeur exacte attendue est « $_attendue ». La comparaison est stricte, y compris la casse : c'est ce qui empêche de contourner la garde en renommant." >&2
+  fi
+  return 1
 }
 
 # --- Verrou d'autorisation humaine ------------------------------------------
@@ -92,13 +122,45 @@ verifier_garde() {
   if ! charger_identite "$ICI_DEPOT"; then
     return 1
   fi
+  # 0. PREMIER DÉPLOIEMENT : ouverture UNIQUE, et seulement pour l'identité.
+  if [ "$PREMIER_DEPLOIEMENT" = "true" ]; then
+    {
+      echo "======================================================================"
+      echo "GARDE NETLIFY — MODE PREMIER DÉPLOIEMENT (PREMIER_DEPLOIEMENT=true)"
+      echo "L'identité du site n'est pas encore déclarée : Netlify l'attribue à"
+      echo "l'import. L'identité n'est donc PAS vérifiée pour ce build."
+      echo "APRÈS succès : relever le Site ID (Site configuration → General), le"
+      echo "déclarer dans netlify.site.conf, puis RETIRER PREMIER_DEPLOIEMENT=true."
+      echo "======================================================================"
+    } >&2
+    # Tout le reste reste EXIGÉ : branche, autorisation humaine, opt-in.
+    if [ "${BRANCH:-}" != "main" ]; then
+      refuser "premier déploiement : seule la branche main est acceptée (branche reçue : ${BRANCH:-<absente>})." || return 1
+    fi
+    if [ "${SORAHNEX_DEPLOY_AUTHORIZED:-}" != "true" ]; then
+      refuser "premier déploiement : l'autorisation humaine reste EXIGÉE. Déclarez SORAHNEX_DEPLOY_AUTHORIZED=true, puis SORAHNEX_DEPLOY_AUTHORIZED_NAME=$AUTORISATION_DEPLOIEMENT_NOM." || return 1
+    fi
+    if [ "${SORAHNEX_DEPLOY_AUTHORIZED_NAME:-}" != "$AUTORISATION_DEPLOIEMENT_NOM" ]; then
+      refuser "premier déploiement : jeton d'autorisation absent ou incorrect (SORAHNEX_DEPLOY_AUTHORIZED_NAME=$AUTORISATION_DEPLOIEMENT_NOM)." || return 1
+    fi
+    if [ "${VYORA_BUILD_ENABLED:-}" != "true" ]; then
+      refuser "premier déploiement : VYORA_BUILD_ENABLED doit valoir exactement « true »." || return 1
+    fi
+    return 0
+  fi
+
   case "$ID_ATTENDU" in
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-    *) refuser "SITE_ID autorisé absent ou mal formé dans $FICHIER_IDENTITE (UUID minuscule attendu)" || return 1 ;;
+    *) refuser "SITE_ID autorisé absent ou mal formé dans $FICHIER_IDENTITE (UUID minuscule attendu). Pour un premier déploiement, déclarez PREMIER_DEPLOIEMENT=true." || return 1 ;;
   esac
-  case "$NOM_ATTENDU" in
-    '' | *[!a-z0-9-]*) refuser "SITE_NAME autorisé absent ou mal formé dans $FICHIER_IDENTITE (minuscules, chiffres, tirets)" || return 1 ;;
-  esac
+  if [ -z "$NOM_ATTENDU" ] && [ "$NOM_FACULTATIF" != "true" ]; then
+    refuser "SITE_NAME autorisé absent de $FICHIER_IDENTITE, et le nom n'est pas déclaré facultatif. Rien ne se publie sur une identité incomplète." || return 1
+  fi
+  if [ -n "$NOM_ATTENDU" ]; then
+    case "$NOM_ATTENDU" in
+      '' | *[!a-z0-9-]*) refuser "SITE_NAME autorisé mal formé dans $FICHIER_IDENTITE (minuscules, chiffres, tirets)" || return 1 ;;
+    esac
+  fi
   if [ -n "$ANCIEN_NOM" ] && [ "$NOM_ATTENDU" = "$ANCIEN_NOM" ]; then
     refuser "le nom autorisé ne peut pas être celui de l'ancien site ($ANCIEN_NOM)" || return 1
   fi
@@ -135,7 +197,7 @@ verifier_garde() {
   if [ -n "$ANCIEN_NOM" ] && [ "$SITE_NAME" = "$ANCIEN_NOM" ]; then
     refuser "ce site porte le nom de l'ANCIEN site ($ANCIEN_NOM) : aucun déploiement n'y est autorisé." || return 1
   fi
-  if [ "$SITE_NAME" != "$NOM_ATTENDU" ]; then
+  if [ -n "$NOM_ATTENDU" ] && [ "$SITE_NAME" != "$NOM_ATTENDU" ]; then
     refuser "ce site s'appelle « $SITE_NAME », le site autorisé s'appelle « $NOM_ATTENDU »." || return 1
   fi
 
@@ -145,16 +207,16 @@ verifier_garde() {
   fi
 
   # 6-7. Autorisation humaine.
-  if [ "${SORAHNEX_DEPLOY_AUTHORIZED:-}" != "true" ]; then
-    refuser "AUTORISATION HUMAINE ABSENTE. Un déploiement de production réussi coûte 15 crédits Netlify. Déclarez $AUTORISATION_DEPLOIEMENT=true sur CE site, juste avant de publier, puis retirez-la. Voir docs/NETLIFY_DEPLOYMENT_CHECKLIST.md." || return 1
+  if ! comparer_exact "${SORAHNEX_DEPLOY_AUTHORIZED:-}" "true" "$AUTORISATION_DEPLOIEMENT"; then
+    refuser "règle 6/8 — AUTORISATION HUMAINE ABSENTE. Un déploiement de production réussi coûte 15 crédits Netlify. Déclarez $AUTORISATION_DEPLOIEMENT=true sur CE site, juste avant de publier, puis retirez-la. Voir docs/NETLIFY_DEPLOYMENT_CHECKLIST.md." || return 1
   fi
-  if [ "${SORAHNEX_DEPLOY_AUTHORIZED_NAME:-}" != "$AUTORISATION_DEPLOIEMENT_NOM" ]; then
-    refuser "jeton d'autorisation absent ou incorrect. La variable $AUTORISATION_DEPLOIEMENT doit être accompagnée de SORAHNEX_DEPLOY_AUTHORIZED_NAME=$AUTORISATION_DEPLOIEMENT_NOM (les deux, ensemble)." || return 1
+  if ! comparer_exact "${SORAHNEX_DEPLOY_AUTHORIZED_NAME:-}" "$AUTORISATION_DEPLOIEMENT_NOM" "SORAHNEX_DEPLOY_AUTHORIZED_NAME"; then
+    refuser "règle 7/8 — jeton d'autorisation incorrect. SORAHNEX_DEPLOY_AUTHORIZED_NAME doit valoir EXACTEMENT « $AUTORISATION_DEPLOIEMENT_NOM » (minuscules, un seul tiret, aucun espace). Ce nom est une constante du code, volontairement non configurable : sans cela, n'importe quel site pourrait se déclarer autorisé en renommant sa variable." || return 1
   fi
 
   # 8. Opt-in de build du site.
-  if [ "${VYORA_BUILD_ENABLED:-}" != "true" ]; then
-    refuser "$OPT_IN_BUILD doit valoir exactement « true » sur ce site (Site configuration → Environment variables)." || return 1
+  if ! comparer_exact "${VYORA_BUILD_ENABLED:-}" "true" "$OPT_IN_BUILD"; then
+    refuser "règle 8/8 — $OPT_IN_BUILD doit valoir exactement « true » sur ce site (Site configuration → Environment variables)." || return 1
   fi
 
   return 0
@@ -180,10 +242,18 @@ refuser() {
     echo
     echo "Site autorisé (source : $FICHIER_IDENTITE) :"
     echo "  SITE_ID   = ${ID_ATTENDU:-<illisible>}"
-    echo "  SITE_NAME = ${NOM_ATTENDU:-<illisible>}"
+    echo "  SITE_NAME = ${NOM_ATTENDU:-<non contraint : seul l'identifiant fait foi>}"
     echo
     echo "Aucun déploiement n'a eu lieu, aucun crédit n'a été consommé."
     echo "Procédure : docs/NETLIFY_DEPLOYMENT_CHECKLIST.md"
+    echo "----------------------------------------------------------------------"
+    # La raison ET l'identité réelle sont RÉPÉTÉES ICI, en fin de bloc. Netlify ne
+    # conserve qu'une partie du journal : sur les deux déploiements refusés du
+    # 25/11, l'extrait commençait à « État observé » et la ligne « Raison », juste
+    # au-dessus, était perdue. Le BAS du bloc est ce qui survit — donc c'est là
+    # que doit tenir tout ce qu'il faut pour agir.
+    echo "Site déployé : SITE_ID=${SITE_ID:-<absent>} SITE_NAME=${SITE_NAME:-<absent>} BRANCHE=${BRANCH:-<absente>}"
+    echo "À CORRIGER : $1"
     echo "======================================================================"
   } >&2
   return 1
