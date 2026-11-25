@@ -101,13 +101,39 @@ function fichierAuCommit(commit: string, chemin: string): string | null {
  * l'artefact sont d'accord, seul l'ÉPINGLAGE est en retard. Dès que l'un des
  * deux bouge sans l'autre, la comparaison échoue et le test redevient rouge.
  */
+/**
+ * L'ancien artefact est-il RÉELLEMENT celui du commit épinglé ?
+ *
+ * C'est la seule preuve que l'épingle pointe sur une version antérieure du code
+ * et non sur autre chose. Le mode « en attente » ne doit jamais couvrir une
+ * empreinte épinglée qui ne correspond à RIEN de connu : ce serait un
+ * déploiement cassé, pas un ré-épinglage en retard.
+ *
+ * Indisponible si le commit épinglé n'est pas dans ce clone (contrôle déjà
+ * signalé en `skipped` par le test dédié).
+ */
+function ancienArtefactEstCeluiDuCommit(nomFonction: string): boolean {
+  const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
+  const commit = /const COMMIT = "([0-9a-f]{40})"/.exec(chargeur)?.[1];
+  if (!commit) return false;
+  if (!commitPresent(commit)) return true; // non vérifiable ici : le test dédié le dit
+  const ancien = fichierAuCommit(commit, FUNCTIONS[nomFonction].artifact);
+  if (ancien === null) return false;
+  const empreinteEpinglee = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
+  return createHash('sha256').update(ancien, 'utf8').digest('hex') === empreinteEpinglee;
+}
+
 function reepinglageEnAttente(nomFonction: string): boolean {
   const built = buildArtifact(nomFonction);
   const artefactCommis = readFileSync(FUNCTIONS[nomFonction].artifact, 'utf8');
   const empreinteCommis = createHash('sha256').update(artefactCommis, 'utf8').digest('hex');
   const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
   const empreinteEpinglee = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
-  return empreinteCommis === built.sha256 && empreinteEpinglee !== built.sha256;
+  return empreinteCommis === built.sha256
+    && empreinteEpinglee !== built.sha256
+    // Sans cette condition, une épingle pointant sur un artefact inconnu
+    // passerait pour un simple retard de ré-épinglage.
+    && ancienArtefactEstCeluiDuCommit(nomFonction);
 }
 
 /** Message d'attente, affiché dans le rapport de test. */
@@ -199,9 +225,31 @@ describe.each(FONCTIONS_SUIVIES)('artefact %s — parité avec le dépôt', (nom
       artefact,
       `l'artefact est absent du commit épinglé ${commit} : poussez-le, puis régénérez le chargeur sur ce commit`,
     ).not.toBeNull();
-    expect(createHash('sha256').update(artefact as string, 'utf8').digest('hex')).toBe(built.sha256);
+
+    // 1) L'épingle est HONNÊTE : l'artefact réellement présent au commit
+    //    épinglé a bien l'empreinte et la taille annoncées par le chargeur.
+    //    C'est le contrôle qui empêche un déploiement cassé, et il ne se
+    //    relâche jamais — y compris pendant un ré-épinglage.
+    const chargeur = readFileSync(FUNCTIONS[nomFonction].loader, 'utf8');
+    const empreinteEpinglee = /const ARTIFACT_SHA256 = "([0-9a-f]{64})"/.exec(chargeur)?.[1];
+    const tailleEpinglee = Number(/const ARTIFACT_CHARS = (\d+);/.exec(chargeur)?.[1]);
+    expect(createHash('sha256').update(artefact as string, 'utf8').digest('hex')).toBe(empreinteEpinglee);
     // `chars` compte des CARACTÈRES, pas des octets : comparer `Buffer.length`
     // à `chars` ferait échouer à tort dès qu'un accent est présent.
+    expect((artefact as string).length).toBe(tailleEpinglee);
+
+    // 2) L'épingle désigne-t-elle la version COURANTE du code ? Pendant le
+    //    cycle en deux temps (docs/renommage-sorahnex.md §5), l'artefact est
+    //    committé avant le ré-épinglage : l'épingle pointe alors, à raison,
+    //    sur la version précédente. Le test dédié au ré-épinglage l'annonce
+    //    en « skipped » ; ici on vérifie que l'écart se limite à cela.
+    if (reepinglageEnAttente(nomFonction)) {
+      // L'artefact committé est, lui, exactement celui du code actuel.
+      expect(createHash('sha256').update(readFileSync(FUNCTIONS[nomFonction].artifact, 'utf8'), 'utf8').digest('hex'))
+        .toBe(built.sha256);
+      return;
+    }
+    expect(createHash('sha256').update(artefact as string, 'utf8').digest('hex')).toBe(built.sha256);
     expect((artefact as string).length).toBe(built.chars);
   });
 
