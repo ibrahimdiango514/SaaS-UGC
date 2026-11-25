@@ -18,7 +18,8 @@
   # Logique commune : `scripts/netlify-guard-lib.sh` (les deux rideaux ne peuvent
   # pas diverger). Huit conditions, toutes exigées, FERMÉ par défaut :
   #   SITE_ID = identifiant de netlify.site.conf   SITE_NAME = nom de netlify.site.conf
-  #   SITE_NAME ≠ vyora-ugc (ancien site, refus explicite)
+  #   SITE_ID/SITE_NAME ∉ liste ANCIEN_SITE_* (hébergements abandonnés, refus
+  #                                              explicite ; plusieurs lignes)
   #   BRANCH = main                                VYORA_BUILD_ENABLED = true
   #   SORAHNEX_DEPLOY_AUTHORIZED = true            SORAHNEX_DEPLOY_AUTHORIZED_NAME = sorahnex-deploy
   #

@@ -46,6 +46,13 @@ charger_identite() {
   PREMIER_DEPLOIEMENT=""
   ANCIEN_NOM=""
   ANCIEN_ID=""
+  # Listes écartées, cumulées sur plusieurs lignes `ANCIEN_SITE_ID=` /
+  # `ANCIEN_SITE_NAME=`. La première valeur reste dans ANCIEN_ID/ANCIEN_NOM
+  # (compatibilité), les suivantes s'ajoutent ici. Nécessaire dès qu'un dépôt a
+  # connu plus d'un site : oublier le précédent le rendrait constructible, ce
+  # qui est précisément ce que cette garde existe pour empêcher.
+  ANCIENS_IDS=""
+  ANCIENS_NOMS=""
   ID_DECLARE=""
   _fichier="$1/$FICHIER_IDENTITE"
   if [ ! -f "$_fichier" ]; then
@@ -65,8 +72,12 @@ charger_identite() {
       SITE_NAME) NOM_ATTENDU=$_valeur ;;
       SITE_NAME_FACULTATIF) NOM_FACULTATIF=$_valeur ;;
       PREMIER_DEPLOIEMENT) PREMIER_DEPLOIEMENT=$_valeur ;;
-      ANCIEN_SITE_NAME) ANCIEN_NOM=$_valeur ;;
-      ANCIEN_SITE_ID) ANCIEN_ID=$_valeur ;;
+      ANCIEN_SITE_NAME)
+        if [ -z "$ANCIEN_NOM" ]; then ANCIEN_NOM=$_valeur; fi
+        ANCIENS_NOMS="${ANCIENS_NOMS}${ANCIENS_NOMS:+,}$_valeur" ;;
+      ANCIEN_SITE_ID)
+        if [ -z "$ANCIEN_ID" ]; then ANCIEN_ID=$_valeur; fi
+        ANCIENS_IDS="${ANCIENS_IDS}${ANCIENS_IDS:+,}$_valeur" ;;
       A_DECLARER) ID_DECLARE=$_valeur ;;
     esac
   done < "$_fichier"
@@ -161,9 +172,11 @@ verifier_garde() {
       '' | *[!a-z0-9-]*) refuser "SITE_NAME autorisé mal formé dans $FICHIER_IDENTITE (minuscules, chiffres, tirets)" || return 1 ;;
     esac
   fi
-  if [ -n "$ANCIEN_NOM" ] && [ "$NOM_ATTENDU" = "$ANCIEN_NOM" ]; then
-    refuser "le nom autorisé ne peut pas être celui de l'ancien site ($ANCIEN_NOM)" || return 1
-  fi
+  for _ancien in $(echo "$ANCIENS_NOMS" | tr ',' ' '); do
+    if [ -n "$_ancien" ] && [ "$NOM_ATTENDU" = "$_ancien" ]; then
+      refuser "le nom autorisé ne peut pas être celui d'un ancien site ($_ancien)" || return 1
+    fi
+  done
 
   # 0. Aucun site n'est encore déclaré : le cas NORMAL avant une migration.
   # Sans cette règle, un dépôt pas encore configuré accuse l'absence d'une
@@ -185,18 +198,22 @@ verifier_garde() {
   fi
   # Un ancien site est refusé AVANT la comparaison d'identifiant : sinon le
   # message generique « pas le site autorise » masquerait la vraie raison.
-  if [ -n "$ANCIEN_ID" ] && [ "$SITE_ID" = "$ANCIEN_ID" ]; then
-    refuser "ce site ($SITE_ID) est un ANCIEN site, explicitement écarté : une bascule ne doit jamais republier par accident sur l'ancien hébergement." || return 1
-  fi
+  for _ancien in $(echo "$ANCIENS_IDS" | tr ',' ' '); do
+    if [ -n "$_ancien" ] && [ "$SITE_ID" = "$_ancien" ]; then
+      refuser "ce site ($SITE_ID) est un ANCIEN site, explicitement écarté : une bascule ne doit jamais republier par accident sur un hébergement abandonné." || return 1
+    fi
+  done
   if [ "$SITE_ID" != "$ID_ATTENDU" ]; then
     refuser "ce site ($SITE_ID) n'est pas le site autorisé ($ID_ATTENDU). Rien ne se publie sur un site qui n'est pas déclaré dans $FICHIER_IDENTITE." || return 1
   fi
   if [ -z "${SITE_NAME:-}" ]; then
     refuser "SITE_NAME absent : identité du site invérifiable." || return 1
   fi
-  if [ -n "$ANCIEN_NOM" ] && [ "$SITE_NAME" = "$ANCIEN_NOM" ]; then
-    refuser "ce site porte le nom de l'ANCIEN site ($ANCIEN_NOM) : aucun déploiement n'y est autorisé." || return 1
-  fi
+  for _ancien in $(echo "$ANCIENS_NOMS" | tr ',' ' '); do
+    if [ -n "$_ancien" ] && [ "$SITE_NAME" = "$_ancien" ]; then
+      refuser "ce site porte le nom d'un ANCIEN site ($_ancien) : aucun déploiement n'y est autorisé." || return 1
+    fi
+  done
   if [ -n "$NOM_ATTENDU" ] && [ "$SITE_NAME" != "$NOM_ATTENDU" ]; then
     refuser "ce site s'appelle « $SITE_NAME », le site autorisé s'appelle « $NOM_ATTENDU »." || return 1
   fi

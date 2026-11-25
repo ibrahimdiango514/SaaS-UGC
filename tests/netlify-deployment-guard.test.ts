@@ -932,10 +932,6 @@ describe('PREMIER DÉPLOIEMENT — ouverture unique, jamais un abandon', () => {
 
   it('le dépôt n’est PLUS en mode premier déploiement (verrou refermé)', () => {
     expect(lire('netlify.site.conf')).not.toMatch(/^PREMIER_DEPLOIEMENT=/m);
-    // Et l'identité relevée au premier build est bien celle qui est déclarée.
-    expect(lire('netlify.site.conf')).toMatch(
-      /^SITE_ID=8d485fbd-ec54-4068-b3db-cd28145c6007$/m,
-    );
   });
 
   it('avec les trois variables, un site dont l’identité est inconnue passe', () => {
@@ -983,5 +979,74 @@ describe('PREMIER DÉPLOIEMENT — ouverture unique, jamais un abandon', () => {
     const conf = lire('netlify.site.conf');
     expect(conf).toMatch(/APRÈS LE PREMIER DÉPLOIEMENT RÉUSSI/);
     expect(conf).toMatch(/RETIRER `PREMIER_DEPLOIEMENT=true`/);
+  });
+});
+
+// ===========================================================================
+describe('ANCIENS SITES — une liste, pas un seul', () => {
+  /**
+   * Un dépôt qui a connu trois hébergements doit refuser les deux quittés.
+   * Le 25/11/2026, `saas-ugc` (8d485fbd) a construit une fois avant d'être
+   * remplacé par `sorahnex` (78ab3ad8) : l'oublier l'aurait rendu de nouveau
+   * constructible, ce qui est exactement le risque que la garde couvre.
+   */
+  const conf = lire('netlify.site.conf');
+  const valeurs = (cle: string) =>
+    conf
+      .split('\n')
+      .filter((l) => l.startsWith(`${cle}=`))
+      .map((l) => l.slice(cle.length + 1).trim());
+
+  const T = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    BRANCH: 'main',
+    VYORA_BUILD_ENABLED: 'true',
+    SORAHNEX_DEPLOY_AUTHORIZED: 'true',
+    SORAHNEX_DEPLOY_AUTHORIZED_NAME: 'sorahnex-deploy',
+  } as Env;
+  const lancer = (siteId: string, siteName: string) =>
+    spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      cwd: RACINE,
+      encoding: 'utf8',
+      env: { ...T, SITE_ID: siteId, SITE_NAME: siteName },
+    });
+
+  it('la configuration énumère plusieurs identifiants écartés', () => {
+    expect(valeurs('SITE_ID')).toHaveLength(1);
+    expect(valeurs('SITE_ID')[0]).toMatch(UUID);
+    // Au moins deux anciens : vyora-ugc et le site du premier import.
+    expect(valeurs('ANCIEN_SITE_ID').length).toBeGreaterThanOrEqual(2);
+    expect(valeurs('ANCIEN_SITE_NAME').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('le site autorisé passe', () => {
+    const id = valeurs('SITE_ID')[0];
+    const nom = valeurs('SITE_NAME')[0];
+    expect(lancer(id, nom).status).toBe(0);
+  });
+
+  it('CHAQUE identifiant de la liste est refusé nommément', () => {
+    for (const [i, ancienId] of valeurs('ANCIEN_SITE_ID').entries()) {
+      const ancienNom = valeurs('ANCIEN_SITE_NAME')[i] ?? 'peu-importe';
+      const r = lancer(ancienId, ancienNom);
+      expect(r.status, `${ancienId} devrait être refusé`).toBe(1);
+      expect(r.stderr).toMatch(/ANCIEN site|nom d'un ANCIEN site/);
+    }
+  });
+
+  it('un ancien NOM avec le nouvel identifiant est refusé aussi', () => {
+    const id = valeurs('SITE_ID')[0];
+    for (const ancienNom of valeurs('ANCIEN_SITE_NAME')) {
+      const r = lancer(id, ancienNom);
+      expect(r.status, `${ancienNom} devrait être refusé`).toBe(1);
+      expect(r.stderr).toMatch(/ANCIEN site/);
+    }
+  });
+
+  it('le site du premier import n’est pas resté constructible', () => {
+    // Régression nommée : 8d485fbd a réellement construit une fois.
+    const r = lancer('8d485fbd-ec54-4068-b3db-cd28145c6007', 'saas-ugc');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/ANCIEN site, explicitement écarté/);
   });
 });
