@@ -12,6 +12,7 @@ import { listNotifications, markAllNotificationsRead, markNotificationRead } fro
 import type { AppNotification } from '../lib/types';
 import { BrandLockup, BrandSymbol } from './Brand';
 import { WorkspaceNav } from '../navigation/WorkspaceNav';
+import { useViewportClavier } from '../lib/viewport-clavier';
 import { SpaceSwitcher } from './SpaceSwitcher';
 import { useScrollRestoration } from '../hooks/useScrollRestoration';
 import {
@@ -31,6 +32,9 @@ function Logo({ compact = false, to = '/app' }: { compact?: boolean; to?: string
 }
 
 export default function Layout() {
+  // Le clavier Android réduit la vue : la place réelle est publiée en CSS
+  // (--clavier-hauteur) pour que modales et formulaires restent utilisables.
+  useViewportClavier();
   const { user, profile, quota, isAdmin, loading, logout, refreshQuota } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();

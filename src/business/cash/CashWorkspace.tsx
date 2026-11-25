@@ -14,6 +14,7 @@ import {
   expensesByCategory, expensesToCsv, monthlyCashflow, nextRecurrenceDate, validateExpense,
   type Expense, type ExpenseRecurrence, type ExpenseStatus,
 } from './model';
+import { useGrandEcran } from '../../lib/media-query';
 
 const money = (value: number | null) => value === null
   ? '—'
@@ -103,6 +104,8 @@ function ExpenseForm({ open, initial, onClose, onSubmit }: {
 }
 
 export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspaceId: string | null; onOpenFinance: () => void }) {
+  // Une seule vue montée à la fois : liste tactile ou tableau.
+  const grandEcran = useGrandEcran();
   const toast = useToast();
   const expensesStore = useRecords(CASH_CATEGORIES.expenses, workspaceId);
   const paymentsStore = useRecords(FINANCE_CATEGORIES.payments, workspaceId);
@@ -257,10 +260,30 @@ export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspac
       {editor && <ExpenseForm open initial={editor === 'new' ? null : editor} onClose={() => setEditor(null)} onSubmit={save} />}
 
       <Modal open={monthlyOpen} onClose={() => setMonthlyOpen(false)} title="Rapport mensuel de trésorerie" size="md">
-        <table className="w-full text-left text-[11.5px]">
-          <thead className="bg-white/[0.03] text-[9.5px] uppercase text-slate-500"><tr><th className="px-2 py-2">Mois</th><th>Encaissements</th><th>Dépenses</th><th>Net</th></tr></thead>
-          <tbody>{flow.map((point) => <tr key={point.month} className="border-t border-white/[0.05]"><td className="px-2 py-2">{point.month}</td><td className="text-emerald-200">{money(point.income)}</td><td className="text-rose-200">{money(point.expense)}</td><td className={point.net >= 0 ? 'text-emerald-200' : 'text-rose-200'}>{money(point.net)}</td></tr>)}</tbody>
-        </table>
+        {/* Sur téléphone, une carte par mois : quatre colonnes dans 360 px
+            coupaient les montants. Les mêmes valeurs restent présentes. */}
+        {!grandEcran && <ul className="liste-mobile">
+          {flow.map((point) => (
+            <li key={point.month} className="px-1 py-2.5">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[13px] font-semibold text-white">{point.month}</span>
+                <span className={point.net >= 0 ? 'text-[13px] font-semibold text-emerald-200' : 'text-[13px] font-semibold text-rose-200'}>
+                  {money(point.net)}
+                </span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-2 text-[11.5px]">
+                <span className="text-emerald-200">Entrées {money(point.income)}</span>
+                <span className="text-rose-200">Sorties {money(point.expense)}</span>
+              </div>
+            </li>
+          ))}
+        </ul>}
+        {grandEcran && <div className="table-defile">
+            <table className="w-full text-left text-[11.5px]">
+              <thead className="bg-white/[0.03] text-[9.5px] uppercase text-slate-500"><tr><th className="px-2 py-2">Mois</th><th>Encaissements</th><th>Dépenses</th><th>Net</th></tr></thead>
+              <tbody>{flow.map((point) => <tr key={point.month} className="border-t border-white/[0.05]"><td className="px-2 py-2">{point.month}</td><td className="text-emerald-200">{money(point.income)}</td><td className="text-rose-200">{money(point.expense)}</td><td className={point.net >= 0 ? 'text-emerald-200' : 'text-rose-200'}>{money(point.net)}</td></tr>)}</tbody>
+            </table>
+          </div>}
         <p className="mt-3 text-[10px] text-slate-500"><Banknote size={11} className="mr-1 inline" />Le solde de trésorerie ne représente pas le chiffre d’affaires facturé. <Receipt size={11} className="mx-1 inline" />Les factures impayées restent dans Finance.</p>
       </Modal>
     </div>

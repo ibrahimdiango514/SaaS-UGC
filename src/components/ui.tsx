@@ -49,12 +49,33 @@ export function CardHeader({ title, description, action }: { title: ReactNode; d
 
 /* ------------------------------- Inputs ---------------------------------- */
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { label?: string; hint?: string; error?: string }>(
-  function Input({ label, hint, error, className, id, ...props }, ref) {
+  function Input({ label, hint, error, className, id, inputMode, type, ...props }, ref) {
     const inputId = id || `f-${label?.toLowerCase().replace(/\s/g, '-')}`;
+    /*
+     * Clavier Android adapté au champ.
+     *
+     * `type="number"` n'ouvre pas le même clavier sur tous les Android : sur
+     * plusieurs claviers (Gboard en français, claviers constructeur), la virgule
+     * décimale est absente et `inputMode="decimal"` est le seul moyen fiable de
+     * l'obtenir. À l'inverse, pour un montant entier, `numeric` affiche un pavé
+     * numérique complet.
+     *
+     * La règle est appliquée UNE fois ici, au lieu d'être répétée sur chaque
+     * formulaire métier : un champ numérique oublié aurait gardé le clavier
+     * alphabétique, ce qui oblige à plusieurs changements de disposition pour
+     * saisir « 15000 ».
+     *
+     * `inputMode` explicite reste prioritaire : un appelant qui sait mieux
+     * (numéro de téléphone, code postal) garde la main.
+     */
+    const modeClavier = inputMode
+      ?? (type === 'number'
+        ? (props.step && props.step !== '1' ? 'decimal' : 'numeric')
+        : type === 'tel' ? 'tel' : type === 'email' ? 'email' : type === 'url' ? 'url' : undefined);
     return (
       <label className="field" htmlFor={inputId}>
         {label && <span className="field-label">{label}</span>}
-        <input ref={ref} id={inputId} className={cn('input', error && 'input-error', className)} {...props} />
+        <input ref={ref} id={inputId} type={type} inputMode={modeClavier} className={cn('input', error && 'input-error', className)} {...props} />
         {hint && !error && <span className="field-hint">{hint}</span>}
         {error && <span className="field-error">{error}</span>}
       </label>
@@ -205,18 +226,55 @@ export function Modal({ open, onClose, title, description, children, footer, siz
 
   if (!open) return null;
   const sizes = { sm: 'max-w-md', md: 'max-w-xl', lg: 'max-w-3xl' };
+  /*
+   * Mobile Android — trois défauts corrigés ici, chacun bloquant :
+   *
+   * 1. Le clavier recouvrait le bouton de validation. La hauteur du clavier est
+   *    retirée de la modale (`.modale-clavier*`, alimenté par
+   *    `--clavier-hauteur`), donc le pied — et son bouton — reste visible.
+   * 2. `max-h-[70vh]` sur le corps, combiné à un pied séparé, dépassait l'écran
+   *    sur 360 × 800. Le corps se dimensionne maintenant sur la place RÉELLE.
+   * 3. Le pied pouvait sortir de l'écran : il est collé en bas, avec la zone de
+   *    sécurité Android respectée (`safe-bottom`).
+   *
+   * Le fond est une feuille qui monte sur mobile et une boîte centrée au-delà :
+   * c'est le geste attendu sur Android, sans en changer le comportement ici.
+   */
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={title} className={cn('w-full animate-fadeUp rounded-t-3xl border border-line bg-panel shadow-2xl sm:rounded-2xl', sizes[size])} onMouseDown={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-          <div>
-            <h2 className="text-lg font-semibold text-white">{title}</h2>
+    <div
+      className="modale-clavier fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onMouseDown={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={cn(
+          'modale-clavier-panneau flex w-full animate-fadeUp flex-col rounded-t-3xl border border-line bg-panel shadow-2xl sm:rounded-2xl',
+          sizes[size],
+        )}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-semibold text-white">{title}</h2>
             {description && <p className="mt-1 text-sm text-slate-400">{description}</p>}
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="Fermer"><X size={18} /></button>
+          <button
+            onClick={onClose}
+            className="cible-tactile -mr-2 shrink-0 rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+            aria-label="Fermer"
+          >
+            <X size={18} />
+          </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-5">{children}</div>
-        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-4">{footer}</div>}
+        {/* `overscroll-contain` : le défilement du corps ne propage pas à la page. */}
+        <div className="modale-clavier-corps min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">{children}</div>
+        {footer && (
+          <div className="safe-bottom flex shrink-0 flex-wrap justify-end gap-2 border-t border-line px-5 py-4">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );

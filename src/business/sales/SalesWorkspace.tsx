@@ -19,6 +19,7 @@ import {
   quoteToOrderDraft, quotesToCsv, statusLabel, statusTone,
   type Invoice, type Quote, type SalesLine, type SalesOrder,
 } from './model';
+import { useGrandEcran } from '../../lib/media-query';
 
 export type SalesTab = 'devis' | 'commandes' | 'factures';
 
@@ -205,6 +206,8 @@ export default function SalesWorkspace({
   onOpenContact: (contactId: string) => void;
   onOpenFinance: (contactId?: string) => void;
 }) {
+  // Une seule vue montée à la fois : liste tactile ou tableau.
+  const grandEcran = useGrandEcran();
   const toast = useToast();
   const [tab, setTab] = useState<SalesTab>(initialTab);
   useEffect(() => setTab(initialTab), [initialTab]);
@@ -538,7 +541,31 @@ export default function SalesWorkspace({
               </Badge>
               {detail?.kind === 'factures' && (detailRecord as Invoice).receivableId && <span className="text-[11px] text-emerald-200">Créance Finance liée</span>}
             </div>
-            <div className="overflow-x-auto rounded-xl border border-white/[0.06]">
+            {/* Sur téléphone, une ligne de devis/facture se lit en carte :
+                six colonnes rendaient les montants illisibles et coupaient la
+                désignation. Toutes les valeurs du tableau restent affichées. */}
+            {!grandEcran && <ul className="liste-mobile overflow-hidden rounded-xl border border-white/[0.06]">
+              {detailRecord.lines.map((line) => {
+                const totalLigne = money(
+                  line.quantity * line.unitPrice * (1 - line.discountPct / 100) * (1 + line.taxPct / 100),
+                  detailRecord.currency,
+                );
+                return (
+                  <li key={line.id} className="px-3 py-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="min-w-0 flex-1 text-[12.5px] font-medium text-white">{line.description}</span>
+                      <span className="shrink-0 text-[12.5px] font-semibold text-white">{totalLigne}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] text-slate-400">
+                      <span>{line.quantity} × {money(line.unitPrice, detailRecord.currency)}</span>
+                      {line.discountPct > 0 && <span>Remise {line.discountPct}%</span>}
+                      <span>TVA {line.taxPct}%</span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>}
+            {grandEcran && <div className="table-defile rounded-xl border border-white/[0.06]">
               <table className="w-full text-left text-[11.5px]">
                 <thead className="bg-white/[0.03] text-[9.5px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Désignation</th><th>Qté</th><th>Prix</th><th>Remise</th><th>TVA</th><th>Total</th></tr></thead>
                 <tbody>
@@ -547,7 +574,7 @@ export default function SalesWorkspace({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </div>}
             <div className="flex justify-end gap-4 font-medium text-white">
               <span>Sous-total {money(computeTotals(detailRecord.lines).subtotal, detailRecord.currency)}</span>
               <span>Total {money(computeTotals(detailRecord.lines).total, detailRecord.currency)}</span>

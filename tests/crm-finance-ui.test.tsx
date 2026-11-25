@@ -149,10 +149,23 @@ describe('Finances — interface connectée aux créances et paiements', () => {
     expect(screen.getByText('En retard')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^Créances$/ }));
     await waitFor(() => expect(screen.getByTestId('finance-receivables')).toBeTruthy());
-    const rows = screen.getAllByRole('row');
-    const paidRow = rows.find((row) => row.textContent?.includes('FAC-002'));
+    /*
+     * Le calcul métier est ce qui compte ici : une créance soldée ne doit pas
+     * être comptée en retard. La vue change (liste tactile sur petit écran,
+     * tableau au-delà de 640 px), donc on interroge l'ÉLÉMENT qui porte la
+     * référence plutôt qu'un `<tr>` : jsdom est un petit écran, la liste est
+     * affichée. Les deux vues portent le même statut.
+     */
+    const conteneur = screen.getByTestId('finance-receivables');
+    const lignes = [...conteneur.querySelectorAll('li, tr')];
+    // Garde-fou : sans cette assertion, un conteneur VIDE faisait passer le test
+    // (`find` renvoyait undefined, et `undefined?.textContent` ne prouve rien).
+    expect(lignes.length).toBeGreaterThan(0);
+    const paidRow = lignes.find((ligne) => ligne.textContent?.includes('FAC-002'));
+    expect(paidRow).toBeDefined();
     expect(paidRow?.textContent).toMatch(/Payée/);
-    const overdueRow = rows.find((row) => row.textContent?.includes('FAC-001'));
+    const overdueRow = lignes.find((ligne) => ligne.textContent?.includes('FAC-001'));
+    expect(overdueRow).toBeDefined();
     expect(overdueRow?.textContent).toMatch(/En retard/);
   });
 

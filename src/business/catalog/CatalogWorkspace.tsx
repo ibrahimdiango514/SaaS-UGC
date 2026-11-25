@@ -411,7 +411,15 @@ export default function CatalogWorkspace({ workspaceId }: { workspaceId: string 
             <p className="text-[10px] text-slate-400">
               {importResults.filter((result) => result.data).length} ligne(s) valide(s) · {importDuplicateCount} doublon(s) détecté(s) · {importResults.filter((result) => !result.data).length} ligne(s) en erreur
             </p>
-            <div className="max-h-56 overflow-auto rounded-lg border border-white/[0.06]">
+            {/*
+              Aperçu d'un fichier importé : les colonnes viennent de l'en-tête du
+              fichier, donc leur nombre est inconnu à l'avance. On ne peut pas en
+              faire une liste à champs fixes comme les autres écrans.
+              `table-defile` borne le défilement HORIZONTAL à cette boîte : sans
+              elle, c'est la page entière qui s'élargissait et les titres
+              partaient hors de l'écran sur Android.
+            */}
+            <div className="table-defile max-h-56 overflow-y-auto rounded-lg border border-white/[0.06]">
               <table className="w-full text-left text-[10.5px]">
                 <thead className="bg-white/[0.03] text-slate-500"><tr>{importRows[0].map((header, index) => <th key={index} className="px-2 py-1">{header}</th>)}</tr></thead>
                 <tbody>{importRows.slice(1, 6).map((row, index) => <tr key={index} className="border-t border-white/[0.04]">{row.map((cell, cellIndex) => <td key={cellIndex} className="px-2 py-1 text-slate-300">{cell}</td>)}</tr>)}</tbody>
