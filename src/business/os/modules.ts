@@ -1,14 +1,19 @@
 import {
   BarChart3, BellRing, Brain, Building2, ClipboardList, Landmark, LayoutDashboard, Mail,
-  Megaphone, Package, Plug, Shield, ShoppingCart, Store, Target, Truck, Users, Wallet, Workflow, Zap,
+  Megaphone, Package, Plus, Plug, Shield, ShoppingCart, Store, Target, Truck, UserPlus,
+  Users, Wallet, Workflow, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 /**
- * Navigation du nouveau Growth OS.
+ * Navigation du Growth OS.
  *
  * Un module = une URL réelle (`/app/business/...`), pas un onglet caché dans
- * une page unique. L'ancien cockpit « Croissance » n'est plus rendu.
+ * une page unique. Les groupes suivent l'intention de l'utilisateur (piloter,
+ * vendre, opérer, encaisser, décider, régler) et non la technique.
+ *
+ * `GROWTH_OS_NAV` est la source unique : la navigation globale des pages
+ * métier (`src/navigation/config.ts`) en est dérivée.
  */
 export type GrowthOsModule =
   | 'overview' | 'crm' | 'pipeline' | 'tasks' | 'relances'
@@ -49,8 +54,8 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
     ],
   },
   {
-    id: 'commercial',
-    label: 'Commercial',
+    id: 'ventes',
+    label: 'Clients et ventes',
     items: [
       {
         key: 'crm', label: 'CRM', shortLabel: 'CRM',
@@ -63,9 +68,9 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         path: '/app/business/pipeline', icon: Target,
       },
       {
-        key: 'tasks', label: 'Tâches et activités', shortLabel: 'Tâches',
-        description: 'Aujourd’hui, retards, agenda et suivi',
-        path: '/app/business/tasks', icon: ClipboardList,
+        key: 'sales', label: 'Ventes et facturation', shortLabel: 'Ventes',
+        description: 'Devis, commandes et factures reliés au CRM',
+        path: '/app/business/sales', icon: ShoppingCart,
       },
       {
         key: 'relances', label: 'Relances', shortLabel: 'Relances',
@@ -73,10 +78,16 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         path: '/app/business/relances', icon: Mail,
       },
       {
-        key: 'sales', label: 'Ventes et facturation', shortLabel: 'Ventes',
-        description: 'Devis, commandes et factures reliés au CRM',
-        path: '/app/business/sales', icon: ShoppingCart,
+        key: 'tasks', label: 'Tâches et activités', shortLabel: 'Tâches',
+        description: 'Aujourd’hui, retards, agenda et suivi',
+        path: '/app/business/tasks', icon: ClipboardList,
       },
+    ],
+  },
+  {
+    id: 'operations',
+    label: 'Opérations',
+    items: [
       {
         key: 'catalog', label: 'Produits et stock', shortLabel: 'Catalogue',
         description: 'Catalogue, mouvements et alertes de stock',
@@ -104,21 +115,26 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         path: '/app/business/finance', icon: Wallet,
       },
       {
-        key: 'recouvrement', label: 'Recouvrement', shortLabel: 'Recouvrement',
-        description: 'Priorités, promesses, litiges et risques',
-        path: '/app/business/recouvrement', icon: BellRing,
-      },
-      {
         key: 'cash', label: 'Trésorerie et dépenses', shortLabel: 'Trésorerie',
         description: 'Encaissements réels, dépenses et solde',
         path: '/app/business/cash', icon: Landmark,
       },
+      {
+        key: 'recouvrement', label: 'Recouvrement', shortLabel: 'Recouvrement',
+        description: 'Priorités, promesses, litiges et risques',
+        path: '/app/business/recouvrement', icon: BellRing,
+      },
     ],
   },
   {
-    id: 'intelligence',
-    label: 'Intelligence',
+    id: 'croissance',
+    label: 'Croissance et IA',
     items: [
+      {
+        key: 'assistant', label: 'Assistant IA', shortLabel: 'Assistant',
+        description: 'Conversation reliée au CRM et aux finances',
+        path: '/app/business/assistant', icon: Brain,
+      },
       {
         key: 'automation', label: 'Automatisations', shortLabel: 'Automatisations',
         description: 'Signaux, règles et actions confirmées',
@@ -129,16 +145,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         description: 'Segments, campagnes et messages préparés',
         path: '/app/business/marketing', icon: Megaphone,
       },
-      {
-        key: 'assistant', label: 'Assistant IA', shortLabel: 'Assistant',
-        description: 'Conversation reliée au CRM et aux finances',
-        path: '/app/business/assistant', icon: Brain,
-      },
     ],
   },
   {
-    id: 'settings',
-    label: 'Configuration',
+    id: 'reglages',
+    label: 'Réglages',
     items: [
       {
         key: 'company', label: 'Contexte entreprise', shortLabel: 'Entreprise',
@@ -170,6 +181,23 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
 ];
 
 export const GROWTH_OS_MODULES: readonly GrowthOsNavItem[] = GROWTH_OS_NAV.flatMap((group) => group.items);
+
+/**
+ * Actions principales du quotidien, affichées dans l'en-tête du Growth OS.
+ * Toutes pointent vers un écran existant : aucune mutation n'est déclenchée
+ * directement depuis ce bandeau.
+ */
+export const GROWTH_OS_QUICK_ACTIONS: readonly {
+  to: string;
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+}[] = [
+  { to: '/app/business/crm', label: 'Prospect', hint: 'Ajouter ou retrouver un contact', icon: UserPlus },
+  { to: '/app/business/pipeline', label: 'Vente', hint: 'Faire avancer une opportunité', icon: Plus },
+  { to: '/app/business/finance', label: 'Encaissement', hint: 'Créances et paiements', icon: Wallet },
+  { to: '/app/business/assistant', label: 'Assistant', hint: 'Demander une analyse', icon: Brain },
+];
 
 export function growthOsModule(key: GrowthOsModule): GrowthOsNavItem {
   return GROWTH_OS_MODULES.find((item) => item.key === key) ?? GROWTH_OS_MODULES[0];

@@ -778,7 +778,7 @@ export default function GenerationStudio() {
 
       {handedOffBrief && (
         <div className="mx-auto mt-3 max-w-3xl px-3 sm:px-6" data-testid="studio-handoff-banner">
-          <Banner tone="info" title={`Brief importé depuis Business Grow${handedOffBrief.product ? ` · ${handedOffBrief.product}` : ''}`}>
+          <Banner tone="info" title={`Brief importé depuis SORAHNEX Grow${handedOffBrief.product ? ` · ${handedOffBrief.product}` : ''}`}>
             {handedOffBrief.targetAudience ? `Cible : ${handedOffBrief.targetAudience}. ` : ''}
             Aucun crédit Studio consommé lors du transfert.
           </Banner>
@@ -933,7 +933,7 @@ export default function GenerationStudio() {
         <Link to="/app/historique" className="inline-flex items-center gap-1 text-cyan-400/70 hover:text-cyan-300">Historique <ArrowRight size={10} /></Link>
         {businessContinuityState && (
           <Link to="/app/business" state={businessContinuityState} className="inline-flex items-center gap-1 text-violet-300/70 hover:text-violet-200">
-            Poursuivre dans Business Grow <ArrowRight size={10} />
+            Poursuivre dans SORAHNEX Grow <ArrowRight size={10} />
           </Link>
         )}
       </footer>

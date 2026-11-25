@@ -108,7 +108,7 @@ describe('Growth OS — routing réel', () => {
       </MemoryRouter>,
     );
 
-    const nav = screen.getByRole('navigation', { name: 'Navigation Growth OS' });
+    const nav = screen.getByRole('navigation', { name: 'Navigation SORAHNEX Grow' });
     expect(nav).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Vue générale' }).getAttribute('href')).toBe('/app/business');
     expect(screen.getByRole('link', { name: 'CRM' }).getAttribute('aria-current')).toBe('page');
@@ -134,10 +134,10 @@ describe('Growth OS — routing réel', () => {
         </GrowthOsLayout>
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir le menu Growth OS' }));
-    expect(screen.getByRole('dialog', { name: 'Menu Growth OS' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir le menu SORAHNEX Grow' }));
+    expect(screen.getByRole('dialog', { name: 'Menu SORAHNEX Grow' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Fermer' }));
-    expect(screen.queryByRole('dialog', { name: 'Menu Growth OS' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Menu SORAHNEX Grow' })).toBeNull();
   });
 });
 

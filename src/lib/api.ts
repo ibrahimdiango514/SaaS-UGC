@@ -1,6 +1,7 @@
 import {invalidateCatalog} from '../hooks/useCatalogRevision';
 import { supabase, STORAGE_BUCKET, SITE_URL } from './supabase';
 import { AppError, humanizeError } from './errors';
+import { edgeFunctionName } from './platform-identity';
 import type {
   AdminCreditHistory, AdminCreditMovement, AdminMetrics, AdminOverview, AdminProviderBalance, AdminProviderSpendSummary, AdminUser, AdminVideoCatalogResponse, AiCoreAdminSettings, AiCoreCallEntry, AiCoreRegistrySnapshot, AiScene, AiScriptResult, AppNotification, Avatar, Brand,
   GeneratedAsset, GenerationJob, GenerationPreset, Json, LedgerEntry, MuApiModel, Plan, Product,
@@ -634,22 +635,22 @@ export async function startGeneration(
 
 /** Full live MuAPI video catalogue with explicit public/account diagnostics. */
 export function getVideoCatalog(): Promise<VideoCatalogResponse> {
-  return invokeEdge<VideoCatalogResponse>('reelora-video', { action: 'catalog' });
+  return invokeEdge<VideoCatalogResponse>(edgeFunctionName('video'), { action: 'catalog' });
 }
 
 export function adminVideoCatalog(): Promise<AdminVideoCatalogResponse> {
-  return invokeEdge<AdminVideoCatalogResponse>('reelora-video', { action: 'admin-catalog' });
+  return invokeEdge<AdminVideoCatalogResponse>(edgeFunctionName('video'), { action: 'admin-catalog' });
 }
 
 /** Verified MuAPI video models (kept for the classical Studio and existing tests). */
 export async function listVideoModels(): Promise<MuApiModel[]> {
-  const result = await invokeEdge<{ models: MuApiModel[] }>('reelora-video', { action: 'models' });
+  const result = await invokeEdge<{ models: MuApiModel[] }>(edgeFunctionName('video'), { action: 'models' });
   return result.models ?? [];
 }
 
 /** Full input_schema of one real model, fetched by the server with its own key. */
 export function getVideoModelDetail(modelId: string): Promise<{ model: MuApiModel }> {
-  return invokeEdge<{ model: MuApiModel }>('reelora-video', { action: 'model-detail', model_id: modelId });
+  return invokeEdge<{ model: MuApiModel }>(edgeFunctionName('video'), { action: 'model-detail', model_id: modelId });
 }
 
 export interface VideoProviderQuoteResponse {
@@ -681,7 +682,7 @@ export async function getVideoProviderQuote(modelId: string, quote?: VideoQuoteI
   } catch (error) {
     if (error instanceof AppError && error.code !== 'EDGE_ERROR' && error.code !== 'QUOTE_INTERNAL_ERROR') throw error;
     // Repli : action `quote` de la passerelle pour les environnements où le service dédié n'est pas déployé.
-    return invokeEdge<VideoProviderQuoteResponse>('reelora-video', { ...body, action: 'quote' });
+    return invokeEdge<VideoProviderQuoteResponse>(edgeFunctionName('video'), { ...body, action: 'quote' });
   }
 }
 
@@ -712,7 +713,7 @@ export async function estimateVideo(serviceKey: string, modelId: string, quote?:
   if (quote?.video_url) body.video_url = quote.video_url;
   if (quote?.audio_url) body.audio_url = quote.audio_url;
   if (quote?.param_schema) body.param_schema = quote.param_schema;
-  const estimate = await invokeEdge<VideoCostEstimate>('reelora-video', body);
+  const estimate = await invokeEdge<VideoCostEstimate>(edgeFunctionName('video'), body);
   if (estimate.provider_quote) return estimate;
   try {
     // La passerelle de génération peut être antérieure au devis fournisseur :
@@ -729,11 +730,11 @@ export async function cancelGeneration(jobId: string): Promise<boolean> {
 }
 
 export function videoStart(jobId: string): Promise<VideoActionResult> {
-  return invokeEdge<VideoActionResult>('reelora-video', { action: 'start', job_id: jobId });
+  return invokeEdge<VideoActionResult>(edgeFunctionName('video'), { action: 'start', job_id: jobId });
 }
 
 export function videoStatus(jobId: string): Promise<VideoActionResult> {
-  return invokeEdge<VideoActionResult>('reelora-video', { action: 'status', job_id: jobId });
+  return invokeEdge<VideoActionResult>(edgeFunctionName('video'), { action: 'status', job_id: jobId });
 }
 
 export async function listJobs(
@@ -883,7 +884,7 @@ export interface AiEngineHealth {
 
 /** Real server-side probe of the central AI engine (model names, no keys). */
 export async function aiEngineHealth(): Promise<AiEngineHealth> {
-  return invokeEdge<AiEngineHealth>('vyora-ai', { action: 'health' });
+  return invokeEdge<AiEngineHealth>(edgeFunctionName('ai'), { action: 'health' });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1085,7 +1086,7 @@ export function adminProviderBalance(): Promise<AdminProviderBalance> {
  */
 export async function adminRefreshProviderBalance(): Promise<AdminProviderBalance> {
   const data = await invokeEdge<{ balance: AdminProviderBalance; spend: AdminProviderSpendSummary | null }>(
-    'reelora-video',
+    edgeFunctionName('video'),
     { action: 'admin-provider-balance', refresh: true },
   );
   return data.balance;
@@ -1213,7 +1214,7 @@ export async function adminListAuditLogs() {
  * côté serveur par le registre ; aucune passerelle de secours n'est nommée ici.
  */
 async function invokeAi<T>(body: Record<string, unknown>): Promise<T> {
-  return invokeEdge<T>('vyora-ai', body);
+  return invokeEdge<T>(edgeFunctionName('ai'), body);
 }
 
 export async function generateScript(payload: {

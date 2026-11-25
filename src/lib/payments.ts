@@ -2,12 +2,15 @@
  * Paiements SasPay — côté navigateur.
  *
  * Le navigateur ne détient aucune clé et ne décide de rien : il transmet une
- * INTENTION (produit, article, réseau, numéro) à l'Edge Function `vyora-payments`.
+ * INTENTION (produit, article, réseau, numéro) à l'Edge Function de paiement
+ * (`sorahnex-payments`, encore déployée sous son nom historique : voir
+ * `src/lib/platform-identity.ts`).
  * Le prix, les crédits, les frais et l'état du paiement viennent toujours du
  * serveur. Un paiement n'est « confirmé » que lorsque le serveur l'a vérifié
  * auprès de SasPay ; l'URL de retour ou un message local ne prouvent rien.
  */
 import { invokeEdge, rpc } from './api';
+import { edgeFunctionName } from './platform-identity';
 
 export type PaymentProduct = 'studio' | 'business';
 export type PaymentFlow = 'softpay' | 'checkout';
@@ -205,7 +208,7 @@ export interface CreatePaymentInput {
   idempotencyKey: string;
 }
 
-const FUNCTION = 'vyora-payments';
+const FUNCTION = edgeFunctionName('payments');
 
 export function getPaymentOptions(product: PaymentProduct, item?: PaymentItem): Promise<PaymentOptions> {
   return invokeEdge<PaymentOptions>(FUNCTION, { action: 'options', product, ...(item ? { item } : {}) });

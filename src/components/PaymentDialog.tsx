@@ -506,7 +506,7 @@ export default function PaymentDialog({ open, product, item, title, onClose, onC
                 <p className="text-[12.5px] leading-relaxed text-slate-300">
                   {order.product === 'studio'
                     ? `${order.credits ?? ''} crédits ont été ajoutés à votre solde Studio.`
-                    : 'Votre abonnement Business Grow est actif.'}
+                    : 'Votre abonnement SORAHNEX Grow est actif.'}
                   {' '}Référence : {order.internal_reference}.
                 </p>
               </>

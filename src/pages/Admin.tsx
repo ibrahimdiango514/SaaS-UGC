@@ -250,7 +250,7 @@ export default function Admin() {
         { id: 'providers', label: 'Fournisseurs IA', icon: <Bot size={14} /> },
         { id: 'ai-core', label: 'Contrôle IA', icon: <Cpu size={14} /> },
         { id: 'studio-activity', label: 'Activité Studio', icon: <Video size={14} /> },
-        { id: 'growth-activity', label: 'Activité Business Growth', icon: <Sparkles size={14} /> },
+        { id: 'growth-activity', label: 'Activité SORAHNEX Grow', icon: <Sparkles size={14} /> },
         { id: 'video-pricing', label: 'Tarifs vidéo', icon: <Video size={14} /> },
         { id: 'settings', label: 'Paramètres', icon: <Settings2 size={14} /> },
         { id: 'audit', label: 'Journal', icon: <FileClock size={14} /> },

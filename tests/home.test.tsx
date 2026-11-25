@@ -24,7 +24,7 @@ describe('Accueil personnalisé après connexion', () => {
   it('présente deux cartes indépendantes vers les vrais tableaux de bord', () => {
     render(<MemoryRouter><Home /></MemoryRouter>);
     const studio = screen.getByRole('link', { name: /Entrer dans Studio/ });
-    const business = screen.getByRole('link', { name: /Entrer dans Business Growth/ });
+    const business = screen.getByRole('link', { name: /Entrer dans SORAHNEX Grow/ });
     expect(studio.getAttribute('href')).toBe('/app/studio');
     expect(business.getAttribute('href')).toBe('/app/business');
     expect(screen.getByRole('heading', { name: 'SORAHNEX Studio' })).toBeTruthy();

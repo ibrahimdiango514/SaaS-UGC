@@ -51,7 +51,7 @@ describe('séparation des deux espaces', () => {
   it('affiche les deux cartes d’univers vers leurs tableaux de bord réels', () => {
     render(<MemoryRouter><Home /></MemoryRouter>);
     expect(screen.getByRole('link', { name: /Entrer dans Studio/ }).getAttribute('href')).toBe('/app/studio');
-    expect(screen.getByRole('link', { name: /Entrer dans Business Growth/ }).getAttribute('href')).toBe('/app/business');
+    expect(screen.getByRole('link', { name: /Entrer dans SORAHNEX Grow/ }).getAttribute('href')).toBe('/app/business');
     expect(screen.getByRole('heading', { name: 'SORAHNEX Studio' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'SORAHNEX Grow' })).toBeTruthy();
   });
