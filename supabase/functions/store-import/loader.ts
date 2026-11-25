@@ -6,16 +6,16 @@
 // toute exécution. Un bundle absent, tronqué, reformaté ou modifié n'est
 // JAMAIS exécuté.
 //
-// Épinglé sur store-import.js (113906 caractères).
+// Épinglé sur store-import.js (113982 caractères).
 //
 // Généré par scripts/edge-github-loader.mjs : ne pas éditer à la main.
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "cf92ca35939549b1e2621200791c574ea3dbe6a8";
+const COMMIT = "8f77d59d4d8b2912c9f1dc7efce680e9b1b46151";
 const PATH = "supabase/functions/_artifacts/store-import.js";
-const ARTIFACT_SHA256 = "f9d120584b7e8ea0894485484f877ece9a5018dd2e9c29b96b0c4c409daae26a";
-const ARTIFACT_CHARS = 113906;
+const ARTIFACT_SHA256 = "b2cce45362933e5c3b1b57b42ff86c73b2948ac37fef0e381e5501b3efa5671e";
+const ARTIFACT_CHARS = 113982;
 
 // Le fichier est comparé TEL QUEL, saut de ligne final compris : l'empreinte
 // porte sur le fichier tel qu'il est committé.
