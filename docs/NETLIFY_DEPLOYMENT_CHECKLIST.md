@@ -48,23 +48,33 @@ Tout ce qui suit ne consomme aucun crédit et ne dépend pas du nouveau site.
 
 ## Étape 2 — Préparer le dépôt pour le nouveau site (PR, sans fusionner)
 
-- [ ] Remplacer les **deux** valeurs dans `netlify.site.conf` :
+> ✅ **FAIT le 25 novembre 2026.** Le site autorisé est désormais `saas-ugc`
+> (`6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803`). `vyora-saas-ugc` est passé en
+> `ANCIEN_SITE_ID` : il est refusé nommément, même si ses trois variables
+> d'autorisation étaient déclarées — pour qu'une bascule ne republie jamais par
+> accident sur l'ancien hébergement.
+
+- [ ] Pour un futur changement, remplacer les **deux** valeurs dans `netlify.site.conf` :
 
 ```sh
 SITE_ID=<NOUVEAU_SITE_ID>
 SITE_NAME=<nouveau-nom>
-ANCIEN_SITE_NAME=vyora-ugc     # ne pas modifier
 ```
 
-- [ ] Si le site existait déjà et s'est fait refuser, sa valeur figure sur la
-      ligne `A_DECLARER` de `netlify.site.conf` : la **déplacer** sur `SITE_ID`
-      et `SITE_NAME`, puis **supprimer** les deux lignes `A_DECLARER` — le tout dans
-      la PR de migration (par PR, jamais à la main dans l'interface). C'est ce
-      qui distingue « site connu mais pas encore autorisé » (le cas normal d'une
-      migration) de « site totalement inconnu » (le refus de sécurité).
-      Exemple vécu le 25/11/2026 : `saas-ugc` / `6ec85a76-…` a tenté un
-      déploiement de production depuis `main`. Refusé, zéro crédit consommé,
-      et le journal disait exactement pourquoi.
+- [ ] Ce changement se fait **par PR** (jamais à la main dans l'interface Netlify :
+      une valeur modifiée dans le tableau de bord ne serait pas revue).
+- [ ] Et déplacer l'ancien identifiant sur `ANCIEN_SITE_ID`, avec son nom sur
+      `ANCIEN_SITE_NAME` : un site quitté doit être **refusé explicitement**, pas
+      simplement oublié. Oublier produit un message générique ; refuser produit
+      la vraie raison dans le journal.
+
+- [ ] Cas vécu le 25/11/2026, à connaître : `saas-ugc` a tenté un déploiement de
+      production depuis `main` alors qu'il n'était pas encore déclaré. La garde a
+      refusé (zéro crédit), mais le message accusait `VYORA_BUILD_ENABLED` — une
+      variable, au lieu de l'identité. **C'est corrigé** : un site ni autorisé ni
+      ancien est nommé, et le message renvoie au fichier d'identité. La leçon
+      reste : quand un build est refusé, lire la ligne `Raison :` — elle dit
+      désormais la vraie cause.
 - [ ] Vérifier qu'aucune autre modification n'est nécessaire :
       `grep -rn "fc88d197\|vyora-saas-ugc" --include=*.toml --include=*.sh --include=*.conf .`
       → ne doit apparaître **que** dans des commentaires historiques.

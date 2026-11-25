@@ -194,9 +194,8 @@ describe('Identité du site — positive, sans liste noire', () => {
   it('un site INCONNU est refusé, même avec toutes les autorisations', () => {
     const env = autorise({ SITE_ID: SITE_ID_AUTRE });
     expect(publicationAutorisee(env)).toBe(false);
-    // Message enrichi depuis le refus saas-ugc du 25/11/2026 : un site ni
-    // autorisé ni déclaré se voit nommé, avec les deux identités en regard.
-    expect(executer(commandeBuild!.split(' && ')[0], env).sortie).toMatch(/ni le site autorisé .* ni le site à déclarer/);
+    // Un site inconnu est nommé, et le message renvoie au fichier d'identité.
+    expect(executer(commandeBuild!.split(' && ')[0], env).sortie).toMatch(/n'est pas le site autorisé/);
   });
 
   it('un nom inconnu est refusé même avec le bon identifiant', () => {
@@ -310,7 +309,7 @@ describe('Diagnostic — le message dit exactement ce qui manque', () => {
 
   it('chaque condition manquante a son message propre, pas un refus muet', () => {
     const cas: [Env, string][] = [
-      [autorise({ SITE_ID: SITE_ID_AUTRE }), 'ni le site autorisé'],
+      [autorise({ SITE_ID: SITE_ID_AUTRE }), "n'est pas le site autorisé"],
       [autorise({ SITE_NAME: 'autre-site' }), 'le site autorisé s\'appelle'],
       [autorise({ BRANCH: 'dev' }), 'seule la branche main'],
       [sans(autorise(), 'VYORA_BUILD_ENABLED'), 'VYORA_BUILD_ENABLED doit valoir'],
@@ -459,28 +458,53 @@ describe('Harnais de vérification — aucun repli vers un site mort', () => {
 
 // ===========================================================================
 describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', () => {
-  /** Reproduit l'environnement exact du déploiement refusé du 25/11/2026. */
-  const envJournal = {
+  /**
+   * Le site `saas-ugc` a été refusé le 25/11/2026 parce qu'il n'était pas encore
+   * déclaré. Depuis, le propriétaire l'a autorisé : il est devenu le site de
+   * production, et `vyora-saas-ugc` l'ancien. Le cas de test qui compte
+   * maintenant est celui de l'ANCIEN site, qui doit rester refusé.
+   */
+  const envAncienSite = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
-    SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
-    SITE_NAME: 'saas-ugc',
+    SITE_ID: 'fc88d197-fe0b-47c7-a6e3-fba44eeccda9',
+    SITE_NAME: 'vyora-saas-ugc',
     BRANCH: 'main',
+    VYORA_BUILD_ENABLED: 'true',
   };
 
-  it('ne reproche PAS une variable absente quand le site n’est simplement pas autorisé', () => {
-    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envJournal as NodeJS.ProcessEnv });
+  it('un ANCIEN site est refusé pour cette raison précise, pas par un message générique', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
     expect(r.status).toBe(1);
-    // C'était le défaut : « VYORA_BUILD_ENABLED doit valoir true » accusait une
-    // variable alors que la vraie cause était « ce site n'est pas autorisé ».
-    expect(r.stderr).not.toMatch(/Raison : VYORA_BUILD_ENABLED/);
-    expect(r.stderr).toMatch(/n'est pas encore AUTORISÉ/);
-    expect(r.stderr).toContain('6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803');
+    expect(r.stderr).toMatch(/ANCIEN site, explicitement écarté/);
   });
 
-  it('cite le site autorisé ET le site à déclarer, pour lever l’ambiguïté', () => {
-    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envJournal as NodeJS.ProcessEnv });
+  it('le refus ne reproche JAMAIS une variable absente quand la cause est l’identité', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
+    // C'était le défaut du 25/11 : « VYORA_BUILD_ENABLED doit valoir true »
+    // accusait une variable alors que le site n'était pas le bon.
+    expect(r.stderr).not.toMatch(/Raison : VYORA_BUILD_ENABLED/);
+    expect(r.stderr).not.toMatch(/Raison : AUTORISATION HUMAINE/);
+  });
+
+  it('un site ancien reste refusé même si TOUT le reste est correct (verrou inclus)', () => {
+    // Le scénario dangereux : quelqu'un déclare les trois variables d'autorisation
+    // sur l'ancien site « pour voir ». L'identité doit primer sur le verrou.
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], {
+      encoding: 'utf8',
+      env: {
+        ...envAncienSite,
+        SORAHNEX_DEPLOY_AUTHORIZED: 'true',
+        SORAHNEX_DEPLOY_AUTHORIZED_NAME: 'sorahnex-deploy',
+      } as NodeJS.ProcessEnv,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/ANCIEN site/);
+  });
+
+  it('cite le site autorisé dans l’état du refus', () => {
+    const r = spawnSync('sh', ['scripts/netlify-build-guard.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv });
     expect(r.stderr).toMatch(/Site autorisé/);
-    expect(r.stderr).toContain('fc88d197-fe0b-47c7-a6e3-fba44eeccda9');
+    expect(r.stderr).toContain('6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803');
   });
 
   it('n’accuse pas la variable d’opt-in pour un site totalement inconnu', () => {
@@ -489,7 +513,9 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
       env: { PATH: process.env.PATH ?? '/usr/bin:/bin', SITE_ID: '11111111-2222-3333-4444-555555555555', SITE_NAME: 'autre', BRANCH: 'main' },
     });
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/ni le site autorisé .* ni le site à déclarer/);
+    expect(r.stderr).toMatch(/n'est pas le site autorisé/);
+    // Et surtout : il ne met pas la faute sur une variable.
+    expect(r.stderr).not.toMatch(/Raison : VYORA_BUILD_ENABLED doit valoir/);
   });
 
   it('pour le site autorisé sans autorisation humaine, dit la vraie raison', () => {
@@ -497,8 +523,8 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
       encoding: 'utf8',
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
-        SITE_ID: 'fc88d197-fe0b-47c7-a6e3-fba44eeccda9',
-        SITE_NAME: 'vyora-saas-ugc',
+        SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
+        SITE_NAME: 'saas-ugc',
         BRANCH: 'main',
         VYORA_BUILD_ENABLED: 'true',
       },
@@ -513,8 +539,8 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
       encoding: 'utf8',
       env: {
         PATH: process.env.PATH ?? '/usr/bin:/bin',
-        SITE_ID: 'fc88d197-fe0b-47c7-a6e3-fba44eeccda9',
-        SITE_NAME: 'vyora-saas-ugc',
+        SITE_ID: '6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803',
+        SITE_NAME: 'saas-ugc',
         BRANCH: 'main',
         VYORA_BUILD_ENABLED: 'true',
         SORAHNEX_DEPLOY_AUTHORIZED: 'true',
@@ -525,8 +551,8 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
     expect(r.stdout).toMatch(/build autorisé/);
   });
 
-  it('le rideau 1 ANNULE (code 0) pour le site non autorisé : zéro crédit', () => {
-    const r = spawnSync('sh', ['scripts/netlify-ignore.sh'], { encoding: 'utf8', env: envJournal as NodeJS.ProcessEnv, timeout: 20_000 });
+  it('le rideau 1 ANNULE (code 0) pour l’ancien site : zéro crédit', () => {
+    const r = spawnSync('sh', ['scripts/netlify-ignore.sh'], { encoding: 'utf8', env: envAncienSite as NodeJS.ProcessEnv, timeout: 20_000 });
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/build annule/);
   });
@@ -544,19 +570,20 @@ describe('Message de refus — dire la VRAIE cause, celle du journal Netlify', (
   });
 });
 
-describe('Identité déclarée mais non autorisée', () => {
-  it('netlify.site.conf consigne le site refusé, commenté, sans l’autoriser', () => {
+describe('Identité autorisée — le site choisi, et les anciens écartés', () => {
+  it('netlify.site.conf autorise saas-ugc et écarte explicitement l’ancien site', () => {
     const conf = lire('netlify.site.conf');
-    expect(conf).toContain('A_DECLARER=6ec85a76-bf5f-4eed-9d9e-0a8f6b7f9803');
-    // Et surtout : il n'est PAS sur la ligne d'autorisation.
     const autorise = conf.split('\n').find((l) => /^SITE_ID=/.test(l.trim()));
-    expect(autorise).toContain('fc88d197');
-    expect(autorise).not.toContain('6ec85a76');
+    expect(autorise).toContain('6ec85a76');
+    expect(autorise).not.toContain('fc88d197');
+    // L'ancien identifiant n'est pas supprimé : il est REFUSÉ nommément.
+    expect(conf).toContain('ANCIEN_SITE_ID=fc88d197-fe0b-47c7-a6e3-fba44eeccda9');
+    expect(conf).toContain('ANCIEN_SITE_NAME=vyora-ugc');
   });
 
-  it('la documentation explique comment autoriser le site, par PR', () => {
+  it('la documentation explique comment autoriser un site, par PR', () => {
     const checklist = lire('docs/NETLIFY_DEPLOYMENT_CHECKLIST.md');
-    expect(checklist).toMatch(/A_DECLARER/);
+    expect(checklist).toMatch(/ANCIEN_SITE_ID/);
     expect(checklist).toMatch(/par PR/i);
   });
 });

@@ -66,7 +66,7 @@ pas les déclarer à la main, cela masquerait la vraie valeur.
 
 | Fichier | Contenu |
 | --- | --- |
-| `netlify.site.conf` | `SITE_ID`, `SITE_NAME`, `ANCIEN_SITE_NAME`. **Seule source de vérité**, lue par les deux rideaux. Migrer = remplacer deux valeurs, par PR. |
+| `netlify.site.conf` | `SITE_ID`, `SITE_NAME`, `ANCIEN_SITE_NAME`, `ANCIEN_SITE_ID`. **Seule source de vérité**, lue par les deux rideaux. Migrer = remplacer deux valeurs et déplacer l'ancienne identité sur `ANCIEN_SITE_ID`, par PR. |
 
 ---
 

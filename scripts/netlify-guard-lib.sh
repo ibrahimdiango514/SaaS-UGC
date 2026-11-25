@@ -43,6 +43,7 @@ charger_identite() {
   ID_ATTENDU=""
   NOM_ATTENDU=""
   ANCIEN_NOM=""
+  ANCIEN_ID=""
   ID_DECLARE=""
   _fichier="$1/$FICHIER_IDENTITE"
   if [ ! -f "$_fichier" ]; then
@@ -61,6 +62,7 @@ charger_identite() {
       SITE_ID) ID_ATTENDU=$_valeur ;;
       SITE_NAME) NOM_ATTENDU=$_valeur ;;
       ANCIEN_SITE_NAME) ANCIEN_NOM=$_valeur ;;
+      ANCIEN_SITE_ID) ANCIEN_ID=$_valeur ;;
       A_DECLARER) ID_DECLARE=$_valeur ;;
     esac
   done < "$_fichier"
@@ -119,8 +121,13 @@ verifier_garde() {
   if [ -z "${SITE_ID:-}" ]; then
     refuser "SITE_ID absent : identité du site invérifiable. Ce n'est pas un environnement Netlify, ou le site n'est pas relié au dépôt." || return 1
   fi
+  # Un ancien site est refusé AVANT la comparaison d'identifiant : sinon le
+  # message generique « pas le site autorise » masquerait la vraie raison.
+  if [ -n "$ANCIEN_ID" ] && [ "$SITE_ID" = "$ANCIEN_ID" ]; then
+    refuser "ce site ($SITE_ID) est un ANCIEN site, explicitement écarté : une bascule ne doit jamais republier par accident sur l'ancien hébergement." || return 1
+  fi
   if [ "$SITE_ID" != "$ID_ATTENDU" ]; then
-    refuser "ce site ($SITE_ID) n'est pas le site autorisé ($ID_ATTENDU). Rien ne se publie sur un site non déclaré." || return 1
+    refuser "ce site ($SITE_ID) n'est pas le site autorisé ($ID_ATTENDU). Rien ne se publie sur un site qui n'est pas déclaré dans $FICHIER_IDENTITE." || return 1
   fi
   if [ -z "${SITE_NAME:-}" ]; then
     refuser "SITE_NAME absent : identité du site invérifiable." || return 1
