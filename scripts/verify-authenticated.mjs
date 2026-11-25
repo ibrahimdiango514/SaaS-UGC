@@ -38,7 +38,10 @@ const TIMEOUT_MS = Number(process.env.SORAHNEX_TIMEOUT_MS || 30_000);
 
 /** Ne jamais laisser un jeton, un mot de passe ou une clé sortir dans les journaux. */
 export function rediger(texte) {
-  return String(texte ?? '')
+  // Un corps JSON doit être sérialisé AVANT rédaction : String(objet) ne produit
+  // que « [object Object] », ce qui effacerait précisément le code d'erreur cherché.
+  const source = texte !== null && typeof texte === 'object' ? JSON.stringify(texte) : String(texte ?? '');
+  return source
     .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '<jeton-masqué>')
     .replace(/sb_(?:secret|publishable)_[A-Za-z0-9_-]+/g, '<clé-masquée>')
     .replace(/("(?:access_token|refresh_token|password)"\s*:\s*")[^"]*(")/gi, '$1<masqué>$2')
@@ -55,6 +58,13 @@ export function classer(statut, corps) {
   if (/ARTIFACT_UNAVAILABLE|ARTIFACT_LOAD_FAILED/.test(texte)) return 'ARTEFACT';
   if (statut === 0) return 'AUCUNE RÉPONSE';
   if (statut >= 500) return 'PANNE';
+  // Un 403 AVEC un code métier est une restriction d'accès voulue (par exemple
+  // BUSINESS_GROW_SUBSCRIPTION_REQUIRED : Import & Connect est réservé aux
+  // abonnés). La session est valide, le handler a tourné et a décidé : c'est un
+  // résultat, pas une panne. Un 403 sans code, ou un 401, reste un refus de
+  // session — ce qui serait un vrai échec pour un test censé être connecté.
+  const codeMetier = /\berror\b/.test(texte) && /"code"\s*:\s*"[A-Z_]+"/.test(texte);
+  if (statut === 403 && codeMetier) return 'ACCÈS RESTREINT';
   if (statut === 401 || statut === 403) return 'SESSION REFUSÉE';
   if (statut >= 200 && statut < 300) return 'OK';
   if (statut >= 400 && statut < 500) return 'REFUS MÉTIER';
@@ -114,7 +124,7 @@ async function connecter(email, motDePasse) {
  * Les actions réellement appelées par l'interface (src/business/api.ts,
  * src/mcp/serveurs.ts, src/lib/api.ts). Toutes en lecture.
  */
-export function sondes(jeton) {
+export function sondes(jeton, workspaceId = null) {
   const bg = (action, valeurs = {}) => ({
     nom: `business-grow · ${action}`,
     url: `${SUPABASE_URL}/functions/v1/business-grow`,
@@ -137,10 +147,12 @@ export function sondes(jeton) {
     bg('memory.get'),
     bg('integrations.list'),
     bg('tools.list'),
-    bg('agent.reports.list'),
+    // `agent.reports.list` exige une entreprise : sans elle, le backend répond
+    // 400 INVALID_WORKSPACE, ce qui est le contrat attendu, pas une panne.
+    bg('agent.reports.list', workspaceId ? { workspaceId } : {}),
     ...modules.map((category) => ({
-      ...bg('modules.records', { category, op: 'list' }),
-      nom: `business-grow · module ${category.replace('bg_module_', '')}`,
+      ...bg('modules.records', { category, op: 'list', ...(workspaceId ? { workspaceId } : {}) }),
+      nom: `business-grow · module ${category.replace('bg_module_', '')}${workspaceId ? ' (par entreprise)' : ''}`,
     })),
     {
       nom: 'mcp-client · gestion/lister',
@@ -194,9 +206,19 @@ async function principal() {
   console.log(`::notice::session obtenue pour ${compte} (identifiant ${session.identifiant ?? 'inconnu'})`);
   lignes.push(`Session GoTrue obtenue pour \`${compte}\`.`);
 
+  // Une entreprise (espace de travail) est nécessaire aux actions par périmètre.
+  // Lecture seule : on cherche celle du compte, on n'en crée pas.
+  const espaces = await appeler(`${SUPABASE_URL}/rest/v1/ugc_workspace_members?select=workspace_id&limit=1`, {
+    headers: entetes(session.jeton),
+  });
+  const workspaceId = Array.isArray(espaces.corps) && espaces.corps[0]?.workspace_id ? espaces.corps[0].workspace_id : null;
+  const portee = workspaceId ? `entreprise ${workspaceId}` : 'aucune entreprise sur ce compte : les actions par périmètre répondront « entreprise requise »';
+  console.log(`::notice::périmètre — ${portee}`);
+  lignes.push(`Périmètre : ${portee}.`);
+
   let echecs = 0;
   const tableau = ['| Sonde | HTTP | Verdict | Extrait |', '| --- | --- | --- | --- |'];
-  for (const sonde of sondes(session.jeton)) {
+  for (const sonde of sondes(session.jeton, workspaceId)) {
     const { statut, corps } = await appeler(sonde.url, sonde.init);
     const verdict = classer(statut, corps);
     const extrait = rediger(corps).replace(/\|/g, '/').replace(/\n/g, ' ');

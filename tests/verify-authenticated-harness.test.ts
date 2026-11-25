@@ -78,6 +78,35 @@ describe('Classement des réponses — ce qui prouve que le handler a tourné', 
     // UNAUTHORIZED_NO_AUTH_HEADER vient de la passerelle : la fonction n'a pas tourné.
     expect(classer(401, { code: 'UNAUTHORIZED_NO_AUTH_HEADER' })).toBe('SESSION REFUSÉE');
   });
+
+  it('un 403 AVEC code métier est une restriction voulue, pas un échec de session', () => {
+    // Constat réel du 2026-11-25 : un compte sans abonnement Grow reçoit ce refus
+    // sur integrations.list. La session est valide, le handler a décidé : c'est le
+    // contrat d'Import & Connect, pas une panne.
+    const reponse = { error: { code: 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED', message: 'Import & Connect est réservé aux abonnés Grow actifs.' } };
+    expect(classer(403, reponse)).toBe('ACCÈS RESTREINT');
+    expect(estEchec('ACCÈS RESTREINT')).toBe(false);
+    // Un 401 avec le même code reste un refus de session.
+    expect(classer(401, reponse)).toBe('SESSION REFUSÉE');
+    // Un 403 sans code métier ne prouve pas une décision du handler.
+    expect(classer(403, {})).toBe('SESSION REFUSÉE');
+  });
+});
+
+describe('Rédaction d’un corps JSON — le code d’erreur doit rester lisible', () => {
+  it('sérialise un objet au lieu de produire « [object Object] »', () => {
+    // Défaut constaté en exécution réelle : String(objet) effaçait précisément
+    // le code d'erreur que la vérification cherche à établir.
+    const sortie = rediger({ error: { code: 'BUSINESS_GROW_SUBSCRIPTION_REQUIRED' } });
+    expect(sortie).not.toContain('[object Object]');
+    expect(sortie).toContain('BUSINESS_GROW_SUBSCRIPTION_REQUIRED');
+  });
+
+  it('masque les jetons même à l’intérieur d’un objet', () => {
+    const sortie = rediger({ access_token: 'ne-doit-pas-sortir', user: { id: 'abc' } });
+    expect(sortie).not.toContain('ne-doit-pas-sortir');
+    expect(sortie).toContain('abc');
+  });
 });
 
 describe('Sondes — les actions réellement appelées par l’interface', () => {
