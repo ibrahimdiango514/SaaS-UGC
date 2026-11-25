@@ -509,7 +509,7 @@ export default function VideoEditor() {
       setRecoverableDraft(null);
       setDirty(false);
       setSavedAt(new Date().toISOString());
-      toast.success('Montage enregistré sans perte dans votre projet VYORA.');
+      toast.success('Montage enregistré sans perte dans votre projet SORAHNEX.');
       return next;
     } catch (err) {
       toast.error(asAppError(err).message);
@@ -1116,7 +1116,7 @@ export default function VideoEditor() {
       <Modal
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
-        title="Médias du projet & bibliothèque VYORA"
+        title="Médias du projet & bibliothèque SORAHNEX"
         size="lg"
         description="Seuls les médias réels stockés dans votre espace privé peuvent être attachés à un plan."
       >

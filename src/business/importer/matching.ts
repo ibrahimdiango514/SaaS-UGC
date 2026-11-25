@@ -1,5 +1,5 @@
 /**
- * VYORA — rapprochement d'un produit importé avec le catalogue existant.
+ * SORAHNEX — rapprochement d'un produit importé avec le catalogue existant.
  *
  * ## Le problème
  * La déduplication actuelle compare le nom exact (casse, accents et ponctuation

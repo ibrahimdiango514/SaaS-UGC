@@ -1,4 +1,4 @@
-// VYORA — garde-fou « catalogue de fournisseurs NON figé ».
+// SORAHNEX — garde-fou « catalogue de fournisseurs NON figé ».
 //
 // Décision produit du 2026-11-14 : la liste des fournisseurs IA ne doit jamais
 // être écrite dans le code, une migration ou un fichier de configuration. Elle

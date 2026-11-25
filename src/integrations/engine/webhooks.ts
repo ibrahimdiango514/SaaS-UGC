@@ -1,5 +1,5 @@
 /**
- * VYORA — réception de webhooks entrants.
+ * SORAHNEX — réception de webhooks entrants.
  *
  * ## Le principe
  *

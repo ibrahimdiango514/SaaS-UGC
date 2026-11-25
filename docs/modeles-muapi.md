@@ -11,12 +11,12 @@ stockée en secret Supabase. Aucun tarif n’a été saisi ni estimé à la main
 | Dernier appel catalogue authentifié | **2026-11-11T19:22:37.095Z** |
 | Clé MuAPI | configurée **et validée** (catalogue authentifié disponible, solde lisible) |
 | Source retenue | `muapi_authenticated` (catalogue complet renvoyé avec la clé) |
-| Dernière synchronisation base VYORA | **2026-11-11T16:29:41.391Z** |
+| Dernière synchronisation base SORAHNEX | **2026-11-11T16:29:41.391Z** |
 | Devise d’origine | **USD** (100 % des lignes) |
 | Équivalent USDT | affiché systématiquement à côté du prix d’origine |
 
 > **Convention de conversion explicitée** : `1 USD = 1 USDT` est une **convention de calcul
-> interne VYORA**, pas un taux de marché. Le prix d’origine en USD reste la référence ; la
+> interne SORAHNEX**, pas un taux de marché. Le prix d’origine en USD reste la référence ; la
 > colonne USDT n’est qu’une lecture de cette même valeur.
 
 ---
@@ -26,14 +26,14 @@ stockée en secret Supabase. Aucun tarif n’a été saisi ni estimé à la main
 | Indicateur | Valeur |
 | --- | --- |
 | Modèles vidéo détectés dans le catalogue MuAPI | **415** |
-| Modèles sélectionnables dans VYORA (base) | **412** |
+| Modèles sélectionnables dans SORAHNEX (base) | **412** |
 | Modèles annoncés « bientôt disponibles » | **3** |
 | Modèles désactivés | **0** |
 | Modèles actifs selon la classification serveur en direct | **236** |
 | Modèles indisponibles selon la classification serveur en direct | **179** |
 
 Les deux lectures ne se contredisent pas : les 412 lignes de la base sont techniquement
-activées côté VYORA, mais la classification en direct retire de la sélection les modèles dont
+activées côté SORAHNEX, mais la classification en direct retire de la sélection les modèles dont
 l’entrée n’est pas raccordée à l’interface (champs d’entrée non gérés) ou dont le tarif n’a pas
 pu être vérifié. **Aucune de ces exclusions n’est masquée** : le motif est affiché par modèle
 dans l’administration.
@@ -92,7 +92,7 @@ inventée pour le remplacer. Aucun modèle ne présente de tarif absent (null).
 
 Conséquence pratique : pour la quasi-totalité des modèles, le prix affiché ici est le **tarif de
 base** ; le montant exact d’une génération dépend de la durée et de la résolution demandées.
-C’est pourquoi VYORA conserve un **devis calculé côté serveur** avant toute génération
+C’est pourquoi SORAHNEX conserve un **devis calculé côté serveur** avant toute génération
 (fonction `video-quote`) et refuse d’afficher un prix quand le fournisseur ne le confirme pas
 (« devis indisponible »).
 
@@ -142,14 +142,14 @@ Ces devis ont été obtenus par appels serveur réels sur `POST /api/v1/models/{
 | `video-effects` (`3158cdf0-b5d1-4f97-871a-dbfb08f6b259`) | valeurs par défaut | **0,30 USD** |
 | `seedance-2-omni-reference-480p` | valeurs par défaut | **1,44 USD** |
 | `kling` | 1080p / 10 s | **2,35 USD** |
-| `wan2.2-5bfast` | valeurs par défaut | **non vérifiable** — le fournisseur répond `PROVIDER_BAD_RESPONSE` : VYORA affiche « devis indisponible » au lieu d’un prix inventé |
+| `wan2.2-5bfast` | valeurs par défaut | **non vérifiable** — le fournisseur répond `PROVIDER_BAD_RESPONSE` : SORAHNEX affiche « devis indisponible » au lieu d’un prix inventé |
 
 ---
 
 ## 8. Où consulter la table complète
 
 La table exhaustive (415 lignes : identifiant technique, nom commercial, catégorie, tarif USD,
-équivalent USDT, devise source, tarification dynamique, stratégie tarifaire, statut VYORA,
+équivalent USDT, devise source, tarification dynamique, stratégie tarifaire, statut SORAHNEX,
 accès compte, champs requis, date de synchronisation) est disponible dans
 **Administration → Modèles vidéo**, avec :
 
@@ -161,4 +161,4 @@ accès compte, champs requis, date de synchronisation) est disponible dans
 
 Le système de crédits et d’abonnements reste **inchangé** : aucune formule, aucun prix de
 crédit, aucun barème n’a été modifié par ce rapport. La table de tarifs ci-dessus servira de
-base à la discussion sur la tarification VYORA.
+base à la discussion sur la tarification SORAHNEX.

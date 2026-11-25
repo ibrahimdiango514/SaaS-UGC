@@ -21,14 +21,14 @@
  * ## Pourquoi ce n'est pas un deuxième système de connexion
  *
  * Les états (`pending`, `connected`, `error`) et la table sont ceux du socle
- * Business Grow (`saas_business.integration_connections`). On ajoute seulement
+ * Grow (`saas_business.integration_connections`). On ajoute seulement
  * deux RPC pour écrire un secret Vault et journaliser la vérification. Aucune
  * table parallèle n'est créée pour l'état de connexion.
  *
  * ## Sécurité, dans l'ordre où elle s'applique
  *
  * 1. Authentification GoTrue (jamais un en-tête de confiance).
- * 2. Abonnement Business Grow **actif et payé** (`bg_import_access`).
+ * 2. Abonnement Grow **actif et payé** (`bg_import_access`).
  * 3. Accès en écriture à l'entreprise (`bg_require_workspace(…, true)`).
  * 4. Validation d'URL + résolution DNS + épinglage IP (aucun SSRF possible).
  * 5. La clé n'est utilisée que pour un `GET` sortant, jamais renvoyée.
@@ -423,7 +423,7 @@ async function connecter(
     const message = erreur instanceof Error ? erreur.message : '';
     if (/SUBSCRIPTION_REQUIRED/i.test(message)) {
       return jsonResponse(
-        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Grow actif et payé est requis pour connecter une boutique.'),
+        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Grow actif et payé est requis pour connecter une boutique.'),
         403, corsOrigin,
       );
     }
@@ -570,7 +570,7 @@ async function connecterHerberge(
     const message = erreur instanceof Error ? erreur.message : '';
     if (/SUBSCRIPTION_REQUIRED/i.test(message)) {
       return jsonResponse(
-        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Grow actif et payé est requis pour connecter une boutique.'),
+        failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Grow actif et payé est requis pour connecter une boutique.'),
         403, corsOrigin,
       );
     }
@@ -1030,7 +1030,7 @@ async function reponseEnregistrementImpossible(
   const message = erreur instanceof Error ? erreur.message : '';
   if (/SUBSCRIPTION_REQUIRED|SUBSCRIPTION_EXPIRED|SUBSCRIPTION_CANCELED/i.test(message)) {
     return jsonResponse(
-      failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Business Grow actif et payé est requis pour connecter une boutique.'),
+      failure('SUBSCRIPTION_REQUIRED', 'Un abonnement Grow actif et payé est requis pour connecter une boutique.'),
       403, corsOrigin,
     );
   }
@@ -1104,7 +1104,7 @@ export async function handleStoreConnect(
     const autorisation = request.headers.get('authorization') ?? '';
     const userId = await deps.getUserId(autorisation);
     if (!userId) {
-      return new Response(JSON.stringify(failure('UNAUTHENTICATED', 'Session VYORA invalide ou expirée.')), {
+      return new Response(JSON.stringify(failure('UNAUTHENTICATED', 'Session SORAHNEX invalide ou expirée.')), {
         status: 401, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
       });
     }
@@ -1125,7 +1125,7 @@ export async function handleStoreConnect(
         ? 403 : acces.reason === 'NO_SUBSCRIPTION' ? 402 : 403;
       return new Response(JSON.stringify(failure(
         acces.reason || 'SUBSCRIPTION_REQUIRED',
-        acces.message || 'Un abonnement Business Grow actif est requis.',
+        acces.message || 'Un abonnement Grow actif est requis.',
       )), {
         status: statut, headers: { 'content-type': 'application/json; charset=utf-8', ...corsHeaders },
       });
@@ -1489,7 +1489,7 @@ async function sonderApiPersonnalisee(
   const publique = assertPublicAddresses(adresses);
   if (!publique.ok) {
     // Message volontairement générique : il ne doit pas servir de sonde réseau.
-    throw new ConnectError('SSRF_BLOCKED', 'Cette adresse n’est pas accessible depuis VYORA.', 400);
+    throw new ConnectError('SSRF_BLOCKED', 'Cette adresse n’est pas accessible depuis SORAHNEX.', 400);
   }
 
   let reponse: Response;

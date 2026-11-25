@@ -54,7 +54,7 @@ export default function Login() {
       await signIn(email.trim(), password);
       const account = await bootstrap();
       setState('success');
-      toast.success('Bienvenue sur VYORA !');
+      toast.success('Bienvenue sur SORAHNEX !');
       const from = (location.state as { from?: string } | null)?.from;
       // Laisse la coche de réussite se dessiner avant la navigation.
       window.setTimeout(() => {
@@ -75,7 +75,7 @@ export default function Login() {
       variant="enter"
       eyebrow="Connexion sécurisée"
       title="Connexion"
-      subtitle="Accédez à votre espace de création VYORA."
+      subtitle="Accédez à votre espace de création SORAHNEX."
       footer={<>Pas encore de compte ? <Link to="/inscription" className="font-semibold text-cyan-300 transition hover:text-cyan-200">Créer un compte</Link></>}
     >
       <div
@@ -141,7 +141,7 @@ export default function Login() {
           Accès propriétaire
         </Link>
         <Link to="/inscription" className="vy-btn min-h-11 border border-white/[0.09] bg-white/[0.03] px-4 text-[11.5px] text-slate-300 hover:text-white">
-          Découvrir VYORA
+          Découvrir SORAHNEX
         </Link>
       </div>
     </AuthShell>

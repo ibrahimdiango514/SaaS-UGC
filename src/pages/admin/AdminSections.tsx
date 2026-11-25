@@ -370,8 +370,8 @@ export function ModelsSection() {
       <UniversalCatalogBrowser />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-slate-500">
-          Sous-catalogue vidéo historique · {catalog ? `${catalog.catalog.detected_video} modèles vidéo détectés` : 'chargement'} ·
-          récupéré le {catalog ? formatDate(catalog.catalog.fetched_at, true) : '—'}
+          Sous-catalogue vidéo historique · {catalog?.catalog ? `${catalog.catalog.detected_video} modèles vidéo détectés` : 'chargement'} ·
+          récupéré le {catalog?.catalog ? formatDate(catalog.catalog.fetched_at, true) : '—'}
         </p>
         <div className="flex gap-2">
           <Button variant="ghost" size="sm" onClick={() => void load()} loading={loading} icon={<RefreshCw size={14} />}>Rafraîchir</Button>
@@ -385,11 +385,11 @@ export function ModelsSection() {
       {error ? <div className="rounded-xl border border-rose-400/30 bg-rose-400/[0.06] p-4 text-sm text-rose-200">{error}</div> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Modèles détectés" value={catalog?.catalog.detected_video ?? 0} icon={<Video size={19} />} tone="cyan" />
-        <StatCard label="Sélectionnables" value={catalog?.catalog.active ?? 0} icon={<CheckCircle2 size={19} />} tone="emerald" hint={`${catalog?.catalog.unavailable ?? 0} indisponible(s)`} />
+        <StatCard label="Modèles détectés" value={catalog?.catalog?.detected_video ?? 0} icon={<Video size={19} />} tone="cyan" />
+        <StatCard label="Sélectionnables" value={catalog?.catalog?.active ?? 0} icon={<CheckCircle2 size={19} />} tone="emerald" hint={`${catalog?.catalog?.unavailable ?? 0} indisponible(s)`} />
         <StatCard label="Tarif moyen" value={formatUsdValue(avg)} icon={<Coins size={19} />} hint={`min ${formatUsdValue(min)} · max ${formatUsdValue(max)}`} tone="amber" />
-        <StatCard label="Clé MuAPI" value={catalog?.catalog.account.key_valid ? 'validée' : 'non validée'} icon={<AlertTriangle size={19} />}
-          hint={catalog?.catalog.account.key_configured ? 'clé configurée côté serveur' : 'clé absente côté serveur'} />
+        <StatCard label="Clé MuAPI" value={catalog?.catalog?.account?.key_valid ? 'validée' : 'non validée'} icon={<AlertTriangle size={19} />}
+          hint={catalog?.catalog?.account?.key_configured ? 'clé configurée côté serveur' : 'clé absente côté serveur'} />
       </div>
 
       <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-[11px] leading-relaxed text-cyan-100/80">
@@ -616,7 +616,7 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
-          <CardHeader title="Tentatives par fournisseur" description="Business Growth — appels réellement journalisés." />
+          <CardHeader title="Tentatives par fournisseur" description="Grow — appels réellement journalisés." />
           {attempts.length === 0 ? <EmptyState icon={<Sparkles size={22} />} title="Aucune tentative" description="Aucun appel IA n’a encore été journalisé." /> : (
             <div className="table-wrap">
               <table className="table">
@@ -656,7 +656,7 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
 }
 
 /* -------------------------------------------------------------------------- */
-/* Activité Studio / Business Growth                                          */
+/* Activité Studio / Grow                                          */
 /* -------------------------------------------------------------------------- */
 
 export function StudioActivitySection({ metrics, loading }: { metrics: AdminMetrics | null; loading: boolean }) {
@@ -701,8 +701,8 @@ export function GrowthActivitySection({ metrics, loading }: { metrics: AdminMetr
         <StatCard label="Mémoire métier" value={metrics.business_growth.memory_items} icon={<Coins size={19} />} tone="emerald" hint="faits consentis enregistrés" />
         <StatCard label="Tokens consommés" value={metrics.business_growth.tokens_total} icon={<TrendingUp size={19} />} tone="amber" hint={`${metrics.business_growth.tool_executions} action(s) proposée(s)`} />
       </div>
-      <Card><CardHeader title="Requêtes Business Growth par mois" description="Requêtes réellement journalisées." />
-        <div className="p-5"><BarChart labels={monthLabels(rows)} values={rows.map((row) => row.requests)} label="Requêtes Business Growth par mois" color="#22d3ee" /></div>
+      <Card><CardHeader title="Requêtes Grow par mois" description="Requêtes réellement journalisées." />
+        <div className="p-5"><BarChart labels={monthLabels(rows)} values={rows.map((row) => row.requests)} label="Requêtes Grow par mois" color="#22d3ee" /></div>
       </Card>
     </div>
   );

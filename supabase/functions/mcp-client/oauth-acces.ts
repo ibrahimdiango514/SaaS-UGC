@@ -1,5 +1,5 @@
 /**
- * VYORA — accès SQL aux jetons OAuth sortants.
+ * SORAHNEX — accès SQL aux jetons OAuth sortants.
  *
  * ## Pourquoi un module à part
  *

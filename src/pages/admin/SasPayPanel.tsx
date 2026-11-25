@@ -1,15 +1,15 @@
 /**
  * Administration — paiements SasPay.
  *
- *  - Les soldes marchands sont lus chez SasPay par le serveur ; VYORA n'expose
+ *  - Les soldes marchands sont lus chez SasPay par le serveur ; SORAHNEX n'expose
  *    aucun retrait, transfert ni recharge de portefeuille.
  *  - Un paiement ne peut être ni créé, ni modifié, ni validé à la main : son état
  *    ne change que par une vérification auprès de SasPay (le bouton « Revérifier »
  *    ne fait que redemander cet état au serveur).
  *  - Seule écriture possible : enregistrer le remboursement d'un paiement
  *    confirmé (reprise de ce qui a été livré, sans mouvement d'argent), puis
- *    attester le versement fait hors de VYORA. Voir `SasPayOperations`.
- *  - Studio et Business Grow sont listés séparément, jamais additionnés.
+ *    attester le versement fait hors de SORAHNEX. Voir `SasPayOperations`.
+ *  - Studio et Grow sont listés séparément, jamais additionnés.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Lock, RefreshCw, Wallet } from 'lucide-react';
@@ -119,7 +119,7 @@ export default function SasPayPanel() {
         <div className="space-y-3 p-5">
           <p className="flex items-center gap-1.5 text-[11.5px] text-slate-400">
             <Lock size={12} className="text-slate-500" />
-            Lecture seule : aucun retrait, transfert ni recharge n’est possible depuis VYORA.
+            Lecture seule : aucun retrait, transfert ni recharge n’est possible depuis SORAHNEX.
           </p>
           {balanceError && <Banner tone="warning" title="Soldes non vérifiés">{balanceError}</Banner>}
           {balances && !balances.configured && (
@@ -160,7 +160,7 @@ export default function SasPayPanel() {
       <Card>
         <CardHeader
           title="Paiements SasPay"
-          description="L’état d’un paiement ne change que par vérification auprès de SasPay. Un paiement confirmé peut être remboursé : VYORA reprend ce qui a été livré, vous rendez l’argent."
+          description="L’état d’un paiement ne change que par vérification auprès de SasPay. Un paiement confirmé peut être remboursé : SORAHNEX reprend ce qui a été livré, vous rendez l’argent."
           action={(
             <Button size="sm" variant="outline" icon={<RefreshCw size={13} />} loading={ordersBusy} onClick={() => void loadOrders(product)}>
               Actualiser
@@ -171,7 +171,7 @@ export default function SasPayPanel() {
           <Tabs
             active={product}
             onChange={(id) => setProduct(id === 'business' ? 'business' : 'studio')}
-            tabs={[{ id: 'studio', label: 'Studio (crédits)' }, { id: 'business', label: 'Business Grow (abonnements)' }]}
+            tabs={[{ id: 'studio', label: 'Studio (crédits)' }, { id: 'business', label: 'Grow (abonnements)' }]}
           />
         </div>
         {notice && <p className="px-5 pt-3 text-[12px] text-amber-200" role="status">{notice}</p>}

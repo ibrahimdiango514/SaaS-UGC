@@ -4,17 +4,17 @@ import { describe, expect, it } from 'vitest';
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
-describe('isolation des comptes VYORA', () => {
+describe('isolation des comptes SORAHNEX', () => {
   const migration = read('supabase/migrations/20261111165732_vyora_customer_isolation_and_admin_entitlement.sql');
 
-  it('ne crée de compte client VYORA que pour une inscription explicitement VYORA', () => {
+  it('ne crée de compte client SORAHNEX que pour une inscription explicitement SORAHNEX', () => {
     expect(read('src/lib/api.ts')).toContain("app_scope: 'vyora'");
     expect(read('src/pages/OwnerBootstrap.tsx')).toContain("app_scope: 'vyora_owner'");
     expect(migration).toContain("new.raw_user_meta_data->>'app_scope' is distinct from 'vyora'");
     expect(migration).toContain('insert into saas_ugc.ugc_customer_accounts');
   });
 
-  it('empêche le provisioning et les opérations client pour les administrateurs et comptes non VYORA', () => {
+  it('empêche le provisioning et les opérations client pour les administrateurs et comptes non SORAHNEX', () => {
     expect(migration).toContain("raise exception 'admin_not_customer'");
     expect(migration).toContain("raise exception 'not_vyora_customer'");
     expect(migration).toContain("s.status <> 'active'");
@@ -38,7 +38,7 @@ describe('isolation des comptes VYORA', () => {
     expect(migration).toContain('where exists (select 1 from saas_ugc.ugc_customer_accounts');
   });
 
-  it('laisse inchangées les inscriptions immobilier et ignore uniquement les scopes VYORA', () => {
+  it('laisse inchangées les inscriptions immobilier et ignore uniquement les scopes SORAHNEX', () => {
     expect(migration).toContain("if new.raw_user_meta_data->>'app_scope' in ('vyora', 'vyora_owner') then");
     expect(migration).toContain('insert into saas_immobilier.user_profiles');
     expect(migration).not.toMatch(/delete\s+from\s+saas_immobilier/i);

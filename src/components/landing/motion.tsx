@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNo
 import { cn } from '../ui';
 
 /**
- * Animations de la vitrine VYORA.
+ * Animations de la vitrine SORAHNEX.
  *
  * Principes :
  * - uniquement `opacity` et `transform` (aucun recalcul de layout) ;

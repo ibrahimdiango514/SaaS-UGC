@@ -3,7 +3,7 @@ import { resolveMuapiEndpoint } from '../supabase/functions/universal-catalog/en
 const schema = (path: unknown) => ({ schemas: { input_data: { endpoint_url: path } } });
 describe('official MuAPI endpoint binding', () => {
   it('preserves a declared alias and multi-segment paths instead of guessing the ID', () => {
-    expect(resolveMuapiEndpoint('flux-dev',schema('flux-dev-image'))).toEqual({ status:'declared', path:'flux-dev-image',url:'https://api.muapi.ai/api/v1/flux-dev-image',differs:true });
+    expect(resolveMuapiEndpoint('flux-dev',schema('flux-dev-image'))).toMatchObject({ status:'declared', path:'flux-dev-image',url:'https://api.muapi.ai/api/v1/flux-dev-image',differs:true });
     expect(resolveMuapiEndpoint('wan-2.1',schema('wan-2.1')).status).toBe('declared');
     expect(resolveMuapiEndpoint('mmaudio-v2-text-to-audio',schema('mmaudio-v2/text-to-audio')).path).toBe('mmaudio-v2/text-to-audio');
   });

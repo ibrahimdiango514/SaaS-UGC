@@ -1,7 +1,7 @@
 /**
  * Montage assistance — deterministic LOCAL rules, explicitly not AI.
  *
- * VYORA's AI-assisted suggestions require the central provider (`vyora-ai` → FreeLLMAPI).
+ * SORAHNEX's AI-assisted suggestions require the central provider (`vyora-ai` → FreeLLMAPI).
  * While it is absent, these deterministic local rules analyze the timeline,
  * real project media dimensions/durations, UGC pacing presets, voiceover WPM,
  * transitions and subtitles to propose concrete, reviewable edits (accept /

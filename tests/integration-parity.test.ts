@@ -14,7 +14,7 @@ const worker = read('supabase/functions/reelora-video-worker/index.ts');
 const config = read('supabase/config.toml');
 
 describe('Une seule intégration MuAPI, de bout en bout', () => {
-  it('déclare les quatre fonctions Studio, Business Grow, le bootstrap propriétaire et les trois fonctions de paiement', () => {
+  it('déclare les quatre fonctions Studio, Grow, le bootstrap propriétaire et les trois fonctions de paiement', () => {
     const declared = [...config.matchAll(/^\[functions\.([a-z0-9-]+)\]/gm)].map((m) => m[1]);
     expect(declared.sort()).toEqual(['business-grow', 'reelora-health', 'reelora-owner-bootstrap', 'reelora-video', 'reelora-video-worker', 'studio-runtime', 'universal-catalog', 'vyora-ai', 'vyora-payments', 'vyora-payments-reconcile', 'vyora-provider-discovery', 'vyora-provider-health', 'vyora-saspay-webhook']);
     expect(config).toMatch(/\[functions\.business-grow\]\r?\nverify_jwt = true/);

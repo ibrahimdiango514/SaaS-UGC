@@ -1,5 +1,5 @@
 /**
- * VYORA — frontière HTTP de l'Edge Function `mcp-client`.
+ * SORAHNEX — frontière HTTP de l'Edge Function `mcp-client`.
  *
  * ## Pourquoi ce module existe
  *

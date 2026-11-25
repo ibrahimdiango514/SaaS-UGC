@@ -124,7 +124,7 @@ contrôles. Le fichier de migration est committé avec le code.
 
 | Exigence | État | Preuve |
 | --- | --- | --- |
-| Business Grow actif **et payé** pour importer | **conservé** | `bg_import_access` lue côté serveur avant toute écriture |
+| Grow actif **et payé** pour importer | **conservé** | `bg_import_access` lue côté serveur avant toute écriture |
 | Contrôle serveur, pas client | **conservé** | aucune valeur d'abonnement ne vient du navigateur |
 | Aucun accès inter-entreprises | **conservé** | `bg_require_workspace` + filtre `workspace_id` |
 | Imports personnels d'un collègue invisibles | **conservé** | progression filtrée sur `user_id` **et** `workspace_id` |

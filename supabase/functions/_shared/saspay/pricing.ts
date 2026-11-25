@@ -1,4 +1,4 @@
-// Tarification VYORA : provision commerciale et couverture des frais SasPay.
+// Tarification SORAHNEX : provision commerciale et couverture des frais SasPay.
 //
 // Miroir, en TypeScript, du calcul fait en base par `ugc_private.vyora_price_quote`
 // (migration `20261113120000_vyora_pricing_margin.sql`). La base FAIT FOI : c'est

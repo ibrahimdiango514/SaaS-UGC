@@ -1,6 +1,6 @@
-// VYORA AI CORE — adaptateur de FOURNISSEUR unique, construit depuis le registre.
+// SORAHNEX AI CORE — adaptateur de FOURNISSEUR unique, construit depuis le registre.
 //
-// Décision d'architecture (migration 2026-11-23) : VYORA ne parle plus qu'UN
+// Décision d'architecture (migration 2026-11-23) : SORAHNEX ne parle plus qu'UN
 // SEUL protocole, `openai` (chat/completions + models). Les fournisseurs
 // centralisés derrière FreeLLMAPI sont exposés par ce protocole ; il n'existe
 // donc plus d'adaptateur natif par fournisseur ni aucune liste de fournisseurs

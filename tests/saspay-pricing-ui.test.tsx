@@ -206,7 +206,7 @@ describe('pages de tarifs — prix final', () => {
     await waitFor(() => expect(screen.getByTestId('pack-price-creator').textContent).toBe(FCFA('5 000')));
   });
 
-  it('Business Grow : la formule à 25 000 FCFA est annoncée 26 000 FCFA', async () => {
+  it('Grow : la formule à 25 000 FCFA est annoncée 26 000 FCFA', async () => {
     mockRpc({
       business_grow_catalog: { billing_enabled: true, config: null, plans: [{
         plan_key: 'croissance', display_name: 'Croissance', tagline: null, monthly_price_minor: 25000, currency: 'XOF',
@@ -454,7 +454,7 @@ describe('administration — prix, frais et marge', () => {
     const text = screen.getByTestId('payout-result').textContent ?? '';
     expect(text).toContain('Aucune (la provision ne s’applique qu’aux encaissements)');
     expect(text).toContain('Non confirmés');
-    expect(text).toContain('VYORA n’exécute aucun décaissement');
+    expect(text).toContain('SORAHNEX n’exécute aucun décaissement');
     expect(invokeEdge).not.toHaveBeenCalled();
   });
 

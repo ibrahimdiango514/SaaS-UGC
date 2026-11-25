@@ -1,5 +1,5 @@
 /**
- * VYORA — scène 3D du parcours d'authentification (« atrium »).
+ * SORAHNEX — scène 3D du parcours d'authentification (« atrium »).
  *
  * Un noyau de verre distordu, deux anneaux orbitaux et une poussière d'étoiles.
  * Léger par construction :

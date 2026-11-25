@@ -1,11 +1,11 @@
 /**
- * VYORA — serveurs MCP SORTANTS, vu de l'application.
+ * SORAHNEX — serveurs MCP SORTANTS, vu de l'application.
  *
  * ## Sortant ≠ entrant
  *
- * `src/mcp/api.ts` gère le MCP **entrant** : VYORA est le serveur, l'utilisateur
+ * `src/mcp/api.ts` gère le MCP **entrant** : SORAHNEX est le serveur, l'utilisateur
  * connecte Claude ou Cursor. Ce module-ci fait l'inverse : l'utilisateur
- * connecte SES serveurs MCP distants, et VYORA les appelle.
+ * connecte SES serveurs MCP distants, et SORAHNEX les appelle.
  *
  * ## Ce module ne voit jamais un secret
  *

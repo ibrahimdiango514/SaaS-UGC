@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
         return;
       }
-      if (!boot.workspace_id) throw new Error('Le serveur n’a pas associé de workspace à ce compte VYORA.');
+      if (!boot.workspace_id) throw new Error('Le serveur n’a pas associé de workspace à ce compte SORAHNEX.');
       const [p, q, ws] = await Promise.all([
         getProfile(activeUser.id),
         getQuota(),
@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     } catch (error) {
       if (requestId !== dataRequestId.current || currentUid.current !== activeUser.id) return;
-      setBootstrapError(asAppError(error, 'Impossible de charger votre espace VYORA.').message);
+      setBootstrapError(asAppError(error, 'Impossible de charger votre espace SORAHNEX.').message);
       setLoading(false);
     }
   }, []);

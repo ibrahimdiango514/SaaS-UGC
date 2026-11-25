@@ -26,7 +26,7 @@ import { hasConnectFlow } from '../business/importer/connector-requirements';
 import '../ai/assistant.css';
 
 /**
- * VYORA Integrations — catalogue.
+ * SORAHNEX Integrations — catalogue.
  *
  * ## Règle appliquée partout : l'état vient de la base
  *
@@ -54,7 +54,7 @@ export type SubscriptionRefusal = NonNullable<ReturnType<typeof subscriptionRefu
  * `null`. Chaque cas a son libellé : « État inconnu » n'est plus un fourre-tout.
  *
  * - `subscription` : le serveur a refusé la lecture faute d'abonnement
- *   Business Grow actif — rien n'est en panne, l'accès est réservé ;
+ *   Grow actif — rien n'est en panne, l'accès est réservé ;
  * - `workspace`    : aucune entreprise active, la lecture n'a pas été tentée ;
  * - `error`        : la lecture a échoué (réseau, serveur) ;
  * - `loading`      : la première lecture est en cours.
@@ -77,9 +77,9 @@ export function etatIndetermine(args: {
 }
 
 /**
- * Contrôleur d'état fourni par l'espace hôte (Business Grow).
+ * Contrôleur d'état fourni par l'espace hôte (Grow).
  *
- * Business Grow possède déjà des compteurs de séquence et un verrou de mutation
+ * Grow possède déjà des compteurs de séquence et un verrou de mutation
  * éprouvés par ses tests : les réimplémenter ici les affaiblirait. Quand ce
  * contrôleur est fourni, il pilote entièrement l'état ; sinon le composant gère
  * le sien (page `/app/connect`).
@@ -109,7 +109,7 @@ export function IntegrationsCenter({
   /** Entreprise active : les demandes d'activation y sont rattachées. */
   workspaceId?: string | null;
   /**
-   * Intégré à Business Grow : on ne rend pas l'en-tête de page (titre, retour),
+   * Intégré à Grow : on ne rend pas l'en-tête de page (titre, retour),
    * déjà fournis par l'espace hôte. Le contenu est identique.
    */
   embedded?: boolean;
@@ -170,7 +170,7 @@ export function IntegrationsCenter({
     }
     /*
      * 1) Les demandes d'activation d'abord, SEULES. Le serveur refuse cette
-     *    lecture sans abonnement Business Grow actif : c'est la vérification
+     *    lecture sans abonnement Grow actif : c'est la vérification
      *    d'abonnement elle-même. Tant qu'elle n'a pas réussi, aucune autre
      *    source n'est interrogée — ni comptes OAuth, ni journal, ni boutiques
      *    (voir `MesBoutiquesConnectees`). Lancer ces lectures « au cas où »
@@ -282,7 +282,7 @@ export function IntegrationsCenter({
     setSubscriptionRefusal(refus);
     setLoadError(refus ? null : erreur instanceof Error ? erreur.message : 'Réponse perdue.');
     setNotice(refus
-      ? { tone: 'error', text: 'Opération refusée : abonnement Business Grow requis. Rien n’a été enregistré.' }
+      ? { tone: 'error', text: 'Opération refusée : abonnement Grow requis. Rien n’a été enregistré.' }
       : { tone: 'error', text: 'Opération non confirmée. Relisez l’état avant de réessayer.' });
   };
 
@@ -359,8 +359,8 @@ export function IntegrationsCenter({
       setNotice({
         tone: 'success',
         text: remoteRevoked
-          ? 'Connexion révoquée chez le fournisseur et dans VYORA.'
-          : 'Connexion désactivée dans VYORA. Le fournisseur n’a pas confirmé la révocation distante : révoquez aussi depuis votre compte si nécessaire.',
+          ? 'Connexion révoquée chez le fournisseur et dans SORAHNEX.'
+          : 'Connexion désactivée dans SORAHNEX. Le fournisseur n’a pas confirmé la révocation distante : révoquez aussi depuis votre compte si nécessaire.',
       });
       setConfirmation(null);
       await charger();
@@ -429,7 +429,7 @@ export function IntegrationsCenter({
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-brand-400/25 bg-brand-500/10 px-3 py-1 text-[0.7rem] text-brand-200">
               <Plug size={13} />
-              VYORA Integrations
+              SORAHNEX Integrations
             </span>
             {connections !== null && (
               <span className="text-[0.7rem] text-slate-500">
@@ -439,7 +439,7 @@ export function IntegrationsCenter({
           </div>
 
           <h1 className="font-display text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-            Connectez vos outils à VYORA
+            Connectez vos outils à SORAHNEX
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
             Chaque fiche indique ce que la connexion permettra réellement, les
@@ -487,14 +487,14 @@ export function IntegrationsCenter({
               <p className="mt-0.5 opacity-80">{guidanceAbonnement.detail}</p>
               <p className="mt-1 opacity-60">
                 Connexions verrouillées : le catalogue reste consultable, mais aucune requête n’est émise vers vos
-                boutiques ni vos comptes tant que l’abonnement Business Grow n’est pas actif. Aucune connexion n’est supposée.
+                boutiques ni vos comptes tant que l’abonnement Grow n’est pas actif. Aucune connexion n’est supposée.
               </p>
               {guidanceAbonnement.showSubscribe && (
                 <Link
                   to={SUBSCRIPTION_PATH}
                   className="mt-2 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
                 >
-                  Voir l’abonnement Business Grow <ArrowRight size={12} />
+                  Voir l’abonnement Grow <ArrowRight size={12} />
                 </Link>
               )}
             </div>
@@ -709,7 +709,7 @@ export function IntegrationsCenter({
           <Card className="w-full max-w-md p-5">
             <h3 className="font-display text-base font-semibold text-white">Révoquer cette connexion ?</h3>
             <p className="mt-2 text-sm leading-relaxed text-slate-400">
-              VYORA cessera d’utiliser <strong className="text-slate-200">{confirmation.displayName || confirmation.email || confirmation.provider}</strong>.
+              SORAHNEX cessera d’utiliser <strong className="text-slate-200">{confirmation.displayName || confirmation.email || confirmation.provider}</strong>.
               Une tentative de révocation sera faite chez le fournisseur. Vos données déjà importées ne sont pas supprimées.
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -872,7 +872,7 @@ function FicheDetail({
   // refuserait ou la rattacherait à un contexte indéterminé.
   const demandePossible = etatConnu && entrepriseActive && canRequestActivation(entry, statut);
   const annulationPossible = etatConnu && canCancelRequest(statut);
-  // « Connecté » au sens du socle Business Grow (ligne `connected`) : on peut
+  // « Connecté » au sens du socle Grow (ligne `connected`) : on peut
   // retirer l'association locale, même si aucun compte OAuth ne la corrobore.
   const associationLocale = etatConnu && connection?.status === 'connected';
   const connectable = etatConnu && canConnect(entry, statut);
@@ -902,7 +902,7 @@ function FicheDetail({
           <div className="mt-3 flex items-start gap-2 rounded-lg border border-violet-300/25 bg-violet-400/[0.08] px-3 py-2 text-xs text-violet-100">
             <Lock size={13} className="mt-0.5 shrink-0" />
             <p>
-              Réservé aux abonnés Business Grow actifs : l’état de cette connexion n’est pas lu et aucune
+              Réservé aux abonnés Grow actifs : l’état de cette connexion n’est pas lu et aucune
               action n’est proposée tant que l’abonnement n’est pas actif.{' '}
               <Link to={SUBSCRIPTION_PATH} className="font-medium underline underline-offset-2">Voir l’abonnement</Link>
             </p>
@@ -990,7 +990,7 @@ function FicheDetail({
           {!etatConnu ? (
             <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.05] px-3.5 py-3 text-xs leading-relaxed text-amber-100">
               {indetermine.kind === 'subscription'
-                ? 'Abonnement requis : aucune action n’est proposée tant que l’abonnement Business Grow n’est pas actif.'
+                ? 'Abonnement requis : aucune action n’est proposée tant que l’abonnement Grow n’est pas actif.'
                 : indetermine.kind === 'workspace'
                   ? 'Aucune entreprise active : aucune action n’est proposée tant que l’entreprise n’est pas résolue.'
                   : indetermine.kind === 'loading'
@@ -1102,7 +1102,7 @@ function FicheDetail({
               {associationLocale && (
                 <div className="rounded-lg border border-line bg-white/[0.03] px-3.5 py-3">
                   <p className="text-xs leading-relaxed text-slate-400">
-                    Retirer l’association locale détache VYORA de ce fournisseur pour
+                    Retirer l’association locale détache SORAHNEX de ce fournisseur pour
                     cette entreprise. Aucune révocation n’est effectuée chez le
                     fournisseur.
                   </p>
@@ -1165,9 +1165,9 @@ export function expliquerIndisponibilite(statut: IntegrationStatus, entry: Integ
   }
   switch (statut) {
     case 'needs_approval':
-      return `Ce fournisseur exige une validation de son côté (${entry.auth.find((a) => a.externalApproval)?.externalApproval ?? 'approbation du fournisseur'}). VYORA ne peut pas contourner cette étape : la connexion sera proposée une fois l’approbation obtenue.`;
+      return `Ce fournisseur exige une validation de son côté (${entry.auth.find((a) => a.externalApproval)?.externalApproval ?? 'approbation du fournisseur'}). SORAHNEX ne peut pas contourner cette étape : la connexion sera proposée une fois l’approbation obtenue.`;
     case 'needs_config':
-      return 'Les identifiants VYORA pour ce fournisseur ne sont pas encore configurés côté serveur. Le moteur d’intégration les ajoutera en Livraison 3.';
+      return 'Les identifiants SORAHNEX pour ce fournisseur ne sont pas encore configurés côté serveur. Le moteur d’intégration les ajoutera en Livraison 3.';
     case 'unavailable':
       return 'Aucun mode de connexion légal n’est disponible pour ce fournisseur actuellement.';
     default:

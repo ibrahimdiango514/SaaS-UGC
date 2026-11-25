@@ -283,7 +283,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
         script_text: scriptText, scenes, visual_prompt: visualPrompt,
         avatar_id: avatarId || null, image_url: imageUrl.trim() || null,
         product_name: productName, product_info: productInfo, campaign_objective: objective,
-        target_audience: audience, platform, title: projects.find((p) => p.id === projectId)?.title ?? 'VYORA',
+        target_audience: audience, platform, title: projects.find((p) => p.id === projectId)?.title ?? 'SORAHNEX',
       };
       const id = await startGeneration(projectId, serviceKey, payload, idempotencyKey);
       setJobId(id); setStatus('reserved'); setProgress(20);
@@ -433,7 +433,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                       {modelId === m.model_id && <CheckCircle2 size={15} className="text-brand-300" />}</div>
                     <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-400">Paramètres et formats de création disponibles.</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      <Badge tone="info">Vidéo VYORA</Badge>
+                      <Badge tone="info">Vidéo SORAHNEX</Badge>
                       {m.required_fields.includes('image_url') && <Badge tone="warning">image requise</Badge>}
                     </div>
                   </button>
@@ -485,7 +485,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
             <div className="space-y-4 p-5">
               <Select label="Service de génération (crédits Studio UGC)" value={serviceKey} onChange={(e) => setServiceKey(e.target.value)}>
                 <option value="">Sélectionner un service</option>
-                {services.map((s, index) => <option key={s.service_key} value={s.service_key}>{`Service vidéo VYORA ${index + 1}`}</option>)}
+                {services.map((s, index) => <option key={s.service_key} value={s.service_key}>{`Service vidéo SORAHNEX ${index + 1}`}</option>)}
               </Select>
               <div className="grid gap-3 sm:grid-cols-2">
                 {[
@@ -499,7 +499,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
                 ))}
               </div>
               <div className="rounded-xl border border-brand-400/20 bg-brand-500/[0.06] px-4 py-3 text-xs leading-relaxed text-slate-300">
-                Modèle vidéo VYORA · Réservation de <span className="text-white">{creditsLabel}</span> avant soumission.
+                Modèle vidéo SORAHNEX · Réservation de <span className="text-white">{creditsLabel}</span> avant soumission.
                 Débit définitif uniquement si la génération réussit ; restitution automatique en cas d’échec, d’expiration ou d’annulation autorisée.
                 Aucune génération ne sera facturée deux fois grâce à un identifiant d’idempotence propre à cette opération.
               </div>
@@ -598,7 +598,7 @@ export default function Studio({ embedded = false }: { embedded?: boolean }) {
       <ConfirmDialog open={confirmOpen} onClose={() => setConfirmOpen(false)} onConfirm={() => void onLaunch()}
         confirmLabel={`Confirmer · ${creditsLabel}`} loading={starting}
         title="Confirmer la génération vidéo"
-        message={`Modèle vidéo VYORA. ${creditsLabel} seront réservés maintenant puis débités uniquement si la génération réussit. En cas d’échec, d’expiration ou d’annulation autorisée, ils seront restitués automatiquement.`} />
+        message={`Modèle vidéo SORAHNEX. ${creditsLabel} seront réservés maintenant puis débités uniquement si la génération réussit. En cas d’échec, d’expiration ou d’annulation autorisée, ils seront restitués automatiquement.`} />
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nouveau projet publicitaire"
         description="Le projet est créé dans votre workspace avec les règles RLS et quotas existantes."

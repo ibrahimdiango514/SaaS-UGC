@@ -1,5 +1,5 @@
 /**
- * VYORA — import de fichiers : CSV, TSV, XML et XLSX.
+ * SORAHNEX — import de fichiers : CSV, TSV, XML et XLSX.
  *
  * ## Aucune dépendance ajoutée
  *

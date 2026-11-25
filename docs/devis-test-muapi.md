@@ -1,4 +1,4 @@
-# Tarification vidéo VYORA — état de validation
+# Tarification vidéo SORAHNEX — état de validation
 
 **Statut : configuration désactivée par défaut. Aucun devis réel ni génération payante
 n'a été demandé ou lancé dans cette validation.** Les tests du dépôt utilisent des
@@ -30,7 +30,7 @@ catalogue. Les changements sont journalisés.
   expiration, le service, le modèle et la version de tarification avant de réserver
   exactement le montant du devis.
 - Si le coût ne peut pas être vérifié, aucun devis valide n'est créé et la génération ne
-  peut pas démarrer. Les crédits Studio restent indépendants du quota Business Grow.
+  peut pas démarrer. Les crédits Studio restent indépendants du quota Grow.
 - Les coûts fournisseurs et identifiants techniques restent réservés aux vues
   d'administration ; les réponses normales du Studio exposent un coût en crédits.
 

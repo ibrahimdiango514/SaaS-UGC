@@ -1,4 +1,4 @@
-// VYORA MuAPI worker — SERVER-SIDE tracking, independent of any open browser tab.
+// SORAHNEX MuAPI worker — SERVER-SIDE tracking, independent of any open browser tab.
 //
 // Two entry points (both protected by a Vault-stored shared token, verify_jwt = false
 // because MuAPI itself cannot send a Supabase JWT):

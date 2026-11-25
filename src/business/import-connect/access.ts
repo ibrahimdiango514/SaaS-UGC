@@ -68,7 +68,7 @@ export function normalizeAccess(raw: unknown): ImportAccessState {
     // Comparaison stricte : `"true"`, `1` ou absent ne valent pas accord.
     allowed: source.allowed === true,
     reason: raison,
-    message: str(source.message) ?? 'Un abonnement Business Grow actif est requis.',
+    message: str(source.message) ?? 'Un abonnement Grow actif est requis.',
     status: str(source.status),
     planKey: str(source.plan_key) ?? str(source.planKey),
     currentPeriodEnd: str(source.current_period_end) ?? str(source.currentPeriodEnd),
@@ -111,8 +111,8 @@ export function accessGuidance(state: ImportAccessState): {
     return {
       title: 'Import & Connect est actif',
       detail: state.currentPeriodEnd
-        ? `Abonnement Business Grow valable jusqu’au ${new Date(state.currentPeriodEnd).toLocaleDateString('fr-FR')}.`
-        : 'Abonnement Business Grow actif.',
+        ? `Abonnement Grow valable jusqu’au ${new Date(state.currentPeriodEnd).toLocaleDateString('fr-FR')}.`
+        : 'Abonnement Grow actif.',
       showSubscribe: false,
       tone: 'info',
     };
@@ -129,35 +129,35 @@ export function accessGuidance(state: ImportAccessState): {
     case 'NOT_AUTHENTICATED':
       return {
         title: 'Session requise',
-        detail: 'Reconnectez-vous pour vérifier votre abonnement Business Grow.',
+        detail: 'Reconnectez-vous pour vérifier votre abonnement Grow.',
         showSubscribe: false,
         tone: 'warning',
       };
     case 'NO_SUBSCRIPTION':
       return {
-        title: 'Abonnement Business Grow requis',
-        detail: 'Import & Connect est réservé aux abonnés Business Grow. Souscrivez une offre pour importer et connecter vos boutiques.',
+        title: 'Abonnement Grow requis',
+        detail: 'Import & Connect est réservé aux abonnés Grow. Souscrivez une offre pour importer et connecter vos boutiques.',
         showSubscribe: true,
         tone: 'info',
       };
     case 'PAYMENT_FAILED':
       return {
         title: 'Paiement de l’abonnement en échec',
-        detail: 'L’accès est suspendu tant que le paiement de votre abonnement Business Grow n’est pas régularisé.',
+        detail: 'L’accès est suspendu tant que le paiement de votre abonnement Grow n’est pas régularisé.',
         showSubscribe: true,
         tone: 'danger',
       };
     case 'SUBSCRIPTION_EXPIRED':
       return {
         title: 'Abonnement expiré',
-        detail: 'Votre abonnement Business Grow a expiré. Renouvelez-le pour retrouver l’accès à vos boutiques et à vos imports.',
+        detail: 'Votre abonnement Grow a expiré. Renouvelez-le pour retrouver l’accès à vos boutiques et à vos imports.',
         showSubscribe: true,
         tone: 'warning',
       };
     case 'SUBSCRIPTION_CANCELED':
       return {
         title: 'Abonnement résilié',
-        detail: 'Votre abonnement Business Grow a été résilié. Une nouvelle souscription est nécessaire pour accéder au module.',
+        detail: 'Votre abonnement Grow a été résilié. Une nouvelle souscription est nécessaire pour accéder au module.',
         showSubscribe: true,
         tone: 'warning',
       };
@@ -171,14 +171,14 @@ export function accessGuidance(state: ImportAccessState): {
     case 'PERIOD_UNKNOWN':
       return {
         title: 'Période d’abonnement non établie',
-        detail: 'La période de votre abonnement Business Grow n’est pas encore confirmée. L’accès sera ouvert dès que le paiement sera appliqué.',
+        detail: 'La période de votre abonnement Grow n’est pas encore confirmée. L’accès sera ouvert dès que le paiement sera appliqué.',
         showSubscribe: true,
         tone: 'warning',
       };
     default:
       return {
-        title: 'Abonnement Business Grow inactif',
-        detail: state.message || 'Un abonnement Business Grow actif est requis pour utiliser Import & Connect.',
+        title: 'Abonnement Grow inactif',
+        detail: state.message || 'Un abonnement Grow actif est requis pour utiliser Import & Connect.',
         showSubscribe: true,
         tone: 'warning',
       };
@@ -226,7 +226,7 @@ export async function loadImportAccess(): Promise<ImportAccessState> {
     return normalizeAccess(raw);
   } catch {
     return unknownAccess(
-      'Impossible de vérifier votre abonnement Business Grow pour le moment. Aucune opération n’a été lancée.',
+      'Impossible de vérifier votre abonnement Grow pour le moment. Aucune opération n’a été lancée.',
     );
   }
 }

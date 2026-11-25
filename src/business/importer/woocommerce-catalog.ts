@@ -1,11 +1,11 @@
 /**
- * VYORA — connecteur WooCommerce : projection vers la forme brute commune.
+ * SORAHNEX — connecteur WooCommerce : projection vers la forme brute commune.
  *
  * Comme pour Shopify et PrestaShop, ce module ne normalise rien : il produit des
  * `RawCatalogProduct`, puis `normalizeCatalog` applique les mêmes règles de prix,
  * de devise et d'arrondi, `matchBatch` le même rapprochement, et l'aperçu le même
  * rendu. Un produit WooCommerce et son équivalent PrestaShop donnent donc la même
- * fiche VYORA.
+ * fiche SORAHNEX.
  *
  * ## L'unité de prix, point le plus piégeux
  *

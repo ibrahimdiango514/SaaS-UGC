@@ -109,7 +109,7 @@ export function AuthStage({ variant = 'create' }: { variant?: AuthVariant }) {
       </div>
 
       <div className="relative">
-        <Link to="/" aria-label="VYORA, accueil" className="inline-flex items-center gap-2.5">
+        <Link to="/" aria-label="SORAHNEX, accueil" className="inline-flex items-center gap-2.5">
           <BrandLockup symbolSize={40} tagline />
         </Link>
       </div>
@@ -136,7 +136,7 @@ export function AuthStage({ variant = 'create' }: { variant?: AuthVariant }) {
         <span className="inline-flex items-center gap-1.5">
           <ShieldCheck size={12} className="text-emerald-400" /> Authentification Supabase · politiques RLS
         </span>
-        <span>© {new Date().getFullYear()} VYORA</span>
+        <span>© {new Date().getFullYear()} SORAHNEX</span>
       </div>
     </div>
   );
@@ -154,7 +154,7 @@ export function AuthStageMobile({ variant = 'create' }: { variant?: AuthVariant 
       <div className="relative flex items-center gap-3">
         <BrandSymbol size={38} />
         <div className="min-w-0">
-          <p className="font-display text-[13px] font-semibold tracking-[0.16em] text-white">VYORA</p>
+          <p className="font-display text-[13px] font-semibold tracking-[0.16em] text-white">SORAHNEX</p>
           <p className="truncate text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400">{copy.eyebrow}</p>
         </div>
         <Link to="/" className="ml-auto shrink-0 text-[11px] text-slate-400 transition hover:text-white">Accueil</Link>

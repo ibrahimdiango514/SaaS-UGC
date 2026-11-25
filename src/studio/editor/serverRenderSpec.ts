@@ -1,5 +1,5 @@
 /**
- * VYORA Phase 4 — Studied Server-Side Render Architecture Contract.
+ * SORAHNEX Phase 4 — Studied Server-Side Render Architecture Contract.
  *
  * IMPORTANT: No server render worker or Edge Function is deployed here, and local
  * browser exports never debit credits. This module defines the deterministic

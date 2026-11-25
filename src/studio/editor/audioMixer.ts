@@ -1,5 +1,5 @@
 /**
- * VYORA Phase 4 — Sample-accurate timeline audio planner & OfflineAudioContext mixer.
+ * SORAHNEX Phase 4 — Sample-accurate timeline audio planner & OfflineAudioContext mixer.
  *
  * `planAudioTimeline()` is pure and deterministic (fully unit-tested in Node).
  * `mixProjectAudioOffline()` decodes and mixes real clip audio, voiceover and

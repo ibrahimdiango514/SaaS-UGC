@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Attribution manuelle d'une formule Business Grow par un administrateur.
+ * Attribution manuelle d'une formule Grow par un administrateur.
  *
  * ## Deux niveaux de preuve
  * 1. **Migration `20261122090000`** (lue ici comme texte) : la RPC est
@@ -101,7 +101,7 @@ describe('migration 20261122090000 — garde-fous de sécurité', () => {
     const acces = CODE.slice(CODE.search(/create or replace function saas_business\.bg_import_access\(/i));
     expect(acces).toMatch(/SUBSCRIPTION_EXPIRED/);
     expect(acces).toMatch(/current_period_end/);
-    expect(acces).toMatch(/Business Grow/);
+    expect(acces).toMatch(/Grow/);
   });
 });
 
@@ -113,7 +113,7 @@ describe('client — appels RPC transmis sans interprétation', () => {
     mocks.rpc.mockReturnValueOnce(okRpc({
       subscription_id: 'sub-1', user_id: CIBLE, plan_key: 'essentiel', status: 'active', billing_provider: 'manual',
       reference: `manual:${CIBLE}`, current_period_end: fin.toISOString(), renewed: false,
-      access: { allowed: true, reason: 'OK', message: 'Abonnement Business Grow actif.' },
+      access: { allowed: true, reason: 'OK', message: 'Abonnement Grow actif.' },
     }));
     const res = await adminSetBusinessSubscription({ userId: CIBLE, planKey: 'essentiel', periodEnd: fin, note: '  pilote ' });
     expect(mocks.rpc).toHaveBeenCalledWith('vyora_admin_set_business_subscription', {
@@ -155,7 +155,7 @@ describe('client — appels RPC transmis sans interprétation', () => {
   it('renouvellement : même compte, nouvelle formule et nouvelle date → le serveur signale renewed=true', async () => {
     mocks.rpc.mockReturnValueOnce(okRpc({
       subscription_id: 'sub-1', user_id: CIBLE, plan_key: 'croissance', status: 'active', renewed: true,
-      current_period_end: '2027-01-31T23:59:59.000Z', access: { allowed: true, reason: 'OK', message: 'Abonnement Business Grow actif.' },
+      current_period_end: '2027-01-31T23:59:59.000Z', access: { allowed: true, reason: 'OK', message: 'Abonnement Grow actif.' },
     }));
     const res = await adminSetBusinessSubscription({ userId: CIBLE, planKey: 'croissance', periodEnd: new Date('2027-01-31T23:59:59Z') });
     expect(res.renewed).toBe(true);
@@ -200,7 +200,7 @@ describe('interface administrateur — modale d’attribution', () => {
         return okRpc({
           subscription_id: 'sub-1', user_id: CIBLE, plan_key: 'croissance', status: 'active', billing_provider: 'manual',
           reference: `manual:${CIBLE}`, current_period_end: '2026-12-31T23:59:59.000Z', renewed: false,
-          access: { allowed: true, reason: 'OK', message: 'Abonnement Business Grow actif.' },
+          access: { allowed: true, reason: 'OK', message: 'Abonnement Grow actif.' },
         });
       }
       return koRpc('inattendu');
@@ -241,7 +241,7 @@ describe('interface administrateur — modale d’attribution', () => {
     mocks.rpc.mockImplementation((name: string) => {
       if (name === 'business_grow_catalog') return catalogue();
       if (name === 'vyora_admin_revoke_business_subscription') {
-        return okRpc({ subscription_id: 'sub-1', status: 'canceled', access: { allowed: false, reason: 'SUBSCRIPTION_CANCELED', message: 'Abonnement Business Grow résilié.' } });
+        return okRpc({ subscription_id: 'sub-1', status: 'canceled', access: { allowed: false, reason: 'SUBSCRIPTION_CANCELED', message: 'Abonnement Grow résilié.' } });
       }
       return koRpc('inattendu');
     });

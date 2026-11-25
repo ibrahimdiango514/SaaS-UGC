@@ -1,4 +1,4 @@
-// VYORA AI CORE — point d'entrée partagé (Business Grow, Studio UGC, admin).
+// SORAHNEX AI CORE — point d'entrée partagé (Grow, Studio UGC, admin).
 export * from './types.ts';
 export * from './adapters.ts';
 export * from './registry.ts';

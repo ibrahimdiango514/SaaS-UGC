@@ -1,5 +1,5 @@
 /**
- * VYORA Growth OS — Lot K : vitrine commerciale.
+ * SORAHNEX Growth OS — Lot K : vitrine commerciale.
  *
  * Fondations honnêtes : le catalogue peut être configuré, prévisualisé, exporté
  * en HTML autonome et partagé. Les demandes de commande sont saisies ou

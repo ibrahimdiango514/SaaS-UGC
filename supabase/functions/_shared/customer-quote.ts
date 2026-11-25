@@ -8,7 +8,7 @@ export function customerQuote(quote: { available: boolean; error_code: string | 
     available: false,
     verified: quote.available === true,
     error_code: quote.error_code === 'PROMPT_REQUIRED' ? 'PROMPT_REQUIRED' : null,
-    error_message: 'Consultez le coût en crédits VYORA avant de confirmer.',
+    error_message: 'Consultez le coût en crédits SORAHNEX avant de confirmer.',
     billing_units: [] as string[],
   };
 }

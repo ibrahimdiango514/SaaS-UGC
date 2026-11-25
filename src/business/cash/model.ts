@@ -1,5 +1,5 @@
 /**
- * VYORA Growth OS — Lot G : trésorerie et dépenses.
+ * SORAHNEX Growth OS — Lot G : trésorerie et dépenses.
  *
  * Distinction stricte entre facturé, encaissé, engagé et payé. Les encaissements
  * proviennent uniquement des paiements Finance validés et non annulés : une

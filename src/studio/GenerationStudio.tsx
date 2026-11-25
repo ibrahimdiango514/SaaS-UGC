@@ -131,7 +131,7 @@ export default function GenerationStudio() {
   // Références du projet (images/vidéos persistées dans `vyora_files`) et leur
   // répartition calculée pour le modèle sélectionné. `null` = aucune référence.
   const [projectPlan, setProjectPlan] = useState<ReferencePlan | null>(null);
-  // Projet demandé par le chemin d'arrivée : Business Grow (brief transféré) ou ?projet=.
+  // Projet demandé par le chemin d'arrivée : Grow (brief transféré) ou ?projet=.
   const [projectId, setProjectId] = useState(search.get('projet') ?? handedOffBrief?.projectId ?? '');
   const [projectModal, setProjectModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -726,7 +726,7 @@ export default function GenerationStudio() {
   const showEmpty = !form.prompt.trim() && !jobId && !result;
   const catalogModel = selectedModel;
 
-  // Contexte réel transmis à Business Grow pour poursuivre le travail sans ressaisie.
+  // Contexte réel transmis à Grow pour poursuivre le travail sans ressaisie.
   // Le lien est déplacé dans le pied de page du studio : il ne doit pas occuper
   // l'espace de création (exigence de la refonte immersive).
   const activeProject = projects.find((p) => p.id === projectId) ?? null;
@@ -778,7 +778,7 @@ export default function GenerationStudio() {
 
       {handedOffBrief && (
         <div className="mx-auto mt-3 max-w-3xl px-3 sm:px-6" data-testid="studio-handoff-banner">
-          <Banner tone="info" title={`Brief importé depuis Business Grow${handedOffBrief.product ? ` · ${handedOffBrief.product}` : ''}`}>
+          <Banner tone="info" title={`Brief importé depuis Grow${handedOffBrief.product ? ` · ${handedOffBrief.product}` : ''}`}>
             {handedOffBrief.targetAudience ? `Cible : ${handedOffBrief.targetAudience}. ` : ''}
             Aucun crédit Studio consommé lors du transfert.
           </Banner>
@@ -835,7 +835,7 @@ export default function GenerationStudio() {
               <div className="mt-3 space-y-2 text-[11px]">
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Qualité</span><span className="text-white">{QUALITY_TIERS.find((q) => q.id === form.quality)?.label}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Modèle</span><span className="text-right text-white">{model ? (MODE_LABELS[modeFromModel(model)] ?? 'Vidéo') : '—'}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-slate-500">Type de création</span><span className="text-right text-white">Vidéo VYORA</span></div>
+                <div className="flex justify-between gap-2"><span className="text-slate-500">Type de création</span><span className="text-right text-white">Vidéo SORAHNEX</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Coût en crédits</span><span className="font-bold text-cyan-300">{cost ?? '…'}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-slate-500">Solde après réservation</span><span className="text-white">{summary.remaining ?? '—'}</span></div>
               </div>
@@ -933,7 +933,7 @@ export default function GenerationStudio() {
         <Link to="/app/historique" className="inline-flex items-center gap-1 text-cyan-400/70 hover:text-cyan-300">Historique <ArrowRight size={10} /></Link>
         {businessContinuityState && (
           <Link to="/app/business" state={businessContinuityState} className="inline-flex items-center gap-1 text-violet-300/70 hover:text-violet-200">
-            Poursuivre dans Business Grow <ArrowRight size={10} />
+            Poursuivre dans Grow <ArrowRight size={10} />
           </Link>
         )}
       </footer>

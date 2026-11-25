@@ -1,5 +1,5 @@
 /**
- * VYORA Business Grow — CRM : modèle métier pur.
+ * SORAHNEX Grow Grow — CRM : modèle métier pur.
  *
  * Aucune dépendance React ni Supabase. Toutes les décisions commerciales
  * (score, priorité, doublons, actions, segments, tableau de bord) sont

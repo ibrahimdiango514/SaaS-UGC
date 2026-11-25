@@ -1,5 +1,5 @@
 /**
- * VYORA — frontière HTTP de l'exécution d'outils MCP externes.
+ * SORAHNEX — frontière HTTP de l'exécution d'outils MCP externes.
  *
  * ## Pourquoi une couche distincte de `execution.ts`
  *

@@ -1,4 +1,4 @@
-# VYORA — Phase « expérience premium » : ce qui a été livré et ce qui reste
+# SORAHNEX — Phase « expérience premium » : ce qui a été livré et ce qui reste
 
 > État au 2026-11-14, branche de session issue de `develop`.
 > Chaque section indique le fichier concerné et le comportement préservé.
@@ -13,10 +13,10 @@
 | Backend | Supabase (Auth + PostgreSQL schéma `saas_ugc` / `saas_business`) + Edge Functions Deno |
 | Routes protégées | `/app/*` derrière `ProtectedRoute`, `/admin` derrière `AdminRoute` (vérifié côté serveur) |
 | **Espace 1 — Studio UGC** | `/app/studio*`, `/app/projets`, `/app/scripts`, `/app/prompts`, `/app/presets`, `/app/avatars`, `/app/bibliotheque`, `/app/historique`, `/app/credits`, `/app/abonnement` |
-| **Espace 2 — Business Growth** | `/app/business*` (sections assistant, croissance, entreprise, mémoire, services IA, contrôle IA, intégrations), `/app/business/modules/*` (13 modules), `/app/business/abonnement` |
+| **Espace 2 — Grow** | `/app/business*` (sections assistant, croissance, entreprise, mémoire, services IA, contrôle IA, intégrations), `/app/business/modules/*` (13 modules), `/app/business/abonnement` |
 | Sélecteur | `/app` (`Home`) : choix entre les deux espaces |
 | Administrateur | `/admin` (console propriétaire, hors espaces client) |
-| Isolation | crédits Studio jamais lus/débités par Business Growth ; RLS par workspace ; admin sans workspace client |
+| Isolation | crédits Studio jamais lus/débités par Grow ; RLS par workspace ; admin sans workspace client |
 | Moteur IA | `supabase/functions/_shared/ai-core/` : 7 adaptateurs, routeur, registre, mémoire, budgets |
 | Composants réutilisables préexistants | `Button`, `Card`, `StatCard`, `Badge`, `Modal`, `EmptyState`, `Reveal`, `BrandLockup`, `HeroScene` |
 | Tests | 75 fichiers / 1146 tests verts au démarrage de la phase → **80 fichiers / 1189 tests** en fin de quatrième tranche |
@@ -102,7 +102,7 @@ Règles tenues :
 
 ## 4. Séparation des deux espaces (livré)
 
-- **Identité chromatique** : cyan (Studio) / violet (Business Growth), héritée par les
+- **Identité chromatique** : cyan (Studio) / violet (Grow), héritée par les
   cartes, boutons d'accent, champs et tuiles via variables CSS.
 - **Barre d'espace** (`WorkspaceDock`) : nom de l'espace, univers, tableau de bord et
   retour au sélecteur — visible dans la barre latérale et le tiroir mobile.
@@ -138,7 +138,7 @@ La liste elle-même n'est pas figée : elle vit dans le registre (§8). Les clé
 | Étape | Contenu | Fichiers |
 |---|---|---|
 | A | **Écrans propriétaire** alignés sur le parcours d'authentification (`variant="secure"`), champs et boutons à états. Règles d'accès **inchangées** et désormais verrouillées par un test : une session sans rôle est fermée (`signOut`), la promotion reste impossible depuis l'interface. | `OwnerLogin.tsx`, `OwnerBootstrap.tsx`, `OwnerConfirmation.tsx`, `tests/owner-access.test.tsx` |
-| B | **Catalogue des modules Business Growth** refondu : en-tête d'espace violet, filtres en pastilles avec accent par catégorie, recherche avec effacement, cartes entièrement cliquables, compteur « prêts / total » calculé sur `isModuleKey`. | `src/business/modules/BusinessModules.tsx` |
+| B | **Catalogue des modules Grow** refondu : en-tête d'espace violet, filtres en pastilles avec accent par catégorie, recherche avec effacement, cartes entièrement cliquables, compteur « prêts / total » calculé sur `isModuleKey`. | `src/business/modules/BusinessModules.tsx` |
 | C | **Coquille Studio** : en-tête cyan avec liseré lumineux, badge « Espace création », onglets accentués. | `src/studio/components/StudioShell.tsx` |
 
 Comportements préservés et vérifiés : filtres et recherche du catalogue, liens réels
@@ -150,10 +150,10 @@ par module (`/app/business/modules/:key`), contrôle de rôle administrateur, co
 | Étape | Contenu | Fichiers |
 |---|---|---|
 | A | **Garde-fou « aucun secret »** : test qui échoue si une signature de clé (Google, OpenAI/DeepSeek, OpenRouter, Groq, xAI, Mistral, JWT, `sb_secret_`, clé PEM) apparaît dans `src/`, `supabase/`, `docs/`, `scripts/`, `netlify/`, `tests/` ou `.env.example` ; vérifie aussi qu'aucun code de `src/` n'accède à l'environnement serveur et qu'aucune Edge Function ne contient de clé en littéral. Validé par une sonde temporaire (clé factice détectée puis supprimée). | `tests/secrets-guard.test.ts` |
-| B | **Intérieur Business Growth** : en-tête violet à liseré, badge « Espace pilotage », indicateurs en tuiles premium, bandeau modules et onglets de section accentués, 11 panneaux internes passés sur la même surface de verre. | `src/business/BusinessGrowWorkspace.tsx` |
+| B | **Intérieur Grow** : en-tête violet à liseré, badge « Espace pilotage », indicateurs en tuiles premium, bandeau modules et onglets de section accentués, 11 panneaux internes passés sur la même surface de verre. | `src/business/BusinessGrowWorkspace.tsx` |
 | C | **Catalogue vidéo Studio** : en-tête de modèle (tuile d'icône), carte sélectionnée avec liseré et relief, survol cohérent, états indisponible conservés. | `src/studio/components/CatalogBrowser.tsx` |
 
-Aucune logique touchée : 94 tests Business Growth + modules restent verts sans
+Aucune logique touchée : 94 tests Grow + modules restent verts sans
 modification, 1182 tests au total.
 
 ## 8. Fournisseurs IA — réception seulement, catalogue NON figé

@@ -1,7 +1,7 @@
-// VYORA AI CORE — types communs (partagés par tous les espaces).
+// SORAHNEX AI CORE — types communs (partagés par tous les espaces).
 //
 // Aucune dépendance d'environnement : le code fonctionne identiquement sous
-// Deno (Edge), Node (tests vitest) et dans le bundle esbuild de Business Grow.
+// Deno (Edge), Node (tests vitest) et dans le bundle esbuild de Grow.
 // Les secrets et l'accès réseau sont TOUJOURS injectés par l'hôte.
 
 export type AiChatRole = 'system' | 'user' | 'assistant';
@@ -87,7 +87,7 @@ export interface AiParsedResult {
  * Gabarit de protocole d'un fournisseur, stocké DANS LE REGISTRE
  * (`ai_providers.adapter_kind`).
  *
- * Décision d'architecture : VYORA ne parle plus qu'un protocole, `openai`
+ * Décision d'architecture : SORAHNEX ne parle plus qu'un protocole, `openai`
  * (/chat/completions + /models). Les fournisseurs sont centralisés derrière
  * FreeLLMAPI et exposés par ce protocole ; aucun adaptateur natif par
  * fournisseur ne subsiste (ni Groq, ni Gemini, ni Cloudflare).

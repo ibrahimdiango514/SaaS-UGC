@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur Shopify : projection vers la forme brute commune.
+ * SORAHNEX — connecteur Shopify : projection vers la forme brute commune.
  *
  * Aucune normalisation ici : ce module produit des `RawCatalogProduct`, la même
  * structure que PrestaShop et Chariow. Prix, devise, arrondi, dédoublonnage et
@@ -224,7 +224,7 @@ function prixDe(valeur: unknown): string | number | null {
  *
  * `handle` est le seul segment fiable. Sans domaine de vitrine connu, on ne
  * fabrique rien : une URL vers `/admin/` n'a aucun intérêt pour un client, et
- * une URL relative seule ne serait pas cliquable dans VYORA.
+ * une URL relative seule ne serait pas cliquable dans SORAHNEX.
  */
 function urlProduit(produit: Record<string, unknown>, domaineVitrine: string | null): string | null {
   const handle = typeof produit.handle === 'string' ? produit.handle.trim() : '';

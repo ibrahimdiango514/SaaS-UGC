@@ -1,5 +1,5 @@
 /**
- * VYORA — sources de catalogue : sonde de boutique et lecture des fichiers
+ * SORAHNEX — sources de catalogue : sonde de boutique et lecture des fichiers
  * publics.
  *
  * ## Ce module est le seul endroit qui fait du réseau
@@ -133,9 +133,9 @@ async function boundedGet(
       redirect: 'manual',
       signal: controller.signal,
       headers: {
-        // Un User-Agent honnête : on s'annonce comme VYORA, on ne se fait pas
+        // Un User-Agent honnête : on s'annonce comme SORAHNEX, on ne se fait pas
         // passer pour un navigateur pour franchir une protection.
-        'user-agent': 'VYORA-CatalogImporter/1.0 (+https://vyora.app)',
+        'user-agent': 'SORAHNEX-CatalogImporter/1.0 (+https://vyora.app)',
         accept,
         'accept-language': 'fr,en;q=0.8',
       },

@@ -354,7 +354,7 @@ export interface MuApiParamDef {
   required?: boolean;
 }
 
-export type ReeloraModelStatus = 'active' | 'disabled' | 'coming_soon' | 'unsupported' | 'unverified';
+export type SorahnnexModelStatus = 'active' | 'disabled' | 'coming_soon' | 'unsupported' | 'unverified';
 export type MuApiAccountAccess = 'account' | 'public_only' | 'unverified';
 
 /** Catalog row from GET reelora-video { action: "catalog" } (live MuAPI metadata). */
@@ -381,7 +381,7 @@ export interface MuApiModel {
   endpoint_url?: string | null;
   estimate_endpoint?: string | null;
   source?: string | null;
-  reelora_status?: ReeloraModelStatus;
+  reelora_status?: SorahnnexModelStatus;
   reelora_reason?: string;
   account_access?: MuApiAccountAccess;
 }
@@ -483,7 +483,7 @@ export interface AdminProviderSpendSummary {
 }
 
 /**
- * VYORA AI CORE — fournisseur du registre (lecture admin).
+ * SORAHNEX AI CORE — fournisseur du registre (lecture admin).
  *
  * Le registre décrit LUI-MÊME le protocole : `adapter_kind`, `base_url` et le
  * NOM de la variable portant la clé (`api_key_env`). Aucune liste fermée n'est
@@ -522,7 +522,7 @@ export interface AiCoreRegistrySnapshot {
   monthly_spend_usd: number;
 }
 
-/** VYORA AI CORE — ligne du journal des appels IA (lecture admin). */
+/** SORAHNEX AI CORE — ligne du journal des appels IA (lecture admin). */
 export interface AiCoreCallEntry {
   id: string;
   space: 'business' | 'studio' | 'system' | string;
@@ -541,7 +541,7 @@ export interface AiCoreCallEntry {
   created_at: string;
 }
 
-/** VYORA AI CORE — réglages d'administration IA (budgets, seuil d'alerte). */
+/** SORAHNEX AI CORE — réglages d'administration IA (budgets, seuil d'alerte). */
 export interface AiCoreAdminSettings {
   monthly_budget_usd: number | null;
   alert_threshold_pct: number;
@@ -568,7 +568,7 @@ export interface VideoCostEstimate {
   service_active: boolean;
   model_id: string | null;
   model_available: boolean;
-  model_status?: ReeloraModelStatus;
+  model_status?: SorahnnexModelStatus;
   model_reason?: string | null;
   pricing_available: boolean;
   pricing_error?: string | null;
@@ -754,8 +754,8 @@ export interface AdminCreditHistory {
  * Solde fournisseur réel (MuAPI) tel que persisté par le serveur.
  *
  * Règle d'affichage : `balance_usd === null` signifie « non vérifié » — il ne
- * faut jamais l'afficher comme 0 USD ni le confondre avec le plafond VYORA, la
- * dépense VYORA ou le budget restant, qui sont des montants distincts.
+ * faut jamais l'afficher comme 0 USD ni le confondre avec le plafond SORAHNEX, la
+ * dépense SORAHNEX ou le budget restant, qui sont des montants distincts.
  */
 export interface AdminProviderBalance {
   provider: string;

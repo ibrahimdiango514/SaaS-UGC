@@ -26,7 +26,7 @@ const registryRows = [
   { provider_key: 'groq', display_name: 'Groq', adapter_kind: 'openai', default_base_url: 'https://api.groq.com/openai/v1' },
   { provider_key: 'gemini', display_name: 'Gemini', adapter_kind: 'gemini', default_base_url: 'https://generativelanguage.googleapis.com/v1beta' },
   { provider_key: 'cloudflare', display_name: 'Cloudflare Workers AI', adapter_kind: 'cloudflare', default_base_url: 'https://api.cloudflare.com/client/v4', account_id_env: 'CLOUDFLARE_ACCOUNT_ID' },
-  { provider_key: 'openrouter', display_name: 'OpenRouter', adapter_kind: 'openai', default_base_url: 'https://openrouter.ai/api/v1', is_aggregator: true, default_headers: { 'X-Title': 'VYORA' } },
+  { provider_key: 'openrouter', display_name: 'OpenRouter', adapter_kind: 'openai', default_base_url: 'https://openrouter.ai/api/v1', is_aggregator: true, default_headers: { 'X-Title': 'SORAHNEX' } },
   { provider_key: 'deepseek', display_name: 'DeepSeek', adapter_kind: 'openai', default_base_url: 'https://api.deepseek.com' },
   { provider_key: 'mistral', display_name: 'Mistral AI', adapter_kind: 'openai', default_base_url: 'https://api.mistral.ai/v1' },
   { provider_key: 'grok', display_name: 'Grok (xAI)', adapter_kind: 'openai', default_base_url: 'https://api.x.ai/v1' },
@@ -34,7 +34,7 @@ const registryRows = [
 
 beforeEach(() => { primeProviderRegistry(registryRows); });
 
-describe('Business Grow provider clients', () => {
+describe('Grow provider clients', () => {
   it('calls the official Groq Chat Completions API with configured model and maps usage', async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({

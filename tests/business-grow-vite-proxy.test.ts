@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 
 /** Integration test for the actual Vite relay, using a disposable local upstream. */
-describe('Business Grow Vite relay', () => {
+describe('Grow Vite relay', () => {
   let upstream: Server;
   let vite: ViteDevServer;
   let baseUrl: string;

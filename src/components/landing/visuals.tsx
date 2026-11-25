@@ -76,7 +76,7 @@ function HeroConsoleCompact() {
             decoding="async"
           />
           <span className="min-w-0 flex-1">
-            <span className="block text-[8.5px] font-bold uppercase tracking-[0.16em] text-cyan-200">VYORA Studio</span>
+            <span className="block text-[8.5px] font-bold uppercase tracking-[0.16em] text-cyan-200">SORAHNEX Studio</span>
             <span className="mt-1 block text-[12px] font-semibold leading-snug text-white">Créer des vidéos qui attirent</span>
             <span className="mt-1 block text-[10px] leading-snug text-slate-400">UGC, publicités, produits mis en scène, montage.</span>
             <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-cyan-200">
@@ -101,7 +101,7 @@ function HeroConsoleCompact() {
             </span>
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[8.5px] font-bold uppercase tracking-[0.16em] text-violet-200">Business Growth</span>
+            <span className="block text-[8.5px] font-bold uppercase tracking-[0.16em] text-violet-200">Grow</span>
             <span className="mt-1 block text-[12px] font-semibold leading-snug text-white">Développer votre activité</span>
             <span className="mt-1 block text-[10px] leading-snug text-slate-400">Agent IA, prospects, objectifs, marché et stratégie.</span>
             <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-violet-200">
@@ -126,7 +126,7 @@ function StudioMiniPanel() {
         <span className="grid h-5 w-5 place-items-center rounded-md bg-cyan-400/15 text-cyan-200">
           <Clapperboard size={11} />
         </span>
-        <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-cyan-100">VYORA Studio</span>
+        <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-cyan-100">SORAHNEX Studio</span>
         <span className="ml-auto rounded-full border border-cyan-300/20 bg-cyan-400/10 px-1.5 py-0.5 text-[8.5px] font-semibold text-cyan-100">CRÉER</span>
       </div>
 
@@ -178,7 +178,7 @@ function GrowthMiniPanel() {
         <span className="grid h-5 w-5 place-items-center rounded-md bg-violet-400/15 text-violet-200">
           <Brain size={11} />
         </span>
-        <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-violet-100">Business Growth</span>
+        <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-violet-100">Grow</span>
         <span className="ml-auto rounded-full border border-violet-300/20 bg-violet-400/10 px-1.5 py-0.5 text-[8.5px] font-semibold text-violet-100">DÉVELOPPER</span>
       </div>
 
@@ -267,7 +267,7 @@ function GrowthMiniPanel() {
       </div>
 
       <p className="mt-auto flex items-center gap-1 pt-1.5 text-[8px] text-slate-500">
-        <Zap size={7} /> Quota Business Growth distinct
+        <Zap size={7} /> Quota Grow distinct
       </p>
     </article>
   );
@@ -288,7 +288,7 @@ export function StudioShowcase() {
         <div className="flex flex-wrap items-center gap-2 px-1 pb-2.5">
           <BrandSymbol size={28} />
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-white">VYORA Studio</p>
+            <p className="text-[11px] font-semibold text-white">SORAHNEX Studio</p>
             <p className="text-[8px] uppercase tracking-[0.18em] text-cyan-200/75">Création vidéo assistée</p>
           </div>
           <span className="ml-auto rounded-full border border-cyan-300/25 bg-cyan-400/10 px-2 py-1 text-[8px] font-semibold text-cyan-100">
@@ -398,7 +398,7 @@ export function StudioShowcase() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Business Growth : tableau de bord (qualitatif, sans chiffre inventé).       */
+/* Grow : tableau de bord (qualitatif, sans chiffre inventé).       */
 /* -------------------------------------------------------------------------- */
 
 export function GrowthShowcase() {
@@ -420,7 +420,7 @@ export function GrowthShowcase() {
           <div className="flex flex-wrap items-center gap-2 px-1 pb-2.5">
             <BrandSymbol size={28} />
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold text-white">VYORA Business Growth</p>
+              <p className="text-[11px] font-semibold text-white">SORAHNEX Grow</p>
               <p className="text-[8px] uppercase tracking-[0.18em] text-violet-200/75">Pilotage & croissance</p>
             </div>
             <span className="ml-auto rounded-full border border-white/10 bg-white/[0.05] px-2 py-1 text-[8px] font-medium text-slate-300">
@@ -535,7 +535,7 @@ export function GrowthShowcase() {
 
           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5 rounded-xl border border-white/[0.07] bg-black/25 px-2.5 py-1.5 text-[8.5px] text-slate-500">
             <span className="inline-flex items-center gap-1"><MessageSquare size={8} /> Exemple d’échange et interface illustratifs</span>
-            <span className="inline-flex items-center gap-1"><LockKeyhole size={8} /> Quota Business Growth distinct des crédits Studio</span>
+            <span className="inline-flex items-center gap-1"><LockKeyhole size={8} /> Quota Grow distinct des crédits Studio</span>
           </div>
         </div>
       </div>
@@ -565,7 +565,7 @@ export function EcosystemFlow() {
             </span>
             <div>
               <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-200/80">Espace 01</p>
-              <h3 className="text-sm font-semibold text-white">VYORA Studio</h3>
+              <h3 className="text-sm font-semibold text-white">SORAHNEX Studio</h3>
             </div>
           </div>
           <p className="relative mt-3 text-xs leading-relaxed text-slate-300">
@@ -601,7 +601,7 @@ export function EcosystemFlow() {
             </span>
             <div>
               <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-violet-200/80">Espace 02</p>
-              <h3 className="text-sm font-semibold text-white">VYORA Business Growth</h3>
+              <h3 className="text-sm font-semibold text-white">SORAHNEX Grow</h3>
             </div>
           </div>
           <p className="relative mt-3 text-xs leading-relaxed text-slate-300">
@@ -617,7 +617,7 @@ export function EcosystemFlow() {
 
       <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-5">
         {[
-          { n: '01', title: 'Le besoin', text: 'Business Growth identifie un angle marketing à partir de votre contexte réel.' },
+          { n: '01', title: 'Le besoin', text: 'Grow identifie un angle marketing à partir de votre contexte réel.' },
           { n: '02', title: 'Le brief', text: 'L’agent prépare produit, angle, accroche et cible. Rien n’est envoyé sans votre validation.' },
           { n: '03', title: 'Le transfert', text: 'Vous ouvrez le brief dans Studio. Le transfert ne consomme aucun crédit.' },
           { n: '04', title: 'La génération', text: 'Studio produit la vidéo avec vos crédits Studio et votre formule.' },
@@ -638,8 +638,8 @@ export function EcosystemFlow() {
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold text-emerald-50">Périmètre et droits inchangés</p>
           <p className="mt-1 text-[11px] leading-relaxed text-emerald-100/80">
-            Business Growth ne lit ni ne débite le portefeuille Studio. La création pilotée depuis Business Growth
-            est destinée aux abonnés Business Growth lorsque la facturation de cet espace sera officiellement activée.
+            Grow ne lit ni ne débite le portefeuille Studio. La création pilotée depuis Grow
+            est destinée aux abonnés Grow lorsque la facturation de cet espace sera officiellement activée.
             En attendant, les droits d’accès existants restent exactement les mêmes.
           </p>
         </div>

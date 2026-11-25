@@ -1,5 +1,5 @@
 /**
- * VYORA — serveur d'autorisation OAuth 2.1 du serveur MCP.
+ * SORAHNEX — serveur d'autorisation OAuth 2.1 du serveur MCP.
  *
  * Ce module ne fait aucune entrée/sortie : il valide des requêtes, décide
  * d'une réponse et délègue tout effet de bord aux dépendances injectées. C'est
@@ -44,7 +44,7 @@ export const DUREE_ACCES_SECONDES = 3600;
 /** Méthodes PKCE acceptées : `S256` uniquement (OAuth 2.1 interdit `plain`). */
 export const METHODES_PKCE = ['S256'] as const;
 
-/** Portées que VYORA sait accorder. */
+/** Portées que SORAHNEX sait accorder. */
 export const PORTEES_SUPPORTEES = ['read', 'write'] as const;
 
 export type PorteeOAuth = (typeof PORTEES_SUPPORTEES)[number];
@@ -80,7 +80,7 @@ export function metadonneesRessource(ressource: string, emetteur: string): Recor
     authorization_servers: [emetteur],
     scopes_supported: [...PORTEES_SUPPORTEES],
     bearer_methods_supported: ['header'],
-    resource_name: 'VYORA MCP',
+    resource_name: 'SORAHNEX MCP',
   };
 }
 

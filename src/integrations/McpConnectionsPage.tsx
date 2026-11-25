@@ -1,15 +1,15 @@
 /**
- * « MCP et connexions IA » — connecter un client IA à VYORA.
+ * « MCP et connexions IA » — connecter un client IA à SORAHNEX.
  *
  * ## Le besoin
  *
- * Un utilisateur qui veut utiliser VYORA depuis Claude, Cursor ou VS Code doit
+ * Un utilisateur qui veut utiliser SORAHNEX depuis Claude, Cursor ou VS Code doit
  * pouvoir, sans lire de documentation technique :
  *
  *   1. trouver l'URL du serveur MCP ;
  *   2. créer un jeton et le copier une fois ;
  *   3. voir ce qui est autorisé, et le retirer s'il change d'avis ;
- *   4. vérifier que son client a bien appelé VYORA.
+ *   4. vérifier que son client a bien appelé SORAHNEX.
  *
  * ## Les trois règles de cet écran
  *
@@ -64,12 +64,12 @@ const CLIENTS: Array<{ valeur: TypeClient; libelle: string; aide: string }> = [
   {
     valeur: 'cursor',
     libelle: 'Cursor',
-    aide: 'Fichier `.cursor/mcp.json` : ajoutez une entrée « url » avec l’URL VYORA et un en-tête Authorization Bearer.',
+    aide: 'Fichier `.cursor/mcp.json` : ajoutez une entrée « url » avec l’URL SORAHNEX et un en-tête Authorization Bearer.',
   },
   {
     valeur: 'vscode',
     libelle: 'VS Code',
-    aide: 'Fichier `.vscode/mcp.json` : type « http », l’URL VYORA et l’en-tête Authorization.',
+    aide: 'Fichier `.vscode/mcp.json` : type « http », l’URL SORAHNEX et l’en-tête Authorization.',
   },
   {
     valeur: 'generic',
@@ -232,7 +232,7 @@ export function McpConnectionsPage({ sansEnTete = false }: { sansEnTete?: boolea
         <h1 className="font-display text-xl font-semibold text-white">MCP et connexions IA</h1>
         <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-400">
           Connectez Claude, Cursor, VS Code ou tout autre client compatible MCP à votre compte
-          VYORA. Vos outils n’accèdent qu’à VOS données : le serveur déduit l’identité du jeton,
+          SORAHNEX. Vos outils n’accèdent qu’à VOS données : le serveur déduit l’identité du jeton,
           jamais d’un identifiant transmis par le client.
         </p>
       </header>
@@ -406,7 +406,7 @@ export function McpConnectionsPage({ sansEnTete = false }: { sansEnTete?: boolea
             <EmptyState
               icon={<KeyRound size={20} />}
               title="Aucun jeton MCP"
-              description="Créez un jeton pour connecter votre premier client IA à VYORA."
+              description="Créez un jeton pour connecter votre premier client IA à SORAHNEX."
             />
           </div>
         )}
@@ -516,7 +516,7 @@ export function McpConnectionsPage({ sansEnTete = false }: { sansEnTete?: boolea
         <p className="mt-2 text-[0.68rem] leading-relaxed text-slate-500">
           Les outils d’écriture ne sont proposés qu’aux jetons qui en ont la portée, et seulement
           si l’exploitant a activé l’écriture sur le déploiement. Une création de produit reste
-          dans VYORA : aucune écriture n’est faite chez une plateforme e-commerce.
+          dans SORAHNEX : aucune écriture n’est faite chez une plateforme e-commerce.
         </p>
       </section>
 
@@ -559,7 +559,7 @@ export function McpConnectionsPage({ sansEnTete = false }: { sansEnTete?: boolea
           <li>5. Revenez ici : « Dernier appel » et le journal confirmeront que la connexion fonctionne.</li>
         </ol>
         {/*
-          * Honnêteté de la promesse : VYORA implémente le protocole MCP, mais
+          * Honnêteté de la promesse : SORAHNEX implémente le protocole MCP, mais
           * aucun client tiers n'est certifié par un essai réel de bout en bout.
           * Annoncer « compatible ChatGPT » sans l'avoir essayé serait un
           * mensonge que l'utilisateur découvrirait à ses frais.
@@ -568,7 +568,7 @@ export function McpConnectionsPage({ sansEnTete = false }: { sansEnTete?: boolea
           className="mt-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.06] px-2.5 py-2 text-[0.68rem] leading-relaxed text-amber-100/90"
           data-testid="avertissement-compatibilite"
         >
-          VYORA parle le protocole MCP (Streamable HTTP + OAuth 2.1/PKCE). Aucun client tiers
+          SORAHNEX parle le protocole MCP (Streamable HTTP + OAuth 2.1/PKCE). Aucun client tiers
           (ChatGPT, Claude Code, Cursor, VS Code…) n’a encore été validé par un essai réel de bout
           en bout : considérez la compatibilité comme <strong>attendue</strong>, pas certifiée.
           Le journal ci-dessus est la preuve de ce qui se passe réellement.

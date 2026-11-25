@@ -49,7 +49,7 @@ export const CATALOG_CATEGORIES: CategoryOption[] = [
 
 export const CATALOG_STATUSES: { id: CatalogStatusFilter; label: string }[] = [
   { id: 'all', label: 'Tous les statuts' },
-  { id: 'active', label: 'Disponibles dans VYORA' },
+  { id: 'active', label: 'Disponibles dans SORAHNEX' },
   { id: 'unavailable', label: 'Indisponibles' },
 ];
 

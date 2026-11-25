@@ -10,7 +10,7 @@ annoncer comme compatible).
 
 ## 1. L'objectif, et où il en est
 
-> VYORA doit pouvoir se connecter à une application tierce protégée par OAuth
+> SORAHNEX doit pouvoir se connecter à une application tierce protégée par OAuth
 > (Shopify, Notion, GitHub, un serveur MCP d'entreprise…), sans jamais demander
 > à l'utilisateur de coller un jeton, et sans qu'un jeton transite par le
 > navigateur. L'écran doit distinguer clairement les deux sens du protocole.
@@ -50,9 +50,9 @@ noms `mcp_server_<id>` et `mcp_oauth_client_secret_<id>`.
 Nouvelle page `/app/connexions-mcp` (entrée Sidebar « Connexions MCP »), un seul
 `h1`, deux sections :
 
-- **A. Connecter VYORA à mes IA** — VYORA est le *serveur* : clés pour Claude,
+- **A. Connecter SORAHNEX à mes IA** — SORAHNEX est le *serveur* : clés pour Claude,
   Cursor, ChatGPT… (contenu de l'ancienne `/app/connexions-ia`).
-- **B. Connecter mes applications à VYORA** — VYORA est le *client* : mes serveurs
+- **B. Connecter mes applications à SORAHNEX** — SORAHNEX est le *client* : mes serveurs
   MCP externes, avec le bouton **« Autoriser via OAuth »** quand `authKind = oauth`.
 
 Les anciennes routes `/app/connexions-ia` et `/app/mes-serveurs-mcp` restent
@@ -71,7 +71,7 @@ Chargeur épinglé sur le commit `4675984`, artefact
 
 | Requête | Attendu | Obtenu |
 |---|---|---|
-| `GET /oauth/callback` sans paramètre | 400 HTML | **400**, « Requête incomplète — VYORA » |
+| `GET /oauth/callback` sans paramètre | 400 HTML | **400**, « Requête incomplète — SORAHNEX » |
 | `GET /oauth/callback?state=etat-inexistant&code=…` | 400 HTML (état refusé par la RPC réelle) | **400**, « Autorisation expirée… » |
 | `GET /gestion/lister` | 405 | **405** `methode_non_autorisee` |
 | `POST /gestion/oauth-demarrer` sans jeton | 401 | **401** `authentification_requise` |

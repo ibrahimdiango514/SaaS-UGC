@@ -1,5 +1,5 @@
 /**
- * VYORA Growth OS — Lot F : produits, services et stock.
+ * SORAHNEX Growth OS — Lot F : produits, services et stock.
  *
  * Le stock n'est jamais stocké comme un compteur modifiable : il est dérivé des
  * mouvements, ce qui rend l'historique auditable et évite les écarts silencieux.

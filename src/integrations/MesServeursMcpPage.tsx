@@ -190,7 +190,7 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
         setMessage({
           ton: 'info',
           texte: 'Ce fournisseur n’annonce pas PKCE S256 dans ses métadonnées. '
-            + 'VYORA l’envoie quand même, mais la protection n’est pas confirmée par le serveur.',
+            + 'SORAHNEX l’envoie quand même, mais la protection n’est pas confirmée par le serveur.',
         });
       }
       window.location.assign(demarrage.autorisationUrl);
@@ -218,9 +218,9 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
     try {
       const resultat = await revoquerOAuth(serveur.id);
       const textes: Record<typeof resultat.distant, string> = {
-        revoque: 'Accès retiré : le fournisseur a révoqué le jeton et VYORA l’a détruit.',
-        refuse: `Jetons détruits côté VYORA, mais le fournisseur a refusé la révocation${resultat.detailDistant ? ` (${resultat.detailDistant})` : ''}. Vérifiez aussi dans ses réglages.`,
-        indisponible: 'Jetons détruits côté VYORA. Ce fournisseur n’expose pas de révocation : retirez aussi l’accès dans ses réglages.',
+        revoque: 'Accès retiré : le fournisseur a révoqué le jeton et SORAHNEX l’a détruit.',
+        refuse: `Jetons détruits côté SORAHNEX, mais le fournisseur a refusé la révocation${resultat.detailDistant ? ` (${resultat.detailDistant})` : ''}. Vérifiez aussi dans ses réglages.`,
+        indisponible: 'Jetons détruits côté SORAHNEX. Ce fournisseur n’expose pas de révocation : retirez aussi l’accès dans ses réglages.',
         aucun_jeton: 'Aucun jeton à révoquer : la connexion est déjà en attente d’autorisation.',
       };
       setMessage({ ton: resultat.distant === 'revoque' || resultat.distant === 'aucun_jeton' ? 'succes' : 'info', texte: textes[resultat.distant] });
@@ -331,9 +331,9 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
         </div>
       ) : (
       <PageHeader
-        eyebrow="VYORA · MCP"
+        eyebrow="SORAHNEX · MCP"
         title="Mes serveurs MCP"
-        description="Connectez vos propres serveurs MCP : VYORA découvre leurs outils, et vous décidez de ce qu’il peut faire."
+        description="Connectez vos propres serveurs MCP : SORAHNEX découvre leurs outils, et vous décidez de ce qu’il peut faire."
         actions={(
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={() => void charger()} disabled={chargement}>
@@ -370,7 +370,7 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
       <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-2.5 text-xs leading-relaxed text-slate-400">
         <ShieldCheck className="mr-1.5 inline h-3.5 w-3.5 text-emerald-300" />
         Vos jetons sont stockés côté serveur dans Vault et ne sont jamais renvoyés au navigateur.
-        Les écritures ne sont pas activées : VYORA n’exécute que les outils que vous autorisez expressément.
+        Les écritures ne sont pas activées : SORAHNEX n’exécute que les outils que vous autorisez expressément.
       </div>
 
       {chargement ? (
@@ -382,7 +382,7 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
           <Plug className="mx-auto mb-3 h-8 w-8 text-slate-500" />
           <p className="text-sm font-medium text-white">Aucun serveur MCP connecté</p>
           <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-slate-400">
-            Ajoutez l’URL d’un serveur MCP compatible Streamable HTTP. VYORA teste la connexion,
+            Ajoutez l’URL d’un serveur MCP compatible Streamable HTTP. SORAHNEX teste la connexion,
             découvre ses outils et vous laisse choisir lesquels autoriser.
           </p>
           <Button className="mt-4" onClick={() => setCreationOuverte(true)} disabled={!workspaceId}>
@@ -559,7 +559,7 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
                           })}
                         </ul>
                         <p className="mt-2 text-[11px] text-slate-500">
-                          Seuls les outils autorisés peuvent être exécutés. VYORA revérifie cette
+                          Seuls les outils autorisés peuvent être exécutés. SORAHNEX revérifie cette
                           autorisation en base à chaque appel, pas seulement ici.
                         </p>
                       </>
@@ -587,7 +587,7 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
         open={Boolean(aExecuter)}
         onClose={fermerExecution}
         title={aExecuter ? `Exécuter « ${aExecuter.outil} »` : 'Exécuter un outil'}
-        description="VYORA vérifie l’autorisation en base, puis appelle réellement le serveur distant."
+        description="SORAHNEX vérifie l’autorisation en base, puis appelle réellement le serveur distant."
         footer={(
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={fermerExecution}>Fermer</Button>
@@ -612,7 +612,7 @@ export function MesServeursMcpPage({ sansEnTete = false }: { sansEnTete?: boolea
               className="w-full resize-y rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-sky-400/50"
             />
             <p className="mt-1 text-[11px] text-slate-500">
-              Objet JSON transmis tel quel à l’outil. VYORA n’y ajoute rien.
+              Objet JSON transmis tel quel à l’outil. SORAHNEX n’y ajoute rien.
             </p>
           </div>
 
@@ -727,7 +727,7 @@ function FormulaireCreation({
       open={ouvert}
       onClose={fermer}
       title="Ajouter un serveur MCP"
-      description="VYORA se connectera à l’URL indiquée pour découvrir ses outils."
+      description="SORAHNEX se connectera à l’URL indiquée pour découvrir ses outils."
       footer={(
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={fermer} disabled={envoi}>Annuler</Button>
@@ -766,7 +766,7 @@ function FormulaireCreation({
         {authKind === 'oauth' && (
           <p className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-sky-200/90">
             Aucun jeton à coller : après la création, cliquez sur « Autoriser » pour ouvrir la page
-            d’autorisation du fournisseur. VYORA découvre ses points de terminaison, s’enregistre
+            d’autorisation du fournisseur. SORAHNEX découvre ses points de terminaison, s’enregistre
             s’il le permet, et range le jeton dans Vault.
           </p>
         )}

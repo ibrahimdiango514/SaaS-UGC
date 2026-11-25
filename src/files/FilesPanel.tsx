@@ -1,5 +1,5 @@
 /**
- * VYORA FILES — panneau de gestion des fichiers d'une entreprise.
+ * SORAHNEX FILES — panneau de gestion des fichiers d'une entreprise.
  *
  * ## Ce que l'utilisateur peut faire ici
  * Importer (avec progression réelle), voir la liste, prévisualiser, télécharger,
@@ -25,7 +25,7 @@ import { Badge, Button, EmptyState, ProgressBar, cn } from '../components/ui';
 import { asAppError } from '../lib/errors';
 import {
   attachToProject, list, remove, signedUrl, upload, validate,
-  type VyoraFile,
+  type SorahnnexFile,
 } from './api';
 import {
   IMAGE_REFERENCE_ROLES, MAX_FILE_BYTES, REFERENCE_ROLE_LABELS,
@@ -42,7 +42,7 @@ interface PendingUpload {
 
 /** Aperçu ouvert : l'URL signée est demandée au moment de l'ouverture. */
 interface Preview {
-  file: VyoraFile;
+  file: SorahnnexFile;
   url?: string;
   text?: string;
   error?: string;
@@ -67,7 +67,7 @@ export interface FilesPanelProps {
   compact?: boolean;
 }
 
-function iconFor(kind: VyoraFile['kind']) {
+function iconFor(kind: SorahnnexFile['kind']) {
   if (kind === 'image') return ImageIcon;
   if (kind === 'video') return Film;
   if (kind === 'audio') return FileAudio;
@@ -98,7 +98,7 @@ export function FilesPanel({
   canDeleteOthers = false,
   compact = false,
 }: FilesPanelProps) {
-  const [fichiers, setFichiers] = useState<VyoraFile[]>([]);
+  const [fichiers, setFichiers] = useState<SorahnnexFile[]>([]);
   const [chargement, setChargement] = useState(true);
   const [erreurListe, setErreurListe] = useState<string | null>(null);
   const [envois, setEnvois] = useState<PendingUpload[]>([]);
@@ -163,7 +163,7 @@ export function FilesPanel({
     [workspaceId, role, projectId, conversationId],
   );
 
-  const ouvrirApercu = useCallback(async (file: VyoraFile) => {
+  const ouvrirApercu = useCallback(async (file: SorahnnexFile) => {
     setApercu({ file, loading: true });
     if (!file.preview_kind) {
       setApercu({ file, loading: false, error: 'Ce format ne peut pas être prévisualisé. Vous pouvez le télécharger.' });
@@ -186,7 +186,7 @@ export function FilesPanel({
     }
   }, []);
 
-  const supprimer = useCallback(async (file: VyoraFile) => {
+  const supprimer = useCallback(async (file: SorahnnexFile) => {
     setSuppression(file.id);
     try {
       await remove(file);
@@ -201,7 +201,7 @@ export function FilesPanel({
     }
   }, [apercu]);
 
-  const rattacher = useCallback(async (file: VyoraFile, nouveauRole: ReferenceRole) => {
+  const rattacher = useCallback(async (file: SorahnnexFile, nouveauRole: ReferenceRole) => {
     if (!projectId) return;
     try {
       const misAJour = await attachToProject(file.id, projectId, nouveauRole);
@@ -212,7 +212,7 @@ export function FilesPanel({
   }, [projectId]);
 
   const peutSupprimer = useCallback(
-    (file: VyoraFile) => Boolean(currentUserId && file.owner_id === currentUserId) || canDeleteOthers,
+    (file: SorahnnexFile) => Boolean(currentUserId && file.owner_id === currentUserId) || canDeleteOthers,
     [currentUserId, canDeleteOthers],
   );
 

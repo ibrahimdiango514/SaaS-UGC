@@ -90,7 +90,7 @@ export function GrowthOsLayout({
           <div className="relative ml-auto flex h-full w-[86%] max-w-[320px] flex-col overflow-y-auto bg-[#070c13] p-4">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-violet-200/80">VYORA</p>
+                <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-violet-200/80">SORAHNEX</p>
                 <p className="text-sm font-semibold text-white">Growth OS</p>
                 <p className="mt-0.5 truncate text-[10px] text-slate-500">{workspaceName}</p>
               </div>
@@ -107,7 +107,7 @@ export function GrowthOsLayout({
         <aside className="hidden lg:block">
           <div className="sticky top-4 rounded-2xl border border-white/[0.07] bg-[#070c13]/85 p-3 backdrop-blur-xl">
             <div className="mb-4 px-1">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-violet-200/80">VYORA · Business</p>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-violet-200/80">SORAHNEX · Business</p>
               <p className="mt-0.5 font-display text-[15px] font-semibold text-white">Growth OS</p>
               <p className="mt-0.5 truncate text-[10px] text-slate-500">{workspaceName}</p>
             </div>

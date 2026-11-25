@@ -1,5 +1,5 @@
 /**
- * VYORA — normalisation des produits importés.
+ * SORAHNEX — normalisation des produits importés.
  *
  * ## Le problème
  *

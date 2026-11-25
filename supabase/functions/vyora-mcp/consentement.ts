@@ -1,5 +1,5 @@
 /**
- * VYORA — session et page de consentement OAuth.
+ * SORAHNEX — session et page de consentement OAuth.
  *
  * Ce module ne touche ni au réseau ni à la base : il transforme un en-tête
  * `Cookie` et une session Supabase en une identité vérifiable, puis rend le
@@ -180,7 +180,7 @@ export function rendrePageConsentement(vue: VueConsentement): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Autoriser ${echapperHtml(vue.clientName)} — VYORA</title>
+  <title>Autoriser ${echapperHtml(vue.clientName)} — SORAHNEX</title>
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
@@ -202,7 +202,7 @@ export function rendrePageConsentement(vue: VueConsentement): string {
 <body>
   <main>
     <h1>Autoriser ${echapperHtml(vue.clientName)}</h1>
-    <p class="hote">Cette application demande l’accès à votre compte VYORA et sera renvoyée vers ${echapperHtml(vue.redirectHost)}.</p>
+    <p class="hote">Cette application demande l’accès à votre compte SORAHNEX et sera renvoyée vers ${echapperHtml(vue.redirectHost)}.</p>
     <ul>
       ${portees}
     </ul>
@@ -214,7 +214,7 @@ export function rendrePageConsentement(vue: VueConsentement): string {
         <button type="submit" name="decision" value="autoriser">Autoriser</button>
       </div>
     </form>
-    <footer>Vous pourrez révoquer cet accès à tout moment depuis VYORA, dans « Connexions IA ».</footer>
+    <footer>Vous pourrez révoquer cet accès à tout moment depuis SORAHNEX, dans « Connexions IA ».</footer>
   </main>
 </body>
 </html>`;
@@ -228,7 +228,7 @@ export function rendrePageErreur(message: string): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <title>Autorisation refusée — VYORA</title>
+  <title>Autorisation refusée — SORAHNEX</title>
   <style>
     body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
            display: flex; align-items: center; justify-content: center;

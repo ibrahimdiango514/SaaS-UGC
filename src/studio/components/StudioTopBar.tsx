@@ -59,15 +59,15 @@ export function StudioTopBar() {
         <Link
           to="/app"
           className="studio-bar-icon shrink-0"
-          title="Revenir à l’espace de travail VYORA"
-          aria-label="Revenir à l’espace de travail VYORA"
+          title="Revenir à l’espace de travail SORAHNEX"
+          aria-label="Revenir à l’espace de travail SORAHNEX"
         >
           <LayoutGrid size={15} />
         </Link>
 
-        <Link to="/app/studio" className="flex shrink-0 items-center gap-2" aria-label="VYORA Studio">
+        <Link to="/app/studio" className="flex shrink-0 items-center gap-2" aria-label="SORAHNEX Studio">
           <BrandSymbol size={26} />
-          <span className="hidden text-[13px] font-semibold tracking-tight text-white sm:block">VYORA</span>
+          <span className="hidden text-[13px] font-semibold tracking-tight text-white sm:block">SORAHNEX</span>
         </Link>
 
         <nav aria-label="Espaces du Studio" className="no-scrollbar -mx-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-1">

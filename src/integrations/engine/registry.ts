@@ -1,5 +1,5 @@
 /**
- * VYORA — registre des connecteurs.
+ * SORAHNEX — registre des connecteurs.
  *
  * ## Rôle
  *

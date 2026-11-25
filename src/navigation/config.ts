@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   BarChart3, BellRing, BookOpen, Bot, Boxes, Brain, Building2, Clapperboard,
   ClipboardList, Coins, CreditCard, Film, FolderKanban, HardDrive, History,
-  LayoutDashboard, Mail, Plug, Scissors, Settings, Shield, SlidersHorizontal,
+  LayoutDashboard, Mail, MoreHorizontal, Plug, Scissors, Settings, Shield, SlidersHorizontal,
   Sparkles, Target, Users, Wallet, Wand2, Zap,
 } from 'lucide-react';
 
@@ -47,7 +47,7 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
     defaultOpen: true,
     items: [{
       to: '/app/ai',
-      label: 'Assistant VYORA',
+      label: 'Assistant SORAHNEX',
       description: 'Conversations, pièces jointes et analyse',
       icon: Bot,
       keywords: ['ia', 'chat', 'assistant', 'conversation', 'analyse', 'gpt'],
@@ -369,7 +369,7 @@ export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
       },
       {
         to: '/app/business/abonnement',
-        label: 'Formules Business Growth',
+        label: 'Formules Grow',
         description: 'Abonnement et limites de l’espace métier',
         icon: CreditCard,
         keywords: ['formule', 'abonnement', 'plan', 'prix'],
@@ -398,19 +398,40 @@ export const BUSINESS_SHORTCUTS: WorkspaceShortcut[] = [
   { to: '/app/business/finance', label: 'Finance', icon: Wallet },
 ];
 
-export const STUDIO_MOBILE_NAV = [
-  { to: '/app/studio/accueil', label: 'Vue d’ensemble', icon: LayoutDashboard },
-  { to: '/app/studio', label: 'Créer', icon: Clapperboard },
-  { to: '/app/projets', label: 'Projets', icon: FolderKanban },
-  { to: '/app/historique', label: 'Historique', icon: History },
+/**
+ * Entrée de la barre de navigation mobile.
+ *
+ * `shortLabel` évite de couper le libellé au premier mot (« Vue d’ensemble »
+ * devenait « Vue ») : la barre affiche un mot choisi, jamais une troncature
+ * automatique. `opensDrawer` permet une entrée « Plus » qui ouvre le tiroir
+ * complet au lieu de naviguer vers une route inexistante.
+ */
+export interface MobileNavItem {
+  to: string;
+  label: string;
+  shortLabel?: string;
+  icon: LucideIcon;
+  opensDrawer?: boolean;
+}
+
+export const STUDIO_MOBILE_NAV: MobileNavItem[] = [
+  { to: '/app/studio/accueil', label: 'Vue d’ensemble', shortLabel: 'Accueil', icon: LayoutDashboard },
+  { to: '/app/studio', label: 'Créer', shortLabel: 'Créer', icon: Clapperboard },
+  { to: '/app/projets', label: 'Projets', shortLabel: 'Projets', icon: FolderKanban },
+  { to: '/app/historique', label: 'Historique', shortLabel: 'Historique', icon: History },
 ];
 
-export const BUSINESS_MOBILE_NAV = [
-  { to: '/app/business', label: 'Vue', icon: LayoutDashboard },
-  { to: '/app/business/crm', label: 'CRM', icon: Users },
-  { to: '/app/business/pipeline', label: 'Pipeline', icon: Target },
-  { to: '/app/business/finance', label: 'Finance', icon: Wallet },
-  { to: '/app/business/assistant', label: 'Assistant', icon: Brain },
+/**
+ * Cinq entrées : les quatre usages quotidiens de Grow, plus un accès au tiroir
+ * complet (pipeline, modules, intégrations, paramètres) pour ne bloquer aucune
+ * fonctionnalité derrière une barre trop courte.
+ */
+export const BUSINESS_MOBILE_NAV: MobileNavItem[] = [
+  { to: '/app/business', label: 'Accueil Grow', shortLabel: 'Accueil', icon: LayoutDashboard },
+  { to: '/app/business/finance', label: 'Activité et ventes', shortLabel: 'Ventes', icon: Wallet },
+  { to: '/app/business/crm', label: 'Prospects et clients', shortLabel: 'Prospects', icon: Users },
+  { to: '/app/business/assistant', label: 'Assistant IA', shortLabel: 'Assistant', icon: Brain },
+  { to: '#plus', label: 'Tout le menu Grow', shortLabel: 'Plus', icon: MoreHorizontal, opensDrawer: true },
 ];
 
 export function normalizeSearch(value: string): string {

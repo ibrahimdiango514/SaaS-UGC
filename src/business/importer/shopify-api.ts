@@ -1,5 +1,5 @@
 /**
- * VYORA — connecteur Shopify : client de l'API Admin officielle.
+ * SORAHNEX — connecteur Shopify : client de l'API Admin officielle.
  *
  * ## Quel mécanisme d'authentification, et pourquoi
  *
@@ -7,7 +7,7 @@
  *
  *   1. **OAuth d'application publique** — l'utilisateur installe une application
  *      enregistrée chez Shopify. Elle exige un identifiant et un secret
- *      d'application appartenant à VYORA (`SHOPIFY_API_SECRET`), une URL de
+ *      d'application appartenant à SORAHNEX (`SHOPIFY_API_SECRET`), une URL de
  *      redirection déclarée, et une revue d'application. **Ce n'est pas ce qui
  *      est implémenté ici**, et le prétendre serait faux : le secret
  *      d'application n'existe pas dans ce dépôt, donc le parcours échouerait à
@@ -21,7 +21,7 @@
  *
  * C'est la voie 2 qui est implémentée. Elle est officielle, documentée par
  * Shopify, et c'est la seule qui puisse fonctionner sans secret d'application
- * côté VYORA. La fiche du catalogue porte le libellé exact.
+ * côté SORAHNEX. La fiche du catalogue porte le libellé exact.
  *
  * ## Ce que ce module ne fait jamais
  *
@@ -326,7 +326,7 @@ export async function fetchShopifyResource(
       }
       const code = (cause as { code?: string })?.code;
       if (code === 'blocked_url') {
-        return fail('blocked_url', 'Cette adresse n’est pas accessible depuis VYORA.');
+        return fail('blocked_url', 'Cette adresse n’est pas accessible depuis SORAHNEX.');
       }
       if (code === 'dns_failed' || code === 'no_resolver') {
         return fail('dns_failed', 'Le domaine de la boutique n’a pas pu être résolu.');
@@ -556,7 +556,7 @@ export async function probeShopify(
  * - **Plafonds durs** (`MAX_SHOPIFY_PRODUCTS`, `MAX_SHOPIFY_PAGES`) : temps et
  *   mémoire bornés, et `truncated` le dit.
  * - **Les brouillons sont écartés et comptés.** `/products.json` renvoie aussi
- *   `draft` et `archived` ; importer l'un d'eux publierait dans VYORA une fiche
+ *   `draft` et `archived` ; importer l'un d'eux publierait dans SORAHNEX une fiche
  *   que le marchand n'a pas mise en vente.
  * - **Aucune écriture.**
  */

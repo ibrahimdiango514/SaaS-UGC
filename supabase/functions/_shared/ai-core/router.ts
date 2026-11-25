@@ -1,4 +1,4 @@
-// VYORA AI CORE — routage automatique multi-fournisseurs.
+// SORAHNEX AI CORE — routage automatique multi-fournisseurs.
 //
 // Objectif produit : choisir le meilleur modèle disponible pour une tâche, sans
 // qu'aucune liste de fournisseurs ne soit écrite dans le code. Le routeur ne lit

@@ -12,7 +12,7 @@ vi.mock('../src/context/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 'user-1', email: 'awa@example.com' },
     profile: { display_name: 'Awa Traoré' },
-    workspace: { id: 'ws-1', name: 'Maison VYORA' },
+    workspace: { id: 'ws-1', name: 'Maison SORAHNEX' },
     quota: null,
   }),
 }));
@@ -51,9 +51,9 @@ describe('séparation des deux espaces', () => {
   it('affiche les deux cartes d’univers vers leurs tableaux de bord réels', () => {
     render(<MemoryRouter><Home /></MemoryRouter>);
     expect(screen.getByRole('link', { name: /Entrer dans Studio/ }).getAttribute('href')).toBe('/app/studio');
-    expect(screen.getByRole('link', { name: /Entrer dans Business Growth/ }).getAttribute('href')).toBe('/app/business');
-    expect(screen.getByRole('heading', { name: 'VYORA Studio' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'VYORA Business Growth' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Entrer dans Grow/ }).getAttribute('href')).toBe('/app/business');
+    expect(screen.getByRole('heading', { name: 'SORAHNEX Studio' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'SORAHNEX Grow' })).toBeTruthy();
   });
 
   it('n’expose que des destinations réellement déclarées', () => {
@@ -71,13 +71,13 @@ describe('séparation des deux espaces', () => {
 
   it('donne une identité distincte à chaque barre d’espace', () => {
     render(<MemoryRouter><WorkspaceDock scope="studio" currentPath="/app/studio" /></MemoryRouter>);
-    expect(screen.getByText('VYORA Studio')).toBeTruthy();
+    expect(screen.getByText('SORAHNEX Studio')).toBeTruthy();
     expect(screen.getByText('Création & production UGC')).toBeTruthy();
     expect(screen.getByTestId('workspace-dock').getAttribute('data-scope')).toBe('studio');
     cleanup();
 
     render(<MemoryRouter><WorkspaceDock scope="business" currentPath="/app/business" /></MemoryRouter>);
-    expect(screen.getByText('VYORA Business Growth')).toBeTruthy();
+    expect(screen.getByText('SORAHNEX Grow')).toBeTruthy();
     expect(screen.getByText('Pilotage, revenus & opérations')).toBeTruthy();
     expect(screen.getByTestId('workspace-dock').getAttribute('data-scope')).toBe('business');
   });

@@ -115,7 +115,7 @@ export default function Avatars() {
             <Card key={a.id} className="flex flex-col p-3">
               <AvatarThumb avatar={a} />
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                <Badge tone="info">{a.provider === 'custom' ? 'Personnalisé' : a.provider === 'legacy' ? 'Historique' : 'VYORA'}</Badge>
+                <Badge tone="info">{a.provider === 'custom' ? 'Personnalisé' : a.provider === 'legacy' ? 'Historique' : 'SORAHNEX'}</Badge>
                 {a.is_default && <Badge tone="success"><Star size={11} fill="currentColor" /> Par défaut</Badge>}
                 {a.status !== 'active' && <Badge tone="danger">{a.status}</Badge>}
               </div>
@@ -139,7 +139,7 @@ export default function Avatars() {
           <Textarea label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Style, tenue, personnalité…" />
           <div className="grid gap-4 sm:grid-cols-2">
             <Select label="Type de fiche" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as Avatar['provider'] })}>
-              <option value="muapi">VYORA</option><option value="custom">Référence personnalisée</option><option value="legacy">Historique (lecture seule)</option>
+              <option value="muapi">SORAHNEX</option><option value="custom">Référence personnalisée</option><option value="legacy">Historique (lecture seule)</option>
             </Select>
             <Select label="Langue" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })}><option value="fr">Français</option><option value="en">Anglais</option><option value="es">Espagnol</option></Select>
           </div>

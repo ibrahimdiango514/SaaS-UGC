@@ -8,9 +8,9 @@ import { Badge, Banner, Button, Card, CardHeader } from '../../components/ui';
  *
  * Quatre montants coexistent et ne doivent JAMAIS être confondus :
  *   1. solde MuAPI réel      (argent disponible chez le fournisseur)
- *   2. plafond VYORA         (limite que l'administration s'autorise)
- *   3. dépensé VYORA         (dépense fournisseur déjà confirmée)
- *   4. restant VYORA         (plafond - engagé)
+ *   2. plafond SORAHNEX         (limite que l'administration s'autorise)
+ *   3. dépensé SORAHNEX         (dépense fournisseur déjà confirmée)
+ *   4. restant SORAHNEX         (plafond - engagé)
  *
  * Le solde fournisseur n'est jamais simulé : s'il n'a pas pu être lu, la fiche
  * affiche « Non vérifié » avec la raison, jamais « 0 $ ».
@@ -59,7 +59,7 @@ export default function ProviderBalanceCard({ balance, summary, loading, error, 
     <Card>
       <CardHeader
         title="Fournisseurs IA et soldes"
-        description="Le solde fournisseur est lu côté serveur avec la clé MuAPI. Il est distinct du plafond VYORA et des crédits clients."
+        description="Le solde fournisseur est lu côté serveur avec la clé MuAPI. Il est distinct du plafond SORAHNEX et des crédits clients."
         action={(
           <Button variant="secondary" onClick={onRefresh} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -87,17 +87,17 @@ export default function ProviderBalanceCard({ balance, summary, loading, error, 
           tone={verified ? ((balance?.balance_usd ?? 0) > 0 ? 'good' : 'warn') : 'warn'}
         />
         <Money
-          label="2 · Plafond VYORA"
+          label="2 · Plafond SORAHNEX"
           value={cap === null ? '—' : usd(cap)}
           hint={`Seuil d'alerte ${summary?.alert_percent ?? 0} % · ${summary?.enabled ? 'tests payants autorisés' : 'tests payants désactivés'}`}
         />
         <Money
-          label="3 · Dépensé VYORA"
+          label="3 · Dépensé SORAHNEX"
           value={spent === null ? '—' : usd(spent)}
           hint={committed === null ? undefined : `dont ${usd(committed)} engagés (réservations et estimations)`}
         />
         <Money
-          label="4 · Restant VYORA"
+          label="4 · Restant SORAHNEX"
           value={providerRemaining === null ? '—' : usd(providerRemaining)}
           hint="Plafond moins engagements. Ne jamais lire ce montant comme le solde MuAPI."
           tone={providerRemaining === 0 ? 'warn' : 'good'}
@@ -108,14 +108,14 @@ export default function ProviderBalanceCard({ balance, summary, loading, error, 
         {!verified && (
           <Banner tone="warning" title="Solde fournisseur non vérifié">
             Aucun montant n'est affiché à la place du solde réel. Tant que la lecture échoue,
-            VYORA bloque les appels payants : aucun débit ne peut être lancé sans solde vérifié.
+            SORAHNEX bloque les appels payants : aucun débit ne peut être lancé sans solde vérifié.
           </Banner>
         )}
         {verified && (balance?.balance_usd ?? 0) <= 0 && (
           <Banner tone="warning" title="Solde MuAPI épuisé">
             Le compte MuAPI ne dispose plus de crédit. Les nouvelles générations payantes sont refusées
             côté serveur avant tout appel fournisseur. Le rechargement se fait uniquement depuis le
-            portail officiel MuAPI : VYORA n'expose aucun bouton de recharge fictif.
+            portail officiel MuAPI : SORAHNEX n'expose aucun bouton de recharge fictif.
           </Banner>
         )}
         {needsTopUp && (
@@ -125,7 +125,7 @@ export default function ProviderBalanceCard({ balance, summary, loading, error, 
           </Banner>
         )}
         {summary?.alert_state && summary.alert_state !== 'ok' && (
-          <Banner tone="warning" title="Plafond VYORA sous surveillance">
+          <Banner tone="warning" title="Plafond SORAHNEX sous surveillance">
             État des alertes : {summary.alert_state}. Le plafond reste appliqué côté serveur avant chaque appel payant.
           </Banner>
         )}

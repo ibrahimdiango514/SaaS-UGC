@@ -1,4 +1,4 @@
-# Intégrations Business Grow — verrou d'accès et compte de test
+# Intégrations Grow — verrou d'accès et compte de test
 
 _Mis à jour le 2026-11-18._
 
@@ -6,7 +6,7 @@ _Mis à jour le 2026-11-18._
 
 | Abonnement (réponse serveur `business-grow` / `listIntegrations`) | Écran Intégrations | Requêtes `store-connect status` |
 | --- | --- | --- |
-| Refusé (`NO_SUBSCRIPTION`, `SUBSCRIPTION_EXPIRED`, …) | Bandeau « Connexions verrouillées … » + lien **Voir l'abonnement Business Grow** (`/app/business/abonnement`) ; « Mes boutiques connectées » affiche le même verrou. | **Aucune** (une seule requête au total : la lecture des intégrations). Comptes OAuth et journal ne sont pas lus non plus. |
+| Refusé (`NO_SUBSCRIPTION`, `SUBSCRIPTION_EXPIRED`, …) | Bandeau « Connexions verrouillées … » + lien **Voir l'abonnement Grow** (`/app/business/abonnement`) ; « Mes boutiques connectées » affiche le même verrou. | **Aucune** (une seule requête au total : la lecture des intégrations). Comptes OAuth et journal ne sont pas lus non plus. |
 | Accepté | État réel de chaque boutique (PrestaShop, Chariow, Shopify, WooCommerce). | 4 lectures, après la réponse d'acceptation. |
 | Indisponible (panne réseau) | « Lecture des intégrations en échec : … », bouton **Revérifier**. | Aucune. |
 
@@ -35,7 +35,7 @@ redéploiement Edge, donc une autorisation explicite.
 
 Aucune protection n'a été désactivée : l'abonnement a été posé par la RPC
 `public.vyora_admin_set_business_subscription`, exécutée dans le contexte de
-l'administrateur VYORA (`reelora_assert_admin()`), journalisée dans
+l'administrateur SORAHNEX (`reelora_assert_admin()`), journalisée dans
 `saas_ugc.ugc_audit_logs` (`business_grow_subscription_set`).
 
 - Compte : `ibagang009@gmail.com` (`373436db-0f06-4888-a489-e9c60d7fbd8b`)
@@ -44,7 +44,7 @@ l'administrateur VYORA (`reelora_assert_admin()`), journalisée dans
 - Note : « Compte de test intégrations (Shopify/WooCommerce/PrestaShop/Chariow) »
 
 Révocation : `select public.vyora_admin_revoke_business_subscription('373436db-0f06-4888-a489-e9c60d7fbd8b', 'fin de test');`
-(même contexte admin), ou Admin → Abonnements Business Grow.
+(même contexte admin), ou Admin → Abonnements Grow.
 
 Tarifs, facturation automatique et formules n'ont pas été modifiés
 (`billing_enabled = false` sur les trois formules).

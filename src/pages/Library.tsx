@@ -82,7 +82,7 @@ function VideoCard({ asset, job, projects, onDelete, onAttach }: {
           <span className="text-amber-300">{credits} crédits</span>
         </div>
         <div className="mt-3 space-y-1.5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-2.5 text-[10px] leading-relaxed">
-          <p><span className="text-slate-500">Type : </span><span className="text-slate-300">Vidéo VYORA</span></p>
+          <p><span className="text-slate-500">Type : </span><span className="text-slate-300">Vidéo SORAHNEX</span></p>
           <p><span className="text-slate-500">Paramètres : </span><span className="text-slate-300">{paramsSummary(params)}</span></p>
           <p><span className="text-slate-500">Projet : </span><span className="text-slate-300">{project?.title ?? 'Bibliothèque uniquement'}</span></p>
           <p><span className="text-slate-500">Stockage : </span><span className="text-emerald-300">Espace privé</span></p>

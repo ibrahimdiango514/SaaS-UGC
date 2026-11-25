@@ -6,7 +6,7 @@ import { writeFileSync, mkdirSync, readFileSync, readdirSync, existsSync } from 
 import type { ReactNode } from 'react';
 
 /**
- * Preuve de rendu — Business Grow, section Assistant.
+ * Preuve de rendu — Grow, section Assistant.
  *
  * ## Pourquoi ce fichier existe
  *
@@ -139,7 +139,7 @@ const STYLES = `
   code { color:#c4b5fd; }
 `;
 
-describe('preuve de rendu — Business Grow', () => {
+describe('preuve de rendu — Grow', () => {
   it('monte la vraie page et produit un DOM vérifiable', async () => {
     const { container } = render(
       <MemoryRouter initialEntries={['/app/business/assistant']}>
@@ -150,7 +150,7 @@ describe('preuve de rendu — Business Grow', () => {
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('business-message-assistant')).toBeTruthy());
 
-    // 1. L'interface VYORA est bien celle qui est rendue.
+    // 1. L'interface SORAHNEX est bien celle qui est rendue.
     expect(screen.getByTestId('business-assistant')).toBeTruthy();
     expect(screen.getByLabelText('Navigation de l’assistant')).toBeTruthy();
 
@@ -193,7 +193,7 @@ describe('preuve de rendu — Business Grow', () => {
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>VYORA — Business Grow, section Assistant (preuve de rendu)</title>
+<title>SORAHNEX — Grow, section Assistant (preuve de rendu)</title>
 <style>${css}</style>
 <style>${STYLES}</style>
 </head>

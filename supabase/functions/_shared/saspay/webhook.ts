@@ -1,4 +1,4 @@
-// VYORA — vérification de la signature des webhooks SasPay.
+// SORAHNEX — vérification de la signature des webhooks SasPay.
 //
 // Contrat documenté (https://docs.saspay.me/api-reference/webhooks) :
 //   X-Webhook-Signature = HMAC-SHA256(secret, `${timestamp}.${corpsBrut}`), hex minuscule

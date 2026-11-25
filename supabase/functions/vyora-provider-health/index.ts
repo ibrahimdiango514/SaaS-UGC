@@ -1,4 +1,4 @@
-// VYORA — surveillance planifiée du fournisseur IA central (FreeLLMAPI).
+// SORAHNEX — surveillance planifiée du fournisseur IA central (FreeLLMAPI).
 //
 // Appelée uniquement par le job pg_cron `vyora-provider-health-*` via pg_net.
 // Deux protections, dans cet ordre :

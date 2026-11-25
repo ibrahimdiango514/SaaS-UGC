@@ -1,4 +1,4 @@
-// VYORA — couche HTTP des Edge Functions de paiement.
+// SORAHNEX — couche HTTP des Edge Functions de paiement.
 //
 // Deux gestionnaires :
 //   * `createPaymentsHandler` : appels du navigateur (JWT utilisateur requis).
@@ -19,7 +19,7 @@ export interface PaymentsEnv {
   serviceRoleKey: string;
   /** Clé secrète SasPay. Lue uniquement côté serveur. */
   sasPaySecretKey: string;
-  /** Secret de signature du webhook VYORA (propre à ce point de terminaison). */
+  /** Secret de signature du webhook SORAHNEX (propre à ce point de terminaison). */
   webhookSecret: string;
   /** Origines supplémentaires autorisées, séparées par des virgules. */
   extraOrigins: string;
@@ -32,11 +32,11 @@ export function readPaymentsEnv(get: EnvReader): PaymentsEnv {
     supabaseUrl: get('SUPABASE_URL'),
     anonKey: get('SUPABASE_ANON_KEY'),
     serviceRoleKey: get('SUPABASE_SERVICE_ROLE_KEY'),
-    // Clé DÉDIÉE à VYORA. Aucun repli sur `SASPAY_SECRET_KEY` : cette variable
+    // Clé DÉDIÉE à SORAHNEX. Aucun repli sur `SASPAY_SECRET_KEY` : cette variable
     // appartient à un autre produit hébergé sur le même projet et ne doit jamais
-    // servir à encaisser pour VYORA par simple oubli de configuration.
+    // servir à encaisser pour SORAHNEX par simple oubli de configuration.
     sasPaySecretKey: get('VYORA_SASPAY_SECRET_KEY').trim(),
-    // Chaque webhook SasPay possède son propre secret : celui de VYORA n'est pas
+    // Chaque webhook SasPay possède son propre secret : celui de SORAHNEX n'est pas
     // celui d'un autre produit hébergé sur le même projet.
     webhookSecret: get('VYORA_SASPAY_WEBHOOK_SECRET').trim(),
     extraOrigins: get('VYORA_PAYMENTS_ALLOWED_ORIGINS'),
@@ -80,7 +80,7 @@ function failure(error: unknown, headers: Record<string, string> = {}): Response
     return json({ error: { code: error.code, message: error.message, ...error.details } }, error.status, headers);
   }
   log('unexpected_error', { message: safeErrorMessage(error) });
-  return json({ error: { code: 'PAYMENT_INTERNAL_ERROR', message: 'Une erreur inattendue est survenue. Aucun débit n’a été effectué par VYORA.' } }, 500, headers);
+  return json({ error: { code: 'PAYMENT_INTERNAL_ERROR', message: 'Une erreur inattendue est survenue. Aucun débit n’a été effectué par SORAHNEX.' } }, 500, headers);
 }
 
 export interface HandlerDeps {

@@ -6,8 +6,8 @@
 // un artefact absent ou modifié n'est jamais exécuté.
 const FUNCTION_NAME = "vyora-payments";
 const ARTIFACT_NAME = "vyora-saspay";
-const ARTIFACT_SHA256 = "acefd46793cea029a67edc9b84768653286e9d08f2db107ea0a4cb8b753dd690";
-const ARTIFACT_CHARS = 56709;
+const ARTIFACT_SHA256 = "20a8b4ff8d54cd6620fd1bb4ce4a165d88780f99c459c89b1eb153dc0127210b";
+const ARTIFACT_CHARS = 56664;
 
 async function readArtifact(): Promise<string> {
   const base = Deno.env.get("SUPABASE_URL") ?? "";

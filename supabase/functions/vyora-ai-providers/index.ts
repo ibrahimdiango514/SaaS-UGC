@@ -1,4 +1,4 @@
-// VYORA — intégration des fournisseurs IA : sonde RÉELLE et synchronisation
+// SORAHNEX — intégration des fournisseurs IA : sonde RÉELLE et synchronisation
 // du catalogue (phase 1, 2026-11-14).
 //
 // Cette fonction ne fait qu'une chose : appeler RÉELLEMENT chaque fournisseur

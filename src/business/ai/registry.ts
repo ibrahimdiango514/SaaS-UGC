@@ -1,5 +1,5 @@
 /**
- * VYORA — définitions partagées de l'espace Business.
+ * SORAHNEX — définitions partagées de l'espace Business.
  *
  * AUCUN fournisseur n'est listé ici : la liste des services IA vient du
  * registre serveur (`ai_providers`). Ajouter un fournisseur est une opération

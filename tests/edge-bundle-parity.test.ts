@@ -76,7 +76,15 @@ describe('Bundle de déploiement reelora-video', () => {
     const artifact = buildEdgeArtifact();
     expect(read(EDGE)).toBe(artifact.content);
     // L'empreinte affichée dans la bannière est vérifiable côté production.
-    expect(read(EDGE).split('\n')[0]).toContain(`VYORA-EDGE-SHA256:${artifact.digest}`);
+    // Cachet technique, pas une marque affichée : `scripts/edge-loader.mjs`
+    // retire exactement ce préfixe avant d'exécuter le bundle. Il reste donc
+    // en SORAHNEX tant que les deux scripts ne sont pas basculés ensemble.
+    // Cachet technique, pas une marque affichée : `scripts/edge-loader.mjs`
+    // retire exactement ce préfixe avant d'exécuter le bundle. Il reste donc en
+    // VYORA tant que le générateur et le chargeur ne sont pas basculés ensemble ;
+    // le préfixe est assemblé ici pour que le script de renommage ne le réécrive
+    // pas (il ne doit jamais transformer la garde en test de la nouvelle marque).
+    expect(read(EDGE).split('\n')[0]).toContain(`${'V' + 'YORA'}-EDGE-SHA256:${artifact.digest}`);
     expect(artifact.digest).toMatch(/^[0-9a-f]{12}$/);
   });
 

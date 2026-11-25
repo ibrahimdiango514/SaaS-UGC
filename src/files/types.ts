@@ -1,5 +1,5 @@
 /**
- * VYORA FILES — règles communes de type, de taille et de prévisualisation.
+ * SORAHNEX FILES — règles communes de type, de taille et de prévisualisation.
  *
  * ## Pourquoi ce module est pur
  * Ces règles sont utilisées par l'interface, par les tests et par la

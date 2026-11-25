@@ -1,5 +1,5 @@
 /**
- * VYORA — URL de boutique : validation, dérivation, garde SSRF.
+ * SORAHNEX — URL de boutique : validation, dérivation, garde SSRF.
  *
  * ## Le risque, concrètement
  *

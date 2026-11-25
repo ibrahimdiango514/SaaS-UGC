@@ -526,7 +526,7 @@ const options = (base: AccesGestion) => ({
 });
 
 describe('Route oauth-demarrer', () => {
-  it('refuse sans jeton VYORA (401)', async () => {
+  it('refuse sans jeton SORAHNEX (401)', async () => {
     const { base, appels } = accesGestion();
     const r = await traiterDemarrageOAuth(requeteDemarrage(CORPS_DEMARRAGE, null), CORPS_DEMARRAGE, options(base).deps, options(base));
     expect(r.status).toBe(401);
@@ -998,7 +998,7 @@ describe('P6d — route oauth-revoquer', () => {
   });
   const avecRevocation = () => serveurGere({ oauthAs: { token_endpoint: `${BASE()}/token`, revocation_endpoint: `${BASE()}/revoke` } });
 
-  it('refuse sans jeton VYORA (401), sans réseau ni destruction', async () => {
+  it('refuse sans jeton SORAHNEX (401), sans réseau ni destruction', async () => {
     const { base, appels } = accesGestion({ lireOAuth: jetons() });
     recu.length = 0;
     const r = await traiterRevocationOAuth(requete(null), CORPS, options(base).deps, options(base));

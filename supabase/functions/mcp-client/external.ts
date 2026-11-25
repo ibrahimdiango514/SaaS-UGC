@@ -13,7 +13,7 @@
  *    classification locale (`classerOutil`, pessimiste) fait foi, et une
  *    permission accordée par l'utilisateur doit EXISTER pour que l'outil soit
  *    appelable.
- * 2. **Refus côté serveur VYORA, avant tout appel réseau.** Les trois refus de
+ * 2. **Refus côté serveur SORAHNEX, avant tout appel réseau.** Les trois refus de
  *    `appelerOutil` (non autorisé / écriture non confirmée / arguments
  *    invalides) s'appliquent avant `safePost`.
  * 3. **Aucun secret en clair dans un résultat.** Ce module reçoit un
@@ -259,7 +259,7 @@ export async function testerConnexion(
 /* 3. Exécution d'un outil autorisé                                            */
 /* -------------------------------------------------------------------------- */
 
-/** Ce que VYORA sait d'un outil, indépendamment de ce qu'en dit le serveur. */
+/** Ce que SORAHNEX sait d'un outil, indépendamment de ce qu'en dit le serveur. */
 export interface PermissionStockee {
   /** `allowed` seulement si l'utilisateur l'a explicitement accordé. */
   etat: 'allowed' | 'denied' | 'pending';

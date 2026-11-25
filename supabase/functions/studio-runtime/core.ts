@@ -14,17 +14,31 @@ export function assessment(model: Json, plan?: string) {
   if (!fields) blockers.push('SCHEMA_UNSUPPORTED');
   const unsafe=(schema:Json):boolean=>Object.entries(record(schema.properties)).some(([k,v])=>['webhook','callback_url','api_key','authorization','endpoint'].includes(k.toLowerCase())||unsafe(record(v)))||Boolean(schema.items&&unsafe(record(schema.items)));
   if (unsafe(record(record(model.input_schema).schemas?.input_data))) blockers.push('UNSAFE_PARAMETER');
-  if (!Number.isSafeInteger(c.credits) || c.credits <= 0 || !(Number(c.max_cost_usd) > 0)) blockers.push('PRICING_REQUIRED');
-  const category=String(model.category).toLowerCase();
-  const expectedQuota=category.includes('video')?'video':category.includes('image')?'image':category==='text to text'?'script':null;
-  if (!expectedQuota || c.quota_kind !== expectedQuota) blockers.push('QUOTA_POLICY_PENDING');
+  // Le tarif peut être nul quand le fournisseur déclare officiellement 0 USD
+  // (`billing = 'free'`) : c'est un prix prouvé, pas un prix manquant. Aucun
+  // autre cas n'autorise 0 crédit.
+  const free=c.billing==='free';
+  const priced=free ? c.credits===0 && Number(c.max_cost_usd)===0
+    : Number.isSafeInteger(c.credits) && c.credits>0 && Number(c.max_cost_usd)>0;
+  if (!priced) blockers.push('PRICING_REQUIRED');
+  // La famille de quota est tranchée par la BASE (`studio_runtime_model`), à
+  // partir des règles `studio_family_rules` : aucun codage en dur par catégorie
+  // ici, sinon audio / 3D / LoRA resteraient bloqués à tort.
+  if (typeof c.quota_kind!=='string' || !c.quota_kind || model.quota_resolved===false) blockers.push('QUOTA_POLICY_PENDING');
+  else if (model.quota_policy_ready===false) blockers.push('QUOTA_POLICY_MISSING');
   if (typeof c.estimate_path !== 'string' || !/^\/api\/v1\/models\/[A-Za-z0-9._~-]{1,160}\/estimate-cost$/.test(c.estimate_path)) blockers.push('ESTIMATE_ENDPOINT_UNVERIFIED');
   if (c.adapter !== 'muapi_prediction_v1') blockers.push('ADAPTER_UNVERIFIED');
   if (!c.verified_at || c.verified_hash !== model.spec_hash) blockers.push('PAID_VALIDATION_PENDING');
   if (!c.enabled) blockers.push('ADMIN_DISABLED');
   if (!model.runtime_enabled) blockers.push('RUNTIME_DISABLED');
-  if (plan !== undefined && (!Array.isArray(c.allowed_plans) || !c.allowed_plans.includes(plan))) blockers.push('PLAN_UNAVAILABLE');
-  return { operational: blockers.length === 0, blockers, endpoint, fields };
+  // Le droit d'abonnement est distinct de la préparation technique : un modèle
+  // peut être prêt sans être inclus dans l'offre du client. On expose les deux
+  // pour afficher « non inclus dans votre offre » sans le confondre avec une
+  // panne ou une validation manquante.
+  const planAllowed = plan === undefined || (Array.isArray(c.allowed_plans) && c.allowed_plans.includes(plan));
+  const technicalBlockers = [...blockers];
+  if (!planAllowed) blockers.push('PLAN_UNAVAILABLE');
+  return { operational: blockers.length === 0, blockers, technicalBlockers, planAllowed, endpoint, fields };
 }
 /** Only supported validation rules cross the customer boundary, never provider
  * descriptions, examples, cost metadata, endpoints or arbitrary extensions. */
@@ -48,7 +62,11 @@ export function customerModel(model: Json, plan: string) {
   const a=assessment(model,plan), c=record(model.runtime_config);
   return {model_id:model.provider_model_id,display_name:model.display_name,category:model.category,provider:'MuAPI',
     schema:customerSchema(model.input_schema),credits:Number.isSafeInteger(c.credits)?c.credits:null,
-    operational:a.operational,blockers:a.blockers,stages:{catalogued:true,endpoint_confirmed:a.endpoint.status==='declared',schema_validated:a.fields!==null,form_ready:a.fields!==null,adapter_ready:c.adapter==='muapi_prediction_v1'&&!!c.verified_at,access_confirmed:model.account_access==='available',pricing_configured:Number.isSafeInteger(c.credits)&&c.credits>0,technical_test_performed:!!c.verified_at&&c.verified_hash===model.spec_hash,enabled:c.enabled===true}};
+    quota_family:typeof c.quota_kind==='string'?c.quota_kind:null,
+    billing:c.billing==='free'?'free':'metered',
+    operational:a.operational,plan_allowed:a.planAllowed,
+    blockers:a.blockers,technical_blockers:a.technicalBlockers,
+    stages:{catalogued:true,endpoint_confirmed:a.endpoint.status==='declared',schema_validated:a.fields!==null,form_ready:a.fields!==null,adapter_ready:c.adapter==='muapi_prediction_v1'&&!!c.verified_at,access_confirmed:model.account_access==='available',pricing_configured:Number.isSafeInteger(c.credits)&&c.credits>0,technical_test_performed:!!c.verified_at&&c.verified_hash===model.spec_hash,enabled:c.enabled===true}};
 }
 export function predictionId(raw: unknown): string | null {
   const id=record(raw).request_id;
@@ -81,5 +99,17 @@ export function fileType(bytes: Uint8Array): {mime:string;ext:string;kind:string
   if (ascii(0,3)==='ID3' || bytes[0]===255 && (bytes[1]&0xe0)===0xe0) return {mime:'audio/mpeg',ext:'mp3',kind:'audio'};
   if (ascii(0,4)==='OggS') return {mime:'audio/ogg',ext:'ogg',kind:'audio'};
   if (bytes[0]===0x50&&bytes[1]===0x4b&&bytes[2]===3&&bytes[3]===4) return {mime:'application/zip',ext:'zip',kind:'zip'};
+  // Adaptateur LoRA entraîné (.safetensors) : la signature officielle du format
+  // est une longueur d'en-tête u64 petit-boutiste suivie d'un objet JSON.
+  // Sans cette détection, un entraînement RÉUSSI serait jeté au téléversement
+  // du résultat — après paiement du client.
+  if (bytes.length>8 && bytes[8]===0x7b) {
+    const header=((bytes[0]|bytes[1]<<8|bytes[2]<<16|bytes[3]<<24)>>>0);
+    if(header>0&&header<=bytes.length-8) return {mime:'application/octet-stream',ext:'safetensors',kind:'lora'};
+  }
+  // 3D results (Meshy, Tripo) are binary glTF files named `.glb`. Without this
+  // signature a successful 3D generation would be discarded as unsupported at
+  // result upload time — after the customer had paid for it.
+  if (ascii(0,4)==='glTF') return {mime:'model/gltf-binary',ext:'glb',kind:'model'};
   return null;
 }
