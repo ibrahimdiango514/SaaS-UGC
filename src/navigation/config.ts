@@ -1,9 +1,9 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Bot, BookOpen, Boxes, Brain, CheckSquare, Clapperboard, Coins, CreditCard,
-  Film, FolderKanban, HardDrive, History, LayoutDashboard, LifeBuoy, Megaphone,
-  MessageSquare, MoreHorizontal, Package, Plug, Radar, Scissors, Settings, Shield,
-  ShoppingCart, SlidersHorizontal, Sparkles, TrendingUp, Truck, Users, Wallet, Wand2, Workflow,
+  BarChart3, BellRing, BookOpen, Bot, Boxes, Brain, Building2, Clapperboard,
+  ClipboardList, Coins, CreditCard, Film, FolderKanban, HardDrive, History,
+  LayoutDashboard, Mail, MoreHorizontal, Plug, Scissors, Settings, Shield, SlidersHorizontal,
+  Sparkles, Target, Users, Wallet, Wand2, Zap,
 } from 'lucide-react';
 
 export type WorkspaceScope = 'studio' | 'business';
@@ -224,29 +224,28 @@ export const STUDIO_NAV_GROUPS: WorkspaceNavGroup[] = [
 export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
   {
     id: 'pilotage',
-    label: 'Dashboard et intelligence',
+    label: 'Pilotage',
     icon: LayoutDashboard,
     defaultOpen: true,
     items: [
       {
         to: '/app/business',
-        label: 'Vue d’ensemble',
-        description: 'Activité, conversations et indicateurs métier',
+        label: 'Vue générale',
+        description: 'Chiffres clés, alertes et activité du jour',
         icon: LayoutDashboard,
-        onlyWithoutParams: ['section'],
-        keywords: ['dashboard', 'accueil', 'pilotage', 'indicateurs'],
+        keywords: ['dashboard', 'accueil', 'pilotage', 'indicateurs', 'growth os'],
       },
       {
-        to: '/app/business?section=growth&growthTab=overview',
-        label: 'Croissance',
-        description: 'Objectifs, marché et lecture de la croissance',
-        icon: Sparkles,
-        keywords: ['croissance', 'growth', 'objectifs', 'marche'],
+        to: '/app/business/reports',
+        label: 'Rapports et analyses',
+        description: 'Conversion, sources, encaissements et recouvrement',
+        icon: BarChart3,
+        keywords: ['rapports', 'analyses', 'conversion', 'sources', 'exports'],
       },
       {
         to: '/app/business/modules',
         label: 'Modules métier',
-        description: '13 outils opérationnels, données persistées',
+        description: 'Outils opérationnels, données persistées',
         icon: Boxes,
         badge: '13',
         matchPrefix: true,
@@ -255,240 +254,119 @@ export const BUSINESS_NAV_GROUPS: WorkspaceNavGroup[] = [
     ],
   },
   {
-    id: 'assistant',
-    label: 'Assistant IA et intelligence',
-    icon: Brain,
-    defaultOpen: true,
-    items: [
-      {
-        to: '/app/business?section=chat',
-        label: 'Assistant IA',
-        description: 'Chat contextualisé et actions à valider',
-        icon: MessageSquare,
-        badge: 'IA',
-        keywords: ['assistant', 'chat', 'agent', 'ia', 'conversation'],
-      },
-      {
-        to: '/app/business?section=company',
-        label: 'Contexte entreprise',
-        description: 'Activité, offre, clients et priorités',
-        icon: Package,
-        keywords: ['entreprise', 'societe', 'contexte', 'offre'],
-      },
-      {
-        to: '/app/business?section=memory',
-        label: 'Mémoire métier',
-        description: 'Faits consentis utilisés par l’agent',
-        icon: Brain,
-        keywords: ['memoire', 'memory', 'consentement', 'contexte'],
-      },
-      {
-        to: '/app/business?section=providers',
-        label: 'Services IA',
-        description: 'Fournisseurs vérifiés et routage des modèles',
-        icon: Bot,
-        keywords: ['fournisseur', 'provider', 'modele', 'routage', 'gemini', 'groq'],
-      },
-    ],
-  },
-  {
-    id: 'crm',
-    label: 'CRM et prospects',
+    id: 'commercial',
+    label: 'Commercial',
     icon: Users,
     defaultOpen: true,
     items: [
       {
-        to: '/app/business?section=growth&growthTab=crm',
-        label: 'Smart CRM',
-        description: 'Prospects, pipeline et valeur commerciale',
+        to: '/app/business/crm',
+        label: 'CRM',
+        description: 'Contacts, fiches, segments, doublons et imports',
         icon: Users,
-        keywords: ['crm', 'prospects', 'pipeline', 'opportunites'],
+        keywords: ['crm', 'contacts', 'clients', 'prospects', 'segments', 'doublons'],
       },
       {
-        to: '/app/business/modules/lead-rescue',
-        label: 'Lead Rescue',
-        description: 'Prospects sans réponse et relances dues',
-        icon: LifeBuoy,
-        keywords: ['leads', 'prospects', 'relance', 'rescue'],
-      },
-    ],
-  },
-  {
-    id: 'revenue',
-    label: 'Récupération des revenus',
-    icon: LifeBuoy,
-    items: [
-      {
-        to: '/app/business/modules/payment-recovery',
-        label: 'Payment Recovery',
-        description: 'Factures échues et encaissements',
-        icon: CreditCard,
-        keywords: ['facture', 'impaye', 'paiement', 'encaissement'],
+        to: '/app/business/pipeline',
+        label: 'Pipeline commercial',
+        description: 'Opportunités, étapes et prévisions',
+        icon: Target,
+        keywords: ['pipeline', 'opportunites', 'kanban', 'ventes'],
       },
       {
-        to: '/app/business/modules/order-cart-recovery',
-        label: 'Order & Cart Recovery',
-        description: 'Paniers et commandes abandonnés',
-        icon: ShoppingCart,
-        keywords: ['panier', 'commande', 'abandon', 'cart'],
+        to: '/app/business/tasks',
+        label: 'Tâches et activités',
+        description: 'Aujourd’hui, retards, agenda et suivi',
+        icon: ClipboardList,
+        keywords: ['taches', 'activites', 'agenda', 'rappels'],
       },
       {
-        to: '/app/business/modules/customer-recovery',
-        label: 'Customer Recovery',
-        description: 'Clients à réactiver et valeur historique',
-        icon: Users,
-        keywords: ['client', 'reactivation', 'fidelite'],
-      },
-    ],
-  },
-  {
-    id: 'sales',
-    label: 'Ventes et automatisations',
-    icon: Workflow,
-    items: [
-      {
-        to: '/app/business/modules/sales-automation',
-        label: 'Sales Automation',
-        description: 'Règles de relance et tâches générées',
-        icon: Workflow,
-        keywords: ['automatisation', 'regles', 'ventes', 'taches'],
-      },
-      {
-        to: '/app/business?section=growth&growthTab=catalog',
-        label: 'Catalogue et offres',
-        description: 'Produits, services et prix de référence',
-        icon: Package,
-        keywords: ['catalogue', 'offres', 'produits', 'services'],
-      },
-      {
-        to: '/app/business?section=growth&growthTab=strategy',
-        label: 'Stratégie commerciale',
-        description: 'Priorités et plan de croissance',
-        icon: Brain,
-        keywords: ['strategie', 'plan', 'commercial'],
+        to: '/app/business/relances',
+        label: 'Relances',
+        description: 'Messages préparés, canaux et historique',
+        icon: Mail,
+        keywords: ['relances', 'messages', 'whatsapp', 'email', 'sms'],
       },
     ],
   },
   {
     id: 'finance',
-    label: 'Finance et trésorerie',
+    label: 'Finance',
     icon: Wallet,
+    defaultOpen: true,
     items: [
       {
-        to: '/app/business/modules/finance-intelligence',
-        label: 'Finance Intelligence',
-        description: 'Revenus, dépenses et marge réels',
+        to: '/app/business/finance',
+        label: 'Finance',
+        description: 'Créances, paiements, soldes et échéances',
         icon: Wallet,
-        keywords: ['finance', 'tresorerie', 'marge', 'depenses'],
+        keywords: ['finance', 'creances', 'paiements', 'soldes', 'echeances', 'recus'],
       },
       {
-        to: '/app/business?section=growth&growthTab=goals',
-        label: 'Objectifs financiers',
-        description: 'Cibles suivies et progression',
-        icon: Radar,
-        keywords: ['objectifs', 'goals', 'cibles', 'revenus'],
-      },
-    ],
-  },
-  {
-    id: 'operations',
-    label: 'Stocks et opérations',
-    icon: Package,
-    items: [
-      {
-        to: '/app/business/modules/smart-inventory',
-        label: 'Smart Inventory',
-        description: 'Stocks, seuils et valeur immobilisée',
-        icon: Package,
-        keywords: ['stock', 'inventaire', 'seuil', 'produits'],
-      },
-      {
-        to: '/app/business/modules/operations-manager',
-        label: 'Operations Manager',
-        description: 'Tâches, responsables et échéances',
-        icon: CheckSquare,
-        keywords: ['operations', 'taches', 'equipe', 'echeances'],
-      },
-      {
-        to: '/app/business/modules/supplier-delivery',
-        label: 'Supplier & Delivery',
-        description: 'Fournisseurs, commandes et livraisons',
-        icon: Truck,
-        keywords: ['fournisseur', 'livraison', 'commande', 'retard'],
+        to: '/app/business/recouvrement',
+        label: 'Recouvrement',
+        description: 'Priorités, promesses, litiges et risques',
+        icon: BellRing,
+        keywords: ['recouvrement', 'dettes', 'promesses', 'litiges', 'risque'],
       },
     ],
   },
   {
-    id: 'support',
-    label: 'Clients et support',
-    icon: MessageSquare,
-    items: [{
-      to: '/app/business/modules/customer-support-ai',
-      label: 'Customer Support AI',
-      description: 'Demandes, réponses assistées et suivi',
-      icon: MessageSquare,
-      keywords: ['support', 'tickets', 'sav', 'reclamation'],
-    }],
-  },
-  {
-    id: 'growth-social',
-    label: 'Croissance et réseaux sociaux',
-    icon: Megaphone,
+    id: 'assistant',
+    label: 'Assistant IA',
+    icon: Brain,
+    defaultOpen: true,
     items: [
       {
-        to: '/app/business/modules/social-growth',
-        label: 'Social Growth',
-        description: 'Calendrier éditorial et production',
-        icon: Megaphone,
-        keywords: ['social', 'contenu', 'calendrier', 'publication'],
+        to: '/app/business/assistant',
+        label: 'Assistant IA',
+        description: 'Conversation reliée au CRM et aux finances',
+        icon: Brain,
+        badge: 'IA',
+        keywords: ['assistant', 'chat', 'agent', 'ia', 'conversation'],
       },
       {
-        to: '/app/business?section=growth&growthTab=market',
-        label: 'Marché et concurrence',
-        description: 'Veille et positionnement',
-        icon: Radar,
-        keywords: ['marche', 'concurrence', 'veille'],
-      },
-    ],
-  },
-  {
-    id: 'integrations',
-    label: 'Intégrations',
-    icon: Plug,
-    items: [{
-      to: '/app/business?section=integrations',
-      label: 'Integrations Hub',
-      description: 'Connecteurs, autorisations et état réel',
-      icon: Plug,
-      keywords: ['integrations', 'connecteurs', 'oauth', 'shopify', 'meta'],
-    }],
-  },
-  {
-    id: 'protection',
-    label: 'Protection des revenus',
-    icon: Shield,
-    items: [
-      {
-        to: '/app/business/modules/revenue-leak',
-        label: 'Revenue Leak Detector',
-        description: 'Fuites calculées sur vos données réelles',
-        icon: Radar,
-        keywords: ['fuites', 'revenus', 'leaks', 'pertes'],
-      },
-      {
-        to: '/app/business/modules/dispute-shield',
-        label: 'Dispute Shield',
-        description: 'Litiges, preuves et résolution',
-        icon: Shield,
-        keywords: ['litige', 'dispute', 'preuves', 'remboursement'],
+        to: '/app/business/company',
+        label: 'Contexte entreprise',
+        description: 'Activité, offre, clients et priorités',
+        icon: Building2,
+        keywords: ['entreprise', 'societe', 'contexte', 'offre'],
       },
     ],
   },
   {
     id: 'settings',
-    label: 'Paramètres',
+    label: 'Configuration',
     icon: Settings,
     items: [
+      {
+        to: '/app/business/memory',
+        label: 'Mémoire métier',
+        description: 'Faits consentis utilisés par l’assistant',
+        icon: Brain,
+        keywords: ['memoire', 'memory', 'consentement', 'contexte'],
+      },
+      {
+        to: '/app/business/providers',
+        label: 'Services IA',
+        description: 'Fournisseurs vérifiés et routage des modèles',
+        icon: Zap,
+        keywords: ['fournisseur', 'provider', 'modele', 'routage'],
+      },
+      {
+        to: '/app/business/integrations',
+        label: 'Intégrations',
+        description: 'Connecteurs, autorisations et état réel',
+        icon: Plug,
+        keywords: ['integrations', 'connecteurs', 'oauth', 'shopify', 'meta'],
+      },
+      {
+        to: '/app/business/ai',
+        label: 'Contrôle IA',
+        description: 'Mémoire de l’agent et consentement',
+        icon: Shield,
+        keywords: ['controle', 'ia', 'agent', 'consentement'],
+      },
       {
         to: '/app/business/abonnement',
         label: 'Formules Grow',
@@ -514,15 +392,19 @@ export const STUDIO_SHORTCUTS: WorkspaceShortcut[] = [
 ];
 
 export const BUSINESS_SHORTCUTS: WorkspaceShortcut[] = [
-  { to: '/app/business?section=chat', label: 'Assistant', icon: MessageSquare },
-  { to: '/app/business?section=growth&growthTab=crm', label: 'Smart CRM', icon: Users },
-  { to: '/app/business/modules', label: 'Modules', icon: Boxes },
+  { to: '/app/business', label: 'Vue générale', icon: LayoutDashboard },
+  { to: '/app/business/crm', label: 'CRM', icon: Users },
+  { to: '/app/business/pipeline', label: 'Pipeline', icon: Target },
+  { to: '/app/business/finance', label: 'Finance', icon: Wallet },
 ];
 
 /**
  * Entrée de la barre de navigation mobile.
- * `shortLabel` évite de couper le libellé mot à mot à 360 px et `opensDrawer`
- * permet une entrée « Plus » qui ouvre le tiroir complet au lieu de naviguer.
+ *
+ * `shortLabel` évite de couper le libellé au premier mot (« Vue d’ensemble »
+ * devenait « Vue ») : la barre affiche un mot choisi, jamais une troncature
+ * automatique. `opensDrawer` permet une entrée « Plus » qui ouvre le tiroir
+ * complet au lieu de naviguer vers une route inexistante.
  */
 export interface MobileNavItem {
   to: string;
@@ -539,12 +421,17 @@ export const STUDIO_MOBILE_NAV: MobileNavItem[] = [
   { to: '/app/historique', label: 'Historique', shortLabel: 'Historique', icon: History },
 ];
 
+/**
+ * Cinq entrées : les quatre usages quotidiens de Grow, plus un accès au tiroir
+ * complet (pipeline, modules, intégrations, paramètres) pour ne bloquer aucune
+ * fonctionnalité derrière une barre trop courte.
+ */
 export const BUSINESS_MOBILE_NAV: MobileNavItem[] = [
   { to: '/app/business', label: 'Accueil Grow', shortLabel: 'Accueil', icon: LayoutDashboard },
-  { to: '/app/business?section=growth&growthTab=overview', label: 'Activité et ventes', shortLabel: 'Activité', icon: TrendingUp },
-  { to: '/app/business?section=growth&growthTab=crm', label: 'Prospects (Smart CRM)', shortLabel: 'Prospects', icon: Users },
-  { to: '/app/business?section=chat', label: 'Assistant IA', shortLabel: 'Assistant', icon: MessageSquare },
-  { to: '#plus', label: 'Plus d’options', shortLabel: 'Plus', icon: MoreHorizontal, opensDrawer: true },
+  { to: '/app/business/finance', label: 'Activité et ventes', shortLabel: 'Ventes', icon: Wallet },
+  { to: '/app/business/crm', label: 'Prospects et clients', shortLabel: 'Prospects', icon: Users },
+  { to: '/app/business/assistant', label: 'Assistant IA', shortLabel: 'Assistant', icon: Brain },
+  { to: '#plus', label: 'Tout le menu Grow', shortLabel: 'Plus', icon: MoreHorizontal, opensDrawer: true },
 ];
 
 export function normalizeSearch(value: string): string {

@@ -78,7 +78,15 @@ const STATUS_SCORE: Record<string, number> = {
 };
 
 function hasCapabilities(model: AiRegistryModel, required: string[]): boolean {
-  for (const cap of required) if (model.capabilities[cap] !== true) return false;
+  for (const cap of required) {
+    if (model.capabilities[cap] === true) continue;
+    // Compatibilité du registre historique : les modèles Groq/Gemini vérifiés
+    // avant l'introduction de `vision` déclarent `images: true` pour l'entrée
+    // d'images. Sans cet alias, une image jointe ne trouverait AUCUN modèle
+    // alors que Gemini sait réellement la lire.
+    if (cap === 'vision' && model.capabilities.images === true) continue;
+    return false;
+  }
   return true;
 }
 

@@ -121,10 +121,10 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {health && (!health.groq || !health.muapi) && (
+      {health && (!health.ai || !health.muapi) && (
         <div className="mb-6">
           <Banner tone="warning" title="Certaines fonctionnalités sont temporairement indisponibles">
-            {!health.groq && 'L’assistance IA pour les scripts et prompts est indisponible. '}
+            {!health.ai && 'L’assistance IA pour les scripts et prompts est indisponible. '}
             {!health.muapi && 'La génération vidéo est indisponible. '}
             Réessayez plus tard.
           </Banner>

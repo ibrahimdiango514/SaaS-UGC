@@ -28,17 +28,15 @@ const CORE_FILES = [
 ];
 
 describe('registre dynamique — aucun catalogue de fournisseurs figé', () => {
-  it('n’exporte plus de table AI_PROVIDERS dans le cœur partagé', () => {
+  it('n’exporte plus de table AI_PROVIDERS ni d’adaptateur natif par fournisseur', () => {
     const adapters = read('supabase/functions/_shared/ai-core/adapters.ts');
     expect(adapters).not.toMatch(/export\s+const\s+AI_PROVIDERS/);
-    // Seuls les adaptateurs natifs (protocole non générique) peuvent être nommés.
-    const nativeBlock = adapters.slice(
-      adapters.indexOf('export const NATIVE_ADAPTERS'),
-      adapters.indexOf('};', adapters.indexOf('export const NATIVE_ADAPTERS')) + 2,
-    );
-    expect(nativeBlock.length).toBeGreaterThan(0);
-    const nativeKeys = [...nativeBlock.matchAll(/^\s{2}([a-z0-9_-]+):/gm)].map((match) => match[1]);
-    expect(nativeKeys.sort()).toEqual(['cloudflare', 'gemini', 'groq']);
+    // Un seul protocole subsiste : `openai`. Aucun fournisseur n'est nommé.
+    expect(adapters).not.toMatch(/NATIVE_ADAPTERS|getAiAdapter/);
+    expect(adapters).toMatch(/descriptor\.kind !== 'openai'/);
+    for (const provider of ['groq', 'gemini', 'cloudflare', 'openrouter', 'llm7', 'gonka']) {
+      expect(adapters.toLowerCase()).not.toContain(provider);
+    }
   });
 
   it('ne contient aucune union de fournisseurs ni liste blanche de clés', () => {

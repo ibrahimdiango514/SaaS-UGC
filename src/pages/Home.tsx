@@ -59,9 +59,10 @@ const STUDIO_QUICK: StudioQuickLink[] = [
 ];
 
 const BUSINESS_QUICK: BusinessQuickLink[] = [
-  { to: '/app/business?section=chat', icon: MessagesSquare, title: 'Agent métier', description: 'Poser une question à l’agent relié à votre contexte.', meta: 'Assistant' },
+  { to: '/app/business/assistant', icon: MessagesSquare, title: 'Agent métier', description: 'Poser une question à l’agent relié à votre contexte.', meta: 'Assistant' },
   { to: '/app/business/modules', icon: Brain, title: 'Modules métier', description: 'Catalogue complet des modules Grow.', meta: 'Modules' },
-  { to: '/app/business?section=growth&growthTab=crm', icon: ArrowUpRight, title: 'Smart CRM', description: 'Prospects, pipeline et valeur commerciale.', meta: 'Croissance' },
+  { to: '/app/business/crm', icon: ArrowUpRight, title: 'CRM intelligent', description: 'Contacts, pipeline, priorités et relances.', meta: 'Commercial' },
+  { to: '/app/business/finance', icon: ArrowUpRight, title: 'Finances & recouvrement', description: 'Créances, paiements et promesses.', meta: 'Finance' },
   { to: '/app/business/modules/finance-intelligence', icon: Wallet, title: 'Finance Intelligence', description: 'Revenus, dépenses et marge réels.', meta: 'Finance' },
 ];
 
@@ -105,7 +106,7 @@ export default function Home() {
       <Reveal>
         <section className="relative isolate overflow-hidden rounded-[1.9rem] border border-white/[0.09] bg-[#070c13] px-5 py-7 sm:px-8 sm:py-10 lg:px-11 lg:py-12">
           <img
-            src="/brand/sorahnnex-hero.jpg"
+            src="/brand/vyora-hero.jpg"
             alt=""
             aria-hidden="true"
             className="pointer-events-none absolute inset-y-0 right-0 -z-20 hidden h-full w-[56%] object-cover object-[62%_38%] opacity-40 lg:block [mask-image:linear-gradient(to_right,transparent,black_42%)]"

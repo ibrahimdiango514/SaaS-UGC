@@ -351,7 +351,7 @@ export default function Settings() {
             <div className="space-y-3 p-5">
               {health === null && <Banner tone="warning" title="État indisponible">Impossible de vérifier les services pour le moment. Réessayez plus tard.</Banner>}
               {health && [
-                ['Assistant IA', health.groq, 'Scripts, prompts et suggestions'],
+                ['Assistant IA', health.ai, 'Scripts, prompts et suggestions'],
                 ['Création vidéo', health.muapi, 'Génération dans Studio UGC'],
                 ['Suivi des créations', health.worker, 'Traitement et mise à jour des tâches'],
                 ['Espace de travail', health.supabase, 'Données et contenus sécurisés'],

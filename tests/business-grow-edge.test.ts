@@ -50,7 +50,7 @@ function fixture() {
     apiKey: 'test-groq-secret', model: 'verified-groq-model', baseUrl: 'https://api.groq.com/openai/v1',
   };
   let geminiConfig: ProviderConfig | null = {
-    apiKey: 'test-gemini-secret', model: 'verified-gemini-model', adapterKind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    apiKey: 'test-gemini-secret', model: 'verified-gemini-model', adapterKind: 'openai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
   };
   const dependencies: BusinessGrowDependencies = {
     store,

@@ -45,11 +45,12 @@ function record(id: string, data: Record<string, unknown>): ModuleRecord {
 }
 
 describe('Registre des modules Business Growth', () => {
-  it('couvre les 16 modules de la mission : 13 outils + 3 fondations', () => {
+  it('couvre les 17 modules : 13 outils + 4 fondations (CRM et finances inclus)', () => {
     expect(MODULE_DEFINITIONS).toHaveLength(13);
-    expect(FOUNDATION_MODULES).toHaveLength(3);
+    expect(FOUNDATION_MODULES).toHaveLength(4);
     const allKeys = [...MODULE_DEFINITIONS.map((module) => module.key), ...FOUNDATION_MODULES.map((module) => module.key)];
-    expect(new Set(allKeys).size).toBe(16);
+    expect(new Set(allKeys).size).toBe(17);
+    expect(FOUNDATION_MODULES.map((module) => module.key)).toContain('finance-recovery');
   });
 
   it('déclare pour chaque module un stockage, des champs et des statuts cohérents', () => {
@@ -150,7 +151,7 @@ describe('Registre des modules Business Growth', () => {
 });
 
 describe('Catalogue des modules', () => {
-  it('présente les 13 outils et les 3 fondations, avec un lien réel par module', () => {
+  it('présente les 13 outils et les 4 fondations, avec un lien réel par module', () => {
     render(<MemoryRouter><BusinessModules /></MemoryRouter>);
     expect(screen.getByRole('heading', { name: /Vos modules métier/i })).toBeTruthy();
     expect(screen.getByText('Fondations déjà opérationnelles')).toBeTruthy();

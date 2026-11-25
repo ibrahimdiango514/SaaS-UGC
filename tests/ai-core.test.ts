@@ -6,7 +6,6 @@
 // les règles de routage/budget/anti-boucle du moteur.
 import { describe, expect, it, vi } from 'vitest';
 import {
-  NATIVE_ADAPTERS,
   resolveAiAdapter,
   type AiProviderDescriptor,
   modelBaseKey,
@@ -31,11 +30,9 @@ import {
  */
 const DESCRIPTORS: Record<string, { kind: AiProviderDescriptor['kind']; baseUrl: string; modelsUrl: string | null; headers?: Record<string, string> }> = {
   groq: { kind: 'openai', baseUrl: 'https://api.groq.com/openai/v1', modelsUrl: null },
-  gemini: { kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', modelsUrl: null },
   deepseek: { kind: 'openai', baseUrl: 'https://api.deepseek.com', modelsUrl: 'https://api.deepseek.com/models' },
   mistral: { kind: 'openai', baseUrl: 'https://api.mistral.ai/v1', modelsUrl: null },
   grok: { kind: 'openai', baseUrl: 'https://api.x.ai/v1', modelsUrl: null },
-  cloudflare: { kind: 'cloudflare', baseUrl: 'https://api.cloudflare.com/client/v4', modelsUrl: null },
   openrouter: {
     kind: 'openai', baseUrl: 'https://openrouter.ai/api/v1', modelsUrl: null,
     headers: { 'HTTP-Referer': 'https://vyora-ugc.netlify.app', 'X-Title': 'SORAHNEX' },
@@ -180,21 +177,6 @@ describe('adaptateurs — contrats de transport', () => {
     expect(adapter.parse(OPENAI_OK).content).toBe('Réponse du fournisseur.');
   });
 
-  it('gemini : adaptateur natif (URL du modèle, x-goog-api-key, systemInstruction)', () => {
-    const adapter = adapterFor('gemini')!;
-    const req = adapter.buildRequest({ credentials: creds, model: 'gemini-2.5-flash', messages });
-    expect(req.url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent');
-    expect(req.headers['x-goog-api-key']).toBe('test-key');
-    const body = req.body as Record<string, unknown>;
-    expect(body.systemInstruction).toEqual({ parts: [{ text: 'Système.' }] });
-    expect((body.contents as unknown[]).map((c) => (c as { role: string }).role)).toEqual(['user']);
-    const parsed = adapter.parse({
-      candidates: [{ content: { parts: [{ text: '  Bonjour !  ' }] }, finishReason: 'STOP' }],
-      usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 21 },
-    });
-    expect(parsed.content).toBe('Bonjour !');
-    expect(parsed.outputTokens).toBe(21);
-  });
 
   it('deepseek / mistral / grok : URLs fournies par le registre, protocole OpenAI', () => {
     expect(adapterFor('deepseek')!.buildRequest({ credentials: creds, model: 'deepseek-chat', messages }).url)
@@ -205,45 +187,7 @@ describe('adaptateurs — contrats de transport', () => {
       .toBe('https://api.x.ai/v1/chat/completions');
   });
 
-  it('cloudflare (voie REST) : endpoint officiel par compte, erreur sans compte', () => {
-    const adapter = adapterFor('cloudflare')!;
-    const req = adapter.buildRequest({
-      credentials: { apiKey: 'cf-token', accountId: 'acct-123' },
-      model: '@cf/qwen/qwen3.8-27b', messages,
-    });
-    // Endpoint OpenAI-compatible documenté par Cloudflare (REST API).
-    expect(req.url).toBe('https://api.cloudflare.com/client/v4/accounts/acct-123/ai/v1/chat/completions');
-    expect(req.headers.Authorization).toBe('Bearer cf-token');
-    expect(() => adapter.buildRequest({
-      credentials: { apiKey: 'cf-token', accountId: null },
-      model: '@cf/qwen/qwen3.8-27b', messages,
-    })).toThrow(AiProviderError);
-  });
 
-  it('cloudflare (voie PASSELLE) : jeton dédié, passerelle exigée, URL exacte', () => {
-    const adapter = resolveAiAdapter({
-      key: 'cloudflare', kind: 'cloudflare',
-      baseUrl: 'https://gateway.ai.cloudflare.com/v1',
-      apiKeyEnv: 'CF_TOKEN', modelsUrl: null, headers: {},
-      transport: 'gateway',
-    })!;
-    const req = adapter.buildRequest({
-      credentials: { apiKey: 'cfut-token', accountId: 'acct123', gatewayId: 'vyora' },
-      model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', messages,
-    });
-    expect(req.url).toBe(
-      'https://gateway.ai.cloudflare.com/v1/acct123/vyora/workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-    );
-    // Le jeton de passerelle se présente en `cf-aig-authorization`, jamais en
-    // `Authorization` : les deux jetons Cloudflare ne sont pas interchangeables.
-    expect(req.headers['cf-aig-authorization']).toBe('Bearer cfut-token');
-    expect(req.headers.Authorization).toBeUndefined();
-    // Sans identifiant de passerelle : erreur explicite, aucune requête.
-    expect(() => adapter.buildRequest({
-      credentials: { apiKey: 'cfut-token', accountId: 'acct123', gatewayId: null },
-      model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', messages,
-    })).toThrow(/AI_ACCOUNT_NOT_CONFIGURED/);
-  });
 
   it('openrouter (agrégateur) : en-têtes d’attribution portés par le registre', () => {
     const req = adapterFor('openrouter')!.buildRequest({ credentials: creds, model: 'openai/gpt-oss-20b', messages });
@@ -267,7 +211,7 @@ describe('adaptateurs — contrats de transport', () => {
     // une requête mal formée (le fournisseur est listé, jamais appelé).
     expect(resolveAiAdapter({ key: 'exotique', kind: 'none', baseUrl: 'https://exotique.test', apiKeyEnv: null })).toBeNull();
     expect(resolveAiAdapter({ key: 'sans-url', kind: 'openai', baseUrl: '', apiKeyEnv: null })).toBeNull();
-    expect(() => NATIVE_ADAPTERS.groq.parse({ choices: [] })).toThrow(AiProviderError);
+    expect(() => adapterFor('groq')!.parse({ choices: [] })).toThrow(AiProviderError);
   });
 
   it('nom de base normalisé (déduplication agrégateur/direct)', () => {
@@ -712,71 +656,7 @@ describe('moteur — appels unifiés et secours plafonné', () => {
     expect(outcome.ok).toBe(true);
   });
 
-  it('descripteur gateway sans GATEWAY_ID : fournisseur écarté, aucun appel incomplet', async () => {
-    // Le fournisseur est déclaré côté passerelle mais l'identifiant de
-    // passerelle n'est pas fourni : il ne doit pas être tenté du tout.
-    const snap = makeSnapshot({
-      providers: [
-        descriptor({
-          key: 'cloudflare', status: 'available', adapterKind: 'cloudflare',
-          baseUrl: 'https://gateway.ai.cloudflare.com/v1',
-          apiKeyEnv: 'CLOUDFLARE_API_TOKEN', accountIdEnv: 'CLOUDFLARE_ACCOUNT_ID',
-          gatewayIdEnv: 'CLOUDFLARE_GATEWAY_ID', transport: 'gateway',
-        }),
-        descriptor({ key: 'groq', status: 'available' }),
-      ],
-    });
-    snap.rules = [];
-    const called: string[] = [];
-    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
-      called.push(String(input));
-      return new Response(JSON.stringify(OPENAI_OK), { status: 200 });
-    }) as unknown as typeof fetch;
-    const deps = makeEngineDeps(snap, fetcher, new Set());
-    deps.env = (name) => {
-      if (name === 'CLOUDFLARE_API_TOKEN') return 'cfut-token';
-      if (name === 'CLOUDFLARE_ACCOUNT_ID') return 'acct123';
-      return null; // CLOUDFLARE_GATEWAY_ID absent
-    };
-    const outcome = await runAiCall(deps, { messages });
-    expect(outcome.ok).toBe(true);
-    expect(outcome.providerKey).toBe('groq');
-    expect(called.every((url) => !url.includes('gateway.ai.cloudflare.com'))).toBe(true);
-    expect(outcome.attempts.some((a) => a.providerKey === 'cloudflare')).toBe(false);
-  });
 
-  it('descripteur gateway avec GATEWAY_ID : le fournisseur redevient éligible', async () => {
-    const snap = makeSnapshot({
-      providers: [
-        descriptor({
-          key: 'cloudflare', status: 'available', adapterKind: 'cloudflare',
-          baseUrl: 'https://gateway.ai.cloudflare.com/v1',
-          apiKeyEnv: 'CLOUDFLARE_API_TOKEN', accountIdEnv: 'CLOUDFLARE_ACCOUNT_ID',
-          gatewayIdEnv: 'CLOUDFLARE_GATEWAY_ID', transport: 'gateway',
-        }),
-      ],
-    });
-    snap.models = [
-      {
-        provider: 'cloudflare', key: 'llama-fast', providerModel: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-        name: 'Llama 3.3 70B (Workers AI)', verified: true, tier: 'fast',
-        capabilities: { writing: true }, contextIn: 128_000, maxOut: 8_000,
-        costIn: null, costOut: null, rpm: null, tpm: null,
-      },
-    ];
-    snap.rules = [];
-    const deps = makeEngineDeps(snap, okFetch(OPENAI_OK), new Set());
-    deps.env = (name) => {
-      if (name === 'CLOUDFLARE_API_TOKEN') return 'cfut-token';
-      if (name === 'CLOUDFLARE_ACCOUNT_ID') return 'acct123';
-      if (name === 'CLOUDFLARE_GATEWAY_ID') return 'vyora-gw';
-      return null;
-    };
-    const outcome = await runAiCall(deps, { messages });
-    expect(outcome.ok).toBe(true);
-    expect(outcome.providerKey).toBe('cloudflare');
-    expect(outcome.providerModelKey).toBe('@cf/meta/llama-3.3-70b-instruct-fp8-fast');
-  });
 
   it('journalisation non bloquante : un échec de log n’échoue pas l’appel', async () => {
     const deps = makeEngineDeps(makeSnapshot(), okFetch(OPENAI_OK));
@@ -869,14 +749,14 @@ describe('moteur — fournisseurs déclarés par le registre uniquement', () => 
     const parsed = parseRegistrySnapshot({
       version: 3,
       providers: [
-        { key: 'x1', name: 'X1', adapter_kind: 'gemini', base_url: 'https://x1.test/v1', api_key_env: 'X1_API_KEY', account_id_env: null, headers: { 'X-Title': 'SORAHNEX', ignore: 42 } },
+        { key: 'x1', name: 'X1', adapter_kind: 'openai', base_url: 'https://x1.test/v1', api_key_env: 'X1_API_KEY', account_id_env: null, headers: { 'X-Title': 'SORAHNEX', ignore: 42 } },
         { key: 'x2', adapter_kind: 'protocole-inconnu' },
         { key: 'X3!' },
       ],
     });
     expect(parsed?.providers).toHaveLength(2);
     expect(parsed?.providers[0]).toMatchObject({
-      key: 'x1', adapterKind: 'gemini', baseUrl: 'https://x1.test/v1', apiKeyEnv: 'X1_API_KEY', headers: { 'X-Title': 'SORAHNEX' },
+      key: 'x1', adapterKind: 'openai', baseUrl: 'https://x1.test/v1', apiKeyEnv: 'X1_API_KEY', headers: { 'X-Title': 'SORAHNEX' },
     });
     // Gabarit inconnu → repli sur le protocole majoritaire, jamais une erreur.
     expect(parsed?.providers[1]).toMatchObject({ key: 'x2', adapterKind: 'openai', baseUrl: null, headers: {} });

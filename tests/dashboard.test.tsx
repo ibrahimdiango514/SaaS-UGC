@@ -50,7 +50,7 @@ describe('espace client Sorahnnex', () => {
     mocks.listProjects.mockResolvedValue([]);
     mocks.listJobs.mockResolvedValue([]);
     mocks.countAssets.mockResolvedValue(0);
-    mocks.healthCheck.mockResolvedValue({ configured: { groq: true, muapi: true } });
+    mocks.healthCheck.mockResolvedValue({ configured: { ai: true, muapi: true } });
     mocks.refreshQuota.mockResolvedValue(true);
   });
 

@@ -529,7 +529,7 @@ export function ProviderHealthCronCard() {
               return (
                 <div key={provider.provider_key} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-white">{provider.provider_key === 'gemini' ? 'Gemini' : 'Groq'}</p>
+                    <p className="font-medium text-white">{provider.provider_key === 'freellmapi' ? 'FreeLLMAPI' : provider.provider_key}</p>
                     <Badge tone={state.tone}>{state.label}</Badge>
                   </div>
                   <dl className="mt-3 space-y-1 text-xs text-slate-400">
@@ -582,23 +582,33 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
 
   useEffect(() => { void load(); }, [load]);
 
-  const groq = health?.providers?.groq;
-  const gemini = health?.providers?.gemini;
+  // Fournisseurs du registre central uniquement : plus aucune liste en dur.
+  const providers = Object.entries(health?.providers ?? {});
   const attempts = metrics?.providers.business_growth ?? [];
   const studioCosts = metrics?.providers.studio_cost_events ?? [];
 
   return (
     <div className="space-y-5" data-testid="admin-providers">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-slate-500">Sonde réelle du moteur IA central (les clés ne quittent jamais le serveur).</p>
+        <p className="text-xs text-slate-500">Sonde réelle du moteur IA central — fournisseur unique FreeLLMAPI (les clés ne quittent jamais le serveur).</p>
         <Button variant="ghost" size="sm" onClick={() => void load()} loading={loading} icon={<RefreshCw size={14} />}>Vérifier</Button>
       </div>
 
       {error ? <div className="rounded-xl border border-rose-400/30 bg-rose-400/[0.06] p-4 text-sm text-rose-200">{error}</div> : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard label="Groq" value={groq ? (groq.configured ? 'configuré' : 'non configuré') : '—'} icon={<Sparkles size={19} />} tone={groq?.configured ? 'emerald' : 'brand'} hint={groq?.model ?? 'modèle inconnu'} />
-        <StatCard label="Gemini" value={gemini ? (gemini.configured ? 'configuré' : 'non configuré') : '—'} icon={<Sparkles size={19} />} tone={gemini?.configured ? 'emerald' : 'brand'} hint={gemini?.model ?? 'modèle inconnu'} />
+        {providers.length === 0 ? (
+          <StatCard label="FreeLLMAPI" value="—" icon={<Sparkles size={19} />} hint="registre indisponible" />
+        ) : providers.map(([key, provider]) => (
+          <StatCard
+            key={key}
+            label={key === 'freellmapi' ? 'FreeLLMAPI' : key}
+            value={provider.configured ? 'configuré' : 'non configuré'}
+            icon={<Sparkles size={19} />}
+            tone={provider.configured ? 'emerald' : 'brand'}
+            hint={provider.model ?? 'modèle du routage auto'}
+          />
+        ))}
         <UniversalCatalogHealth />
       </div>
 

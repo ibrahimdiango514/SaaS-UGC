@@ -13,10 +13,10 @@ Aucun push, aucun déploiement, aucune migration destructive.
 
 | Surface | Avant | Après |
 | --- | --- | --- |
-| Nom de marque | VYORA / REELORA | **SORAHNEX** |
-| Espaces produit | « VYORA Business Growth », « VYORA Business », « Business Grow », « Business Growth » | **SORAHNEX Grow**, « Grow » |
-| Paire d'espaces | « Studio & Business » | **« Studio & Grow »** |
-| Assistant | « Assistant VYORA » | « Assistant SORAHNEX » |
+| Nom de marque | SORAHNEX / SORAHNEX | **SORAHNEX** |
+| Espaces produit | « SORAHNEX Grow », « SORAHNEX Grow », « Grow », « Grow » | **SORAHNEX Grow**, « Grow » |
+| Paire d'espaces | « Studio & Grow » | **« Studio & Grow »** |
+| Assistant | « Assistant SORAHNEX » | « Assistant SORAHNEX » |
 | `package.json` | `name: "vyora"` | `name: "sorahnnex"` |
 | Favicon | `public/vyora-mark.svg` | `public/sorahnnex-mark.svg` |
 | Visuels de marque | `public/brand/vyora-{hero,growth,cta}.jpg` | `public/brand/sorahnnex-{hero,growth,cta}.jpg` |
@@ -40,9 +40,9 @@ renommage confondus : 417 entrées dans `git status`, dont 368 modifications,
 | Garde de marque visible | `npx vitest run tests/brand-visible-sorahnnex.test.ts` | **3/3 succès** |
 | Tests ciblés nav Grow / layout | `npx vitest run tests/layout-notifications.test.tsx tests/growth-workspace.test.tsx tests/business-grow.test.tsx tests/business-modules.test.tsx tests/brand-visible-sorahnnex.test.ts` | **87/87 succès** |
 
-La garde `tests/brand-visible-sorahnnex.test.ts` échoue si `VYORA`, `Vyora`,
-`REELORA` ou `Reelora` réapparaissent comme **mot entier** dans `src/`, `public/`
-ou `index.html` (hors variables `VYORA_*` / `REELORA_*` explicitement protégées).
+La garde `tests/brand-visible-sorahnnex.test.ts` échoue si `SORAHNEX`, `Sorahnnex`,
+`SORAHNEX` ou `Sorahnnex` réapparaissent comme **mot entier** dans `src/`, `public/`
+ou `index.html` (hors variables `SORAHNEX_*` / `SORAHNEX_*` explicitement protégées).
 
 ### Ce qui n'a pas été vérifié
 
@@ -69,7 +69,7 @@ ou déjà appliquée en production. Aucune n'est affichée à l'utilisateur.
 `VYORA_PGRST_PORT`, `VYORA_PGTEST_BIN`, `VYORA_PGTEST_DIR`, `VYORA_PGTEST_PORT`,
 `VYORA_SASPAY_SECRET_KEY`, `VYORA_SASPAY_WEBHOOK_SECRET`, `VYORA_SITE_URL`.
 
-Plus 9 variables `REELORA_*` côté backend :
+Plus 9 variables `SORAHNEX_*` côté backend :
 `REELORA_DOMAIN_BOUNDARIES`, `REELORA_PROJECT_REF`, `REELORA_RENDER_WORKER_TOKEN`,
 `REELORA_RENDER_WORKER_URL`, `REELORA_TOOL_PROPOSALS`, `REELORA_VIDEO_PROVIDER`,
 `REELORA_VIDEO_TIMEOUT`, `REELORA_VIDEO_UNAVAILABLE`, `REELORA_WEBHOOK_BASE_URL`.

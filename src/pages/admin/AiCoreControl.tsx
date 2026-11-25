@@ -55,7 +55,7 @@ export default function AiCoreControl() {
   const [providerDraft, setProviderDraft] = useState({
     provider_key: '',
     display_name: '',
-    adapter_kind: 'openai' as 'openai' | 'gemini' | 'cloudflare' | 'none',
+    adapter_kind: 'openai' as 'openai' | 'none',
     base_url: '',
     api_key_env: '',
   });
@@ -294,8 +294,7 @@ export default function AiCoreControl() {
                       className="mt-1 w-full rounded-lg border border-line bg-[#0c111b] px-3 py-2 text-sm text-white"
                     >
                       <option value="openai">openai — /chat/completions</option>
-                      <option value="gemini">gemini — protocole natif Google</option>
-                      <option value="cloudflare">cloudflare — URL par compte</option>
+                      <option value="none">none — protocole non supporté (jamais appelé)</option>
                       <option value="none">none — protocole dédié, non appelé</option>
                     </select>
                   </label>

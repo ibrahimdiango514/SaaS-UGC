@@ -116,10 +116,7 @@ function statusCode(status: number): string {
 }
 
 /**
- * En-têtes de lecture du catalogue.
- *
- * Le gabarit `openai` et `gemini` s'authentifient comme la conversation ; le
- * gabarit `cloudflare` accepte le jeton en `Authorization` sur l'API REST.
+ * En-têtes de lecture du catalogue : Bearer, comme la conversation.
  * Le registre peut imposer des en-têtes supplémentaires (attribution).
  */
 export function catalogHeaders(
@@ -128,25 +125,15 @@ export function catalogHeaders(
 ): Record<string, string> {
   const headers: Record<string, string> = { ...descriptor.headers };
   if (!credentials.apiKey) return headers;
-  if (descriptor.kind === 'gemini') {
-    headers['x-goog-api-key'] = credentials.apiKey;
-  } else {
-    headers.Authorization = `Bearer ${credentials.apiKey}`;
-  }
+  headers.Authorization = `Bearer ${credentials.apiKey}`;
   return headers;
 }
 
 /** URL de catalogue effective, ou null si le registre n'en publie pas. */
-export function catalogUrl(descriptor: AiProbeDescriptor, credentials: AiCredentials): string | null {
+export function catalogUrl(descriptor: AiProbeDescriptor, _credentials: AiCredentials): string | null {
   if (descriptor.modelsUrl) return descriptor.modelsUrl;
   if (!descriptor.baseUrl) return null;
   const base = descriptor.baseUrl.replace(/\/+$/, '');
-  if (descriptor.kind === 'gemini') return `${base}/models`;
-  if (descriptor.kind === 'cloudflare') {
-    return credentials.accountId
-      ? `${base}/accounts/${encodeURIComponent(credentials.accountId)}/ai/models`
-      : null;
-  }
   return `${base}/models`;
 }
 

@@ -519,7 +519,7 @@ export default function VideoStudio() {
               <ModelCatalog models={modeModels} selectedId={modelId} onSelect={setModelId} busy={refreshing} onRefresh={() => void refreshCatalog()} estimate={estimate} healthMuapi={health?.muapi} />
               <PromptComposer prompt={prompt} onPrompt={setPrompt} structure={structure} onStructure={setStructure}
                 scriptText={scriptText} onScript={setScriptText} productName={productName} onProductName={setProductName}
-                groqConfigured={health?.groq ?? null} />
+                aiConfigured={health?.ai ?? null} />
               <DynamicParams model={selectedModel} values={paramValues} onChange={setParamValues} />
               <ReferenceUploader model={selectedModel} firstPreview={referencePreview} lastPreview={lastPreview}
                 onFirst={(f) => onReference('first', f)} onLast={(f) => onReference('last', f)} busy={uploading || starting} />

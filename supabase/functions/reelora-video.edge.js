@@ -1,4 +1,4 @@
-/* VYORA-EDGE-SHA256:e206f4126372 | artefact genere, ne pas editer */
+/* SORAHNEX-EDGE-SHA256:e206f4126372 | artefact genere, ne pas editer */
 // @ts-nocheck — artefact esbuild : verifie et execute par les tests.
 // ---------------------------------------------------------------------------
 // BUNDLE AUTONOME — généré par esbuild depuis

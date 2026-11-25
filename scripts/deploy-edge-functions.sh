@@ -7,8 +7,8 @@
 # ni aux migrations, ni aux secrets, ni aux règles de crédits.
 #
 # Prérequis : Supabase CLI connecté (`supabase login`) et `supabase link`.
-# Aucune clé n'est stockée ici : MUAPI_API_KEY / GROQ_API_KEY restent des secrets
-# serveur gérés dans Supabase, jamais dans ce dépôt.
+# Aucune clé n'est stockée ici : MUAPI_API_KEY / FREE_LLM_API_KEY restent des
+# secrets serveur gérés dans Supabase, jamais dans ce dépôt.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -17,7 +17,8 @@ PROJECT_REF="${REELORA_PROJECT_REF:-xbuuhfwobrafcbgtdgjx}"
 supabase link --project-ref "$PROJECT_REF"
 
 # verify_jwt=true : le jeton utilisateur est validé par la passerelle puis par GoTrue.
-supabase functions deploy reelora-ai --project-ref "$PROJECT_REF"
+# `vyora-ai` est la SEULE passerelle IA (aucun fournisseur nommé hors registre).
+supabase functions deploy vyora-ai --project-ref "$PROJECT_REF"
 supabase functions deploy reelora-video --project-ref "$PROJECT_REF"
 
 # Business Grow : verify_jwt=true (chaque requête exige un JWT VYORA).

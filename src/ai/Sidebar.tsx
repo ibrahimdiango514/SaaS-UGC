@@ -83,7 +83,10 @@ export function Sidebar({
   const creer = () => {
     onNew();
     onCloseMobile?.();
-    navigate('/app/ai');
+    // Embarquée dans le Growth OS, la création reste dans l'espace courant :
+    // naviguer vers /app/ai ferait sortir l'utilisateur du nouveau Business
+    // Growth et rouvrirait l'ancien espace assistant.
+    if (!embedded) navigate('/app/ai');
   };
 
   return (

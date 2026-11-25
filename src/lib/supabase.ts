@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_SUPABASE_URL } from './public-config';
 
 // These two values are PUBLIC by design (Supabase publishable/anon key).
-// Server secrets (GROQ_API_KEY, MUAPI_API_KEY, SUPABASE_SERVICE_ROLE_KEY)
+// Server secrets (FREE_LLM_API_KEY, MUAPI_API_KEY, SUPABASE_SERVICE_ROLE_KEY)
 // are never referenced in frontend code.
 const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_utbZhw8dg-2M1-g0nXIhfA_n6dZCDZz';
 

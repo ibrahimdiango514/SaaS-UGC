@@ -77,6 +77,7 @@ export default function App() {
                       <Route path="studio" element={<GenerationStudio />} />
                       <Route path="studio/universel" element={<UniversalStudio />} />
                       <Route path="business" element={<BusinessGrow />} />
+                      <Route path="business/*" element={<BusinessGrow />} />
                       <Route path="business/modules" element={<BusinessModules />} />
                       <Route path="business/modules/:moduleKey" element={<BusinessModuleWorkspace />} />
                       <Route path="business/abonnement" element={<BusinessGrowSubscription />} />

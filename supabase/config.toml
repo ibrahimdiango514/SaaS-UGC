@@ -31,7 +31,8 @@ verify_jwt = false
 [functions.reelora-owner-bootstrap]
 verify_jwt = false
 
-[functions.reelora-ai]
+# Passerelle IA unique : VYORA AI GATEWAY -> FreeLLMAPI.
+[functions.vyora-ai]
 verify_jwt = true
 
 [functions.reelora-video]

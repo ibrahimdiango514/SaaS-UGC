@@ -186,6 +186,8 @@ export interface SavedBusinessReport {
 export interface BusinessSendOptions {
   roleKey?: string;
   workspaceId?: string | null;
+  /** Images redimensionnées pour le modèle vision (jamais une URL, jamais un secret). */
+  images?: Array<{ mimeType: string; dataBase64: string }>;
   routing?: {
     selectionMode?: 'auto' | 'manual';
     preferredProviderKey?: string | null;
@@ -565,6 +567,7 @@ export const businessGrowApi = {
       ...(options?.roleKey ? { roleKey: options.roleKey } : {}),
       ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(options?.routing ? { routing: options.routing } : {}),
+      ...(options?.images?.length ? { images: options.images } : {}),
     }),
   getMemory: (workspaceId?: string | null) => invoke<BusinessMemory>('memory.get', workspaceId ? { workspaceId } : {}),
   setMemoryConsent: (enabled: boolean, workspaceId?: string | null) =>

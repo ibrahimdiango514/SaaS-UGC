@@ -101,7 +101,7 @@ afterEach(() => {
 
 function monter() {
   return render(
-    <MemoryRouter initialEntries={['/app/business']}>
+    <MemoryRouter initialEntries={['/app/business/assistant']}>
       <BusinessGrow />
     </MemoryRouter>,
   );
@@ -130,15 +130,22 @@ describe('Grow — l’interface SORAHNEX remplace l’ancienne section Assistan
     expect(screen.queryByText('Images')).toBeNull();
   });
 
-  it('conserve la navigation métier de Grow, intacte', async () => {
+  it('expose la navigation réelle du Growth OS', async () => {
     monter();
     await waitFor(() => expect(screen.getByTestId('business-assistant')).toBeTruthy());
 
-    const nav = screen.getByRole('navigation', { name: 'Navigation Grow' });
+    const nav = screen.getByRole('navigation', { name: 'Navigation Growth OS' });
     expect(nav).toBeTruthy();
-    for (const rubrique of ['Assistant', 'Croissance', 'Entreprise', 'Mémoire métier', 'Services IA', 'Contrôle IA', 'Intégrations']) {
-      expect(screen.getByRole('button', { name: rubrique })).toBeTruthy();
+    for (const rubrique of [
+      'Vue générale', 'Rapports et analyses', 'CRM', 'Pipeline commercial',
+      'Tâches et activités', 'Relances', 'Finance', 'Recouvrement',
+      'Assistant IA', 'Contexte entreprise', 'Mémoire métier', 'Services IA',
+      'Contrôle IA', 'Intégrations',
+    ]) {
+      expect(screen.getByRole('link', { name: rubrique })).toBeTruthy();
     }
+    // Plus aucun ancien onglet « Croissance » ni second CRM dans l’interface.
+    expect(screen.queryByRole('link', { name: 'Croissance' })).toBeNull();
   });
 
   it('s’appuie sur le socle de Grow, pas sur un service inventé', async () => {

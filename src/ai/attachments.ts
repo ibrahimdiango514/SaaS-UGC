@@ -10,10 +10,10 @@
  *   - les formats non lisibles (PDF scanné, image) sont annoncés comme tels
  *     plutôt que silencieusement ignorés.
  *
- * Aucune bibliothèque n'est ajoutée : les formats traités le sont avec les API
- * du navigateur. Un PDF nécessiterait une dépendance (pdf.js) ; il est donc
- * reconnu mais son contenu n'est pas extrait. C'est une limite assumée, pas un
- * oubli — et elle est affichée dans l'interface.
+ * Le PDF et le XLSX sont traités par `files/intoAssistant` : pdf.js extrait le
+ * texte des PDF, et le lecteur ZIP existant lit la première feuille XLSX. Les
+ * images et vidéos restent annoncées comme non analysées : aucun modèle de
+ * texte ne peut les lire, et aucun OCR n'est simulé.
  */
 
 /** Taille maximale d'un fichier joint. */

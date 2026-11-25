@@ -113,7 +113,7 @@ beforeEach(() => {
   apiMocks.listJobs.mockResolvedValue([]);
   apiMocks.signedStorageUrl.mockResolvedValue('https://signed.example/clip.mp4');
   apiMocks.uploadEditorMedia.mockResolvedValue('ws-1/editor/uploaded.mp4');
-  apiMocks.healthCheck.mockResolvedValue({ configured: { groq: false, muapi: true, supabase: true, worker: true } });
+  apiMocks.healthCheck.mockResolvedValue({ configured: { ai: false, muapi: true, supabase: true, worker: true } });
 });
 
 afterEach(() => {
@@ -441,7 +441,7 @@ describe('Interface desktop & mobile (fixtures API simulées — aucune généra
       <AssistPanel
         project={reordered}
         onChange={onChange}
-        groqConfigured={false}
+        aiConfigured={false}
         onProposeAiPlan={async () => null}
       />,
     );
@@ -461,7 +461,7 @@ describe('Interface desktop & mobile (fixtures API simulées — aucune généra
       <AssistPanel
         project={updated}
         onChange={onChange}
-        groqConfigured={false}
+        aiConfigured={false}
         onProposeAiPlan={async () => null}
       />,
     );
@@ -592,13 +592,13 @@ describe('Interface desktop & mobile (fixtures API simulées — aucune généra
 });
 
 describe('Sécurité, routes historiques et garde-fous Phase 1 & 2 préservés', () => {
-  it('conserve toutes les routes historiques et verify_jwt=true sur reelora-ai et reelora-video', () => {
+  it('conserve toutes les routes historiques et verify_jwt=true sur la passerelle IA et reelora-video', () => {
     const app = read('src/App.tsx');
     for (const route of ['path="studio"', 'path="studio/classique"', 'path="studio/montage"', 'path="studio/avance"', 'path="projets/:id"']) {
       expect(app).toContain(route);
     }
     const config = read('supabase/config.toml');
-    expect(config).toMatch(/\[functions\.reelora-ai\][\s\S]*?verify_jwt\s*=\s*true/);
+    expect(config).toMatch(/\[functions\.vyora-ai\][\s\S]*?verify_jwt\s*=\s*true/);
     expect(config).toMatch(/\[functions\.reelora-video\][\s\S]*?verify_jwt\s*=\s*true/);
   });
 });

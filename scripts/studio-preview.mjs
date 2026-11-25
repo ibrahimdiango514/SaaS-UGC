@@ -279,9 +279,9 @@ function edgeResponse(url, body) {
   if (fn === 'reelora-owner-bootstrap') {
     return { user_id: USER_ID, workspace_id: WORKSPACE_ID, role: 'owner', needs_bootstrap: false };
   }
-  if (fn === 'vyora-ai' || fn === 'reelora-ai') {
+  if (fn === 'vyora-ai') {
     const action = body?.action ?? 'health';
-    if (action === 'health') return { configured: { groq: true, gemini: true }, providers: ['groq', 'gemini'], status: 'ok' };
+    if (action === 'health') return { configured: { ai: true }, providers: ['freellmapi'], status: 'ok' };
     return { ok: true, preview: true, action };
   }
   if (fn === 'studio-runtime') {
@@ -294,7 +294,7 @@ function edgeResponse(url, body) {
     return { error: 'UNAUTHENTICATED' };
   }
   if (fn === 'vyora-provider-health') {
-    return { providers: [{ provider_key: 'groq', status: 'available' }, { provider_key: 'gemini', status: 'available' }] };
+    return { providers: [{ provider_key: 'freellmapi', status: 'available' }] };
   }
   if (fn === 'reelora-video-worker') {
     return { ok: true, queued: false, preview: true };

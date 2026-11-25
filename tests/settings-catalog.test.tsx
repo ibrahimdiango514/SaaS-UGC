@@ -81,7 +81,7 @@ beforeEach(() => {
     product_url: null, reference_image_paths: [], product_facts: {},
     created_at: '2026-01-01', updated_at: '2026-01-01',
   }]);
-  mocks.healthCheck.mockResolvedValue({ configured: { groq: false, muapi: false, worker: false, supabase: true } });
+  mocks.healthCheck.mockResolvedValue({ configured: { ai: false, muapi: false, worker: false, supabase: true } });
   mocks.updateProduct.mockImplementation(async (_id: string, patch: { name: string; description: string; key_benefits: string[] }) => {
     mocks.state.productName = patch.name;
     mocks.state.description = patch.description;

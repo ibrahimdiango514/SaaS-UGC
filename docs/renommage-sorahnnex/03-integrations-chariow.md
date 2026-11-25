@@ -31,7 +31,7 @@ Les 64 tests du connecteur passent :
 **Dérive d'épinglage des artefacts Edge.** `store-connect` n'est pas déployé
 depuis sa source : `supabase/functions/store-connect/loader.ts` télécharge un
 bundle figé depuis GitHub, puis vérifie **taille + SHA-256** avant exécution. Le
-renommage VYORA/REELORA → SORAHNEX a modifié des chaînes affichées **à
+renommage SORAHNEX/SORAHNEX → SORAHNEX a modifié des chaînes affichées **à
 l'intérieur des bundles** (`store-connect`, `store-import`, `mcp-client`,
 `business-grow`). Résultat mesuré :
 

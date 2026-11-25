@@ -492,17 +492,10 @@ function parseSharedStrings(xml: string): string[] {
   });
 }
 
-/**
- * Import XLSX.
- *
- * Lit la première feuille, convertit chaque ligne en tableau de chaînes, puis
- * réutilise le même pipeline que le CSV (colonnes reconnues par synonyme).
- * Une feuille vide ou un classeur sans feuille produit une erreur explicite.
- */
-export async function importXlsx(
+/** Lit la première feuille d'un classeur XLSX en lignes de cellules. */
+export async function readXlsxRows(
   bytes: Uint8Array,
-  options: { platform?: StorePlatform | 'file'; reference?: string } = {},
-): Promise<FileParseResult> {
+): Promise<{ ok: true; rows: string[][] } | { ok: false; error: string }> {
   let feuille: Uint8Array | null;
   let shared: string[] = [];
   try {
@@ -520,22 +513,21 @@ export async function importXlsx(
     if (!feuille) {
       const liste = await readZipEntry(bytes, ['xl/workbook.xml']);
       const nom = liste ? new TextDecoder().decode(liste).match(/<sheet[^>]*name="([^"]+)"/i) : null;
-      if (!nom) return { ok: false, format: 'xlsx', errors: ['Classeur sans feuille de calcul lisible.'] };
+      if (!nom) return { ok: false, error: 'Classeur sans feuille de calcul lisible.' };
       feuille = await readZipEntry(bytes, ['xl/worksheets/sheet1.xml']);
     }
-    if (!feuille) return { ok: false, format: 'xlsx', errors: ['Aucune feuille de calcul trouvée dans le classeur.'] };
+    if (!feuille) return { ok: false, error: 'Aucune feuille de calcul trouvée dans le classeur.' };
   } catch (error) {
     return {
       ok: false,
-      format: 'xlsx',
-      errors: [`Classeur illisible : ${error instanceof Error ? error.message : 'format non pris en charge'}.`],
+      error: `Classeur illisible : ${error instanceof Error ? error.message : 'format non pris en charge'}.`,
     };
   }
 
   const xml = new TextDecoder('utf-8').decode(feuille);
-  const lignes: string[][] = [];
+  const rows: string[][] = [];
   for (const ligneXml of xml.match(/<row[^>]*>([\s\S]*?)<\/row>/gi) ?? []) {
-    if (lignes.length > MAX_ROWS) break;
+    if (rows.length > MAX_ROWS) break;
     // Chaque cellule est placée à SA colonne, déduite de sa référence (`r="C4"`),
     // et non à la suite : une cellule vide n'émet pas de balise, et un
     // placement séquentiel décalerait tout ce qui suit.
@@ -553,8 +545,25 @@ export async function importXlsx(
     }
     // Les colonnes vides de fin sont retirées : elles ne portent rien.
     while (cellules.length > 0 && cellules[cellules.length - 1] === '') cellules.pop();
-    if (cellules.some((c) => c.trim() !== '')) lignes.push(cellules);
+    if (cellules.some((c) => c.trim() !== '')) rows.push(cellules);
   }
+  return { ok: true, rows };
+}
+
+/**
+ * Import XLSX.
+ *
+ * Lit la première feuille, convertit chaque ligne en tableau de chaînes, puis
+ * réutilise le même pipeline que le CSV (colonnes reconnues par synonyme).
+ * Une feuille vide ou un classeur sans feuille produit une erreur explicite.
+ */
+export async function importXlsx(
+  bytes: Uint8Array,
+  options: { platform?: StorePlatform | 'file'; reference?: string } = {},
+): Promise<FileParseResult> {
+  const table = await readXlsxRows(bytes);
+  if (!table.ok) return { ok: false, format: 'xlsx', errors: [table.error] };
+  const lignes = table.rows;
 
   if (lignes.length < 2) return { ok: false, format: 'xlsx', errors: ['La feuille ne contient pas d’en-tête et de données.'] };
 

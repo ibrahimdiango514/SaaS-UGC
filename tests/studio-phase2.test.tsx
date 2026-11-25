@@ -477,7 +477,7 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     // Champ vide + modèle exigeant un prompt : le backend répond PROMPT_REQUIRED.
     // L'interface ne doit pas laisser croire que le backend calcule sans fin.
     const props = {
-      ...promptBarHealthProps({ groq: true }),
+      ...promptBarHealthProps({ ai: true }),
       state: { ...initialFormState(), prompt: '' },
       // Devis non calculable : aucune instruction à chiffrer.
       estimate: null,
@@ -489,22 +489,22 @@ describe('Phase 2 · calculs de crédits, réservation, capture et remboursement
     cleanup();
   });
 
-  it('annonce la vérification Groq en cours sans afficher une relance prématurée', () => {
+  it('annonce la vérification de l’aide IA en cours sans afficher une relance prématurée', () => {
     render(<MemoryRouter><PromptBar {...promptBarHealthProps(null, true)} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
     expect(screen.getByRole('status').textContent).toContain('Vérification de la disponibilité de l’aide IA');
     expect(screen.queryByRole('button', { name: 'Réessayer' })).toBeNull();
   });
 
-  it('désactive le plan si Groq est absent et l’active si Groq est configuré', () => {
-    const absent = promptBarHealthProps({ groq: false });
+  it('désactive le plan si le fournisseur IA est absent et l’active s’il est configuré', () => {
+    const absent = promptBarHealthProps({ ai: false });
     render(<MemoryRouter><PromptBar {...absent} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
     expect(screen.getByText(/Assistance IA indisponible pour le moment/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Proposer un plan avec l’IA' }).hasAttribute('disabled')).toBe(true);
 
     cleanup();
-    const available = promptBarHealthProps({ groq: true });
+    const available = promptBarHealthProps({ ai: true });
     render(<MemoryRouter><PromptBar {...available} /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: /Réglages/ }));
     expect(screen.queryByRole('status')).toBeNull();

@@ -185,9 +185,11 @@ describe('Section B — autorisation OAuth', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Autoriser via OAuth' }));
       await waitFor(() => expect(assigner).toHaveBeenCalledTimes(1));
       expect(assigner).toHaveBeenCalledWith('https://as.example/authorize?client_id=c&code_challenge=x');
-      // Aucun stockage navigateur n'est utilisé par ce parcours.
-      expect(window.localStorage.getItem('oauth')).toBeNull();
-      expect(window.sessionStorage.getItem('oauth')).toBeNull();
+      // Aucun stockage navigateur n'est utilisé par ce parcours. jsdom peut
+      // exposer un stockage opaque selon l'origine ; son absence signifie aussi
+      // qu'aucun jeton n'a pu y être écrit.
+      expect(window.localStorage?.getItem('oauth') ?? null).toBeNull();
+      expect(window.sessionStorage?.getItem('oauth') ?? null).toBeNull();
     } finally {
       Object.defineProperty(window, 'location', { configurable: true, value: original });
     }

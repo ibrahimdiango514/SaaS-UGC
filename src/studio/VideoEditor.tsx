@@ -668,7 +668,7 @@ export default function VideoEditor() {
   };
 
   const proposeGroqPlan = async (): Promise<ProductionPlan | null> => {
-    if (!project || health?.groq !== true) return null;
+    if (!project || health?.ai !== true) return null;
     const local = buildLocalPlan({
       prompt: brief || project.prompt || project.title,
       ratio: project.aspect,
@@ -708,7 +708,7 @@ export default function VideoEditor() {
         toast.success('Demande générale appliquée au montage.');
         return;
       }
-      if (health?.groq !== true) {
+      if (health?.ai !== true) {
         setPlanMessage('Assistance IA indisponible pour le moment.');
         return;
       }
@@ -926,11 +926,11 @@ export default function VideoEditor() {
               <Button size="sm" variant="outline" loading={planBusy} onClick={() => void applyBrief(false)()}>
                 Recalculer le plan local
               </Button>
-              <Button size="sm" variant="ghost" loading={planBusy} disabled={health?.groq !== true} onClick={() => void applyBrief(true)()}>
+              <Button size="sm" variant="ghost" loading={planBusy} disabled={health?.ai !== true} onClick={() => void applyBrief(true)()}>
                 Proposer avec l’IA
               </Button>
             </div>
-            {health?.groq === false && <p className="mt-2 text-[10px] text-amber-300">Assistance IA indisponible pour le moment.</p>}
+            {health?.ai === false && <p className="mt-2 text-[10px] text-amber-300">Assistance IA indisponible pour le moment.</p>}
             {planMessage && <p className="mt-2 text-[11px] leading-relaxed text-slate-300">{planMessage}</p>}
           </section>
         </div>
@@ -993,7 +993,7 @@ export default function VideoEditor() {
               onChange={(next) => commitChange(next)}
               disabled={rendering}
               mediaItems={mediaItems}
-              groqConfigured={health?.groq ?? null}
+              aiConfigured={health?.ai ?? null}
               onProposeAiPlan={proposeGroqPlan}
               onSelectScene={(id) => {
                 setSelectedId(id);

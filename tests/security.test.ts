@@ -55,7 +55,7 @@ describe('clés secrètes côté serveur uniquement', () => {
 describe('configuration des Edge Functions', () => {
   const config = read('supabase/config.toml');
   it('les fonctions IA et vidéo exigent un JWT vérifié', () => {
-    expect(config).toMatch(/\[functions\.reelora-ai\][\s\S]*?verify_jwt\s*=\s*true/);
+    expect(config).toMatch(/\[functions\.vyora-ai\][\s\S]*?verify_jwt\s*=\s*true/);
     expect(config).toMatch(/\[functions\.reelora-video\][\s\S]*?verify_jwt\s*=\s*true/);
   });
   it('la sonde de santé n’expose que des booléens de présence', () => {
@@ -76,7 +76,7 @@ describe('configuration des Edge Functions', () => {
     expect(runtime).toContain("if(diff)error('FORBIDDEN',403)");
     const discovery = read('supabase/functions/vyora-provider-discovery/index.ts');
     expect(discovery).toContain('vyora_provider_health_cron_token');
-    expect(discovery).toContain('!equal(supplied,token)');
+    expect(discovery).toContain('!equal(supplied, token)');
     expect(discovery).not.toContain('chat/completions');
     expect(discovery).not.toContain(':generateContent');
     expect(config).toMatch(/\[functions\.reelora-video-worker\][\s\S]*?verify_jwt\s*=\s*false/);

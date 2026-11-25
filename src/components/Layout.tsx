@@ -35,6 +35,10 @@ export default function Layout() {
   const location = useLocation();
   const isHub = location.pathname === '/app';
   const isBusiness = location.pathname === '/app/business' || location.pathname.startsWith('/app/business/');
+  // Le Growth OS possède sa propre sidebar : la masquer évite une double
+  // navigation identique à l'écran. Les routes catalogue/abonnement gardent
+  // la navigation globale de l'application.
+  const isGrowthOs = isBusiness && !/^\/app\/business\/(?:modules|abonnement)/.test(location.pathname);
   // Périmètre visuel : chaque espace possède sa propre identité chromatique,
   // héritée par toute l'arborescence via `data-vy-scope` (variables CSS).
   const scope: 'studio' | 'business' | 'hub' | 'admin' = isAdmin ? 'admin' : isHub ? 'hub' : isBusiness ? 'business' : 'studio';
@@ -160,7 +164,7 @@ export default function Layout() {
       data-vy-scope={scope === 'admin' ? 'admin' : scope}
     >
       {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}
-      <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', isHub && 'lg:hidden')}>
+      <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', (isHub || isGrowthOs) && 'lg:hidden')}>
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
         {/* Liseré d'identité : cyan en Studio, violet en Grow. */}

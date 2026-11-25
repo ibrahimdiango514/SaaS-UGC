@@ -22,6 +22,16 @@ const ROOT = process.cwd();
 const APPLY = process.argv.includes('--apply');
 
 const TARGETS = ['src', 'tests', 'docs', 'supabase/functions', 'index.html', 'README.md'];
+
+/**
+ * Fichiers qui doivent continuer à nommer les anciennes marques : la garde de
+ * tests les interdit, donc les renommer ici inverserait son sens (elle se
+ * mettrait à interdire SORAHNEX). Le script ne les analyse jamais.
+ */
+const EXCLUDED = new Set([
+  'tests/brand-visible-sorahnnex.test.ts',
+  'scripts/rename-brand-visible.mjs',
+]);
 const EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.md', '.html', '.json', '.css', '.txt',
 ]);
@@ -71,6 +81,7 @@ const report = [];
 let changedFiles = 0;
 
 for (const file of files) {
+  if (EXCLUDED.has(relative(ROOT, file).split('\\').join('/'))) continue;
   const before = readFileSync(file, 'utf8');
   if (!/vyora|reelora/i.test(before)) continue;
 

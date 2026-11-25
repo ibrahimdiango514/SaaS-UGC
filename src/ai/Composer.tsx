@@ -203,12 +203,12 @@ export function Composer({
               {a.mimeType.startsWith('image/') ? <ImageIcon size={13} /> : <FileText size={13} />}
               <span className="max-w-[12rem] truncate">{a.name}</span>
               <span className="text-slate-500">{formatBytes(a.sizeBytes)}</span>
-              {a.excerpt ? (
+              {a.excerpt || a.visionImage ? (
                 <span
                   className="rounded bg-brand-500/15 px-1 text-[0.65rem] text-brand-200"
-                  title="Le contenu texte est transmis à l’assistant."
+                  title={a.visionImage ? 'L’image est transmise au modèle vision pour analyse.' : 'Le contenu texte est transmis à l’assistant.'}
                 >
-                  lu
+                  {a.visionImage ? 'vision' : 'lu'}
                 </span>
               ) : (
                 <span
