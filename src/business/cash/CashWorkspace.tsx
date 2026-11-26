@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Download, Plus, Receipt, Wallet,
+  AlertTriangle, ArrowDownLeft, ArrowUpRight, Banknote, Download, Plus, Receipt, Upload, Wallet,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
@@ -11,8 +11,8 @@ import { SALES_CATEGORIES, invoiceFromRecord } from '../sales/model';
 import {
   CASH_CATEGORIES, EXPENSE_CATEGORIES, EXPENSE_RECURRENCES, EXPENSE_STATUSES,
   cashMovements, computeCashSummary, detectUnusualExpenses, expenseFromRecord,
-  expensesByCategory, expensesToCsv, monthlyCashflow, nextRecurrenceDate, validateExpense,
-  type Expense, type ExpenseRecurrence, type ExpenseStatus,
+  analyserCsvDepenses, expensesByCategory, expensesToCsv, monthlyCashflow, nextRecurrenceDate, validateExpense,
+  type Expense, type ExpenseRecurrence, type ExpenseStatus, type LigneDepenseImportee,
 } from './model';
 import { useGrandEcran } from '../../lib/media-query';
 import {
@@ -125,6 +125,50 @@ export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspac
   const [filter, setFilter] = useState('tous');
   const [editor, setEditor] = useState<Expense | null | 'new'>(null);
   const [monthlyOpen, setMonthlyOpen] = useState(false);
+  const [importDepenses, setImportDepenses] = useState<LigneDepenseImportee[] | null>(null);
+  const [importErreur, setImportErreur] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Lecture du fichier : on ANALYSE d'abord, on écrit ensuite, sur validation.
+   * Rien n'est créé tant que l'utilisateur n'a pas vu ce qui sera importé.
+   */
+  const lireImportDepenses = async (fichier: File) => {
+    try {
+      const texte = await fichier.text();
+      const analyse = analyserCsvDepenses(texte);
+      if (analyse.erreurs.length > 0) { setImportErreur(analyse.erreurs.join(' ')); return; }
+      if (analyse.lignes.length === 0) { setImportErreur('Aucune ligne exploitable dans ce fichier.'); return; }
+      setImportDepenses(analyse.lignes);
+    } catch (cause) {
+      setImportErreur(asAppError(cause).message);
+    }
+  };
+
+  const confirmerImportDepenses = async () => {
+    const valides = (importDepenses ?? []).filter((ligne) => ligne.depense !== null);
+    if (valides.length === 0) return;
+    setImportBusy(true);
+    let ecrites = 0;
+    const echecs: string[] = [];
+    for (const ligne of valides) {
+      try {
+        await expensesStore.create({ ...ligne.depense }, null);
+        ecrites += 1;
+      } catch (cause) {
+        echecs.push(`Ligne ${ligne.ligne} : ${asAppError(cause).message}`);
+      }
+    }
+    setImportBusy(false);
+    setImportDepenses(null);
+    if (echecs.length > 0) {
+      // On ne dit pas « importé » quand une partie a échoué.
+      setImportErreur(`${ecrites} dépense(s) enregistrée(s), ${echecs.length} échec(s). ${echecs[0]}`);
+    } else {
+      toast.success(`${ecrites} dépense(s) importée(s).`);
+    }
+  };
 
   const summary = useMemo(() => computeCashSummary({ payments, expenses }), [expenses, payments]);
   const movements = useMemo(() => cashMovements(payments, expenses), [expenses, payments]);
@@ -390,6 +434,15 @@ export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspac
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="ghost" onClick={onOpenFinance}>Voir Finance</Button>
           <Button size="sm" variant="outline" icon={<Download size={13} />} onClick={() => downloadFile('depenses.csv', expensesToCsv(expenses))}>Exporter</Button>
+          <Button size="sm" variant="outline" icon={<Upload size={13} />} onClick={() => { setImportErreur(''); setImportDepenses(null); importRef.current?.click(); }}>Importer CSV</Button>
+          <input
+            ref={importRef}
+            type="file"
+            accept=".csv,text/csv"
+            aria-label="Fichier CSV de dépenses"
+            className="hidden"
+            onChange={(event) => { const fichier = event.target.files?.[0]; if (fichier) void lireImportDepenses(fichier); event.target.value = ''; }}
+          />
           <Button size="sm" icon={<Plus size={13} />} onClick={() => setEditor('new')}>Nouvelle dépense</Button>
         </div>
       </div>
@@ -426,6 +479,52 @@ export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspac
       )}
 
       {editor && <ExpenseForm open initial={editor === 'new' ? null : editor} onClose={() => setEditor(null)} onSubmit={save} />}
+
+      <Modal
+        open={importDepenses !== null || importErreur !== ''}
+        onClose={() => { setImportDepenses(null); setImportErreur(''); }}
+        title="Importer des dépenses"
+        size="lg"
+        footer={<>
+          <Button variant="ghost" onClick={() => { setImportDepenses(null); setImportErreur(''); }}>Annuler</Button>
+          <Button
+            variant="primary"
+            loading={importBusy}
+            disabled={importBusy || (importDepenses ?? []).every((ligne) => ligne.depense === null)}
+            onClick={() => void confirmerImportDepenses()}
+          >
+            Importer les lignes valides
+          </Button>
+        </>}
+      >
+        {importErreur && (
+          <p className="mb-2 rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-2.5 py-1.5 text-[11px] text-rose-200/90" data-testid="import-depenses-erreur">
+            {importErreur}
+          </p>
+        )}
+        {importDepenses && (
+          <>
+            <p className="mb-2 text-[11px] text-slate-400">
+              {(importDepenses.filter((ligne) => ligne.depense !== null)).length} ligne(s) valide(s),
+              {' '}{(importDepenses.filter((ligne) => ligne.depense === null)).length} refusée(s).
+              Les lignes refusées ne sont PAS importées et restent visibles ci-dessous avec leur raison.
+            </p>
+            <ul className="max-h-72 space-y-1 overflow-auto">
+              {importDepenses.map((ligne) => (
+                <li key={ligne.ligne} className={cn('rounded-lg border px-2 py-1.5 text-[11px]',
+                  ligne.depense ? 'border-white/[0.06] bg-white/[0.02] text-slate-300' : 'border-rose-500/25 bg-rose-500/[0.04] text-rose-100/90')}>
+                  <span className="font-semibold">Ligne {ligne.ligne}</span>
+                  {' · '}{ligne.brut.libelle || '(sans libellé)'}{' · '}{ligne.brut.montant || '—'}{' · '}{ligne.brut.date || '—'}
+                  {ligne.erreurs.length > 0 && <span className="block text-[10.5px] text-rose-200/80">Refusée : {ligne.erreurs.join(' ')}</span>}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[10px] text-slate-500">
+              Colonnes reconnues : date, libelle, categorie, fournisseur, montant, payee_le, moyen, statut, reference, notes.
+            </p>
+          </>
+        )}
+      </Modal>
 
       <Modal open={monthlyOpen} onClose={() => setMonthlyOpen(false)} title="Rapport mensuel de trésorerie" size="md">
         {/* Sur téléphone, une carte par mois : quatre colonnes dans 360 px

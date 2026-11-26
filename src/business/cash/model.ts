@@ -7,7 +7,7 @@
  */
 
 import { dateOnly, todayIso } from '../crm/model';
-import type { PaymentMethod } from '../finance/model';
+import { PAYMENT_METHODS, type PaymentMethod } from '../finance/model';
 
 export type ExpenseStatus = 'engagee' | 'payee' | 'annulee';
 export type ExpenseRecurrence = 'aucune' | 'mensuelle' | 'trimestrielle' | 'annuelle';
@@ -253,4 +253,160 @@ export function expensesToCsv(expenses: readonly Expense[]): string {
     expense.incurredAt, expense.label, expense.category, expense.supplier, expense.amount,
     expense.paidAt, expense.method, expense.status, expense.reference,
   ].map(esc).join(','))].join('\r\n');
+}
+
+/**
+ * Import CSV de dépenses — analyse PUIS validation, jamais écriture directe.
+ *
+ * L'écran montre d'abord ce qui sera importé et ce qui sera refusé. Une ligne
+ * dont le montant ou la date est illisible est refusée AVEC sa raison : filtrer
+ * silencieusement des dépenses fausserait la trésorerie sans que personne ne le
+ * voie.
+ *
+ * Colonnes attendues (ordre libre, en-têtes reconnus en français) :
+ *   date, libelle, categorie, fournisseur, montant, payee_le, moyen, statut, reference, notes
+ */
+export interface LigneDepenseImportee {
+  ligne: number;
+  /** Dépense prête à écrire, ou `null` si la ligne est refusée. */
+  depense: Omit<Expense, 'id' | 'createdAt'> | null;
+  erreurs: string[];
+  /** Valeurs brutes, affichées pour que l'utilisateur reconnaisse sa ligne. */
+  brut: Record<string, string>;
+}
+
+function celluleCsv(ligne: string, separateur: string): string[] {
+  const cellules: string[] = [];
+  let courante = '';
+  let entreGuillemets = false;
+  for (let index = 0; index < ligne.length; index += 1) {
+    const caractere = ligne[index];
+    if (caractere === '"') {
+      if (entreGuillemets && ligne[index + 1] === '"') { courante += '"'; index += 1; }
+      else entreGuillemets = !entreGuillemets;
+    } else if (caractere === separateur && !entreGuillemets) {
+      cellules.push(courante); courante = '';
+    } else courante += caractere;
+  }
+  cellules.push(courante);
+  return cellules.map((cellule) => cellule.trim());
+}
+
+const ALIAS_COLONNES: Record<string, string> = {
+  date: 'date', date_depense: 'date', incurredat: 'date',
+  libelle: 'libelle', label: 'libelle', designation: 'libelle', description: 'libelle',
+  categorie: 'categorie', category: 'categorie',
+  fournisseur: 'fournisseur', supplier: 'fournisseur',
+  montant: 'montant', amount: 'montant', total: 'montant',
+  payee_le: 'payee_le', payele: 'payee_le', paidat: 'payee_le', date_paiement: 'payee_le',
+  moyen: 'moyen', method: 'moyen',
+  statut: 'statut', status: 'statut',
+  reference: 'reference', ref: 'reference',
+  notes: 'notes', note: 'notes',
+};
+
+/**
+ * Une date qui EXISTE vraiment, en `AAAA-MM-JJ` ou `JJ/MM/AAAA`.
+ *
+ * `dateOnly` ne suffit pas ici : `Date.parse('2026-02-31')` renvoie une date
+ * valide (le 3 mars). Importer une dépense au 31 février la décalerait
+ * silencieusement d'un mois — donc on compare l'aller-retour avec la valeur
+ * saisie, seule façon de refuser une date impossible.
+ */
+function dateImportee(valeur: string): string {
+  const texte = valeur.trim();
+  let iso = texte;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(texte)) {
+    const [jour, mois, annee] = texte.split('/');
+    iso = `${annee}-${mois}-${jour}`;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  const date = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10) === iso ? iso : '';
+}
+
+export function analyserCsvDepenses(texte: string): {
+  lignes: LigneDepenseImportee[];
+  acceptees: number;
+  refusees: number;
+  erreurs: string[];
+} {
+  const lignes = texte.split(/\r?\n/).filter((ligne) => ligne.trim().length > 0);
+  if (lignes.length < 2) {
+    return { lignes: [], acceptees: 0, refusees: 0, erreurs: ['Fichier vide ou sans ligne de données.'] };
+  }
+  const separateur = (lignes[0].match(/;/g)?.length ?? 0) > (lignes[0].match(/,/g)?.length ?? 0) ? ';' : ',';
+  const entetes = celluleCsv(lignes[0], separateur)
+    .map((entete) => ALIAS_COLONNES[entete.toLowerCase().replace(/[^a-z_]/g, '')] ?? '');
+
+  if (!entetes.includes('libelle') || !entetes.includes('montant') || !entetes.includes('date')) {
+    return {
+      lignes: [], acceptees: 0, refusees: 0,
+      erreurs: ['Colonnes obligatoires absentes : « date », « libelle » et « montant » sont requis.'],
+    };
+  }
+
+  const resultat: LigneDepenseImportee[] = [];
+  lignes.slice(1).forEach((ligne, index) => {
+    const cellules = celluleCsv(ligne, separateur);
+    const valeur = (nom: string): string => {
+      const position = entetes.indexOf(nom);
+      return position === -1 ? '' : (cellules[position] ?? '');
+    };
+    const brut = {
+      date: valeur('date'), libelle: valeur('libelle'), categorie: valeur('categorie'),
+      fournisseur: valeur('fournisseur'), montant: valeur('montant'),
+    };
+    const erreurs: string[] = [];
+    const label = valeur('libelle').slice(0, 200);
+    if (!label) erreurs.push('Libellé manquant.');
+    const montantBrut = valeur('montant').replace(/\s/g, '').replace(',', '.');
+    const montant = Number(montantBrut);
+    if (!montantBrut || !Number.isFinite(montant) || montant <= 0) erreurs.push('Montant illisible ou nul.');
+    const date = dateImportee(valeur('date'));
+    if (!date) erreurs.push('Date illisible (attendu AAAA-MM-JJ ou JJ/MM/AAAA).');
+
+    const statutBrut = valeur('statut').toLowerCase();
+    const statut: ExpenseStatus = statutBrut === 'payee' || statutBrut === 'payée'
+      ? 'payee'
+      : statutBrut === 'annulee' || statutBrut === 'annulée' ? 'annulee' : 'engagee';
+    const moyenBrut = valeur('moyen').toLowerCase();
+    const method = (PAYMENT_METHODS.find((candidat) => candidat.value === moyenBrut)?.value
+      ?? PAYMENT_METHODS.find((candidat) => candidat.label.toLowerCase() === moyenBrut)?.value
+      ?? 'especes') as PaymentMethod;
+
+    const depense: Omit<Expense, 'id' | 'createdAt'> = {
+      label,
+      category: valeur('categorie') || 'Autre',
+      supplier: valeur('fournisseur').slice(0, 160),
+      amount: Number.isFinite(montant) ? montant : 0,
+      incurredAt: date,
+      // Une dépense « engagée » n'a pas de date de paiement : ne pas en inventer
+      // une, sinon elle serait comptée comme sortie de trésorerie.
+      paidAt: statut === 'payee' ? (dateImportee(valeur('payee_le')) || date) : '',
+      method,
+      reference: valeur('reference').slice(0, 80),
+      notes: valeur('notes').slice(0, 1000),
+      status: statut,
+      recurrence: 'aucune',
+    };
+
+    const validation = validateExpense(depense);
+    for (const message of validation) if (!erreurs.includes(message)) erreurs.push(message);
+
+    resultat.push({
+      ligne: index + 2,
+      depense: erreurs.length === 0 ? depense : null,
+      erreurs,
+      brut,
+    });
+  });
+
+  return {
+    lignes: resultat,
+    acceptees: resultat.filter((ligne) => ligne.depense !== null).length,
+    refusees: resultat.filter((ligne) => ligne.depense === null).length,
+    erreurs: [],
+  };
 }
