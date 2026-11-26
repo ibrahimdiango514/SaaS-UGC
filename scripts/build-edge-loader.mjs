@@ -41,10 +41,24 @@ export const SLICES_TABLE = '_edge_function_artifact_slices';
 
 /** Fonctions publiées par chargeur (source longue). */
 export const LOADER_TARGETS = {
-  'vyora-ai': { migration: '20261124110000' },
-  'vyora-ai-providers': { migration: '20261124110100' },
+  'vyora-ai': { migration: '20261127120000', republish: true },
+  'vyora-ai-providers': { migration: '20261127120000', republish: true },
   'vyora-provider-health': { migration: '20261115220200' },
   'vyora-mcp': { migration: '20261120090200' },
+};
+
+/**
+ * Migrations de publication HISTORIQUES, conservées telles quelles.
+ *
+ * Une migration appliquée est immuable : réécrire `20261124110000` aurait
+ * changé le dépôt sans changer la base, laissant les chargeurs échouer sur
+ * `artifact_digest_mismatch`. La republication passe donc par
+ * `20261127120000_vyora_ai_artifacts_republish.sql`, et les deux fichiers
+ * d'origine sont vérifiés comme inchangés plutôt que régénérés.
+ */
+export const FROZEN_ARTIFACT_MIGRATIONS = {
+  'vyora-ai': '20261124110000',
+  'vyora-ai-providers': '20261124110100',
 };
 
 /**
@@ -82,7 +96,28 @@ export function deterministicGzip(input) {
  * fonctions restent livrées par chargeur (tranches + SHA-256) pour la même
  * raison. Le code exécuté reste exactement celui du dépôt.
  */
+/**
+ * Cache des bundles par (root, slug).
+ *
+ * `buildBundle` lance esbuild : quelques dizaines de millisecondes, mais les
+ * tests de parité et de republication l'appellent une vingtaine de fois. Sous
+ * charge CI, la répétition rapprochait certains tests du délai de 5 s de vitest
+ * et provoquait des échecs intermittents. Le résultat est donc mémorisé : le
+ * bundle ne dépend que du contenu du dossier, et le processus de test est
+ * jetable, donc rien ne peut devenir obsolète en cours d'exécution.
+ */
+const cacheBundles = new Map();
+
 export function buildBundle(root, slug) {
+  const cle = `${root}::${slug}`;
+  const memo = cacheBundles.get(cle);
+  if (memo) return memo;
+  const built = buildBundleSansCache(root, slug);
+  cacheBundles.set(cle, built);
+  return built;
+}
+
+function buildBundleSansCache(root, slug) {
   const result = esbuild.buildSync({
     entryPoints: [join(root, 'supabase/functions', slug, 'index.ts')],
     bundle: true,
@@ -265,6 +300,44 @@ $artifact$;
 `;
 }
 
+/**
+ * Compose le contenu du fichier de republication multiple.
+ *
+ * Deux artefacts qui partagent un même numéro de migration ne peuvent pas être
+ * publiés par des fichiers dérivés du slug : le second écraserait le premier.
+ * Cette fonction produit donc UN fichier contenant l'en-tête explicatif puis
+ * chaque publication, dans l'ordre des slugs. Le test de parité et le générateur
+ * s'y réfèrent tous deux, il n'existe pas de seconde copie à maintenir.
+ */
+export function renderRepublishSql(entries) {
+  const entete = `-- Republie les artefacts de ${entries.map((e) => e.slug).join(' et ')} SANS réécrire
+-- les migrations déjà appliquées (20261124110000, 20261124110100).
+--
+-- Pourquoi cette migration existe : une migration appliquée est immuable. Les
+-- deux publications d’origine portent l’ancien bundle (14 964 et 14 488
+-- caractères base64) ; les chargeurs déployés attendent désormais 15 576 et
+-- 14 860 caractères avec de nouvelles empreintes SHA-256. Réécrire les
+-- migrations d’origine corrigerait le dépôt mais laisserait la base sur
+-- l’ancien contenu — le chargeur échouerait sur artifact_digest_mismatch.
+--
+-- Cette migration est additive : elle supprime les tranches de ces deux noms
+-- puis les réinsère à l’identique de ce que produisent les chargeurs.
+-- vyora-provider-health et vyora-mcp ne sont PAS touchés.
+--
+-- Contrôles de longueur : 15576 (vyora-ai) et 14860 (vyora-ai-providers).
+-- Généré par scripts/build-edge-loader.mjs : ne pas éditer à la main.
+`;
+  return entete + entries.map(({ slug, built }) => `\n${renderSeedSql(slug, built)}`).join('');
+}
+
+/** Slugs publiés par un même fichier de migration. */
+export function republishGroup(slug) {
+  const migration = LOADER_TARGETS[slug]?.migration;
+  return Object.keys(LOADER_TARGETS).filter(
+    (other) => LOADER_TARGETS[other].republish && LOADER_TARGETS[other].migration === migration,
+  );
+}
+
 function targetsFromArgs(argv) {
   const rest = argv.slice(2);
   if (rest[0] === '--all') return Object.keys(LOADER_TARGETS);
@@ -295,12 +368,37 @@ function main() {
     const loader = renderLoader(slug, built);
     const bundlePath = join(root, 'supabase/functions', `${slug}.edge.js`);
     const loaderPath = join(root, 'supabase/functions', slug, 'loader.ts');
+    // Un slug republié partage son fichier avec ses pairs : on ne l'écrit pas
+    // ici, au risque d'effacer la publication de l'autre slug.
+    if (LOADER_TARGETS[slug].republish) {
+      if (check) continue; // déjà contrôlé dans le bloc `check` ci-dessus
+      writeFileSync(loaderPath, loader);
+      writeFileSync(bundlePath, built.source);
+      console.log(`${slug} : chargeur et bundle régénérés (publication par ${LOADER_TARGETS[slug].migration})`);
+      continue;
+    }
     const migrationPath = join(
       root, 'supabase/migrations',
       `${LOADER_TARGETS[slug].migration}_${slug.replace(/-/g, '_')}_artifact.sql`,
     );
 
     if (check) {
+      if (LOADER_TARGETS[slug].republish) {
+        const groupe = republishGroup(slug);
+        const chemin = join(
+          root, 'supabase/migrations',
+          `${LOADER_TARGETS[slug].migration}_${groupe.map((s) => s.replace(/-/g, '_')).join('_et_')}_artifacts_republish.sql`,
+        );
+        const attendu = renderRepublishSql(groupe.map((s) => ({ slug: s, built: buildBundle(root, s) })));
+        const actuel = existsSync(chemin) ? readFileSync(chemin, 'utf8').replace(/\r\n/g, '\n') : '';
+        for (const [path, expected] of [[loaderPath, loader], [bundlePath, built.source], [chemin, attendu]]) {
+          if ((path === chemin ? actuel : readFileSync(path, 'utf8').replace(/\r\n/g, '\n')) !== expected) {
+            console.error(`désynchronisé : ${path.replace(root + '/', '')}`);
+            stale = true;
+          }
+        }
+        continue;
+      }
       for (const [path, expected] of [
         [loaderPath, loader],
         [bundlePath, built.source],

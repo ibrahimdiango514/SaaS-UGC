@@ -301,4 +301,52 @@ describe('Panneau de diagnostic — rendu réel', () => {
     // La relance relit l'état : deux appels au total, jamais un cache affiché.
     await waitFor(() => expect(api.aiEngineHealth).toHaveBeenCalledTimes(2));
   });
+
+  /*
+   * Défaut trouvé en CI, invisible en test isolé.
+   *
+   * `aiEngineHealth` répond après que le composant a quitté l'écran (changement
+   * d'onglet, fermeture du panneau, fin d'un test). React écrivait alors l'état
+   * d'un arbre démonté : en production c'est du travail perdu, et dans un
+   * environnement de test déjà détruit cela lève
+   * `ReferenceError: window is not defined` — une erreur NON GÉRÉE qui fait
+   * échouer la suite entière, pas seulement le test concerné.
+   *
+   * Le test démonte donc volontairement avant la réponse de la sonde et exige
+   * l'absence de toute erreur non gérée.
+   */
+  it('une sonde qui répond après démontage ne met à jour aucun état', async () => {
+    let repondre: (valeur: unknown) => void = () => undefined;
+    api.aiEngineHealth.mockReturnValue(new Promise((resolve) => { repondre = resolve; }));
+
+    const { unmount } = render(<MoteurIaDiagnostic />);
+    expect(screen.getByTestId('moteur-ia-diagnostic')).toBeTruthy();
+    unmount();
+
+    /*
+     * On reproduit la condition exacte de la CI : jsdom est détruit (plus de
+     * `window`) alors que la promesse est encore en vol, puis elle répond.
+     *
+     * Sans garde de montage, React écrit l'état d'un arbre démonté, lit
+     * `window` pour calculer la priorité de l'événement et lève
+     * `ReferenceError: window is not defined` — une erreur NON GÉRÉE qui fait
+     * sortir vitest en code 1, donc échouer la CI entière.
+     */
+    const fenetre = (globalThis as { window?: unknown }).window;
+    const erreurs: unknown[] = [];
+    const capter = (e: unknown) => { erreurs.push(e); };
+    process.on('unhandledRejection', capter);
+    process.on('uncaughtException', capter);
+    try {
+      delete (globalThis as { window?: unknown }).window;
+      repondre({ providers: { freellmapi: { enabled: true, last_probe_ok: true } } });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      (globalThis as { window?: unknown }).window = fenetre;
+      process.off('unhandledRejection', capter);
+      process.off('uncaughtException', capter);
+    }
+
+    expect(erreurs).toEqual([]);
+  });
 });

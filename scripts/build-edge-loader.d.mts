@@ -1,7 +1,18 @@
 /** Déclaration du générateur de chargeurs Edge publiés par tranches. */
 export declare const SLICE_CHARS: number;
 export declare const SLICES_TABLE: string;
-export declare const LOADER_TARGETS: Record<string, { migration: string }>;
+/**
+ * Migration de publication de chaque chargeur.
+ *
+ * `republish: true` signale un artefact republié dans une migration NOUVELLE
+ * (plusieurs artefacts peuvent alors partager un même fichier).
+ */
+export declare const LOADER_TARGETS: Record<
+  string,
+  { migration: string; republish?: boolean }
+>;
+/** Migrations de publication historiques, figées : jamais réécrites. */
+export declare const FROZEN_ARTIFACT_MIGRATIONS: Record<string, string>;
 /** Bundle compilé, gzip+base64 et découpé en tranches prêtes à publier. */
 export declare function buildBundle(
   root: string,
@@ -39,3 +50,12 @@ export declare function renderSeedSql(
     chars: number;
   },
 ): string;
+/**
+ * SQL d'une migration de republication groupée : en-tête explicatif puis la
+ * publication de chaque artefact du groupe.
+ */
+export declare function renderRepublishSql(
+  entries: Array<{ slug: string; built: { source: string; sha256: string; base64: string; base64Md5: string; slices: string[]; chars: number } }>,
+): string;
+/** Slugs publiés par le même fichier de migration que `slug`. */
+export declare function republishGroup(slug: string): string[];

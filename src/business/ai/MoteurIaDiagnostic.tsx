@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, HelpCircle, RefreshCw, ShieldAlert } from 'lucide-react';
 import { Badge } from '../../components/ui';
 import {
@@ -46,11 +46,27 @@ export function MoteurIaDiagnostic({
   const [erreur, setErreur] = useState('');
   const [relance, setRelance] = useState(false);
 
+  /*
+   * Montage suivi par référence, et non par un booléen capturé :
+   * `charger` est aussi appelée par le bouton de relance, et une sonde lente
+   * peut répondre APRÈS que le composant a quitté l'écran. Écrire l'état à ce
+   * moment-là déclenche une mise à jour React sur un arbre démonté — en
+   * production c'est du travail inutile, et dans un environnement de test déjà
+   * détruit c'est `ReferenceError: window is not defined`, qui fait échouer la
+   * suite entière au lieu du seul test concerné.
+   */
+  const monte = useRef(true);
+  useEffect(() => {
+    monte.current = true;
+    return () => { monte.current = false; };
+  }, []);
+
   const charger = useCallback(async () => {
     setChargement(true);
     setErreur('');
     try {
       const sante = await aiEngineHealth();
+      if (!monte.current) return;
       const entrees = Object.entries(sante?.providers ?? {});
       // Le fournisseur central est celui du registre ; s'il n'y en a qu'un,
       // c'est lui. Aucun nom n'est codé en dur : le registre décide.
@@ -58,11 +74,12 @@ export function MoteurIaDiagnostic({
       setFournisseur(central ? central[1] : null);
       setRegistreLisible(entrees.length > 0);
     } catch (e) {
+      if (!monte.current) return;
       setRegistreLisible(false);
       setFournisseur(null);
       setErreur(e instanceof Error && e.message ? e.message : 'Sonde illisible.');
     } finally {
-      setChargement(false);
+      if (monte.current) setChargement(false);
     }
   }, []);
 
@@ -75,9 +92,11 @@ export function MoteurIaDiagnostic({
       await onRelancer();
       await charger();
     } catch (e) {
-      setErreur(e instanceof Error && e.message ? e.message : 'Relance impossible.');
+      if (monte.current) {
+        setErreur(e instanceof Error && e.message ? e.message : 'Relance impossible.');
+      }
     } finally {
-      setRelance(false);
+      if (monte.current) setRelance(false);
     }
   }, [onRelancer, charger]);
 
