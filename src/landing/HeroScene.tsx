@@ -97,7 +97,7 @@ export function HeroScene() {
               ['--cam-z' as string]: `${(progres * 220).toFixed(1)}px`,
             }}
           >
-            <EcranTelephone progres={progres} anime={anime || allege} />
+            <EcranTelephone progres={progres} anime={anime || allege} fige={!anime} />
           </div>
         </div>
 
@@ -197,9 +197,15 @@ export function HeroScene() {
 /* L'écran du téléphone : brief → script → plans → vidéo               */
 /* ------------------------------------------------------------------ */
 
-function EcranTelephone({ progres, anime }: { progres: number; anime: boolean }) {
-  // En animé, l'état suit le défilement ; en repli, on montre le résultat.
-  const etape = anime ? Math.min(3, Math.floor(progres * 4)) : 3;
+function EcranTelephone({ progres, anime, fige }: { progres: number; anime: boolean; fige: boolean }) {
+  /*
+   * En repli, la scène est GELÉE : elle doit montrer un état cohérent, pas
+   * l'état initial d'une animation qui ne se jouera jamais. Sans cela, l'écran
+   * affichait « Vidéo prête » en haut et « Génération en cours » avec une
+   * barre vide en bas — constaté à la capture.
+   */
+  const position = fige ? 1 : progres;
+  const etape = anime ? Math.min(3, Math.floor(position * 4)) : 3;
 
   const plans = [
     { titre: 'Unboxing', teinte: PALETTE.magenta },
@@ -244,11 +250,11 @@ function EcranTelephone({ progres, anime }: { progres: number; anime: boolean })
           <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
             <div
               className="h-1 rounded-full transition-[width] duration-300"
-              style={{ width: `${Math.min(100, 20 + progres * 80)}%`, background: `linear-gradient(90deg, ${PALETTE.magenta}, ${PALETTE.orange})` }}
+              style={{ width: `${Math.min(100, 20 + position * 80)}%`, background: `linear-gradient(90deg, ${PALETTE.magenta}, ${PALETTE.orange})` }}
             />
           </div>
           <p className="mt-1.5 text-[10px] font-semibold text-white">
-            {progres > 0.75 ? 'Vidéo prête' : 'Génération en cours'}
+            {position > 0.75 ? 'Vidéo prête' : 'Génération en cours'}
           </p>
           <p className="text-[9px] text-slate-500">Devis vérifié avant lancement</p>
         </div>
