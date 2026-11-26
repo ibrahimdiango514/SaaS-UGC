@@ -136,3 +136,60 @@ describe('Palette — le rôle des couleurs est fixe', () => {
     expect(REASSURANCE).toContain('aucun coût surprise');
   });
 });
+
+/**
+ * Garde d'environnement de `useScrollImmersif`.
+ *
+ * Défaut réel observé : le module GSAP se résout APRÈS la destruction de
+ * l'environnement de test et `window.matchMedia` lève alors une erreur NON
+ * GÉRÉE qui fait échouer la suite vitest entière (pas seulement un test).
+ * Ici on simule exactement cette situation : `matchMedia` disparaît, GSAP est
+ * remplacé par un faux qui ÉCHOUE s'il est appelé. Si la garde disparaît, le
+ * test casse — il ne passe pas « par hasard ».
+ */
+describe('useScrollImmersif — garde d’environnement', () => {
+  it('ne touche jamais à GSAP quand window.matchMedia a disparu', async () => {
+    vi.resetModules();
+
+    let gsapAppele = false;
+    vi.doMock('gsap', () => {
+      const faux = {
+        default: {
+          registerPlugin: () => {
+            gsapAppele = true;
+            throw new Error('GSAP appelé alors que l’environnement est détruit');
+          },
+          context: () => ({ revert: () => {} }),
+          timeline: () => ({ to: () => ({ to: () => ({}) }) }),
+          utils: { toArray: () => [] },
+        },
+      };
+      return faux;
+    });
+    vi.doMock('gsap/ScrollTrigger', () => ({ default: {}, ScrollTrigger: { update: () => {}, refresh: () => {} } }));
+    vi.doMock('lenis', () => ({ default: class { raf() {} on() {} destroy() {} } }));
+
+    const { renderHook } = await import('@testing-library/react');
+    const { useScrollImmersif } = await import('../src/landing/useScrollImmersif');
+    const racine = { current: document.createElement('div') };
+
+    const original = window.matchMedia;
+    // L'environnement est « détruit » : plus de matchMedia.
+    // @ts-expect-error — on simule volontairement un environnement partiel.
+    delete window.matchMedia;
+
+    try {
+      renderHook(() => useScrollImmersif(racine as React.RefObject<HTMLElement>, 'complet', true));
+      // Laisse la promesse d'imports dynamiques se résoudre.
+      await new Promise((resoudre) => setTimeout(resoudre, 50));
+    } finally {
+      window.matchMedia = original;
+      vi.doUnmock('gsap');
+      vi.doUnmock('gsap/ScrollTrigger');
+      vi.doUnmock('lenis');
+      vi.resetModules();
+    }
+
+    expect(gsapAppele).toBe(false);
+  });
+});

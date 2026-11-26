@@ -28,6 +28,7 @@ import HeroImmersif from '../landing/HeroImmersif';
 import { SceneGrow, SceneStudio } from '../landing/ScenesImmersives';
 import { LogoHorizontal } from '../systeme/Logo';
 import { useNiveauImmersion } from '../systeme/immersion';
+import { CurseurPersonnalise } from '../systeme/CurseurPersonnalise';
 import { useScrollImmersif } from '../landing/useScrollImmersif';
 import { observerMoitiePage, suivre } from '../systeme/tracking';
 import { BIENTOT, CTA_PRINCIPAL, PALETTE, REASSURANCE, SLOGAN } from '../systeme/palette';
@@ -436,6 +437,8 @@ export default function LandingImmersive() {
   }, []);
 
   return (
+    <>
+      <CurseurPersonnalise />
     <div ref={racine} className="relative min-h-screen">
       <a
         href="#contenu"
@@ -461,5 +464,6 @@ export default function LandingImmersive() {
 
       <PiedDePage />
     </div>
+    </>
   );
 }
