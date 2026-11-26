@@ -46,6 +46,9 @@ const FONCTIONS = [
   'bg_set_agent_autonomy',
   'bg_journal_append',
   'bg_journal_list',
+  // Transition de statut : seule la décision (validée, refusée, annulée) peut
+  // évoluer, jamais le contenu déjà journalisé.
+  'bg_journal_set_status',
 ];
 
 describe('Migration autonomie — ADDITIVE uniquement', () => {
@@ -66,7 +69,7 @@ describe('Migration autonomie — ADDITIVE uniquement', () => {
     expect(CODE).not.toMatch(/CREATE OR REPLACE FUNCTION saas_business\.bg_module_validate/i);
   });
 
-  it('crée exactement les cinq fonctions attendues', () => {
+  it('crée exactement les six fonctions attendues', () => {
     const creees = [...CODE.matchAll(/CREATE OR REPLACE FUNCTION saas_business\.([a-z_]+)\(/gi)]
       .map((m) => m[1]);
     expect(creees.sort()).toEqual([...FONCTIONS].sort());
@@ -74,7 +77,7 @@ describe('Migration autonomie — ADDITIVE uniquement', () => {
 });
 
 describe('Migration autonomie — droits', () => {
-  it('révoque l’exécution pour PUBLIC, anon et authenticated sur les cinq fonctions', () => {
+  it('révoque l’exécution pour PUBLIC, anon et authenticated sur les six fonctions', () => {
     for (const nom of FONCTIONS) {
       const ligne = CODE.split('\n').find((l) => l.includes(`REVOKE ALL ON FUNCTION saas_business.${nom}(`));
       expect(ligne, `aucun REVOKE pour ${nom}`).toBeTruthy();
@@ -84,7 +87,7 @@ describe('Migration autonomie — droits', () => {
 
   it('n’accorde l’exécution qu’au rôle serveur bg_edge', () => {
     const grants = [...CODE.matchAll(/GRANT EXECUTE ON FUNCTION saas_business\.([a-z_]+)\([^)]*\) TO ([a-z_, ]+);/gi)];
-    expect(grants.length).toBe(5);
+    expect(grants.length).toBe(FONCTIONS.length);
     for (const [, , roles] of grants) {
       expect(roles.trim()).toBe('bg_edge');
     }
@@ -190,9 +193,18 @@ describe('Migration autonomie — aucune donnée existante touchée', () => {
      * change le niveau d'un outil. L'interdire en bloc serait faux ; l'autoriser
      * sans contrôle le serait aussi. On vérifie donc OÙ il se trouve.
      */
+    /*
+     * Deux UPDATE sont légitimes, et pas un de plus :
+     *  - l'autonomie, qui change le niveau d'un outil ;
+     *  - la transition de statut d'une entrée de journal.
+     *
+     * Le second ne réécrit QUE `statut` (et `resultat`) : le test suivant
+     * vérifie qu'il ne peut pas toucher au contenu déjà journalisé.
+     */
     const updates = [...CODE.matchAll(/UPDATE saas_business\.module_records/gi)];
-    expect(updates.length).toBe(1);
+    expect(updates.length).toBe(2);
     expect(corpsFonction('bg_set_agent_autonomy')).toMatch(/UPDATE saas_business\.module_records/);
+    expect(corpsFonction('bg_journal_set_status')).toMatch(/UPDATE saas_business\.module_records/);
     for (const nom of ['bg_journal_append', 'bg_journal_list', 'bg_get_agent_autonomy']) {
       expect(corpsFonction(nom), nom).not.toMatch(/UPDATE saas_business\.module_records/i);
     }
@@ -220,5 +232,66 @@ describe('Migration autonomie — aucune donnée existante touchée', () => {
     expect(SQL).not.toMatch(/eyJ[A-Za-z0-9_-]{10,}/); // jeton JWT
     expect(SQL).not.toMatch(/postgres:\/\//i);
     expect(SQL).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  });
+});
+
+/**
+ * Transition de statut du journal (`bg_journal_set_status`).
+ *
+ * Cette fonction est la seule à pouvoir faire évoluer une entrée existante.
+ * Les garanties qu'elle doit porter sont donc vérifiées ici une par une : si
+ * l'une tombe, un journal pourrait afficher une annulation qui n'a pas eu lieu
+ * — ou une exécution redevenue « proposée ».
+ */
+describe('Migration autonomie — transition de statut du journal', () => {
+  const corps = corpsFonction('bg_journal_set_status');
+
+  it('vérifie les droits d’écriture de l’espace avant toute mise à jour', () => {
+    expect(corps).toMatch(/bg_lock_workspace_access\(p_user_id, p_workspace_id, true\)/);
+    const verif = corps.indexOf('bg_lock_workspace_access');
+    const update = corps.indexOf('UPDATE saas_business.module_records');
+    expect(verif).toBeGreaterThan(-1);
+    expect(update).toBeGreaterThan(verif);
+  });
+
+  it('borne la ligne ciblée à l’utilisateur, à l’espace ET à la catégorie du journal', () => {
+    // On teste sur le corps ENTIER : la clause `FOR UPDATE` du verrouillage
+    // apparaît après l'UPDATE (lui-même après les bornes), une découpe autour
+    // du mot `UPDATE` couperait donc la vérification du verrou.
+    expect(corps).toMatch(/r\.user_id = p_user_id/);
+    expect(corps).toMatch(/r\.workspace_id IS NOT DISTINCT FROM p_workspace_id/);
+    expect(corps).toMatch(/r\.category = 'bg_module_agent_journal'/);
+    // `FOR UPDATE` : deux décisions simultanées ne peuvent pas se contredire.
+    expect(corps).toMatch(/FOR UPDATE/);
+  });
+
+  it('refuse les statuts inconnus', () => {
+    expect(corps).toMatch(/invalid journal status/);
+    expect(corps).toMatch(/'proposee'\s*,\s*'validee'\s*,\s*'refusee'\s*,\s*'executee'\s*,\s*'echouee'\s*,\s*'annulee'/);
+  });
+
+  it('n’autorise que les transitions prévues, et rend les états finaux terminaux', () => {
+    // Refusée et annulée ne mènent nulle part : une décision ne se « dé-annule »
+    // pas pour redevenir une exécution.
+    expect(corps).toMatch(/WHEN 'refusee'\s+THEN ARRAY\[\]::text\[\]/);
+    expect(corps).toMatch(/WHEN 'annulee'\s+THEN ARRAY\[\]::text\[\]/);
+    // Une entrée exécutée ne peut QUE devenir annulée.
+    expect(corps).toMatch(/WHEN 'executee' THEN ARRAY\['annulee'\]/);
+    // Une entrée proposée peut être validée, refusée, exécutée, échouée ou annulée.
+    expect(corps).toMatch(/WHEN 'proposee' THEN ARRAY\['validee','refusee','executee','echouee','annulee'\]/);
+    expect(corps).toMatch(/NOT \(p_status = ANY \(v_allowed\)\)/);
+  });
+
+  it('ne réécrit QUE le statut et le résultat, jamais le contenu journalisé', () => {
+    // `jsonb_set` sur un seul chemin : montant, résumé ou décision restent figés.
+    expect(corps).toMatch(/jsonb_set\(v_data, '\{statut\}'/);
+    expect(corps).toMatch(/jsonb_set\(v_data, '\{resultat\}'/);
+    // Aucune réécriture globale de la donnée par l'appelant.
+    expect(corps).not.toMatch(/data\s*=\s*p_donn/);
+    expect(corps).toMatch(/left\(p_resultat, 600\)/);
+  });
+
+  it('échoue franchement sur une entrée inexistante au lieu de renvoyer « vrai »', () => {
+    expect(corps).toMatch(/journal entry not found/);
   });
 });

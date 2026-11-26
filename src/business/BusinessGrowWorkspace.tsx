@@ -28,6 +28,7 @@ import { GrowthOsOverview, GrowthOsReports } from './os/GrowthOsOverview';
 import { BriefingDuJour } from './os/BriefingDuJour';
 import { HistoriqueAgent } from './agent/HistoriqueAgent';
 import { LitigesWorkspace } from './finance/LitigesWorkspace';
+import { RecouvrementWorkspace } from './finance/RecouvrementWorkspace';
 import { RentabiliteWorkspace } from './catalog/RentabiliteWorkspace';
 import { growthOsModule, growthOsModuleFromPath, legacyGrowthOsPath, type GrowthOsModule } from './os/modules';
 import { readProspects } from './growth/model';
@@ -2502,18 +2503,13 @@ function ScopedBusinessGrowWorkspace() {
           onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
         />
       )}
+      {/* Relances : vraie séquence progressive de recouvrement. L'onglet CRM
+          « relances » reste accessible depuis la fiche contact. */}
       {workspaceId && osModule === 'relances' && (
-        <CrmWorkspace
+        <RecouvrementWorkspace
           key="relances"
           workspaceId={workspaceId}
-          legacyProspects={legacyProspects}
-          initialTab="relances"
-          lockTab
-          initialContactId={crmContactId}
-          onInitialContactHandled={() => setCrmContactId(null)}
-          onCreateReceivable={(contactId) => { setFinanceContactId(contactId); go('finance'); }}
-          onOpenFinance={() => go('finance')}
-          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+          onOpenFinance={(contactId) => { if (contactId) setFinanceContactId(contactId); go('finance'); }}
         />
       )}
 

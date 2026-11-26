@@ -458,8 +458,14 @@ const store: BusinessGrowStore = {
   async setAgentAutonomy(userId, workspaceId, toolName, level, ruleId) {
     // `ruleId` vide devient NULL en SQL : l'absence de règle doit être
     // explicite, jamais une chaîne vide qui passerait pour une règle nommée.
-    const [row] = await requiredSql()`select * from saas_business.bg_set_agent_autonomy(${userId}::uuid, ${workspaceId}::uuid, ${toolName}, ${level}, ${ruleId})`;
-    return row;
+    //
+    // La fonction renvoie un BOOLÉEN : l'appeler en `FROM` échouerait avec
+    // « column ... does not exist » (détecté par le test de contrat SQL). On
+    // l'appelle donc en `SELECT` scalaire, puis on relit la préférence.
+    const db = requiredSql();
+    await db`select saas_business.bg_set_agent_autonomy(${userId}::uuid, ${workspaceId}::uuid, ${toolName}, ${level}, ${ruleId}) as saved`;
+    const [preference] = await db`select * from saas_business.bg_get_agent_autonomy(${userId}::uuid, ${workspaceId}::uuid) where tool_name = ${toolName}`;
+    return preference ?? { tool_name: toolName, level, rule_id: ruleId };
   },
   async proposeAgentTask(userId, workspaceId, conversationId, category, sourceId, idempotencyKey) {
     const [row] = await requiredSql()`select saas_business.bg_agent_propose_task(${userId}::uuid, ${workspaceId}::uuid, ${conversationId}::uuid, ${category}, ${sourceId}::uuid, ${idempotencyKey}::uuid) as result`;
