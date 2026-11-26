@@ -47,3 +47,44 @@ CSV/Excel, les liens, l'e-mail et les rappels internes.
 
 - Saisie par photo ou par voix : non disponible aujourd'hui, non inventée.
 - Connecteurs de messagerie : hors périmètre (vérifications en attente).
+
+---
+
+## État livré — mise à jour
+
+### Fonctionnalités réellement construites ou complétées
+
+| # | Ce qui a été livré | Où | Branché dans l'interface ? |
+|---|---|---|---|
+| 1 | Dossier de litige : montant, devise, échéance, alerte, inventaire de preuves, brouillon de réponse | `finance/litiges.ts` | **Non** — module testé, écran à brancher |
+| 3 | Prévision de trésorerie 4/8/12 semaines, actions chiffrées en cas de trou | `cash/prevision.ts` | **Oui** — écran Trésorerie |
+| 5 | Marge réelle par produit, ventes à perte, doublons d'abonnement, couverture du coût | `catalog/rentabilite.ts` | **Non** — module testé, écran à brancher |
+| 6 | Prochaine action obligatoire, classement des prospects, capture validée, message à copier | `crm/pilote.ts` | **Non** — module testé, écran à brancher |
+| 8 | Briefing : 3 priorités maximum, tri déterministe | `agent/socle/briefing.ts` | **Non** — module testé, écran à brancher |
+| 9 | Phrase → règle structurée, test à blanc sur données réelles | `automation/phrase.ts` | **Oui** — formulaire Automatisations |
+| Socle | Autonomie fermée par défaut, 9 outils à schéma fermé, journal annulable, contenu externe = donnée | `agent/socle/` | **Non** — briques prêtes |
+
+### Fonctionnalités non commencées (à dire clairement)
+
+| # | Reste à faire |
+|---|---|
+| 2 | Relances progressives : l'existant (modèles, promesses, statuts) est complet ; manquent la prochaine relance planifiée visible et le statut par créance en tête de liste |
+| 4 | Lien partageable, statut « vu », langue du document |
+| 7 | Modèles hors recouvrement (situations commerciales, SAV) |
+| 10 | Échéances et conformité : rien n'existe |
+| 11 | Veille concurrence : modèle présent, aucune interface, aucune écriture |
+| 12 | Déclencheur « du chiffre à la vidéo » depuis une donnée Grow |
+
+### Suite explicitement non faite
+
+- **Saisie par photo ou par voix** : non disponible dans le produit aujourd'hui, non inventée.
+- **Connecteurs WhatsApp / Meta / Google** : hors périmètre (vérifications en attente).
+- **Test sur Android physique** : aucun appareil ni émulateur disponible dans cet environnement. Les tests responsive automatisés ne remplacent pas un test matériel — je ne prétends donc pas l'avoir fait.
+- **Migrations** : aucune ajoutée. Tout repose sur `saas_business.module_records`, déjà en place, avec RLS et isolation par espace.
+
+### Garde-fous vérifiés
+
+- Aucune donnée de démonstration en production : les tests utilisent des données simulées, jamais le produit.
+- Aucune fonctionnalité retirée.
+- Aucun secret ajouté.
+- Les gardes Netlify (`netlify.toml`, `netlify.site.conf`, `scripts/`) n'ont pas été touchées.
