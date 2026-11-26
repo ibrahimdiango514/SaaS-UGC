@@ -5,7 +5,7 @@ import { ToastProvider } from './context/ToastContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
 import { ProtectedRoute, AdminRoute } from './components/Routes';
-import Landing from './pages/Landing';
+import Landing from './pages/LandingImmersive';
 import Legal from './pages/Legal';
 import NotFound from './pages/NotFound';
 
