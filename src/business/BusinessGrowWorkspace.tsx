@@ -25,6 +25,15 @@ import StorefrontWorkspace from './storefront/StorefrontWorkspace';
 import { IntegrationsCenter, type SubscriptionRefusal } from '../integrations/CatalogPage';
 import { GrowthOsLayout } from './os/GrowthOsLayout';
 import { GrowthOsOverview, GrowthOsReports } from './os/GrowthOsOverview';
+import { BriefingDuJour } from './os/BriefingDuJour';
+import { HistoriqueAgent } from './agent/HistoriqueAgent';
+import { LitigesWorkspace } from './finance/LitigesWorkspace';
+import { RecouvrementWorkspace } from './finance/RecouvrementWorkspace';
+import { MessagesWorkspace } from './marketing/MessagesWorkspace';
+import { EcheancesWorkspace } from './compliance/EcheancesWorkspace';
+import { VeilleWorkspace } from './growth/VeilleWorkspace';
+import { BriefStudioWorkspace } from './growth/BriefStudioWorkspace';
+import { RentabiliteWorkspace } from './catalog/RentabiliteWorkspace';
 import { growthOsModule, growthOsModuleFromPath, legacyGrowthOsPath, type GrowthOsModule } from './os/modules';
 import { readProspects } from './growth/model';
 import AgentReports from './agent/AgentReports';
@@ -208,6 +217,26 @@ const TOOL_LABELS: Record<string, string> = {
   handoff_ugc_brief: 'Transférer vers Studio UGC',
   request_connector_read: 'Demander une lecture connecteur',
   create_follow_up_task: 'Créer une tâche dans Operations Manager',
+  propose_business_action: 'Préparer une action métier',
+};
+
+/**
+ * Libellé lisible de l'outil métier proposé par l'agent.
+ *
+ * Ces noms viennent du socle (`agent/socle/outils.ts`) ; on les traduit ici pour
+ * que la carte « Approuver » dise ce qui sera préparé, au lieu d'afficher une clé
+ * technique comme `planifier_relance`.
+ */
+const LIBELLES_OUTIL_METIER: Record<string, string> = {
+  creer_facture: 'Créer une facture',
+  modifier_facture: 'Modifier une facture',
+  creer_devis: 'Créer un devis',
+  planifier_relance: 'Planifier une relance',
+  creer_tache: 'Créer une tâche',
+  ajouter_contact: 'Ajouter un contact',
+  ouvrir_litige: 'Ouvrir un litige',
+  enregistrer_paiement: 'Enregistrer un paiement',
+  preparer_message: 'Préparer un message',
 };
 
 interface VerifyBanner {
@@ -662,8 +691,27 @@ function AssistantView({
                   <Badge tone="neutral">{tool.risk_level === 'write_requires_approval' ? 'Validation requise' : 'Publication bloquée'}</Badge>
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-400">
-                  {typeof tool.input_args?.summary === 'string' ? tool.input_args.summary : JSON.stringify(tool.input_args)}
+                  {typeof tool.input_args?.summary === 'string'
+                    ? tool.input_args.summary
+                    : tool.tool_name === 'propose_business_action' && typeof tool.input_args?.resume === 'string'
+                      ? tool.input_args.resume
+                      : JSON.stringify(tool.input_args)}
                 </p>
+                {tool.tool_name === 'propose_business_action' && (
+                  <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/20 p-2.5 text-[11px] leading-relaxed text-slate-300">
+                    <p>
+                      Action : {LIBELLES_OUTIL_METIER[String(tool.input_args?.outil ?? '')]
+                        ?? String(tool.input_args?.outil ?? 'à préciser')}
+                    </p>
+                    <p className="mt-1 text-slate-400">
+                      Approuver ne crée rien : la proposition est déposée dans l’historique de l’agent,
+                      où vous pourrez l’exécuter ou l’annuler. Aucun client n’est contacté, aucun argent n’est engagé.
+                    </p>
+                    <Link to="/app/business/historique" className="mt-1.5 inline-flex items-center gap-1 text-brand-200 underline">
+                      Voir l’historique de l’agent <ArrowUpRight size={12} />
+                    </Link>
+                  </div>
+                )}
                 {tool.tool_name === 'create_follow_up_task' && Boolean(tool.input_args?.task) && typeof tool.input_args.task === 'object' && (
                   <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/20 p-2.5 text-[11px] leading-relaxed text-slate-300">
                     <p>Priorité : {String((tool.input_args.task as Record<string, unknown>).priority ?? 'à préciser')} · Échéance : {String((tool.input_args.task as Record<string, unknown>).dueDate ?? 'à préciser')}</p>
@@ -2439,7 +2487,23 @@ function ScopedBusinessGrowWorkspace() {
         </section>
       )}
 
-      {osModule === 'overview' && <GrowthOsOverview workspaceId={workspaceId} onNavigate={go} />}
+      {osModule === 'litiges' && (
+        <LitigesWorkspace workspaceId={workspaceId} onOpenFinance={() => go('finance')} />
+      )}
+
+      {osModule === 'rentabilite' && (
+        <RentabiliteWorkspace workspaceId={workspaceId} onOpenCatalog={() => go('catalog')} />
+      )}
+
+      {osModule === 'historique' && <HistoriqueAgent workspaceId={workspaceId} />}
+
+      {osModule === 'overview' && (
+        <>
+          {/* Briefing quotidien en tête de l'accueil : trois priorités, une action préparée par l'agent. */}
+          <BriefingDuJour workspaceId={workspaceId} onNavigate={go} />
+          <GrowthOsOverview workspaceId={workspaceId} onNavigate={go} />
+        </>
+      )}
       {osModule === 'reports' && <GrowthOsReports workspaceId={workspaceId} />}
 
       {workspaceId && osModule === 'crm' && (
@@ -2482,18 +2546,13 @@ function ScopedBusinessGrowWorkspace() {
           onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
         />
       )}
+      {/* Relances : vraie séquence progressive de recouvrement. L'onglet CRM
+          « relances » reste accessible depuis la fiche contact. */}
       {workspaceId && osModule === 'relances' && (
-        <CrmWorkspace
+        <RecouvrementWorkspace
           key="relances"
           workspaceId={workspaceId}
-          legacyProspects={legacyProspects}
-          initialTab="relances"
-          lockTab
-          initialContactId={crmContactId}
-          onInitialContactHandled={() => setCrmContactId(null)}
-          onCreateReceivable={(contactId) => { setFinanceContactId(contactId); go('finance'); }}
-          onOpenFinance={() => go('finance')}
-          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+          onOpenFinance={(contactId) => { if (contactId) setFinanceContactId(contactId); go('finance'); }}
         />
       )}
 
@@ -2528,6 +2587,23 @@ function ScopedBusinessGrowWorkspace() {
           onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
         />
       )}
+
+      {workspaceId && osModule === 'messages' && <MessagesWorkspace workspaceId={workspaceId} />}
+
+      {osModule === 'veille' && (
+        <VeilleWorkspace
+          memory={memory}
+          prixMaison={null}
+          deviseMaison=""
+          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+        />
+      )}
+
+      {workspaceId && osModule === 'brief_studio' && (
+        <BriefStudioWorkspace workspaceId={workspaceId} nomEntreprise={workspace?.name ?? ''} />
+      )}
+
+      {osModule === 'echeances' && <EcheancesWorkspace workspaceId={workspaceId} />}
 
       {workspaceId && osModule === 'finance' && (
         <FinanceWorkspace

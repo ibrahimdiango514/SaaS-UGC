@@ -17,7 +17,16 @@ export type BusinessToolName =
   | 'propose_action_plan'
   | 'propose_campaign_brief'
   | 'handoff_ugc_brief'
-  | 'request_connector_read';
+  | 'request_connector_read'
+  /**
+   * Proposition d'une action métier issue du socle (créer une facture, planifier
+   * une relance, ouvrir un litige…).
+   *
+   * Elle n'écrit JAMAIS de donnée métier : approuvée, elle dépose une entrée
+   * `proposee` dans le journal de l'agent, que l'utilisateur retrouve dans
+   * l'historique. C'est la contrepartie de la promesse « je prépare, tu valides ».
+   */
+  | 'propose_business_action';
 
 export interface BusinessRoleSpec {
   roleKey: BusinessRoleKey;
@@ -114,6 +123,34 @@ const TOOL_RISK_MAP: Record<BusinessToolName, ToolRiskLevel> = {
   propose_campaign_brief: 'write_requires_approval',
   handoff_ugc_brief: 'write_requires_approval',
   request_connector_read: 'read_only',
+  // Toujours « à approuver » : aucun niveau d'autonomie ne peut rendre cet outil
+  // automatique, la décision revient à l'utilisateur dans l'historique.
+  propose_business_action: 'write_requires_approval',
+};
+
+/**
+ * Outils métier du socle (`src/business/agent/socle/outils.ts`).
+ *
+ * Dupliqué depuis l'Edge (qui ne peut pas importer `src/`), et VÉRIFIÉ par un
+ * test de parité : une divergence ferait refuser ici une action que l'interface
+ * sait préparer, ou accepter une action inconnue.
+ */
+export const NOMS_OUTILS_METIER: readonly string[] = [
+  'creer_facture', 'modifier_facture', 'creer_devis', 'planifier_relance', 'creer_tache',
+  'ajouter_contact', 'ouvrir_litige', 'enregistrer_paiement', 'preparer_message',
+];
+
+/** Catégories réelles visées par chaque outil métier. */
+export const CATEGORIE_PAR_OUTIL: Record<string, string> = {
+  creer_facture: 'bg_module_sales_invoices',
+  modifier_facture: 'bg_module_sales_invoices',
+  creer_devis: 'bg_module_sales_quotes',
+  planifier_relance: 'bg_module_receivable_reminders',
+  creer_tache: 'bg_module_crm_tasks',
+  ajouter_contact: 'bg_module_crm_contacts',
+  ouvrir_litige: 'bg_module_receivable_disputes',
+  enregistrer_paiement: 'bg_module_receivable_payments',
+  preparer_message: 'bg_module_receivable_reminders',
 };
 
 const VALID_TOOLS = new Set<string>(Object.keys(TOOL_RISK_MAP));
@@ -205,7 +242,17 @@ export function buildBusinessSystemInstruction(input: {
   }
 
   sections.push(
-    'Si et seulement si une action structurée concrète doit être soumise à l’approbation de l’utilisateur (mémoriser un fait clé, créer un plan d’action, préparer un brief de campagne, ou préparer un brief vidéo vers Studio UGC), tu peux ajouter à la toute fin de ta réponse un bloc caché compact (< 400 caractères) exact, toujours fermé par --> : <!--REELORA_TOOL_PROPOSALS:[{"toolName":"propose_memory_save|propose_action_plan|propose_campaign_brief|handoff_ugc_brief","summary":"...","arguments":{...}}]-->. Pour handoff_ugc_brief, utilise les clés product, angle, hook, targetAudience. N’exécute jamais d’action sans validation humaine.',
+    'Si et seulement si une action structurée concrète doit être soumise à l’approbation de l’utilisateur (mémoriser un fait clé, créer un plan d’action, préparer un brief de campagne, préparer un brief vidéo vers Studio UGC, ou préparer une ACTION MÉTIER), tu peux ajouter à la toute fin de ta réponse un bloc caché compact (< 400 caractères) exact, toujours fermé par --> : <!--REELORA_TOOL_PROPOSALS:[{"toolName":"propose_memory_save|propose_action_plan|propose_campaign_brief|handoff_ugc_brief|propose_business_action","summary":"...","arguments":{...}}]-->. Pour handoff_ugc_brief, utilise les clés product, angle, hook, targetAudience. N’exécute jamais d’action sans validation humaine.',
+  );
+  sections.push(
+    [
+      'Pour une ACTION MÉTIER, utilise toolName "propose_business_action" avec exactement ces clés :',
+      '{"outil":"<nom>","resume":"<une phrase, 400 caractères max>","donnees":{...}}.',
+      `Outils autorisés : ${NOMS_OUTILS_METIER.join(', ')}.`,
+      'Choisis uniquement ce que l’utilisateur a demandé ou ce que les données montrent explicitement.',
+      'Ne calcule jamais un montant absent des données : si une valeur manque, ne la propose pas.',
+      'Cette proposition ne sera PAS exécutée automatiquement : elle apparaîtra dans l’historique de l’agent, où l’utilisateur peut l’annuler.',
+    ].join(' '),
   );
 
   return sections.join('\n\n');
@@ -223,6 +270,38 @@ export function normalizeToolProposalArguments(
   rawArgs: Record<string, unknown>,
   fallbackSummary = '',
 ): Record<string, unknown> {
+  if (toolName === 'propose_business_action') {
+    /*
+     * Normalisation stricte : on ne laisse passer que ce que l'écran sait
+     * afficher. Un outil inconnu, une catégorie inventée ou un résumé vide
+     * feraient échouer la proposition côté SQL — autant les corriger ici, où
+     * l'erreur est visible, plutôt que de produire une carte « Valider »
+     * inutilisable.
+     */
+    const outilBrut = typeof rawArgs.outil === 'string' ? rawArgs.outil.trim() : '';
+    const outil = NOMS_OUTILS_METIER.includes(outilBrut)
+      ? outilBrut
+      : (NOMS_OUTILS_METIER.includes(typeof rawArgs.tool === 'string' ? rawArgs.tool.trim() : '')
+        ? String(rawArgs.tool).trim() : '');
+    const resume = cleanOptString(rawArgs.resume, 400)
+      ?? cleanOptString(rawArgs.summary, 400)
+      ?? cleanOptString(fallbackSummary, 400)
+      ?? '';
+    const donneesSource = rawArgs.donnees ?? rawArgs.arguments ?? rawArgs.data;
+    const donnees = donneesSource && typeof donneesSource === 'object' && !Array.isArray(donneesSource)
+      ? donneesSource as Record<string, unknown>
+      : {};
+    return {
+      outil,
+      resume,
+      donnees,
+      categorie: outil ? CATEGORIE_PAR_OUTIL[outil] ?? '' : '',
+      // Une proposition ne s'exécute jamais : ce drapeau est redondant avec le
+      // statut SQL, et c'est voulu — deux barrières valent mieux qu'une.
+      execute: false,
+    };
+  }
+
   if (toolName === 'handoff_ugc_brief') {
     const product = cleanOptString(rawArgs.product, 160)
       ?? cleanOptString(rawArgs.productName, 160)

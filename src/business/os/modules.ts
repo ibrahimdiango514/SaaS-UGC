@@ -1,7 +1,8 @@
 import {
   BarChart3, BellRing, Brain, Building2, ClipboardList, Landmark, LayoutDashboard, Mail,
   Megaphone, Package, Plus, Plug, Shield, ShoppingCart, Store, Target, Truck, UserPlus,
-  Users, Wallet, Workflow, Zap,
+  Users, Wallet, Workflow, Zap, History, Scale, TrendingUp,
+  CalendarClock, Clapperboard, MessagesSquare,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -18,7 +19,9 @@ import type { LucideIcon } from 'lucide-react';
 export type GrowthOsModule =
   | 'overview' | 'crm' | 'pipeline' | 'tasks' | 'relances'
   | 'sales' | 'catalog' | 'suppliers' | 'storefront' | 'finance' | 'cash' | 'recouvrement' | 'reports'
-  | 'automation' | 'marketing' | 'assistant'
+  | 'litiges' | 'rentabilite'
+  | 'automation' | 'marketing' | 'assistant' | 'historique'
+  | 'messages' | 'echeances' | 'veille' | 'brief_studio'
   | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
 
 export interface GrowthOsNavItem {
@@ -99,6 +102,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         path: '/app/business/suppliers', icon: Truck,
       },
       {
+        key: 'rentabilite', label: 'Rentabilité et fuites', shortLabel: 'Rentabilité',
+        description: 'Marge réelle par produit, ventes à perte et fuites d’argent',
+        path: '/app/business/rentabilite', icon: TrendingUp,
+      },
+      {
         key: 'storefront', label: 'Vitrine commerciale', shortLabel: 'Vitrine',
         description: 'Catalogue partageable et demandes de commande',
         path: '/app/business/storefront', icon: Store,
@@ -124,6 +132,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         description: 'Priorités, promesses, litiges et risques',
         path: '/app/business/recouvrement', icon: BellRing,
       },
+      {
+        key: 'litiges', label: 'Litiges et contestations', shortLabel: 'Litiges',
+        description: 'Dossiers, échéances, preuves rassemblées et réponse préparée',
+        path: '/app/business/litiges', icon: Scale,
+      },
     ],
   },
   {
@@ -136,6 +149,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         path: '/app/business/assistant', icon: Brain,
       },
       {
+        key: 'historique', label: 'Historique de l’agent', shortLabel: 'Historique',
+        description: 'Chaque proposition, décision et action, avec annulation',
+        path: '/app/business/historique', icon: History,
+      },
+      {
         key: 'automation', label: 'Automatisations', shortLabel: 'Automatisations',
         description: 'Signaux, règles et actions confirmées',
         path: '/app/business/automation', icon: Workflow,
@@ -144,6 +162,21 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         key: 'marketing', label: 'Marketing et fidélisation', shortLabel: 'Marketing',
         description: 'Segments, campagnes et messages préparés',
         path: '/app/business/marketing', icon: Megaphone,
+      },
+      {
+        key: 'messages', label: 'Messages préparés', shortLabel: 'Messages',
+        description: 'Modèles et réponses par situation, à copier — aucun envoi',
+        path: '/app/business/messages', icon: MessagesSquare,
+      },
+      {
+        key: 'veille', label: 'Veille marché', shortLabel: 'Veille',
+        description: 'Concurrents, prix relevés, signaux et synthèse',
+        path: '/app/business/veille', icon: TrendingUp,
+      },
+      {
+        key: 'brief_studio', label: 'Du chiffre à la vidéo', shortLabel: 'Vidéo',
+        description: 'Brief Studio UGC construit sur vos chiffres réels, sans débit',
+        path: '/app/business/brief-studio', icon: Clapperboard,
       },
     ],
   },
@@ -155,6 +188,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         key: 'company', label: 'Contexte entreprise', shortLabel: 'Entreprise',
         description: 'Activité, offre et priorités',
         path: '/app/business/company', icon: Building2,
+      },
+      {
+        key: 'echeances', label: 'Échéances et conformité', shortLabel: 'Échéances',
+        description: 'Vos dates rappelées à temps — aucun conseil fiscal ni juridique',
+        path: '/app/business/echeances', icon: CalendarClock,
       },
       {
         key: 'memory', label: 'Mémoire métier', shortLabel: 'Mémoire',

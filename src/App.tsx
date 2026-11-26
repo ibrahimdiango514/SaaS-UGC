@@ -10,6 +10,7 @@ import Legal from './pages/Legal';
 import NotFound from './pages/NotFound';
 
 const Login = lazy(() => import('./pages/Login'));
+const PartageDocument = lazy(() => import('./pages/PartageDocument'));
 const Signup = lazy(() => import('./pages/Signup'));
 const OwnerBootstrap = lazy(() => import('./pages/OwnerBootstrap'));
 const OwnerConfirmation = lazy(() => import('./pages/OwnerConfirmation'));
@@ -66,6 +67,14 @@ export default function App() {
                 <Route path="/auth/callback" element={<AuthCallback />} />
                 <Route path="/confidentialite" element={<Legal kind="confidentialite" />} />
                 <Route path="/conditions" element={<Legal kind="conditions" />} />
+                {/*
+                 * Partage d'un document commercial. PUBLIQUE par nécessité :
+                 * le destinataire n'a pas de compte. La charge est entièrement
+                 * contenue dans le fragment d'URL (`#…`), qui n'est jamais
+                 * transmis au serveur : la page ne lit aucune donnée en base et
+                 * ne peut donc exposer que ce que l'émetteur a choisi d'envoyer.
+                 */}
+                <Route path="/partage/document" element={<PartageDocument />} />
 
                 <Route element={<ProtectedRoute />}>
                   <Route element={<Layout />}>

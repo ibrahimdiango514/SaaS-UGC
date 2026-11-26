@@ -440,6 +440,33 @@ const store: BusinessGrowStore = {
     const [row] = await requiredSql()`select saas_business.bg_delete_agent_report(${userId}::uuid, ${workspaceId}::uuid, ${reportId}::uuid) as deleted`;
     return row.deleted as boolean;
   },
+  async appendAgentJournal(userId, workspaceId, entry) {
+    const db = requiredSql();
+    const [row] = await db`select saas_business.bg_journal_append(${userId}::uuid, ${workspaceId}::uuid, ${db.json(asJsonValue(entry))}) as id`;
+    return row.id as string;
+  },
+  async setAgentJournalStatus(userId, workspaceId, entryId, status, result) {
+    const [row] = await requiredSql()`select saas_business.bg_journal_set_status(${userId}::uuid, ${workspaceId}::uuid, ${entryId}::uuid, ${status}, ${result}) as updated`;
+    return row.updated as boolean;
+  },
+  async listAgentJournal(userId, workspaceId, limit, before) {
+    return asRows(await requiredSql()`select * from saas_business.bg_journal_list(${userId}::uuid, ${workspaceId}::uuid, ${limit}::integer, ${before}::timestamptz)`);
+  },
+  async getAgentAutonomy(userId, workspaceId) {
+    return asRows(await requiredSql()`select * from saas_business.bg_get_agent_autonomy(${userId}::uuid, ${workspaceId}::uuid)`);
+  },
+  async setAgentAutonomy(userId, workspaceId, toolName, level, ruleId) {
+    // `ruleId` vide devient NULL en SQL : l'absence de règle doit être
+    // explicite, jamais une chaîne vide qui passerait pour une règle nommée.
+    //
+    // La fonction renvoie un BOOLÉEN : l'appeler en `FROM` échouerait avec
+    // « column ... does not exist » (détecté par le test de contrat SQL). On
+    // l'appelle donc en `SELECT` scalaire, puis on relit la préférence.
+    const db = requiredSql();
+    await db`select saas_business.bg_set_agent_autonomy(${userId}::uuid, ${workspaceId}::uuid, ${toolName}, ${level}, ${ruleId}) as saved`;
+    const [preference] = await db`select * from saas_business.bg_get_agent_autonomy(${userId}::uuid, ${workspaceId}::uuid) where tool_name = ${toolName}`;
+    return preference ?? { tool_name: toolName, level, rule_id: ruleId };
+  },
   async proposeAgentTask(userId, workspaceId, conversationId, category, sourceId, idempotencyKey) {
     const [row] = await requiredSql()`select saas_business.bg_agent_propose_task(${userId}::uuid, ${workspaceId}::uuid, ${conversationId}::uuid, ${category}, ${sourceId}::uuid, ${idempotencyKey}::uuid) as result`;
     return row.result;

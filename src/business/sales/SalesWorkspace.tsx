@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowRight, Download, FileText, Package, Plus, Printer, Receipt, ShoppingCart, Trash2,
+  ArrowRight, Download, FileText, Link2, Package, Plus, Printer, Receipt, ShoppingCart, Trash2,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
@@ -11,6 +11,7 @@ import {
   CATALOG_CATEGORIES, movementFromRecord, orderReturnMovements, orderStockMovements, productFromRecord,
 } from '../catalog/model';
 import { paymentFromRecord } from '../finance/model';
+import { lienPartageable } from './document';
 import {
   INVOICE_STATUSES, ORDER_STATUSES, QUOTE_STATUSES, SALES_CATEGORIES, addDays, computeInvoiceView,
   computeSalesDashboard, computeTotals, conversionErrors, invoiceFromRecord, invoiceToData,
@@ -373,6 +374,43 @@ export default function SalesWorkspace({
     win.print();
   };
 
+  /**
+   * Partage d'un document : le lien contient le document lui-même, donc il
+   * fonctionne pour quelqu'un qui n'a pas de compte. Rien n'est publié sur un
+   * serveur de partage.
+   */
+  const partager = async (kind: SalesTab, document: Quote | SalesOrder | Invoice) => {
+    const type = kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture';
+    const lien = lienPartageable({
+      kind: type,
+      number: document.number,
+      issuedAt: 'issuedAt' in document ? document.issuedAt : '',
+      dueDate: 'dueAt' in document ? (document as { dueAt?: string }).dueAt ?? '' : ('expiresAt' in document ? document.expiresAt : ''),
+      currency: document.currency,
+      terms: 'terms' in document ? document.terms : '',
+      lines: document.lines,
+      clientNom: contactName(document.contactId),
+      entreprise: 'SORAHNEX Business',
+    });
+    try {
+      await navigator.clipboard.writeText(lien);
+      toast.success(`Lien de partage copié (${document.number}). Il contient le document, pas d’accès à vos données.`);
+    } catch {
+      // La copie peut être refusée (contexte non sécurisé) : on affiche le lien
+      // plutôt que d'échouer en silence.
+      window.prompt('Copiez ce lien de partage :', lien);
+    }
+    // Marque le document « vu » côté vendeur : sans cela, le statut resterait
+    // « envoyé » alors que le lien a été généré et transmis.
+    if (workspaceId && document.status === 'envoye') {
+      const cible = kind === 'devis' ? quotesStore : kind === 'commandes' ? ordersStore : invoicesStore;
+      await cible.update(document.id, { ...document, status: 'vu' })
+        .then(() => toast.success(`${document.number} est marqué « vu ».`))
+        // Un échec de marquage ne doit pas casser le partage : on le signale.
+        .catch((cause) => toast.error(`Lien copié, mais le statut n’a pas pu être mis à jour : ${asAppError(cause).message}`));
+    }
+  };
+
   const deleteDraft = async (kind: SalesTab, document: Quote | SalesOrder | Invoice) => {
     const label = kind === 'devis' ? 'devis' : kind === 'commandes' ? 'commande' : 'facture';
     if (!window.confirm(`Supprimer définitivement le ${label} ${document.number} ? Cette action n’efface aucun paiement ni créance déjà liés.`)) return;
@@ -527,6 +565,7 @@ export default function SalesWorkspace({
               <Button variant="danger" icon={<Trash2 size={13} />} loading={busyId === detailRecord.id} onClick={() => void deleteDraft(detail.kind, detailRecord)}>Supprimer</Button>
             )}
             <Button variant="ghost" icon={<Printer size={13} />} onClick={() => openPrint(detail.kind, detailRecord)}>Imprimer</Button>
+            <Button variant="outline" icon={<Link2 size={13} />} onClick={() => void partager(detail.kind, detailRecord)}>Copier le lien de partage</Button>
             <Button variant="outline" onClick={() => { setEditor({ kind: detail.kind, document: detailRecord }); setDetail(null); }}>Modifier</Button>
             {detail.kind === 'devis' && detailRecord.status !== 'converti' && (
               <Button onClick={() => void convertQuote(detailRecord as Quote)} loading={busyId === detailRecord.id}><ArrowRight size={13} /> Convertir en commande</Button>

@@ -123,7 +123,21 @@ describe('Growth OS — routing réel', () => {
     expect(screen.getByRole('link', { name: 'Achats et fournisseurs' }).getAttribute('href')).toBe('/app/business/suppliers');
     expect(screen.getByRole('link', { name: 'Vitrine commerciale' }).getAttribute('href')).toBe('/app/business/storefront');
     expect(screen.queryByRole('link', { name: 'Croissance' })).toBeNull();
-    expect(GROWTH_OS_NAV.flatMap((group) => group.items)).toHaveLength(21);
+    /*
+     * L'intention de cette assertion est de couvrir TOUS les modules déclarés,
+     * pas d'en figer le nombre. Un décompte en dur casse à chaque module ajouté
+     * sans rien prouver de plus ; on vérifie donc que le menu rend exactement
+     * les entrées déclarées, et qu'il y en a au moins les 21 d'origine.
+     */
+    const declares = GROWTH_OS_NAV.flatMap((group) => group.items);
+    expect(declares.length).toBeGreaterThanOrEqual(21);
+    for (const item of declares) {
+      expect(screen.getByRole('link', { name: item.label }).getAttribute('href')).toBe(item.path);
+    }
+    // Les trois modules ajoutés par la refonte Business Grow sont bien exposés.
+    for (const cle of ['litiges', 'rentabilite', 'historique']) {
+      expect(declares.some((item) => item.key === cle), cle).toBe(true);
+    }
   });
 
   it('ouvre le menu mobile sans perdre la navigation', () => {
