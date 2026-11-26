@@ -122,7 +122,15 @@ describe('Preuve de routage — la nouvelle coquille est bien celle affichée', 
     expect(screen.getByText(/Nouveau chat/i)).toBeTruthy();
     expect(screen.getAllByText(/Bibliothèque/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Intégrations/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Explorer/i)).toBeTruthy();
+    /*
+     * « Explorer » a été retiré : son lien pointait vers `/app/ai/explorer`,
+     * route jamais déclarée (page 404). Ce test d'écran le verrouillait sans
+     * vérifier sa destination. Il vérifie maintenant les entrées réellement
+     * navigables, et la destination de chacune est contrôlée par
+     * `tests/routes-links-alive.test.ts`.
+     */
+    expect(screen.queryByText(/Explorer/i)).toBeNull();
+    expect(screen.getByText(/Images de référence/i)).toBeTruthy();
     expect(screen.getByText(/Espace Business/i)).toBeTruthy();
     expect(screen.getByLabelText(/Rechercher dans les conversations/i)).toBeTruthy();
     expect(screen.getByLabelText(/Navigation de l’assistant/i)).toBeTruthy();
