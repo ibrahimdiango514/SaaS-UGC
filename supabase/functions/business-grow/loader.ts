@@ -12,7 +12,7 @@
 import postgres from "npm:postgres@3.4.5";
 
 const REPO = "ibrahimdiango514/SaaS-UGC";
-const COMMIT = "4b584d98b4796a89820bac5f2fd72f741e083856";
+const COMMIT = "776a2eaff24c6967d891c61e706f6cef003e4a7e";
 const PATH = "supabase/functions/business-grow.edge.js";
 const ARTIFACT_SHA256 = "d8a21be196baed64e25367e5135068c710918e32228d96ca6391aec8930d26e9";
 const ARTIFACT_CHARS = 92464;
