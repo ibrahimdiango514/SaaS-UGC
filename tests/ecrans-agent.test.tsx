@@ -6,6 +6,12 @@ const api = vi.hoisted(() => ({
   createModuleRecord: vi.fn(),
   updateModuleRecord: vi.fn(),
   deleteModuleRecord: vi.fn(),
+  // Journal dédié (`agent.journal`). Laissé SANS implémentation par défaut :
+  // l'appel rejette, ce qui simule un Edge pas encore déployé. Chaque test dit
+  // explicitement s'il teste la voie dédiée ou le repli.
+  listAgentJournal: vi.fn(),
+  appendAgentJournal: vi.fn(),
+  setAgentJournalStatus: vi.fn(),
 }));
 
 vi.mock('../src/business/api', async (importOriginal) => {
@@ -18,8 +24,24 @@ import { ToastProvider } from '../src/context/ToastContext';
 import { LitigesWorkspace } from '../src/business/finance/LitigesWorkspace';
 import { RentabiliteWorkspace } from '../src/business/catalog/RentabiliteWorkspace';
 import { HistoriqueAgent } from '../src/business/agent/HistoriqueAgent';
+import { BusinessGrowApiError } from '../src/business/api';
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); localiserJournalDedie(); });
+
+/**
+ * Simule un Edge déployé AVANT l'action `agent.journal`.
+ *
+ * C'est l'état réel du serveur tant que le déploiement n'a pas eu lieu :
+ * l'action est inconnue, le client doit alors le DIRE et se rabattre sur le
+ * stockage de module, jamais faire semblant que tout va bien.
+ */
+function localiserJournalDedie() {
+  api.listAgentJournal.mockRejectedValue(new BusinessGrowApiError('Opération Grow inconnue.', 'UNKNOWN_ACTION', 400));
+  api.appendAgentJournal.mockRejectedValue(new BusinessGrowApiError('Opération Grow inconnue.', 'UNKNOWN_ACTION', 400));
+  api.setAgentJournalStatus.mockRejectedValue(new BusinessGrowApiError('Opération Grow inconnue.', 'UNKNOWN_ACTION', 400));
+}
+
+localiserJournalDedie();
 
 const record = (id: string, category: string, data: Record<string, unknown>) => ({
   id, category, data, created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z',
@@ -148,5 +170,88 @@ describe('Historique de l’agent — annulable seulement quand c’est possible
     render(<ToastProvider><HistoriqueAgent workspaceId={WS} /></ToastProvider>);
     const panneau = await screen.findByTestId('historique-agent');
     await waitFor(() => expect(panneau.textContent).toContain('Aucune action de l’agent'));
+  });
+});
+
+/**
+ * Journal dédié (`agent.journal`) — la voie nominale.
+ *
+ * Ces tests vérifient ce que le repli ne peut pas garantir : la limite dédiée
+ * (5 000 entrées) et le fait qu'une annulation ne réécrit QUE le statut, sans
+ * pouvoir modifier un montant ou un résumé déjà journalisé.
+ */
+describe('Historique de l’agent — journal dédié', () => {
+  const entree = {
+    horodatage: '2026-11-25T10:00:00Z', outil: 'creer_facture', resume: 'Créer la facture FAC-9',
+    statut: 'executee', decidePar: 'utilisateur', resultat: 'Facture créée',
+    enregistrementId: '8f14e45f-ceea-467a-9c1b-1d3b5f0b1a11', categorie: 'bg_module_sales_invoices', annulable: true,
+  };
+
+  it('lit le journal dédié et n’affiche aucun bandeau de repli', async () => {
+    api.listAgentJournal.mockResolvedValue({ entries: [record('j9', 'bg_module_agent_journal', entree)] });
+    render(<ToastProvider><HistoriqueAgent workspaceId={WS} /></ToastProvider>);
+
+    const panneau = await screen.findByTestId('historique-agent');
+    await waitFor(() => expect(panneau.textContent).toContain('Créer la facture FAC-9'));
+    expect(panneau.textContent).not.toContain('mode compatible');
+    // Le repli ne doit pas avoir été sollicité : une seule vérité par lecture.
+    expect(api.listModuleRecords).not.toHaveBeenCalled();
+  });
+
+  it('avertit explicitement quand le serveur déployé ne connaît pas le journal dédié', async () => {
+    api.listModuleRecords.mockResolvedValue({ records: [record('j1', 'bg_module_agent_journal', entree)] });
+    render(<ToastProvider><HistoriqueAgent workspaceId={WS} /></ToastProvider>);
+
+    const panneau = await screen.findByTestId('historique-agent');
+    await waitFor(() => expect(panneau.textContent).toContain('mode compatible'));
+    // L'entrée reste affichée : le repli est dégradé, pas menteur.
+    expect(panneau.textContent).toContain('Créer la facture FAC-9');
+  });
+
+  it('annule en deux temps : retire la donnée, puis change le SEUL statut', async () => {
+    api.listAgentJournal.mockResolvedValue({ entries: [record('j9', 'bg_module_agent_journal', entree)] });
+    api.setAgentJournalStatus.mockResolvedValue({ updated: true });
+    api.deleteModuleRecord.mockResolvedValue({ deleted: true });
+
+    render(<ToastProvider><HistoriqueAgent workspaceId={WS} /></ToastProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /annuler cette action/i }));
+
+    await waitFor(() => expect(api.setAgentJournalStatus).toHaveBeenCalledTimes(1));
+    // La donnée métier est retirée de SA catégorie, pas du journal.
+    expect(api.deleteModuleRecord).toHaveBeenCalledWith('bg_module_sales_invoices', entree.enregistrementId, WS);
+    // Seuls identifiant + statut (+ résultat lisible) transitent : le serveur
+    // ne peut pas réécrire le montant ou le résumé de l'entrée.
+    const [, entryId, statut, resultat] = api.setAgentJournalStatus.mock.calls[0];
+    expect(entryId).toBe('j9');
+    expect(statut).toBe('annulee');
+    expect(String(resultat)).toContain('Annulée');
+    expect(api.updateModuleRecord).not.toHaveBeenCalled();
+  });
+
+  it('ne marque pas « annulée » si la donnée n’a pas pu être retirée', async () => {
+    api.listAgentJournal.mockResolvedValue({ entries: [record('j9', 'bg_module_agent_journal', entree)] });
+    api.deleteModuleRecord.mockRejectedValue(new Error('Suppression refusée'));
+
+    render(<ToastProvider><HistoriqueAgent workspaceId={WS} /></ToastProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: /annuler cette action/i }));
+
+    await waitFor(() => expect(api.deleteModuleRecord).toHaveBeenCalled());
+    // Aucune écriture de statut : afficher « annulée » sans l'avoir fait serait
+    // exactement le mensonge que l'écran doit rendre impossible.
+    expect(api.setAgentJournalStatus).not.toHaveBeenCalled();
+    expect(api.updateModuleRecord).not.toHaveBeenCalled();
+    // Le bouton reste proposé : l'action est toujours réellement annulable.
+    expect(screen.getByRole('button', { name: /annuler cette action/i })).toBeTruthy();
+  });
+
+  it('propage un refus de droits au lieu de se replier dessus', async () => {
+    api.listAgentJournal.mockRejectedValue(new BusinessGrowApiError('Accès refusé à cette entreprise.', 'FORBIDDEN', 403));
+
+    render(<ToastProvider><HistoriqueAgent workspaceId={WS} /></ToastProvider>);
+    expect(await screen.findByText(/Accès refusé à cette entreprise/i)).toBeTruthy();
+    // Un 403 n'est pas un déploiement en retard : se replier reviendrait à
+    // contourner le contrôle d'accès.
+    expect(api.listModuleRecords).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('historique-agent')).toBeNull();
   });
 });
