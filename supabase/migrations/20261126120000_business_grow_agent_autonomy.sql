@@ -220,6 +220,76 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- 3 bis. Transition de statut d'une entrée de journal
+-- ---------------------------------------------------------------------------
+-- Le journal n'est jamais réécrit librement : seul le STATUT peut évoluer, et
+-- uniquement selon des transitions autorisées. Une entrée « exécutée » ne peut
+-- pas redevenir « proposée », et une entrée « annulée » est terminale : sans
+-- cela, l'écran d'historique pourrait afficher une annulation qui n'a pas eu
+-- lieu. Le dernier `updated_at` conserve la trace de la décision.
+CREATE OR REPLACE FUNCTION saas_business.bg_journal_set_status(
+  p_user_id uuid,
+  p_workspace_id uuid,
+  p_entry_id uuid,
+  p_status text,
+  p_resultat text DEFAULT NULL
+) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, saas_business AS $$
+DECLARE
+  v_actuel text;
+  v_data jsonb;
+  v_allowed text[];
+BEGIN
+  PERFORM saas_business.bg_lock_workspace_access(p_user_id, p_workspace_id, true);
+
+  IF p_status NOT IN ('proposee','validee','refusee','executee','echouee','annulee') THEN
+    RAISE EXCEPTION 'invalid journal status' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT r.data, r.data ->> 'statut' INTO v_data, v_actuel
+  FROM saas_business.module_records r
+  WHERE r.id = p_entry_id
+    AND r.user_id = p_user_id
+    AND r.workspace_id IS NOT DISTINCT FROM p_workspace_id
+    AND r.category = 'bg_module_agent_journal'
+  FOR UPDATE;
+
+  IF v_data IS NULL THEN
+    RAISE EXCEPTION 'journal entry not found' USING ERRCODE = 'P0002';
+  END IF;
+
+  -- Graphe de transitions. Toute arête absente est un refus, pas un silence.
+  v_allowed := CASE COALESCE(v_actuel, 'proposee')
+    WHEN 'proposee' THEN ARRAY['validee','refusee','executee','echouee','annulee']
+    WHEN 'validee'  THEN ARRAY['executee','echouee','annulee']
+    WHEN 'executee' THEN ARRAY['annulee']
+    WHEN 'echouee'  THEN ARRAY['annulee']
+    WHEN 'refusee'  THEN ARRAY[]::text[]
+    WHEN 'annulee'  THEN ARRAY[]::text[]
+    ELSE ARRAY[]::text[]
+  END;
+
+  IF NOT (p_status = ANY (v_allowed)) THEN
+    RAISE EXCEPTION 'journal transition % -> % not allowed', COALESCE(v_actuel, 'proposee'), p_status
+      USING ERRCODE = '22023';
+  END IF;
+
+  v_data := jsonb_set(v_data, '{statut}', to_jsonb(p_status), true);
+  IF p_resultat IS NOT NULL AND btrim(p_resultat) <> '' THEN
+    v_data := jsonb_set(v_data, '{resultat}', to_jsonb(left(p_resultat, 600)), true);
+  END IF;
+
+  UPDATE saas_business.module_records r
+  SET data = v_data, updated_at = now()
+  WHERE r.id = p_entry_id
+    AND r.user_id = p_user_id
+    AND r.workspace_id IS NOT DISTINCT FROM p_workspace_id;
+
+  RETURN true;
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- 4. Privilèges — rien pour anon, rien pour les rôles serveur non concernés
 -- ---------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION saas_business.bg_agent_journal_limit() FROM PUBLIC, anon, authenticated;
@@ -227,9 +297,11 @@ REVOKE ALL ON FUNCTION saas_business.bg_get_agent_autonomy(uuid, uuid) FROM PUBL
 REVOKE ALL ON FUNCTION saas_business.bg_set_agent_autonomy(uuid, uuid, text, text, text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION saas_business.bg_journal_append(uuid, uuid, jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION saas_business.bg_journal_list(uuid, uuid, integer, timestamptz) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION saas_business.bg_journal_set_status(uuid, uuid, uuid, text, text) FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION saas_business.bg_agent_journal_limit() TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_get_agent_autonomy(uuid, uuid) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_set_agent_autonomy(uuid, uuid, text, text, text) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_journal_append(uuid, uuid, jsonb) TO bg_edge;
 GRANT EXECUTE ON FUNCTION saas_business.bg_journal_list(uuid, uuid, integer, timestamptz) TO bg_edge;
+GRANT EXECUTE ON FUNCTION saas_business.bg_journal_set_status(uuid, uuid, uuid, text, text) TO bg_edge;

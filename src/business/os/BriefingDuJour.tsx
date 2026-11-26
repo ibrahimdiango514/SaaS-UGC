@@ -16,8 +16,9 @@ import { CRM_CATEGORIES, FINANCE_CATEGORIES, useRecords } from '../records/useRe
 import { contactFromRecord, todayIso } from '../crm/model';
 import { computeReceivableView, disputeFromRecord, paymentFromRecord, receivableFromRecord } from '../finance/model';
 import { construireBriefing, totalEnJeu, type Priorite } from '../agent/socle/briefing';
-import { entreeToData, CATEGORIE_JOURNAL, type EntreeJournal } from '../agent/socle/journal';
+import type { EntreeJournal } from '../agent/socle/journal';
 import { preparerAction } from '../agent/socle/outils';
+import { ajouterEntree } from '../agent/journalApi';
 
 const money = (valeur: number | null, devise: string | null) => (valeur === null || !devise)
   ? '—'
@@ -39,7 +40,6 @@ export function BriefingDuJour({
   const receivablesStore = useRecords(FINANCE_CATEGORIES.receivables, workspaceId);
   const paymentsStore = useRecords(FINANCE_CATEGORIES.payments, workspaceId);
   const disputesStore = useRecords(FINANCE_CATEGORIES.disputes, workspaceId);
-  const journalStore = useRecords(CATEGORIE_JOURNAL, workspaceId);
   const [enCours, setEnCours] = useState<string | null>(null);
   const [preparees, setPreparees] = useState<Record<string, string>>({});
   const [today, setToday] = useState(todayIso());
@@ -126,7 +126,9 @@ export function BriefingDuJour({
         categorie: preparation.proposition.categorie,
         annulable: false,
       };
-      const id = await journalStore.create(entreeToData(entree), null);
+      // Écriture par le point d'accès unique du journal : la limite dédiée
+      // (5 000) s'applique, et la validation de l'Edge s'exécute.
+      const { id } = await ajouterEntree(workspaceId, entree);
       setPreparees((actuel) => ({ ...actuel, [priorite.cle]: id }));
       toast?.success('Action préparée. Elle attend votre validation.');
     } catch (cause) {

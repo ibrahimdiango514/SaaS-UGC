@@ -9,16 +9,13 @@
  * L'annulation CONSERVE l'historique : on écrit une entrée `annulee`, on ne
  * supprime rien.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { History, RotateCcw } from 'lucide-react';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LoadingState, cn } from '../../components/ui';
-import { useToast } from '../../context/ToastContext';
+import { useOptionalToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
-import { useRecords } from '../records/useRecords';
-import {
-  CATEGORIE_JOURNAL, entreeFromRecord, entreeToData, journalRecent, marquerAnnulee,
-  peutAnnuler, type EntreeJournal, type StatutEntree,
-} from './socle/journal';
+import { journalRecent, marquerAnnulee, peutAnnuler, type EntreeJournal, type StatutEntree } from './socle/journal';
+import { changerStatutEntree, lireJournal, retirerEnregistrement, type ModeJournal } from './journalApi';
 
 const TON_STATUT: Record<StatutEntree, 'success' | 'warning' | 'danger' | 'neutral'> = {
   proposee: 'warning', validee: 'success', refusee: 'neutral',
@@ -31,12 +28,35 @@ const LIBELLE_STATUT: Record<StatutEntree, string> = {
 };
 
 export function HistoriqueAgent({ workspaceId }: { workspaceId: string | null }) {
-  const toast = useToast();
-  const store = useRecords(CATEGORIE_JOURNAL, workspaceId);
+  const toast = useOptionalToast();
+  const [entrees, setEntrees] = useState<EntreeJournal[]>([]);
+  const [mode, setMode] = useState<ModeJournal>('dedie');
+  const [loading, setLoading] = useState(true);
+  const [erreur, setErreur] = useState<string | null>(null);
   const [enCours, setEnCours] = useState<string | null>(null);
   const [filtre, setFiltre] = useState<'tous' | 'proposee' | 'executee'>('tous');
 
-  const entrees = useMemo(() => store.records.map(entreeFromRecord), [store.records]);
+  const charger = useCallback(async () => {
+    if (!workspaceId) {
+      setEntrees([]);
+      setErreur('Aucune entreprise active.');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setErreur(null);
+    try {
+      const page = await lireJournal(workspaceId, 100);
+      setEntrees(page.entrees);
+      setMode(page.mode);
+    } catch (cause) {
+      setErreur(asAppError(cause).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId]);
+
+  useEffect(() => { void charger(); }, [charger]);
   const visibles = useMemo(() => {
     const recentes = journalRecent(entrees, 100);
     return filtre === 'tous' ? recentes : recentes.filter((entree) => entree.statut === filtre);
@@ -50,20 +70,24 @@ export function HistoriqueAgent({ workspaceId }: { workspaceId: string | null })
     setEnCours(entree.id);
     try {
       // 1. On retire d'abord la donnée métier écrite.
-      await store.remove(entree.enregistrementId!);
-      // 2. Puis on marque l'entrée annulée (l'historique reste lisible).
+      await retirerEnregistrement(workspaceId, entree.categorie!, entree.enregistrementId!);
+      // 2. Puis on marque l'entrée annulée : le serveur ne réécrit QUE le
+      //    statut, le reste de l'entrée (montant, résumé, décision) est figé.
       const annulee = marquerAnnulee(entree, 'vous');
-      await store.update(entree.id, entreeToData(annulee));
-      toast.success('Action annulée. L’historique en garde la trace.');
+      setMode(await changerStatutEntree(workspaceId, entree, 'annulee', annulee.resultat));
+      setEntrees((precedent) => precedent.map((ligne) => (ligne.id === entree.id ? annulee : ligne)));
+      toast?.success('Action annulée. L’historique en garde la trace.');
     } catch (cause) {
-      toast.error(asAppError(cause).message);
+      // L'entrée n'est PAS marquée annulée si la donnée n'a pas pu être
+      // retirée : afficher « annulée » sans l'avoir fait serait un mensonge.
+      toast?.error(asAppError(cause).message);
     } finally {
       setEnCours(null);
     }
   };
 
-  if (store.loading) return <LoadingState label="Chargement de l’historique…" />;
-  if (store.error) return <ErrorState message={store.error} onRetry={() => void store.reload()} />;
+  if (loading) return <LoadingState label="Chargement de l’historique…" />;
+  if (erreur) return <ErrorState message={erreur} onRetry={() => void charger()} />;
 
   return (
     <Card data-testid="historique-agent">
@@ -72,6 +96,13 @@ export function HistoriqueAgent({ workspaceId }: { workspaceId: string | null })
         description="Chaque demande, décision et action, avec sa trace. Rien n’est effacé."
         action={<Badge tone="neutral">{entrees.length} entrée(s)</Badge>}
       />
+
+      {mode === 'repli' && (
+        <p className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-2.5 py-1.5 text-[10.5px] text-amber-200/90">
+          Journal en mode compatible : le serveur déployé ne connaît pas encore le journal dédié.
+          Les entrées affichées sont réelles, mais la limite de volume est celle du stockage de module.
+        </p>
+      )}
 
       {entrees.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1" role="group" aria-label="Filtrer l’historique">

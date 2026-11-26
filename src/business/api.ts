@@ -290,12 +290,20 @@ const WORKSPACE_ACTIONS = new Set([
   'messages.list', 'messages.send', 'memory.get', 'memory.consent', 'memory.profile.save',
   'memory.item.put', 'memory.item.delete', 'memory.legacy.import', 'modules.records',
   'agent.report', 'agent.reports.list', 'agent.reports.delete', 'agent.task.propose', 'automation.task.confirm',
+  // Journal et autonomie : n'existent QUE par espace de travail. Sans cette
+  // liste, le préfixe `v3.` ne serait pas posé et le serveur refuserait faute
+  // de périmètre — ou, pire, lirait un périmètre personnel inexistant.
+  'agent.journal', 'agent.autonomy.get', 'agent.autonomy.set',
 ]);
 
 function isReadOnly(action: string, values: Record<string, unknown>): boolean {
   const canonical = action.startsWith('v3.') ? action.slice(3) : action;
   return READ_ACTIONS.has(canonical) || (canonical === 'modules.records' && values.op === 'list')
-    || (canonical === 'agent.report' && values.save !== true);
+    || (canonical === 'agent.report' && values.save !== true)
+    // Lire le journal n'écrit rien : inutile de vérifier le canal avant.
+    // `append` et `status` restent des écritures, donc soumises à la vérification.
+    || (canonical === 'agent.journal' && values.op === 'list')
+    || (canonical === 'agent.autonomy.get');
 }
 
 type TransportOutcome<T> =
@@ -533,6 +541,22 @@ export const businessGrowApi = {
     }),
   listReports: (workspaceId: string) => invoke<{ reports: SavedBusinessReport[] }>('agent.reports.list', { workspaceId }),
   deleteReport: (workspaceId: string, reportId: string) => invoke<{ deleted: boolean }>('agent.reports.delete', { workspaceId, reportId }),
+  listAgentJournal: (workspaceId: string, limit = 50, before?: string | null) =>
+    invoke<{ entries: BusinessModuleRecord[] }>('agent.journal', {
+      workspaceId, op: 'list', limit, ...(before ? { before } : {}),
+    }),
+  appendAgentJournal: (workspaceId: string, entry: Record<string, unknown>) =>
+    invoke<{ entryId: string }>('agent.journal', { workspaceId, op: 'append', entry }),
+  setAgentJournalStatus: (workspaceId: string, entryId: string, statut: string, resultat?: string | null) =>
+    invoke<{ updated: boolean }>('agent.journal', {
+      workspaceId, op: 'status', entryId, statut, ...(resultat ? { resultat } : {}),
+    }),
+  getAgentAutonomy: (workspaceId: string) =>
+    invoke<{ preferences: Array<{ tool_name: string; level: string; rule_id: string | null }> }>('agent.autonomy.get', { workspaceId }),
+  setAgentAutonomy: (workspaceId: string, toolName: string, level: string, ruleId?: string | null) =>
+    invoke<{ preference: Record<string, unknown> }>('agent.autonomy.set', {
+      workspaceId, toolName, level, ...(ruleId ? { ruleId } : {}),
+    }),
   proposeTask: (workspaceId: string, conversationId: string, sourceCategory: string, sourceRecordId: string, idempotencyKey: string) =>
     invoke<{ id: string; summary: string; status: string }>('agent.task.propose', { workspaceId, conversationId, sourceCategory, sourceRecordId, idempotencyKey }),
   createConversation: (title: string, workspaceId: string | null) =>

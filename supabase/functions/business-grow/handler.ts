@@ -60,6 +60,9 @@ export type BusinessAction =
   | 'agent.reports.list'
   | 'agent.reports.delete'
   | 'agent.task.propose'
+  | 'agent.journal'
+  | 'agent.autonomy.get'
+  | 'agent.autonomy.set'
   | 'memory.legacy.import';
 
 // Une action préfixée ne peut pas être comprise par l'Edge historique v22.
@@ -72,7 +75,32 @@ const WORKSPACE_ACTIONS = new Set<string>([
   'messages.list', 'messages.send', 'memory.get', 'memory.consent', 'memory.profile.save',
   'memory.item.put', 'memory.item.delete', 'memory.legacy.import', 'modules.records',
   'agent.report', 'agent.reports.list', 'agent.reports.delete', 'agent.task.propose', 'automation.task.confirm',
+  // Le journal et l'autonomie n'existent QUE par espace de travail : sans
+  // `workspaceId`, l'Edge les refuse plutôt que de retomber sur un périmètre
+  // personnel qui n'a pas de journal.
+  'agent.journal', 'agent.autonomy.get', 'agent.autonomy.set',
 ]);
+
+/**
+ * Noms d'outils et sensibilités de l'agent, alignés sur `src/business/agent/socle/outils.ts`.
+ *
+ * L'Edge ne peut pas importer le socle (le bundle est bâti depuis
+ * `supabase/functions`, pas depuis `src/`). La duplication est donc assumée,
+ * mais VERROUILLÉE par un test de parité : si le socle change et pas cette
+ * liste, la suite échoue. C'est la seule façon d'éviter deux vérités.
+ */
+export const NOMS_OUTILS_AGENT: readonly string[] = [
+  'creer_facture', 'modifier_facture', 'creer_devis', 'planifier_relance', 'creer_tache',
+  'ajouter_contact', 'ouvrir_litige', 'enregistrer_paiement', 'preparer_message',
+];
+
+/** Outils dont la sensibilité est protégée (argent, client, envoi). */
+export const OUTILS_A_SENSIBILITE_PROTEGEE: readonly string[] = [
+  'creer_facture', 'modifier_facture', 'creer_devis', 'planifier_relance',
+  'ajouter_contact', 'ouvrir_litige', 'enregistrer_paiement', 'preparer_message',
+];
+
+export const STATUTS_JOURNAL: readonly string[] = ['proposee', 'validee', 'refusee', 'executee', 'echouee', 'annulee'];
 
 export interface RoutingOptions {
   selectionMode?: 'auto' | 'manual';
@@ -245,6 +273,11 @@ export interface BusinessGrowStore {
   listAgentReports?: (userId: string, workspaceId: string) => Promise<unknown[]>;
   deleteAgentReport?: (userId: string, workspaceId: string, reportId: string) => Promise<boolean>;
   proposeAgentTask?: (userId: string, workspaceId: string, conversationId: string, category: string, sourceId: string, idempotencyKey: string) => Promise<unknown>;
+  appendAgentJournal?: (userId: string, workspaceId: string, entry: Record<string, unknown>) => Promise<unknown>;
+  setAgentJournalStatus?: (userId: string, workspaceId: string, entryId: string, status: string, result: string | null) => Promise<boolean>;
+  listAgentJournal?: (userId: string, workspaceId: string, limit: number, before: string | null) => Promise<unknown[]>;
+  getAgentAutonomy?: (userId: string, workspaceId: string) => Promise<unknown[]>;
+  setAgentAutonomy?: (userId: string, workspaceId: string, toolName: string, level: string, ruleId: string | null) => Promise<unknown>;
   resolveAgentTool?: (userId: string, executionId: string, decision: 'approved' | 'rejected') => Promise<unknown>;
 }
 
@@ -969,6 +1002,95 @@ export function createBusinessGrowHandler(dependencies: BusinessGrowDependencies
           }
           if (!dependencies.store.proposeAgentTask) return response(failure('AGENT_UNAVAILABLE', 'Propositions de tâches indisponibles.'), 503, origin, dependencies.allowedOrigins);
           data = await dependencies.store.proposeAgentTask(userId, workspaceId, conversationId, category, sourceId, key);
+          break;
+        }
+        case 'agent.journal': {
+          // Journal des décisions et actions de l'agent. Trois opérations
+          // seulement : lire, ajouter, et faire évoluer le STATUT d'une entrée
+          // existante (validation, refus, annulation). Aucune suppression :
+          // un journal qu'on peut effacer ne prouve rien.
+          if (!scopedWorkspace) return response(failure('INVALID_WORKSPACE', 'Journal disponible uniquement dans un espace de travail.'), 400, origin, dependencies.allowedOrigins);
+          const op = string(body.op, 20) || 'list';
+          if (op === 'list') {
+            if (!dependencies.store.listAgentJournal) return response(failure('AGENT_UNAVAILABLE', 'Journal indisponible.'), 503, origin, dependencies.allowedOrigins);
+            const limite = Math.min(Math.max(Number(body.limit) || 50, 1), 200);
+            const avant = body.before == null ? null : string(body.before, 40) || null;
+            if (body.before != null && (!avant || Number.isNaN(Date.parse(avant)))) {
+              return response(failure('INVALID_JOURNAL_CURSOR', 'Curseur de lecture invalide.'), 400, origin, dependencies.allowedOrigins);
+            }
+            data = { entries: await dependencies.store.listAgentJournal(userId, scopedWorkspace, limite, avant) };
+            break;
+          }
+          if (op === 'append') {
+            if (!dependencies.store.appendAgentJournal) return response(failure('AGENT_UNAVAILABLE', 'Journal indisponible.'), 503, origin, dependencies.allowedOrigins);
+            const entree = object(body.entry);
+            const resume = string(entree.resume, 400);
+            const outil = string(entree.outil, 40);
+            // Le statut est vérifié ICI et de nouveau en SQL : deux barrières,
+            // parce que c'est lui qui décide si une action a eu lieu.
+            const statut = string(entree.statut, 20) || 'proposee';
+            if (!resume || !STATUTS_JOURNAL.includes(statut as typeof STATUTS_JOURNAL[number])) {
+              return response(failure('INVALID_JOURNAL_ENTRY', 'Résumé et statut valides sont requis.'), 400, origin, dependencies.allowedOrigins);
+            }
+            if (outil && !NOMS_OUTILS_AGENT.includes(outil)) {
+              return response(failure('INVALID_JOURNAL_ENTRY', 'Outil inconnu pour le journal.'), 400, origin, dependencies.allowedOrigins);
+            }
+            // Une entrée « exécutée » doit désigner l'enregistrement écrit :
+            // sans cela, le bouton Annuler de l'écran ne pourrait jamais agir.
+            if (statut === 'executee' && !uuid(entree.enregistrementId)) {
+              return response(failure('INVALID_JOURNAL_ENTRY', 'Une action exécutée doit désigner l’enregistrement écrit.'), 400, origin, dependencies.allowedOrigins);
+            }
+            const entryId = await dependencies.store.appendAgentJournal(userId, scopedWorkspace, {
+              ...entree,
+              resume,
+              statut,
+              outil: outil || null,
+              horodatage: string(entree.horodatage, 40) || new Date().toISOString(),
+            });
+            data = { entryId };
+            break;
+          }
+          if (op === 'status') {
+            if (!dependencies.store.setAgentJournalStatus) return response(failure('AGENT_UNAVAILABLE', 'Journal indisponible.'), 503, origin, dependencies.allowedOrigins);
+            const entryId = uuid(body.entryId);
+            const statut = string(body.statut, 20);
+            const resultat = body.resultat == null ? null : string(body.resultat, 600) || null;
+            if (!entryId || !STATUTS_JOURNAL.includes(statut as typeof STATUTS_JOURNAL[number])) {
+              return response(failure('INVALID_JOURNAL_ENTRY', 'Entrée et statut valides sont requis.'), 400, origin, dependencies.allowedOrigins);
+            }
+            const change = await dependencies.store.setAgentJournalStatus(userId, scopedWorkspace, entryId, statut, resultat);
+            if (!change) return response(failure('JOURNAL_ENTRY_NOT_FOUND', 'Entrée de journal introuvable.'), 404, origin, dependencies.allowedOrigins);
+            data = { updated: true };
+            break;
+          }
+          return response(failure('INVALID_JOURNAL_OPERATION', 'Opération de journal inconnue.'), 400, origin, dependencies.allowedOrigins);
+        }
+        case 'agent.autonomy.get': {
+          if (!scopedWorkspace) return response(failure('INVALID_WORKSPACE', 'Autonomie disponible uniquement dans un espace de travail.'), 400, origin, dependencies.allowedOrigins);
+          if (!dependencies.store.getAgentAutonomy) return response(failure('AGENT_UNAVAILABLE', 'Préférences d’autonomie indisponibles.'), 503, origin, dependencies.allowedOrigins);
+          data = { preferences: await dependencies.store.getAgentAutonomy(userId, scopedWorkspace) };
+          break;
+        }
+        case 'agent.autonomy.set': {
+          if (!scopedWorkspace) return response(failure('INVALID_WORKSPACE', 'Autonomie disponible uniquement dans un espace de travail.'), 400, origin, dependencies.allowedOrigins);
+          if (!dependencies.store.setAgentAutonomy) return response(failure('AGENT_UNAVAILABLE', 'Préférences d’autonomie indisponibles.'), 503, origin, dependencies.allowedOrigins);
+          const toolName = string(body.toolName, 40);
+          const level = string(body.level, 20);
+          const ruleId = body.ruleId == null ? null : string(body.ruleId, 80) || null;
+          if (!NOMS_OUTILS_AGENT.includes(toolName)) {
+            return response(failure('INVALID_AUTONOMY', 'Outil inconnu.'), 400, origin, dependencies.allowedOrigins);
+          }
+          if (!['lecture', 'preparation', 'automatique'].includes(level)) {
+            return response(failure('INVALID_AUTONOMY', 'Niveau d’autonomie inconnu.'), 400, origin, dependencies.allowedOrigins);
+          }
+          // Le niveau « automatique » sur une action sensible n'est accepté QUE
+          // s'il est adossé à une règle nommée. Le contrôle est refait côté
+          // serveur : un client modifié ne doit pas pouvoir s'auto-autoriser.
+          const outilSensible = OUTILS_A_SENSIBILITE_PROTEGEE.includes(toolName);
+          if (level === 'automatique' && outilSensible && !ruleId) {
+            return response(failure('AUTONOMY_REQUIRES_RULE', 'Cette action touche l’argent, un client ou un envoi : elle exige une règle écrite pour passer en automatique.'), 400, origin, dependencies.allowedOrigins);
+          }
+          data = { preference: await dependencies.store.setAgentAutonomy(userId, scopedWorkspace, toolName, level, ruleId) };
           break;
         }
         case 'automation.task.confirm': {
