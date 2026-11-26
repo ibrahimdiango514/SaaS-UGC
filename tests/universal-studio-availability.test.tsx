@@ -9,8 +9,22 @@ it('keeps an unverified reference visible with its exact reason but never offers
  render(<UniversalStudio/>);await screen.findByRole('button',{name:/Validated model/});
  const blocked=screen.getByRole('button',{name:/Not validated/});
  expect(screen.getByText(/2 modèles catalogués/)).toBeTruthy();
- expect(blocked.textContent).toContain('Non disponible');
+ /*
+  * Le modèle bloqué reste VISIBLE, avec un motif qui dit quoi faire.
+  *
+  * L'ancienne assertion exigeait le texte « Non disponible » : c'était le
+  * libellé d'avant, qui nommait l'état sans jamais indiquer l'action. Le produit
+  * demande désormais l'inverse (jamais « indisponible » sans explication), donc
+  * on vérifie ce qui compte réellement : le motif exact ET l'action à mener.
+  */
+ expect(blocked.textContent).toContain('Validation payante en attente');
+ expect(blocked.textContent).toMatch(/génération réelle|confirm/i);
  fireEvent.click(blocked);
- expect(screen.getAllByText(/Validation réelle en attente d’autorisation financière/).length).toBeGreaterThan(0);
+ // La fiche détaille le motif et l'action, sans jamais proposer de génération.
+ const fiches = screen.getAllByText(/Validation payante en attente/);
+ // La fiche du modèle (après sélection) s'ajoute à la carte : au moins deux.
+ expect(fiches.length).toBeGreaterThanOrEqual(1);
+ const detail = fiches.map((n) => n.closest('ul')?.textContent ?? '').join(' ');
+ expect(detail).toMatch(/administration|confirmer/i);
  expect(screen.queryByRole('button',{name:/Obtenir le prix en crédits/})).toBeNull();
 });
