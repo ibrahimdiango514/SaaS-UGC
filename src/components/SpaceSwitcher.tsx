@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Brain, Clapperboard, LayoutGrid } from 'lucide-react';
+import { Brain, Clapperboard, LayoutGrid, Sparkles } from 'lucide-react';
 import { cn } from './ui';
 
 /**
@@ -9,7 +9,7 @@ import { cn } from './ui';
  * Le composant ne lit aucune permission : il reçoit la route courante et
  * pointe vers les deux accueils, qui appliquent leurs propres protections.
  */
-export type SpaceScope = 'studio' | 'business' | 'admin' | 'hub';
+export type SpaceScope = 'studio' | 'business' | 'agent' | 'admin' | 'hub';
 
 const SPACES = [
   {
@@ -26,10 +26,22 @@ const SPACES = [
     detail: 'Piloter',
     icon: Brain,
   },
+  /*
+   * Espace Agent IA : troisième espace, pas une rubrique de Grow. Il a sa
+   * propre route et sa propre navigation, et reste relié à Grow pour lire les
+   * données et agir dessus.
+   */
+  {
+    id: 'agent' as const,
+    to: '/app/agent',
+    label: 'Agent IA',
+    detail: 'Converser et agir',
+    icon: Sparkles,
+  },
 ];
 
 export function SpaceSwitcher({ scope, compact = false }: { scope: SpaceScope; compact?: boolean }) {
-  const current = scope === 'business' ? 'business' : 'studio';
+  const current = scope === 'business' || scope === 'agent' ? scope : 'studio';
 
   return (
     <div
@@ -49,9 +61,9 @@ export function SpaceSwitcher({ scope, compact = false }: { scope: SpaceScope; c
             className={cn(
               'inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2 text-[11px] font-semibold transition',
               active
-                ? space.id === 'studio'
-                  ? 'bg-cyan-400/[0.14] text-cyan-100 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.25)]'
-                  : 'bg-violet-400/[0.16] text-violet-100 shadow-[inset_0_0_0_1px_rgba(196,181,253,0.28)]'
+                ? space.id === 'business'
+                  ? 'bg-violet-400/[0.16] text-violet-100 shadow-[inset_0_0_0_1px_rgba(196,181,253,0.28)]'
+                  : 'bg-cyan-400/[0.14] text-cyan-100 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.25)]'
                 : 'text-slate-400 hover:bg-white/[0.05] hover:text-white',
             )}
           >
