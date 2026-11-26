@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { AlertCircle, Inbox, Loader2, X } from 'lucide-react';
+import { PortalOverlay } from './PortalOverlay';
 import { statusTone } from '../lib/format';
 
 export function cn(...classes: Array<string | false | null | undefined>): string {
@@ -240,7 +241,9 @@ export function Modal({ open, onClose, title, description, children, footer, siz
    * Le fond est une feuille qui monte sur mobile et une boîte centrée au-delà :
    * c'est le geste attendu sur Android, sans en changer le comportement ici.
    */
+  // Le portail soustrait la modale à tout ancêtre animé (voir PortalOverlay).
   return (
+    <PortalOverlay>
     <div
       className="modale-clavier fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       onMouseDown={onClose}
@@ -277,6 +280,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
         )}
       </div>
     </div>
+    </PortalOverlay>
   );
 }
 

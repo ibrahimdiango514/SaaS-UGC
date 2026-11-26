@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  BookOpen, Check, ChevronLeft, ChevronRight, Compass, Image as ImageIcon, Link2, MessageSquarePlus,
+  BookOpen, Check, ChevronLeft, ChevronRight, Image as ImageIcon, Link2, MessageSquarePlus,
   MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plug, Search, Settings, Sparkles,
   Server, Trash2, TrendingUp, User, X,
 } from 'lucide-react';
@@ -194,7 +194,10 @@ export function Sidebar({
         </nav>
       ) : (
         <nav className="space-y-0.5 px-2.5" aria-label="Sections">
-          <RailLink to="/app/ai/images" icon={<ImageIcon size={16} />} label="Images" collapsed={collapsed} onClick={onCloseMobile} />
+          {/* « Images » menait à /app/ai/images, route jamais déclarée : le clic
+              affichait la page 404. Les images de référence sont gérées par
+              l'écran « Mes avatars » (JPG/PNG, présentateur ou produit). */}
+          <RailLink to="/app/avatars" icon={<ImageIcon size={16} />} label="Images de référence" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/bibliotheque" icon={<BookOpen size={16} />} label="Bibliothèque" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/connect" icon={<Plug size={16} />} label="Intégrations" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/connexions-ia" icon={<Sparkles size={16} />} label="MCP et connexions IA" collapsed={collapsed} onClick={onCloseMobile} />
@@ -203,7 +206,6 @@ export function Sidebar({
               chacun dans sa section. Les deux entrées ci-dessus restent pour
               ceux qui arrivent par un lien direct. */}
           <RailLink to="/app/connexions-mcp" icon={<Link2 size={16} />} label="Connexions MCP" collapsed={collapsed} onClick={onCloseMobile} />
-          <RailLink to="/app/ai/explorer" icon={<Compass size={16} />} label="Explorer" collapsed={collapsed} onClick={onCloseMobile} />
           <RailLink to="/app/business" icon={<TrendingUp size={16} />} label="Espace Business" collapsed={collapsed} onClick={onCloseMobile} />
         </nav>
       )}

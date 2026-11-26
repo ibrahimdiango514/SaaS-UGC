@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { ChevronDown, Menu, Sparkles, X } from 'lucide-react';
 import { cn } from '../../components/ui';
 import { SpaceSwitcher } from '../../components/SpaceSwitcher';
+import { PortalOverlay } from '../../components/PortalOverlay';
 import {
   GROWTH_OS_MODULES, GROWTH_OS_NAV, GROWTH_OS_QUICK_ACTIONS, growthOsModule,
   type GrowthOsModule,
@@ -113,7 +114,16 @@ export function GrowthOsLayout({
         </button>
       </div>
 
+      {/*
+        Le panneau est monté dans `document.body` par `PortalOverlay`.
+        La racine de cet écran porte `animate-fadeUp`, dont le `fill-mode: both`
+        laisse un `transform` actif : un `fixed` rendu ici se positionnerait par
+        rapport au conteneur de contenu et non à l'écran. Sur Android, le menu
+        ne couvrait alors qu'une partie de la fenêtre et ses dernières entrées
+        devenaient inaccessibles.
+      */}
       {menuOpen && (
+        <PortalOverlay>
         <div className="fixed inset-0 z-50 flex justify-start overflow-x-hidden md:hidden" role="dialog" aria-modal="true" aria-label="Menu SORAHNEX Grow">
           <button type="button" aria-label="Fermer le menu" className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMenuOpen(false)} />
           <div
@@ -134,6 +144,7 @@ export function GrowthOsLayout({
             {nav(() => setMenuOpen(false))}
           </div>
         </div>
+        </PortalOverlay>
       )}
 
       <div className="grid gap-4 md:grid-cols-[212px_minmax(0,1fr)] lg:grid-cols-[230px_minmax(0,1fr)]">

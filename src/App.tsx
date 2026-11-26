@@ -9,6 +9,7 @@ import Landing from './pages/Landing';
 import Legal from './pages/Legal';
 import NotFound from './pages/NotFound';
 
+const AgentSpace = lazy(() => import('./agent/AgentSpace').then((m) => ({ default: m.AgentSpace })));
 const Login = lazy(() => import('./pages/Login'));
 const PartageDocument = lazy(() => import('./pages/PartageDocument'));
 const Signup = lazy(() => import('./pages/Signup'));
@@ -113,6 +114,14 @@ export default function App() {
                         pas la navigation Studio. Imbrique dans <Layout>, il heritait
                         de l'ancienne sidebar et paraissait inchange. Le catalogue
                         d'integrations suit la meme regle. */}
+                    {/*
+                      Espace Agent IA : espace DISTINCT de SORAHNEX Grow, avec sa
+                      propre coquille et sa propre navigation. Il reste relié à
+                      Grow (il lit ses données et agit dessus) mais n'est pas
+                      noyé dans le menu métier.
+                    */}
+                    <Route path="/app/agent" element={<Navigate to="/app/agent/conversation" replace />} />
+                    <Route path="/app/agent/*" element={<AgentSpace />} />
                     <Route path="/app/ai" element={<Assistant />} />
                     <Route path="/app/connect" element={<Integrations />} />
                     <Route path="/app/connexions-ia" element={<McpConnections />} />

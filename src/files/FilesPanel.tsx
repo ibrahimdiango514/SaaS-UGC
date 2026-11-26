@@ -22,6 +22,7 @@ import {
   AlertTriangle, Download, FileAudio, FileText, Film, ImageIcon, Loader2, Trash2, Upload, X,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ProgressBar, cn } from '../components/ui';
+import { PortalOverlay } from '../components/PortalOverlay';
 import { asAppError } from '../lib/errors';
 import {
   attachToProject, list, remove, signedUrl, upload, validate,
@@ -413,7 +414,9 @@ export function FilesPanel({
         </ul>
       )}
 
+      {/* Aperçu monté dans `document.body` : la fiche vit sous un parent animé. */}
       {apercu && (
+        <PortalOverlay>
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           role="dialog"
@@ -474,6 +477,7 @@ export function FilesPanel({
             )}
           </div>
         </div>
+        </PortalOverlay>
       )}
     </section>
   );

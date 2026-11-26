@@ -7,22 +7,8 @@ import { universalRuntime,uploadUniversalInput,type UniversalStudioPage,type Uni
 import { UniversalModelForm } from '../pages/admin/UniversalModelForm';
 import { StudioShell } from './components/StudioShell';
 import { JsonResult, isJsonDocument } from './components/JsonResult';
-const reasons:Record<string,string>={
-  PROVIDER_UNAVAILABLE:'Indisponible chez le fournisseur',
-  ENDPOINT_UNVERIFIED:'Endpoint à vérifier',
-  SCHEMA_UNSUPPORTED:'Contraintes du formulaire à intégrer',
-  UNSAFE_PARAMETER:'Paramètre technique non autorisé',
-  PRICING_REQUIRED:'Crédits à configurer',
-  ADAPTER_UNVERIFIED:'Protocole à vérifier',
-  PAID_VALIDATION_PENDING:'Validation réelle en attente d’autorisation financière',
-  ADMIN_DISABLED:'Désactivé par l’administration',
-  RUNTIME_DISABLED:'Exécution non ouverte',
-  ACCESS_UNCONFIRMED:'Accès fournisseur non confirmé',
-  QUOTA_POLICY_PENDING:'Politique de quota à valider',
-  QUOTA_POLICY_MISSING:'Aucune limite approuvée pour cette famille de quota',
-  ESTIMATE_ENDPOINT_UNVERIFIED:'Estimation fournisseur à vérifier',
-  PLAN_UNAVAILABLE:'Non inclus dans votre offre',
-};
+import { grouperParFamille, motifPrincipal, expliquerBlocage } from './modelFamilies';
+
 
 /** Un modèle gratuit affiche 0 crédit, jamais un prix supposé. */
 const creditLabel=(credits:number|null,billing?:string)=>credits===null?'':billing==='free'||credits===0?' · gratuit (0 crédit)':` · ${credits} crédit${credits>1?'s':''}`;
@@ -58,6 +44,8 @@ export default function UniversalStudio(){
  const reset=()=>{setCursors(['']);setSelected(null);setQuote(null);};
  const technical=(m:UniversalStudioModel)=>m.technical_blockers??m.blockers.filter(b=>b!=='PLAN_UNAVAILABLE');
  const readyUnavailable=(page?.items??[]).filter(m=>!m.operational&&technical(m).length===0);
+ // Regroupement par FONCTION de création : personne ne cherche « image-to-video ».
+ const groupes=grouperParFamille(page?.items??[]);
  return <StudioShell title="Studio universel MuAPI" eyebrow="Catalogue complet, paramètres, médias privés, devis en crédits et historique.">
   <div className="space-y-4">
    <Card className="space-y-3 p-5"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold text-white">Toutes les catégories de création</h2><span>{page?.total??'…'} modèles catalogués · Solde : {page?.credits??'…'} crédits{page?.plan?` · Offre ${page.plan}`:''}</span></div>
@@ -68,12 +56,12 @@ export default function UniversalStudio(){
     {page&&!page.items.some(m=>m.operational)&&<p role="status">Aucun modèle opérationnel sur cette page. Les modèles non validés restent dans le catalogue administrateur, sans génération disponible.</p>}
     {/* Tous les modèles restent consultables : sélectionner un modèle non
         opérationnel affiche son motif exact, sans formulaire ni génération. */}
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{page?.items.map(m=><button type="button" key={m.model_id} onClick={()=>{setSelected(m);setQuote(null);}} className={`rounded-xl border p-4 text-left ${selected?.model_id===m.model_id?(m.operational?'border-cyan-300 bg-cyan-400/10':'border-amber-300/50 bg-amber-400/5'):(m.operational?'border-white/10 bg-white/[.02]':'border-white/[.06] bg-white/[.01]')}`}><span className="block font-semibold text-white">{m.display_name}</span><span className="block break-all text-xs text-slate-400">{m.model_id} · {m.category}</span>{m.operational?<span className="mt-2 block text-xs text-emerald-300">Opérationnel{creditLabel(m.credits,m.billing)}{m.quota_family?` · ${m.quota_family}`:''}</span>:<span className="mt-2 block text-xs text-amber-200">Non disponible{creditLabel(m.credits,m.billing)} · {reasons[m.blockers[0]]??'validation technique nécessaire'}</span>}</button>)}</div>
+    {groupes.map(({famille,modeles})=><section key={famille.cle} className="space-y-2"><div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-white/[0.06] pb-1"><h3 className="text-sm font-semibold text-white">{famille.label}</h3><span className="text-xs text-slate-500">{famille.description} · {modeles.length} modèle{modeles.length>1?'s':''}</span></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{modeles.map(m=><button type="button" key={m.model_id} onClick={()=>{setSelected(m);setQuote(null);}} className={`rounded-xl border p-4 text-left ${selected?.model_id===m.model_id?(m.operational?'border-cyan-300 bg-cyan-400/10':'border-amber-300/50 bg-amber-400/5'):(m.operational?'border-white/10 bg-white/[.02]':'border-white/[.06] bg-white/[.01]')}`}><span className="block font-semibold text-white">{m.display_name}</span><span className="block break-all text-xs text-slate-400">{m.model_id} · {m.category}</span>{m.operational?<span className="mt-2 block text-xs text-emerald-300">Opérationnel{creditLabel(m.credits,m.billing)}{m.quota_family?` · ${m.quota_family}`:''}</span>:<><span className="mt-2 block text-xs text-amber-200">{motifPrincipal(m.blockers).libelle}{creditLabel(m.credits,m.billing)}</span><span className="mt-1 block text-[11px] leading-relaxed text-amber-100/70">{motifPrincipal(m.blockers).action}</span></>}</button>)}</div></section>)}
     {readyUnavailable.length>0&&<div className="space-y-2 rounded-xl border border-amber-300/30 bg-amber-400/5 p-3"><p className="text-sm font-medium text-amber-100">Prêts techniquement, mais non inclus dans votre offre</p><ul className="space-y-1 text-xs text-amber-200">{readyUnavailable.map(m=><li key={m.model_id}><span className="font-medium text-amber-100">{m.display_name}</span> · {m.category}{creditLabel(m.credits,m.billing)} — <Link to="/app/abonnement" className="underline">voir les offres</Link></li>)}</ul></div>}
     <div className="flex gap-2"><Button size="sm" variant="outline" disabled={cursors.length===1||busy} onClick={()=>{setCursors(v=>v.slice(0,-1));setSelected(null);setQuote(null);}}>Précédent</Button><Button size="sm" variant="outline" disabled={!page?.next_cursor||busy} onClick={()=>{if(page?.next_cursor)setCursors(v=>[...v,page.next_cursor!]);setSelected(null);setQuote(null);}}>Suivant</Button></div>
    </Card>
    {quotas&&<Card className="space-y-2 p-5"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold text-white">Quotas de votre offre · {quotas.plan}</h2><span className="text-xs text-slate-500">Période {quotas.period}</span></div><div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{(quotas.items??[]).filter(q=>q.generator).map(q=><div key={q.family} className="rounded-lg border border-white/10 px-3 py-2 text-xs"><p className="font-medium text-slate-200">{q.display_name}</p><p className="text-slate-400">{q.policy==='active'?`${q.used} / ${q.limit} utilisés` : q.policy==='pending_approval'?(q.limit!==null?`Proposition : ${q.limit} / mois — en attente d’arbitrage produit`:'Politique en attente de validation produit') : q.policy==='disabled'?'Quota désactivé':'Aucun quota pour cette offre'}</p></div>)}</div></Card>}
-   {selected&&<Card className="space-y-3 p-5"><h2 className="font-semibold text-white">{selected.display_name}</h2>{!selected.operational&&<ul className="text-sm text-amber-200">{selected.blockers.map(r=><li key={r}>{reasons[r]??'Validation technique nécessaire'}</li>)}</ul>}
+   {selected&&<Card className="space-y-3 p-5"><h2 className="font-semibold text-white">{selected.display_name}</h2>{!selected.operational&&<ul className="space-y-1 text-sm text-amber-200">{selected.blockers.map(r=>{const e=expliquerBlocage(r);return <li key={r}><span className="font-medium">{e.libelle}</span>{' — '}<span className="text-amber-100/80">{e.action}</span>{e.qui==='administration'?<span className="text-[11px] text-slate-500"> (administration)</span>:null}</li>;})}</ul>}
     {selected.operational&&selected.schema?<UniversalModelForm key={selected.model_id} modelId={selected.model_id} schema={selected.schema} onValuesChange={()=>setQuote(null)} upload={file=>uploadUniversalInput(page!.workspace_id,file)} onSubmit={async params=>{
       if(!selected.operational)throw new Error('MODEL_NOT_OPERATIONAL');
       const q=await universalRuntime<UniversalStudioQuote>('quote',{model_id:selected.model_id,params});setQuote(q);setRequestKey(crypto.randomUUID());return 'Devis prêt. Vérifiez les crédits et confirmez ci-dessous.';

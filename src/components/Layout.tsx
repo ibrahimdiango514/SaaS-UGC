@@ -47,6 +47,12 @@ export default function Layout() {
   // navigation identique à l'écran. Les routes catalogue/abonnement gardent
   // la navigation globale de l'application.
   const isGrowthOs = isBusiness && !/^\/app\/business\/(?:modules|abonnement)/.test(location.pathname);
+  /*
+   * L'espace Agent IA a sa propre coquille et sa propre navigation : la barre
+   * basse de l'application y ferait doublon et volerait la place de la zone de
+   * saisie. Comme le Growth OS, il fournit sa navigation.
+   */
+  const isAgentSpace = location.pathname === '/app/agent' || location.pathname.startsWith('/app/agent/');
   // Périmètre visuel : chaque espace possède sa propre identité chromatique,
   // héritée par toute l'arborescence via `data-vy-scope` (variables CSS).
   const scope: 'studio' | 'business' | 'hub' | 'admin' = isAdmin ? 'admin' : isHub ? 'hub' : isBusiness ? 'business' : 'studio';
@@ -165,7 +171,7 @@ export default function Layout() {
       data-vy-scope={scope === 'admin' ? 'admin' : scope}
     >
       {/* Desktop sidebar — masquée sur le canvas immersif du Studio. */}
-      <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', (isHub || isGrowthOs) && 'lg:hidden')}>
+      <aside className={cn('relative sticky top-0 hidden h-screen w-[252px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-[#070c13]/95 px-3 py-5 backdrop-blur-2xl lg:flex', (isHub || isGrowthOs || isAgentSpace) && 'lg:hidden')}>
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/[0.10] blur-[80px]" />
         <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-violet-500/[0.10] blur-[80px]" />
         {/* Liseré d'identité : cyan en Studio, violet en SORAHNEX Grow. */}
@@ -359,7 +365,7 @@ export default function Layout() {
       {/* Mobile bottom nav */}
       {/* Sur tablette, le Growth OS affiche déjà sa barre latérale : garder la
           barre basse donnerait deux navigations identiques à l'écran. */}
-      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', isHub ? 'hidden' : isGrowthOs ? 'md:hidden' : 'lg:hidden')}>
+      <nav className={cn('safe-bottom fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-white/[0.07] bg-[#070c13]/95 px-1 pt-2 backdrop-blur-2xl', (isHub || isAgentSpace) ? 'hidden' : isGrowthOs ? 'md:hidden' : 'lg:hidden')}>
         {mobileNav.map((item) => {
           const itemClass =
             'flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1 text-[10px] font-medium transition';

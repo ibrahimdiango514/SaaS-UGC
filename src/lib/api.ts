@@ -884,16 +884,61 @@ export async function adminOverview(): Promise<AdminOverview> {
   return rpc<AdminOverview>('reelora_admin_overview');
 }
 
+export interface AiEngineProviderHealth {
+  configured: boolean;
+  model: string | null;
+  /** Statut observé par la sonde : available | degraded | unavailable | unverified. */
+  status?: string;
+  /** Fournisseur activé au registre (un fournisseur désactivé reste lisible). */
+  enabled?: boolean;
+  /** Une adresse de base est-elle résolue côté serveur ? (jamais sa valeur) */
+  base_url_configured?: boolean;
+  /** FORME uniquement : publique, locale, privée, illisible ou absente. */
+  base_url_form?: 'publique' | 'locale' | 'privee' | 'illisible' | 'absente';
+  error_code?: string | null;
+  checked_at?: string | null;
+  catalog_models?: number | null;
+  verified_models?: number | null;
+}
+
 export interface AiEngineHealth {
   service?: string;
   status?: string;
   /** Fournisseurs du registre central (clé = provider_key, aucun nom en dur). */
-  providers: Record<string, { configured: boolean; model: string | null }>;
+  providers: Record<string, AiEngineProviderHealth>;
 }
 
 /** Real server-side probe of the central AI engine (model names, no keys). */
 export async function aiEngineHealth(): Promise<AiEngineHealth> {
   return invokeEdge<AiEngineHealth>(edgeFunctionName('ai'), { action: 'health' });
+}
+
+/** État d'intégration complet, vu par l'administration (RPC réservée admin). */
+export interface AiIntegrationStatus {
+  phase?: string;
+  providers: Array<{
+    key: string;
+    name: string;
+    status: string;
+    enabled: boolean;
+    transport?: string;
+    checked_at: string | null;
+    error_code: string | null;
+    catalog_models: number;
+    verified_models: number;
+    last_quota?: { last_error_code?: string | null; requests_blocked?: number } | null;
+  }>;
+}
+
+/**
+ * Lecture de l'état du registre pour le diagnostic.
+ *
+ * Passe par la RPC `vyora_ai_admin_integration_status`, qui vérifie le rôle
+ * administrateur CÔTÉ BASE : une interface contournée n'obtient rien. Aucune
+ * URL ni clé n'y figure — uniquement des états et des compteurs.
+ */
+export async function aiIntegrationStatus(): Promise<AiIntegrationStatus> {
+  return rpc<AiIntegrationStatus>('vyora_ai_admin_integration_status');
 }
 
 /* -------------------------------------------------------------------------- */
