@@ -29,6 +29,10 @@ import { BriefingDuJour } from './os/BriefingDuJour';
 import { HistoriqueAgent } from './agent/HistoriqueAgent';
 import { LitigesWorkspace } from './finance/LitigesWorkspace';
 import { RecouvrementWorkspace } from './finance/RecouvrementWorkspace';
+import { MessagesWorkspace } from './marketing/MessagesWorkspace';
+import { EcheancesWorkspace } from './compliance/EcheancesWorkspace';
+import { VeilleWorkspace } from './growth/VeilleWorkspace';
+import { BriefStudioWorkspace } from './growth/BriefStudioWorkspace';
 import { RentabiliteWorkspace } from './catalog/RentabiliteWorkspace';
 import { growthOsModule, growthOsModuleFromPath, legacyGrowthOsPath, type GrowthOsModule } from './os/modules';
 import { readProspects } from './growth/model';
@@ -2544,6 +2548,23 @@ function ScopedBusinessGrowWorkspace() {
           onOpenContact={(contactId) => { setCrmContactId(contactId); go('crm'); }}
         />
       )}
+
+      {workspaceId && osModule === 'messages' && <MessagesWorkspace workspaceId={workspaceId} />}
+
+      {osModule === 'veille' && (
+        <VeilleWorkspace
+          memory={memory}
+          prixMaison={null}
+          deviseMaison=""
+          onOpenAssistant={(prompt) => { setReportDraft(prompt); go('assistant'); }}
+        />
+      )}
+
+      {workspaceId && osModule === 'brief_studio' && (
+        <BriefStudioWorkspace workspaceId={workspaceId} nomEntreprise={workspace?.name ?? ''} />
+      )}
+
+      {osModule === 'echeances' && <EcheancesWorkspace workspaceId={workspaceId} />}
 
       {workspaceId && osModule === 'finance' && (
         <FinanceWorkspace
