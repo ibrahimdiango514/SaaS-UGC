@@ -13,6 +13,7 @@ import {
   type AiMessage,
   type AiMode,
 } from './api';
+import { PortalOverlay } from '../components/PortalOverlay';
 import './assistant.css';
 
 const CLE_REPLI = 'vyora.ai.sidebar.collapsed';
@@ -245,7 +246,14 @@ export function BusinessAssistant({
       */}
       <div className="hidden lg:block" data-testid="business-assistant-rail">{panneau(false)}</div>
 
+      {/*
+        Tiroir mobile monté dans `document.body` : l'espace Agent IA peut être
+        hébergé sous un conteneur animé (`animate-fadeUp`), et un `fixed` y
+        perdrait la fenêtre comme référentiel — le tiroir ne couvrirait qu'une
+        partie de l'écran sur Android.
+      */}
       {tiroirMobile && (
+        <PortalOverlay>
         <div className="fixed inset-0 z-50 flex lg:hidden">
           {/* L'overlay est cliquable mais n'est pas une commande : il n'a pas
               de nom accessible, pour ne pas concurrencer le bouton de fermeture
@@ -259,6 +267,7 @@ export function BusinessAssistant({
           />
           {panneau(true)}
         </div>
+        </PortalOverlay>
       )}
 
       <main className="vy-ambient relative flex min-w-0 flex-1 flex-col overflow-hidden">
