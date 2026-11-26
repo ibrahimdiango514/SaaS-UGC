@@ -1,7 +1,7 @@
 import {
   BarChart3, BellRing, Brain, Building2, ClipboardList, Landmark, LayoutDashboard, Mail,
   Megaphone, Package, Plus, Plug, Shield, ShoppingCart, Store, Target, Truck, UserPlus,
-  Users, Wallet, Workflow, Zap,
+  Users, Wallet, Workflow, Zap, History, Scale, TrendingUp,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -18,7 +18,8 @@ import type { LucideIcon } from 'lucide-react';
 export type GrowthOsModule =
   | 'overview' | 'crm' | 'pipeline' | 'tasks' | 'relances'
   | 'sales' | 'catalog' | 'suppliers' | 'storefront' | 'finance' | 'cash' | 'recouvrement' | 'reports'
-  | 'automation' | 'marketing' | 'assistant'
+  | 'litiges' | 'rentabilite'
+  | 'automation' | 'marketing' | 'assistant' | 'historique'
   | 'company' | 'memory' | 'providers' | 'integrations' | 'ai';
 
 export interface GrowthOsNavItem {
@@ -99,6 +100,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         path: '/app/business/suppliers', icon: Truck,
       },
       {
+        key: 'rentabilite', label: 'Rentabilité et fuites', shortLabel: 'Rentabilité',
+        description: 'Marge réelle par produit, ventes à perte et fuites d’argent',
+        path: '/app/business/rentabilite', icon: TrendingUp,
+      },
+      {
         key: 'storefront', label: 'Vitrine commerciale', shortLabel: 'Vitrine',
         description: 'Catalogue partageable et demandes de commande',
         path: '/app/business/storefront', icon: Store,
@@ -124,6 +130,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         description: 'Priorités, promesses, litiges et risques',
         path: '/app/business/recouvrement', icon: BellRing,
       },
+      {
+        key: 'litiges', label: 'Litiges et contestations', shortLabel: 'Litiges',
+        description: 'Dossiers, échéances, preuves rassemblées et réponse préparée',
+        path: '/app/business/litiges', icon: Scale,
+      },
     ],
   },
   {
@@ -134,6 +145,11 @@ export const GROWTH_OS_NAV: readonly GrowthOsNavGroup[] = [
         key: 'assistant', label: 'Assistant IA', shortLabel: 'Assistant',
         description: 'Conversation reliée au CRM et aux finances',
         path: '/app/business/assistant', icon: Brain,
+      },
+      {
+        key: 'historique', label: 'Historique de l’agent', shortLabel: 'Historique',
+        description: 'Chaque proposition, décision et action, avec annulation',
+        path: '/app/business/historique', icon: History,
       },
       {
         key: 'automation', label: 'Automatisations', shortLabel: 'Automatisations',

@@ -25,6 +25,10 @@ import StorefrontWorkspace from './storefront/StorefrontWorkspace';
 import { IntegrationsCenter, type SubscriptionRefusal } from '../integrations/CatalogPage';
 import { GrowthOsLayout } from './os/GrowthOsLayout';
 import { GrowthOsOverview, GrowthOsReports } from './os/GrowthOsOverview';
+import { BriefingDuJour } from './os/BriefingDuJour';
+import { HistoriqueAgent } from './agent/HistoriqueAgent';
+import { LitigesWorkspace } from './finance/LitigesWorkspace';
+import { RentabiliteWorkspace } from './catalog/RentabiliteWorkspace';
 import { growthOsModule, growthOsModuleFromPath, legacyGrowthOsPath, type GrowthOsModule } from './os/modules';
 import { readProspects } from './growth/model';
 import AgentReports from './agent/AgentReports';
@@ -2439,7 +2443,23 @@ function ScopedBusinessGrowWorkspace() {
         </section>
       )}
 
-      {osModule === 'overview' && <GrowthOsOverview workspaceId={workspaceId} onNavigate={go} />}
+      {osModule === 'litiges' && (
+        <LitigesWorkspace workspaceId={workspaceId} onOpenFinance={() => go('finance')} />
+      )}
+
+      {osModule === 'rentabilite' && (
+        <RentabiliteWorkspace workspaceId={workspaceId} onOpenCatalog={() => go('catalog')} />
+      )}
+
+      {osModule === 'historique' && <HistoriqueAgent workspaceId={workspaceId} />}
+
+      {osModule === 'overview' && (
+        <>
+          {/* Briefing quotidien en tête de l'accueil : trois priorités, une action préparée par l'agent. */}
+          <BriefingDuJour workspaceId={workspaceId} onNavigate={go} />
+          <GrowthOsOverview workspaceId={workspaceId} onNavigate={go} />
+        </>
+      )}
       {osModule === 'reports' && <GrowthOsReports workspaceId={workspaceId} />}
 
       {workspaceId && osModule === 'crm' && (

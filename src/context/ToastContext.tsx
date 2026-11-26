@@ -58,3 +58,14 @@ export function useToast(): ToastContextValue {
   if (!ctx) throw new Error('useToast doit être utilisé dans ToastProvider');
   return ctx;
 }
+
+/**
+ * Variante tolérante : renvoie `null` hors provider.
+ *
+ * Réservée aux composants qui peuvent vivre seuls (panneaux montés dans des
+ * contextes de test ou des aperçus). Un toast manquant ne doit pas empêcher
+ * l'affichage d'une donnée métier : c'est un confort, pas une condition.
+ */
+export function useOptionalToast(): ToastContextValue | null {
+  return useContext(ToastContext);
+}

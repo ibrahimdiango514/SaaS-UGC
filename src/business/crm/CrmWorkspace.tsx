@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, BarChart3, CalendarClock, ChevronRight, ClipboardList, Download, Layers, Mail,
-  Phone, Plus, RefreshCw, Sparkles, Target, Users,
+  Gauge, Phone, Plus, RefreshCw, Sparkles, Target, Users,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea, cn } from '../../components/ui';
 import { useToast } from '../../context/ToastContext';
@@ -26,14 +26,16 @@ import {
   ActionCenterPanel, DuplicatesPanel, ImportPanel, PipelinePanel, RemindersPanel,
   ScoreChip, SegmentBar, SegmentExport, TasksPanel, contactOptionLabel, downloadCsv,
 } from './CrmPanels';
+import { PilotePanel } from './PilotePanel';
 
-export type CrmTab = 'dashboard' | 'contacts' | 'pipeline' | 'actions' | 'tasks' | 'relances' | 'segments' | 'import' | 'doublons';
+export type CrmTab = 'dashboard' | 'contacts' | 'pipeline' | 'actions' | 'pilote' | 'tasks' | 'relances' | 'segments' | 'import' | 'doublons';
 
 const TABS: { id: CrmTab; label: string; icon: typeof Users }[] = [
   { id: 'dashboard', label: 'Tableau de bord', icon: BarChart3 },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'pipeline', label: 'Pipeline', icon: Target },
   { id: 'actions', label: 'À faire', icon: AlertTriangle },
+  { id: 'pilote', label: 'Pilote', icon: Gauge },
   { id: 'tasks', label: 'Tâches', icon: ClipboardList },
   { id: 'relances', label: 'Relances', icon: Mail },
   { id: 'segments', label: 'Segments', icon: Layers },
@@ -653,6 +655,17 @@ export default function CrmWorkspace({
             onStageChange={(opportunity, stage) => void changeStage(opportunity, stage)}
             onCreate={() => openOpportunity()} onEdit={openOpportunity} />
         </div>
+      )}
+
+      {tab === 'pilote' && (
+        <PilotePanel
+          workspaceId={workspaceId}
+          contacts={contacts}
+          opportunities={opportunities}
+          scores={scores}
+          onOpenContact={(contactId) => setSelectedContactId(contactId)}
+          onEdit={(contact) => openContact(contact)}
+        />
       )}
 
       {tab === 'actions' && (
