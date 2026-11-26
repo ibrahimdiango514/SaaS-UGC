@@ -17,12 +17,29 @@ import {
   SLICES_TABLE,
   buildBundle,
   renderLoader,
+  renderRepublishSql,
   renderSeedSql,
+  republishGroup,
   sqlLiteral,
 } from '../scripts/build-edge-loader.mjs';
 
 const ROOT = join(__dirname, '..');
 const slugs = Object.keys(LOADER_TARGETS);
+
+/** Chemin de la migration qui publie réellement cet artefact. */
+function cheminMigration(slug: string): string {
+  const { migration, republish } = LOADER_TARGETS[slug] as { migration: string; republish?: boolean };
+  if (!republish) {
+    return join(ROOT, 'supabase/migrations', `${migration}_${slug.replace(/-/g, '_')}_artifact.sql`);
+  }
+  // Publication groupée : un fichier porte plusieurs artefacts.
+  const groupe = republishGroup(slug);
+  return join(
+    ROOT,
+    'supabase/migrations',
+    `${migration}_${groupe.map((s) => s.replace(/-/g, '_')).join('_et_')}_artifacts_republish.sql`,
+  );
+}
 
 /** Extrait les tranches d'un fichier SQL de publication. */
 function slicesFromSql(sql: string, slug: string): string {
@@ -45,13 +62,17 @@ describe('chargeurs Edge — parité générateur / dépôt', () => {
 
     it(`${slug} : la migration publie exactement le bundle déployé`, () => {
       const built = buildBundle(ROOT, slug);
-      const migrationPath = join(
-        ROOT,
-        'supabase/migrations',
-        `${LOADER_TARGETS[slug].migration}_${slug.replace(/-/g, '_')}_artifact.sql`,
-      );
-      const sql = readFileSync(migrationPath, 'utf8');
-      expect(sql).toBe(renderSeedSql(slug, built));
+      const sql = readFileSync(cheminMigration(slug), 'utf8');
+      if ((LOADER_TARGETS[slug] as { republish?: boolean }).republish) {
+        // Fichier groupé : on compare le fichier ENTIER à sa composition, sinon
+        // une tranche d'un autre artefact pourrait y dériver sans être vue.
+        const groupe = republishGroup(slug);
+        expect(sql).toBe(
+          renderRepublishSql(groupe.map((s) => ({ slug: s, built: buildBundle(ROOT, s) }))),
+        );
+      } else {
+        expect(sql).toBe(renderSeedSql(slug, built));
+      }
       // Les tranches se recomposent en un gzip valide dont le contenu est le
       // bundle exact : le SHA-256 du chargeur est donc vérifiable en production.
       const assembled = slicesFromSql(sql, slug);
@@ -120,12 +141,7 @@ describe('chargeurs Edge — garde-fous du contrat de déploiement', () => {
 
   it('aucun secret n’est écrit dans un artifact publié', () => {
     for (const slug of slugs) {
-      const migrationPath = join(
-        ROOT,
-        'supabase/migrations',
-        `${LOADER_TARGETS[slug].migration}_${slug.replace(/-/g, '_')}_artifact.sql`,
-      );
-      const sql = readFileSync(migrationPath, 'utf8');
+      const sql = readFileSync(cheminMigration(slug), 'utf8');
       // Le SQL ne contient que des tranches base64 + une empreinte.
       expect(/sk-[A-Za-z0-9]|gnk-|cfut_|Bearer [A-Za-z0-9]{8,}/.test(sql)).toBe(false);
     }
