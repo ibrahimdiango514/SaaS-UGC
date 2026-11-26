@@ -3,6 +3,7 @@ import {
   BellRing, Copy, Plus, RefreshCw, Sparkles, ToggleLeft, ToggleRight, X,
 } from 'lucide-react';
 import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Select, Textarea } from '../../components/ui';
+import { convertirPhrase, testerABlanc } from './phrase';
 import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { CRM_CATEGORIES, FINANCE_CATEGORIES, useRecords } from '../records/useRecords';
@@ -70,6 +71,30 @@ export default function AutomationWorkspace({ workspaceId, onOpenContact }: { wo
     products: products.map((product) => ({ id: product.id, name: product.name, stock: stockOf(product, movements), threshold: product.lowStockThreshold, trackStock: product.trackStock })),
     unusualExpenses: detectUnusualExpenses(expenses).map((entry) => ({ id: entry.expense.id, label: entry.expense.label, reason: entry.reason })),
   }), [contacts, expenses, invoices, movements, opportunities, products, promises, quotes, receivables, tasks]);
+
+  /*
+   * Éléments réels examinés par le test à blanc, déclencheur par déclencheur.
+   * On réutilise `buildSignals`, déjà utilisé pour les exécutions : le test à
+   * blanc montre donc EXACTEMENT ce que la règle verrait, pas un exemple.
+   */
+  const elementsParTrigger = useMemo(() => {
+    const resultat: Partial<Record<AutomationTrigger, Array<{ cle: string; label: string; detail: string; jours: number | null }>>> = {};
+    for (const declencheur of AUTOMATION_TRIGGERS) {
+      resultat[declencheur.value] = buildSignals(declencheur.value, dataset, 0).map((signal) => ({
+        cle: signal.itemKey,
+        label: signal.label,
+        detail: signal.detail,
+        /*
+         * `AutomationSignal` ne porte pas l'ancienneté en jours, mais son
+         * `detail` commence toujours par « N jour(s) de retard ». On la relit
+         * là plutôt que de modifier `buildSignals`, partagé avec les exécutions
+         * réelles : une signature changée là-bas serait un risque inutile.
+         */
+        jours: lireJoursRetard(signal.detail),
+      }));
+    }
+    return resultat;
+  }, [dataset]);
 
   const [editor, setEditor] = useState<AutomationRule | null | 'new'>(null);
   const [message, setMessage] = useState<{ signal: AutomationSignal; rule: AutomationRule } | null>(null);
@@ -230,7 +255,15 @@ export default function AutomationWorkspace({ workspaceId, onOpenContact }: { wo
         </div>
       )}
 
-      {editor && <RuleForm open initial={editor === 'new' ? null : editor} onClose={() => setEditor(null)} onSubmit={saveRule} />}
+      {editor && (
+        <RuleForm
+          open
+          initial={editor === 'new' ? null : editor}
+          onClose={() => setEditor(null)}
+          onSubmit={saveRule}
+          elementsParTrigger={elementsParTrigger}
+        />
+      )}
 
       <Modal open={Boolean(message)} onClose={() => setMessage(null)} title="Relance préparée" description="Aucun message n’est envoyé. Copiez-le ou ouvrez votre application externe."
         footer={message && <><Button variant="ghost" onClick={() => setMessage(null)}>Fermer</Button><Button icon={<Copy size={13} />} onClick={() => {
@@ -249,11 +282,13 @@ export default function AutomationWorkspace({ workspaceId, onOpenContact }: { wo
   );
 }
 
-function RuleForm({ open, initial, onClose, onSubmit }: {
+function RuleForm({ open, initial, onClose, onSubmit, elementsParTrigger }: {
   open: boolean;
   initial: AutomationRule | null;
   onClose: () => void;
   onSubmit: (data: Record<string, unknown>) => Promise<void>;
+  /** Éléments réels à examiner pour le test à blanc, par déclencheur. */
+  elementsParTrigger?: Partial<Record<AutomationTrigger, readonly { cle: string; label: string; detail: string; jours: number | null }[]>>;
 }) {
   const [name, setName] = useState(initial?.name ?? '');
   const [trigger, setTrigger] = useState<AutomationTrigger>(initial?.trigger ?? 'tache_retard');
@@ -263,6 +298,33 @@ function RuleForm({ open, initial, onClose, onSubmit }: {
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  /*
+   * Saisie par phrase (fonctionnalité 9). La phrase ne crée JAMAIS la règle
+   * directement : elle pré-remplit les champs ci-dessous, que l'utilisateur
+   * relit. Si la phrase n'est pas comprise, on affiche les questions au lieu de
+   * deviner — une règle mal comprise enverrait des relances au mauvais client.
+   */
+  const [phrase, setPhrase] = useState('');
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [phraseError, setPhraseError] = useState('');
+  const [apercu, setApercu] = useState<ReturnType<typeof testerABlanc> | null>(null);
+
+  const appliquerPhrase = () => {
+    setPhraseError('');
+    const conversion = convertirPhrase(phrase);
+    if (!conversion.ok) {
+      setQuestions(conversion.questions);
+      if (conversion.compris.trigger) setTrigger(conversion.compris.trigger);
+      if (conversion.compris.action) setAction(conversion.compris.action);
+      if (conversion.compris.thresholdDays !== undefined) setThresholdDays(String(conversion.compris.thresholdDays));
+      return;
+    }
+    setQuestions([]);
+    if (!name.trim()) setName(conversion.regle.name);
+    setTrigger(conversion.regle.trigger);
+    setAction(conversion.regle.action);
+    setThresholdDays(String(conversion.regle.thresholdDays));
+  };
 
   const submit = async () => {
     if (!name.trim()) { setError('Le nom est obligatoire.'); return; }
@@ -278,6 +340,26 @@ function RuleForm({ open, initial, onClose, onSubmit }: {
       footer={<><Button variant="ghost" onClick={onClose}>Annuler</Button><Button loading={busy} onClick={() => void submit()}>{initial ? 'Enregistrer' : 'Créer'}</Button></>}>
       <div className="space-y-3">
         {error && <p role="alert" className="rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{error}</p>}
+        <div className="rounded-lg border border-violet-400/25 bg-violet-500/[0.06] p-2.5">
+          <p className="text-[11px] font-semibold text-violet-100">Écrire la règle en une phrase</p>
+          <p className="mt-0.5 text-[10px] text-slate-400">
+            Exemple : « si une facture a 7 jours de retard, prépare la relance ». Si un élément manque, les questions s’affichent : rien n’est deviné.
+          </p>
+          <Textarea
+            label=""
+            rows={2}
+            value={phrase}
+            onChange={(event) => setPhrase(event.target.value)}
+            placeholder="si une facture a 7 jours de retard, prépare la relance"
+          />
+          <Button size="sm" variant="outline" onClick={appliquerPhrase}>Comprendre la phrase</Button>
+          {questions.length > 0 && (
+            <ul className="mt-2 list-inside list-disc text-[10.5px] text-amber-200">
+              {questions.map((question) => <li key={question}>{question}</li>)}
+            </ul>
+          )}
+          {phraseError && <p className="mt-1 text-[10.5px] text-rose-200">{phraseError}</p>}
+        </div>
         <Input label="Nom" value={name} onChange={(event) => setName(event.target.value)} placeholder="Relancer les devis oubliés" />
         <Select label="Déclencheur" value={trigger} onChange={(event) => setTrigger(event.target.value as AutomationTrigger)}>
           {AUTOMATION_TRIGGERS.map((entry) => <option key={entry.value} value={entry.value}>{entry.label}</option>)}
@@ -294,10 +376,50 @@ function RuleForm({ open, initial, onClose, onSubmit }: {
             <option value="whatsapp">WhatsApp</option><option value="email">E-mail</option><option value="sms">SMS</option><option value="appel">Appel</option>
           </Select>
         )}
+        {/*
+          Test à blanc : applique la règle aux données actuelles SANS RIEN
+          exécuter. Il distingue « aucun élément concerné » de « aucune donnée
+          à examiner », deux situations qui se ressemblent et n'ont pas le même
+          sens pour l'utilisateur.
+        */}
+        <div className="rounded-lg border border-white/[0.07] p-2.5">
+          <Button size="sm" variant="ghost" onClick={() => setApercu(testerABlanc(
+            { trigger, thresholdDays: Number(thresholdDays) || 0 },
+            elementsParTrigger?.[trigger] ?? [],
+          ))}>
+            Tester à blanc
+          </Button>
+          {apercu && (
+            <div className="mt-2" data-testid="test-a-blanc">
+              <p className="text-[10.5px] text-slate-300">{apercu.message}</p>
+              {apercu.declenchements.length > 0 && (
+                <ul className="mt-1.5 space-y-1">
+                  {apercu.declenchements.slice(0, 5).map((element) => (
+                    <li key={element.cle} className="text-[10px] text-slate-400">
+                      <span className="text-slate-200">{element.label}</span> · {element.detail}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
         <label className="flex items-center gap-2 text-[11px] text-slate-300">
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Activer immédiatement
         </label>
       </div>
     </Modal>
   );
+}
+
+/**
+ * Relit l'ancienneté depuis le `detail` d'un signal (« 10 jour(s) de retard »).
+ * Renvoie `null` si le signal ne porte pas de durée (stock faible, doublon…),
+ * ce qui empêche le test à blanc de compter cet élément comme en retard.
+ */
+function lireJoursRetard(detail: string): number | null {
+  const trouve = detail.match(/(\d+)\s*jour/i);
+  if (!trouve) return null;
+  const valeur = Number.parseInt(trouve[1], 10);
+  return Number.isFinite(valeur) ? valeur : null;
 }

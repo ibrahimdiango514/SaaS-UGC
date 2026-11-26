@@ -6,7 +6,7 @@ import { Badge, Button, EmptyState, ErrorState, Input, LoadingState, Modal, Sele
 import { useToast } from '../../context/ToastContext';
 import { asAppError } from '../../lib/errors';
 import { FINANCE_CATEGORIES, useRecords } from '../records/useRecords';
-import { PAYMENT_METHODS, paymentFromRecord } from '../finance/model';
+import { PAYMENT_METHODS, computeReceivableView, paymentFromRecord, receivableFromRecord, todayIso } from '../finance/model';
 import { SALES_CATEGORIES, invoiceFromRecord } from '../sales/model';
 import {
   CASH_CATEGORIES, EXPENSE_CATEGORIES, EXPENSE_RECURRENCES, EXPENSE_STATUSES,
@@ -15,6 +15,10 @@ import {
   type Expense, type ExpenseRecurrence, type ExpenseStatus,
 } from './model';
 import { useGrandEcran } from '../../lib/media-query';
+import {
+  HORIZONS, actionsContreTrouDeCash, prevoirTresorerie, probabiliteEncaissement,
+  type SemainesHorizon,
+} from './prevision';
 
 const money = (value: number | null) => value === null
   ? '—'
@@ -106,10 +110,15 @@ function ExpenseForm({ open, initial, onClose, onSubmit }: {
 export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspaceId: string | null; onOpenFinance: () => void }) {
   // Une seule vue montée à la fois : liste tactile ou tableau.
   const grandEcran = useGrandEcran();
+  // Horizon de prévision : 8 semaines par défaut (deux mois, le plus lisible).
+  const [horizon, setHorizon] = useState<SemainesHorizon>(8);
   const toast = useToast();
   const expensesStore = useRecords(CASH_CATEGORIES.expenses, workspaceId);
   const paymentsStore = useRecords(FINANCE_CATEGORIES.payments, workspaceId);
   const invoicesStore = useRecords(SALES_CATEGORIES.invoices, workspaceId);
+  // Les créances sont la source des ENTRÉES attendues : sans elles, la
+  // prévision ne serait qu'une extrapolation du passé.
+  const receivablesStore = useRecords(FINANCE_CATEGORIES.receivables, workspaceId);
   const expenses = useMemo(() => expensesStore.records.map(expenseFromRecord), [expensesStore.records]);
   const payments = useMemo(() => paymentsStore.records.map(paymentFromRecord), [paymentsStore.records]);
   const invoices = useMemo(() => invoicesStore.records.map(invoiceFromRecord), [invoicesStore.records]);
@@ -121,6 +130,57 @@ export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspac
   const movements = useMemo(() => cashMovements(payments, expenses), [expenses, payments]);
   const flow = useMemo(() => monthlyCashflow(payments, expenses), [expenses, payments]);
   const categories = useMemo(() => expensesByCategory(expenses), [expenses]);
+  /**
+   * Prévision de trésorerie construite depuis les données réelles.
+   * La devise est celle de la majorité des créances ; les créances d'une autre
+   * devise sont ignorées par `prevoirTresorerie` (jamais additionnées).
+   */
+  const prevision = useMemo(() => {
+    const creances = receivablesStore.records.map((record) => {
+      const view = computeReceivableView(receivableFromRecord(record), payments);
+      const devise = typeof record.data.devise === 'string' && record.data.devise ? String(record.data.devise).toUpperCase() : 'XOF';
+      return {
+        id: view.receivable.id,
+        reference: view.receivable.reference,
+        solde: view.balance,
+        devise,
+        echeance: view.receivable.dueDate,
+        joursDeRetard: Math.max(0, view.daysOverdue),
+        statut: view.effectiveStatus,
+      };
+    });
+    const frequences: Record<string, number> = {};
+    for (const creance of creances) frequences[creance.devise] = (frequences[creance.devise] ?? 0) + 1;
+    const devise = Object.entries(frequences).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'XOF';
+    const entree = {
+      aujourdhui: todayIso(),
+      devise,
+      tresorerieActuelle: summary.balance,
+      creances,
+      depenses: expenses.map((expense) => ({
+        id: expense.id, label: expense.label, montant: expense.amount,
+        date: expense.paidAt || expense.incurredAt,
+        statut: expense.status, recurrence: expense.recurrence,
+      })),
+    };
+    const projection = prevoirTresorerie(entree, horizon);
+    /*
+     * Traçabilité : l'utilisateur doit VOIR quelles créances entrent dans la
+     * projection, avec le montant attendu. Une prévision qu'on ne peut pas
+     * auditer n'inspire pas confiance — et masquer une créance oubliée est
+     * exactement le genre d'erreur que ce panneau doit rendre visible.
+     */
+    const creancesProjetees = creances
+      .filter((creance) => creance.solde > 0 && creance.devise === devise
+        && creance.echeance && !['payee', 'annulee', 'brouillon'].includes(creance.statut))
+      .map((creance) => ({
+        ...creance,
+        probabilite: probabiliteEncaissement(creance.joursDeRetard),
+        attendu: Math.round(creance.solde * probabiliteEncaissement(creance.joursDeRetard)),
+      }))
+      .sort((a, b) => b.attendu - a.attendu);
+    return { entree, projection, actions: actionsContreTrouDeCash(projection, entree), creancesProjetees };
+  }, [expenses, horizon, payments, receivablesStore.records, summary.balance]);
   const unusual = useMemo(() => detectUnusualExpenses(expenses), [expenses]);
   const billed = useMemo(() => invoices
     .filter((invoice) => invoice.status !== 'brouillon' && invoice.status !== 'annulee')
@@ -158,6 +218,114 @@ export default function CashWorkspace({ workspaceId, onOpenFinance }: { workspac
           </div>
         ))}
       </div>
+
+      {/*
+        Prévision de trésorerie — fonctionnalité 3.
+        Mobile d'abord : une semaine = une ligne lisible, pas un graphique.
+        Trois états d'honnêteté explicites : vide, prévision présente, trou de cash.
+      */}
+      <section className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3" data-testid="cash-prevision">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-[11px] font-semibold text-white">Prévision de trésorerie</p>
+            <p className="text-[10px] text-slate-500">
+              Créances attendues et dépenses connues, pondérées par l’ancienneté du retard. Ce sont des hypothèses, pas des garanties.
+            </p>
+          </div>
+          <div className="flex gap-1" role="group" aria-label="Horizon de prévision">
+            {HORIZONS.map((valeur) => (
+              <Button
+                key={valeur}
+                size="sm"
+                variant={horizon === valeur ? 'primary' : 'ghost'}
+                aria-pressed={horizon === valeur}
+                onClick={() => setHorizon(valeur)}
+              >
+                {valeur} sem.
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        {prevision.projection.vide ? (
+          <p className="mt-3 rounded-lg border border-white/[0.06] px-3 py-2 text-[11px] text-slate-400">
+            Aucune créance ni dépense exploitable : la prévision ne peut rien affirmer. Enregistrez une créance ou une dépense pour la voir apparaître.
+          </p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            <ul className="liste-mobile overflow-hidden rounded-lg border border-white/[0.06]">
+              {prevision.projection.semaines.map((semaine) => (
+                <li key={semaine.semaine} className="flex items-center justify-between gap-2 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium text-white">Semaine {semaine.semaine}</p>
+                    <p className="truncate text-[10px] text-slate-500">jusqu’au {semaine.fin}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className={cn('text-[12px] font-semibold', semaine.cumul < 0 ? 'text-rose-300' : 'text-white')}>
+                      {money(semaine.cumul)}
+                    </p>
+                    <p className="text-[9.5px] text-slate-500">
+                      +{money(semaine.entrees)} / −{money(semaine.sorties)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            {prevision.creancesProjetees.length > 0 && (
+              <details className="rounded-lg border border-white/[0.06] px-3 py-2" data-testid="cash-prevision-creances">
+                <summary className="cursor-pointer text-[10.5px] text-slate-400">
+                  Créances prises en compte ({prevision.creancesProjetees.length})
+                </summary>
+                <ul className="mt-2 space-y-1.5">
+                  {prevision.creancesProjetees.map((creance) => (
+                    <li key={creance.id} className="flex items-baseline justify-between gap-2 text-[10.5px]">
+                      <span className="min-w-0 truncate text-slate-300">{creance.reference || 'Sans référence'}</span>
+                      <span className="shrink-0 text-slate-400">
+                        {money(creance.solde)} · attendu {money(creance.attendu)} ({Math.round(creance.probabilite * 100)} %)
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            {prevision.projection.creancesNonDatees > 0 && (
+              <p className="text-[10.5px] text-amber-200">
+                {prevision.projection.creancesNonDatees} créance(s) sans échéance ({money(prevision.projection.montantNonDate)}) ne sont pas projetées : fixez une date pour les compter.
+              </p>
+            )}
+
+            {prevision.projection.premiereSemaineNegative !== null && (
+              <div className="rounded-lg border border-rose-400/30 bg-rose-500/[0.06] p-3">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-200">
+                  <AlertTriangle size={12} /> Trésorerie sous zéro dès la semaine {prevision.projection.premiereSemaineNegative}
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {prevision.actions.map((action) => (
+                    <li key={action.label} className="text-[10.5px] text-slate-300">
+                      <span className="font-medium text-white">{action.label}</span> · effet estimé {money(action.effet)}
+                      <span className="block text-[9.5px] text-slate-500">{action.fondement}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[9.5px] text-slate-500">
+                  Estimation automatique, à relire : elle ne garantit aucun résultat.
+                </p>
+              </div>
+            )}
+
+            <details className="rounded-lg border border-white/[0.06] px-3 py-2">
+              <summary className="cursor-pointer text-[10.5px] text-slate-400">Comment l’encaissement est pondéré</summary>
+              <ul className="mt-2 space-y-1 text-[10px] text-slate-500">
+                {[0, 7, 15, 30, 60, 90].map((jours) => (
+                  <li key={jours}>Retard de {jours} jour(s) : {Math.round(probabiliteEncaissement(jours) * 100)} % attendu</li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        )}
+      </section>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
