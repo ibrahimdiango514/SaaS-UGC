@@ -408,7 +408,70 @@ async function logAiCall(entry: AiCallLogEntry): Promise<void> {
  * compte (`account_id_env`). Aucune valeur de secret ne sort d'ici — seulement
  * « configuré ou non » et, éventuellement, le nom du modèle configuré.
  */
-async function providerHealth(): Promise<Record<string, { configured: boolean; model: string | null }>> {
+/**
+ * État d'un fournisseur tel que l'écran de diagnostic l'affiche.
+ *
+ * Aucune valeur de secret, aucune URL complète : `base_url_form` ne décrit que
+ * la FORME de l'adresse (publique, locale, privée…), ce qui suffit à expliquer
+ * pourquoi une instance `localhost` n'est jamais joignable depuis le cloud.
+ */
+interface ProviderHealthEntry {
+  configured: boolean;
+  model: string | null;
+  status: string;
+  enabled: boolean;
+  base_url_configured: boolean;
+  base_url_form: "publique" | "locale" | "privee" | "illisible" | "absente";
+  error_code: string | null;
+  checked_at: string | null;
+  catalog_models: number | null;
+  verified_models: number | null;
+}
+
+/**
+ * Forme d'une adresse, sans jamais la restituer.
+ *
+ * Edge Functions tournent dans le cloud : `localhost`, une IP privée ou un nom
+ * sans domaine public ne peuvent pas être joints, quel que soit le secret.
+ * Distinguer ce cas évite de chercher une panne réseau là où le problème est
+ * l'adresse elle-même.
+ */
+function formeAdresse(valeur: string | null | undefined): ProviderHealthEntry["base_url_form"] {
+  const brut = (valeur ?? "").trim();
+  if (!brut) return "absente";
+  let hote: string;
+  try {
+    const url = new URL(brut);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "illisible";
+    hote = url.hostname.toLowerCase();
+  } catch {
+    return "illisible";
+  }
+  if (
+    hote === "localhost" || hote === "[::1]" || hote === "::1"
+    || hote.endsWith(".localhost") || hote.endsWith(".local") || hote.endsWith(".internal")
+  ) return "locale";
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hote);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    // 127.x et 0.x sont la boucle locale ; 10.x est privée (RFC 1918).
+    if (a === 127 || a === 0) return "locale";
+    if (a === 10) return "privee";
+    if (a === 192 && b === 168) return "privee";
+    if (a === 172 && b >= 16 && b <= 31) return "privee";
+    if (a === 169 && b === 254) return "privee";
+    return "publique";
+  }
+  if (hote.startsWith("[") || hote.includes(":")) {
+    const nu = hote.replace(/^\[|\]$/g, "");
+    if (nu === "::1" || nu.startsWith("fe80:") || nu.startsWith("fc") || nu.startsWith("fd")) return "privee";
+    return "publique";
+  }
+  if (!hote.includes(".")) return "locale";
+  return "publique";
+}
+
+async function providerHealth(): Promise<Record<string, ProviderHealthEntry>> {
   const snapshot = await loadRegistrySnapshot();
   const keys = new Set<string>((snapshot?.providers ?? []).map((p) => p.key));
   // Repli sans registre : les fournisseurs dont un secret existe déjà.
@@ -420,14 +483,34 @@ async function providerHealth(): Promise<Record<string, { configured: boolean; m
     .filter((key) => key && key !== "SUPABASE" && key !== "ANON" && key !== "SERVICE");
   for (const key of conventions) keys.add(key.toLowerCase());
 
-  const out: Record<string, { configured: boolean; model: string | null }> = {};
+  const out: Record<string, ProviderHealthEntry> = {};
   for (const key of keys) {
     const credentials = credentialsForProvider(key);
     const model = firstEnv([
       ...legacyEnvNames(key).apiKey.map((name) => name.replace(/_API_KEY$|_API_TOKEN$/, MODEL_ENV_SUFFIX)),
       `${key.replace(/[^a-z0-9]+/gi, "_").toUpperCase()}${MODEL_ENV_SUFFIX}`,
     ]);
-    out[key] = { configured: Boolean(credentials.apiKey), model };
+    // La ligne de registre porte l'état RÉEL observé par la sonde : statut,
+    // code d'erreur, date de contrôle. On relaie ces champs sans jamais la
+    // valeur de l'adresse (elle peut contenir un jeton d'instance en chemin).
+    const ligne = (snapshot?.providers ?? []).find((p) => p.key === key);
+    // L'URL peut venir du registre ou d'un secret de déploiement : la forme se
+    // calcule sur celle qui sera RÉELLEMENT appelée.
+    const overrideEnv = ligne?.baseUrlEnv ? env(ligne.baseUrlEnv) : "";
+    const baseUrl = (overrideEnv || ligne?.baseUrl || ligne?.defaultBaseUrl || "").replace(/\/+$/, "");
+    const verifies = (snapshot?.models ?? []).filter((m) => m.provider === key && m.verified).length;
+    out[key] = {
+      configured: Boolean(credentials.apiKey),
+      model,
+      status: ligne?.status ?? "unverified",
+      enabled: ligne?.enabled !== false,
+      base_url_configured: Boolean(baseUrl),
+      base_url_form: formeAdresse(baseUrl),
+      error_code: ligne?.errorCode ?? null,
+      checked_at: ligne?.checkedAt ?? null,
+      catalog_models: (snapshot?.models ?? []).filter((m) => m.provider === key).length,
+      verified_models: verifies,
+    };
   }
   return out;
 }

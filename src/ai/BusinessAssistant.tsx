@@ -14,6 +14,7 @@ import {
   type AiMode,
 } from './api';
 import { PortalOverlay } from '../components/PortalOverlay';
+import { MoteurIaDiagnostic } from '../business/ai/MoteurIaDiagnostic';
 import './assistant.css';
 
 const CLE_REPLI = 'vyora.ai.sidebar.collapsed';
@@ -317,6 +318,15 @@ export function BusinessAssistant({
             </div>
           </div>
         )}
+
+        {/*
+          État honnête du moteur : la cause EXACTE du blocage, et non un
+          « service indisponible » indifférencié. Le même diagnostic que
+          l'administration, pour qu'une seule vérité circule.
+        */}
+        <div className="mx-3 mt-3">
+          <MoteurIaDiagnostic variante="agent" />
+        </div>
 
         {vue.error && (
           <div

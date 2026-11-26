@@ -1,4 +1,5 @@
 import {UniversalCatalogHealth} from './UniversalCatalogHealth';
+import { MoteurIaDiagnostic } from '../../business/ai/MoteurIaDiagnostic';
 /*
  * Sections administrateur adossées à des données réelles.
  *
@@ -595,6 +596,14 @@ export function ProvidersSection({ metrics }: { metrics: AdminMetrics | null }) 
       </div>
 
       {error ? <div className="rounded-xl border border-rose-400/30 bg-rose-400/[0.06] p-4 text-sm text-rose-200">{error}</div> : null}
+
+      {/*
+        Diagnostic de l'étape bloquante : sans lui, un fournisseur éteint et un
+        registre illisible s'affichaient de la même façon. La relance réutilise
+        la lecture serveur déjà en place (`aiEngineHealth`), qui n'écrit aucun
+        statut : elle observe.
+      */}
+      <MoteurIaDiagnostic variante="admin" onRelancer={load} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {providers.length === 0 ? (

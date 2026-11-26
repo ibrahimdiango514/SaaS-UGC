@@ -26,6 +26,21 @@ export interface AiRegistryProvider {
   transport: 'rest' | 'gateway';
   /** Variable portant l'identifiant de passerelle (Cloudflare), si requise. */
   gatewayIdEnv: string | null;
+  /**
+   * Fournisseur activé au registre.
+   *
+   * `false` n'empêche pas la LECTURE : le diagnostic doit pouvoir nommer
+   * « fournisseur désactivé » au lieu de faire croire à un registre absent.
+   * Le routage, lui, n'utilise que des modèles vérifiés, donc jamais un
+   * fournisseur désactivé.
+   */
+  enabled?: boolean;
+  /** Code d'erreur de la dernière sonde réelle (`null` = aucune). */
+  errorCode?: string | null;
+  /** Instant de la dernière sonde réelle, ISO 8601. */
+  checkedAt?: string | null;
+  /** URL de base déclarée au registre (peut être absente : secret seul). */
+  defaultBaseUrl?: string | null;
 }
 
 export interface AiRegistryModel {
@@ -156,6 +171,12 @@ export function parseRegistrySnapshot(raw: unknown): AiRegistrySnapshot | null {
           gatewayIdEnv: strOrNull(r.gateway_id_env),
           transport: String(r.transport ?? '').toLowerCase() === 'gateway' ? 'gateway' : 'rest',
           headers: headerMap(r.headers),
+          // Absent = activé : un snapshot antérieur à la migration ne doit pas
+          // faire croire que tout est désactivé.
+          enabled: r.enabled !== false,
+          errorCode: strOrNull(r.error_code),
+          checkedAt: strOrNull(r.checked_at),
+          defaultBaseUrl: strOrNull(r.default_base_url),
         }];
       })
     : [];
