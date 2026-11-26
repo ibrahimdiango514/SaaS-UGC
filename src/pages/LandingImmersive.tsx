@@ -24,12 +24,17 @@ import {
   ArrowRight, Brain, Check, Clapperboard, Coins, Layers3,
   LockKeyhole, ShieldCheck, Sparkles, TrendingUp, Wand2, Zap,
 } from 'lucide-react';
-import HeroImmersif from '../landing/HeroImmersif';
-import { SceneGrow, SceneStudio } from '../landing/ScenesImmersives';
+import { HeroScene } from '../landing/HeroScene';
+import { SceneMoteurProgres } from '../landing/SceneMoteurProgres';
+import {
+  SceneAutomatisation,
+  SceneAgent,
+  SceneGrow,
+  SceneStudio,
+  SceneVerdict,
+} from '../landing/ScenesImmersives';
 import { LogoHorizontal } from '../systeme/Logo';
-import { useNiveauImmersion } from '../systeme/immersion';
 import { CurseurPersonnalise } from '../systeme/CurseurPersonnalise';
-import { useScrollImmersif } from '../landing/useScrollImmersif';
 import { observerMoitiePage, suivre } from '../systeme/tracking';
 import { BIENTOT, CTA_PRINCIPAL, PALETTE, REASSURANCE, SLOGAN } from '../systeme/palette';
 
@@ -417,8 +422,12 @@ function PiedDePage() {
 
 export default function LandingImmersive() {
   const racine = useRef<HTMLDivElement>(null);
-  const { niveau, pret } = useNiveauImmersion();
-  useScrollImmersif(racine, niveau, pret);
+  /*
+   * Le défilement est piloté par `SceneMoteurProgres` (épinglage des scènes).
+   * L'ancien `useScrollImmersif` a été retiré : il appliquait encore un
+   * décalage aux panneaux et se battait avec le nouveau moteur — les textes
+   * partaient à −88 px sur mobile. Deux moteurs de défilement, c'est un de trop.
+   */
 
   // Mesure d'audience : un seul observateur, retiré au démontage.
   useEffect(() => observerMoitiePage(), []);
@@ -450,9 +459,16 @@ export default function LandingImmersive() {
       <Navigation />
 
       <main id="contenu" className="pt-16">
-        <HeroImmersif />
-        <SceneStudio />
-        <SceneGrow />
+        <SceneMoteurProgres>
+          <HeroScene />
+          <SceneStudio />
+          <SceneGrow />
+          <SceneAgent />
+          <SceneAutomatisation />
+        </SceneMoteurProgres>
+
+        {/* Les blocs classiques viennent APRÈS le récit, jamais à sa place. */}
+        <SceneVerdict />
         <SectionEspaces />
         <SectionFonctionnalites />
         <SectionDefis />

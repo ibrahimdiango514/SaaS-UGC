@@ -58,10 +58,13 @@ describe('Mouvement réduit — exigence d’accessibilité', () => {
         <LandingImmersive />
       </MemoryRouter>,
     );
-    // `hero-mot` porte l'animation d'entrée : en mouvement réduit, elle ne doit
-    // pas être posée du tout (la feuille de style la neutralise aussi, mais
-    // mieux vaut ne pas l'armer).
-    expect(document.querySelectorAll('.hero-mot')).toHaveLength(0);
+    /*
+     * `hero-mot--anime` porte l'animation d'entrée : en mouvement réduit, elle
+     * ne doit pas être posée du tout (la feuille de style la neutralise aussi,
+     * mais mieux vaut ne pas l'armer). `hero-mot` seule est la classe de
+     * placement, présente même à l'arrêt : ce n'est pas elle qu'on vérifie.
+     */
+    expect(document.querySelectorAll('.hero-mot--anime')).toHaveLength(0);
   });
 });
 

@@ -17,7 +17,8 @@
     "preview:studio": "node scripts/studio-preview.mjs",
     "preview:spaces": "node scripts/spaces-preview.mjs",
     "verify:sorahnex-aliases": "node scripts/verify-sorahnex-aliases.mjs",
-    "audit:origins": "node scripts/audit-origins.mjs"
+    "audit:origins": "node scripts/audit-origins.mjs",
+    "capture:immersion": "node scripts/capturer-immersion.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

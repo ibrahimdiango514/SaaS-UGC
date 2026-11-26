@@ -64,6 +64,25 @@ export function useNiveauImmersion(): { niveau: NiveauImmersion; pret: boolean }
     else if (!webgl2 || ecranEtroit || coeursFaibles) niveau = 'allege';
     else niveau = 'complet';
 
+    /*
+     * Commande de vérification : `?immersion=complet|allege|statique`.
+     *
+     * Elle existe parce qu'un niveau ne peut pas être constaté sans matériel
+     * réel : sans WebGL, ou sans écran large, on n'atteint jamais `complet` et
+     * les scènes animées ne peuvent pas être observées — donc pas vérifiées.
+     * Elle ne permet QUE de choisir un niveau déjà supporté, et le mouvement
+     * réduit garde le dernier mot : un visiteur qui a demandé moins
+     * d'animation n'en reçoit jamais davantage, quel que soit le paramètre.
+     */
+    if (!mouvementReduit) {
+      try {
+        const demande = new URLSearchParams(window.location.search).get('immersion');
+        if (demande === 'complet' || demande === 'allege' || demande === 'statique') niveau = demande;
+      } catch {
+        // `location` indisponible (environnement inattendu) : on garde l'estimation.
+      }
+    }
+
     setEtat({ niveau, pret: true });
   }, []);
 

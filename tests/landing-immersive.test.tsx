@@ -160,7 +160,12 @@ describe('Replis — la page tient sans 3D ni mouvement', () => {
      */
     // Les mots sont joints par des espaces insécables (typographie correcte) :
     // on normalise avant de comparer, sinon on testerait un détail de rendu.
-    const texte = (document.body.textContent ?? '').replace(/\u00A0/g, ' ');
+    // Les mots cinétiques sont dans des blocs séparés : le texte lu les colle
+    // (« briefà »). On normalise donc les espaces avant de comparer, sinon le
+    // test vérifie la mise en page au lieu du contenu.
+    const texte = (document.body.textContent ?? '')
+      .replace(/\u00A0/g, ' ')
+      .replace(/\s+/g, ' ');
     expect(texte).toContain('Du brief à la vidéo');
     expect(texte).toContain('Votre activité');
   });
