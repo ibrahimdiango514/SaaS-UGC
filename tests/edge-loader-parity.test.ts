@@ -50,7 +50,12 @@ function slicesFromSql(sql: string, slug: string): string {
     .join('');
 }
 
-describe('chargeurs Edge — parité générateur / dépôt', () => {
+/*
+ * Délai explicite : ces tests lancent esbuild puis décompressent des artefacts.
+ * La valeur par défaut de 5 s suffisait en local mais pas sous charge CI, d'où
+ * des échecs intermittents sur une machine aléatoirement lente.
+ */
+describe('chargeurs Edge — parité générateur / dépôt', { timeout: 30_000 }, () => {
   for (const slug of slugs) {
     it(`${slug} : chargeur et bundle identiques au générateur`, () => {
       const built = buildBundle(ROOT, slug);
@@ -84,7 +89,7 @@ describe('chargeurs Edge — parité générateur / dépôt', () => {
   }
 });
 
-describe('chargeurs Edge — garde-fous du contrat de déploiement', () => {
+describe('chargeurs Edge — garde-fous du contrat de déploiement', { timeout: 30_000 }, () => {
   it('le chargeur est court (le canal n’altère que les sources longues)', () => {
     for (const slug of slugs) {
       const loader = readFileSync(join(ROOT, 'supabase/functions', slug, 'loader.ts'), 'utf8');

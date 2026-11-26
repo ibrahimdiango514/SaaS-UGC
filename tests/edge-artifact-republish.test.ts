@@ -88,7 +88,8 @@ describe('Migrations déjà appliquées — intouchées', () => {
   });
 });
 
-describe('Nouvelle migration — ce que le chargeur lira réellement', () => {
+// Décodage gzip + reconstruction du bundle : même marge que le test de parité.
+describe('Nouvelle migration — ce que le chargeur lira réellement', { timeout: 30_000 }, () => {
   const groupe = republishGroup(PUBLIES[0]);
   const fichier = join(
     MIGRATIONS,
@@ -106,7 +107,7 @@ describe('Nouvelle migration — ce que le chargeur lira réellement', () => {
   });
 
   for (const slug of PUBLIES) {
-    describe(slug, () => {
+    describe(slug, { timeout: 30_000 }, () => {
       const contrat = contratChargeur(slug);
       /*
        * Décodage PARESSEUX : appelé dans chaque test, jamais à la collecte.

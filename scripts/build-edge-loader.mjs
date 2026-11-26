@@ -96,7 +96,28 @@ export function deterministicGzip(input) {
  * fonctions restent livrées par chargeur (tranches + SHA-256) pour la même
  * raison. Le code exécuté reste exactement celui du dépôt.
  */
+/**
+ * Cache des bundles par (root, slug).
+ *
+ * `buildBundle` lance esbuild : quelques dizaines de millisecondes, mais les
+ * tests de parité et de republication l'appellent une vingtaine de fois. Sous
+ * charge CI, la répétition rapprochait certains tests du délai de 5 s de vitest
+ * et provoquait des échecs intermittents. Le résultat est donc mémorisé : le
+ * bundle ne dépend que du contenu du dossier, et le processus de test est
+ * jetable, donc rien ne peut devenir obsolète en cours d'exécution.
+ */
+const cacheBundles = new Map();
+
 export function buildBundle(root, slug) {
+  const cle = `${root}::${slug}`;
+  const memo = cacheBundles.get(cle);
+  if (memo) return memo;
+  const built = buildBundleSansCache(root, slug);
+  cacheBundles.set(cle, built);
+  return built;
+}
+
+function buildBundleSansCache(root, slug) {
   const result = esbuild.buildSync({
     entryPoints: [join(root, 'supabase/functions', slug, 'index.ts')],
     bundle: true,
