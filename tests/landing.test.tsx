@@ -16,7 +16,13 @@ describe('vitrine SORAHNEX (B3)', () => {
   it('présente le hero et un lien d’évitement accessible au clavier', async () => {
     render(<App />);
     const h1 = await screen.findByRole('heading', { level: 1 });
-    expect(h1.textContent).toContain('Vos idées prennent forme');
+    /*
+     * Refonte immersive : le titre du hero change, l'exigence ne change pas.
+     * Le `h1` reste un vrai titre présent dans le HTML au premier rendu — c'est
+     * ce que protège ce test, et c'est ce dont dépend le LCP.
+     */
+    expect(h1.textContent).toContain('Vos vidéos');
+    expect(h1.textContent).toContain('Votre croissance');
     const skip = screen.getByRole('link', { name: /Aller au contenu/i });
     expect(skip.getAttribute('href')).toBe('#contenu');
   });
@@ -36,12 +42,18 @@ describe('vitrine SORAHNEX (B3)', () => {
   it('expose toutes les sections ancrées de la page', async () => {
     render(<App />);
     await screen.findByRole('heading', { level: 1 });
-    for (const id of ['dimensions', 'fonctionnalites', 'workflow', 'defis', 'faq']) {
+    /*
+     * La refonte remplace les ancres de l'ancienne vitrine par celles du
+     * nouveau parcours : l'accueil du scroll immersif, les espaces, les
+     * fonctionnalités, le déroulé et la FAQ. Chacune doit exister réellement
+     * dans le document, sinon un lien de navigation ne mène nulle part.
+     */
+    for (const id of ['hero', 'immersion', 'deux-espaces', 'fonctionnalites', 'workflow', 'faq']) {
       expect(document.getElementById(id), `section #${id} manquante`).toBeTruthy();
     }
-    // La section « défis » (les vrais problèmes des utilisateurs) remplace
-    // l’ancienne section Tarifs de la vitrine publique.
-    expect(screen.getByText('Les défis que vous connaissez')).toBeTruthy();
+    // Les trois espaces sont nommés : c'est la promesse centrale du produit.
+    expect(screen.getAllByText(/Studio/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Grow/).length).toBeGreaterThan(0);
   });
 
   it('n’affiche aucune offre fictive (pas de Tarifs, formule, prix ni mois)', async () => {
@@ -70,6 +82,13 @@ describe('vitrine SORAHNEX (B3)', () => {
     await screen.findByRole('heading', { level: 1 });
     const connexions = screen.getAllByRole('link', { name: /Connexion/i });
     expect(connexions.length).toBeGreaterThanOrEqual(1);
-    expect(within(document.body).getAllByRole('link', { name: /Commencer/i }).length).toBeGreaterThanOrEqual(1);
+    /*
+     * L'action principale de la barre n'est plus « Commencer » mais le CTA
+     * unique de la mission. Ce qui compte, et qui est vérifié ici : une action
+     * mène à la création de compte, et elle est accessible par son nom.
+     */
+    const creer = within(document.body).getAllByRole('link', { name: /Créer ma première vidéo/i });
+    expect(creer.length).toBeGreaterThanOrEqual(1);
+    expect(creer.some((lien) => lien.getAttribute('href') === '/inscription')).toBe(true);
   });
 });

@@ -33,7 +33,9 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 describe('parcours public', () => {
   it('affiche la page d’accueil en français, sans abonnements non commercialisés', async () => {
     render(<App />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Vos idées prennent forme');
+    // Refonte immersive : le titre change, l'exigence reste « un vrai h1 en
+    // français, présent au premier rendu ».
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Vos vidéos');
     expect(screen.getByText('Fonctionnalités')).toBeTruthy();
     // Les deux espaces sont présentés clairement. Le nom de chaque espace
     // apparaît à plusieurs endroits de la vitrine (aperçu, cartes, pastilles) :
@@ -53,7 +55,12 @@ describe('parcours public', () => {
 
   it('navigue vers l’inscription et affiche le formulaire complet', async () => {
     render(<App />);
-    fireEvent.click(screen.getAllByRole('link', { name: /Créer mon compte/ })[0]);
+    /*
+     * L'action de la vitrine est désormais le CTA unique de la mission. Ce qui
+     * est vérifié ici ne change pas : un lien visible mène au formulaire
+     * d'inscription, et ce formulaire fonctionne.
+     */
+    fireEvent.click(screen.getAllByRole('link', { name: /Créer ma première vidéo/ })[0]);
     await waitFor(() => expect(window.location.pathname).toBe('/inscription'));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Créer un compte'), { timeout: 5000 });
     // Parcours en trois étapes : identité → accès sécurisé → confirmation.

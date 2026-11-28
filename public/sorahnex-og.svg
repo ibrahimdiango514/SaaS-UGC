@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="SORAHNEX — Create. Evolve. Grow.">
+  <!-- Image de partage SORAHNEX. Fond noir profond, nébuleuse magenta/rose,
+       planète en bas : la charte de la landing, sans photographie. -->
+  <defs>
+    <linearGradient id="fond" x1="0" y1="0" x2="0" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#05030A" />
+      <stop offset="1" stop-color="#14061F" />
+    </linearGradient>
+    <radialGradient id="nebuleuse1" cx="0.22" cy="0.1" r="0.6">
+      <stop stop-color="#F0389E" stop-opacity="0.34" />
+      <stop offset="1" stop-color="#F0389E" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="nebuleuse2" cx="0.84" cy="0.24" r="0.55">
+      <stop stop-color="#7C3AED" stop-opacity="0.38" />
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="planete" cx="0.5" cy="0.06" r="0.9">
+      <stop stop-color="#2A0A2E" />
+      <stop offset="0.5" stop-color="#14061F" />
+      <stop offset="1" stop-color="#05030A" />
+    </radialGradient>
+    <linearGradient id="titre" x1="80" y1="0" x2="760" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#F7F2FA" stop-opacity="0.86" />
+    </linearGradient>
+    <linearGradient id="accent" x1="80" y1="0" x2="700" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0389E" />
+      <stop offset="0.56" stop-color="#FB7185" />
+      <stop offset="1" stop-color="#FF8A3D" />
+    </linearGradient>
+    <linearGradient id="logo" x1="88" y1="60" x2="152" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F0389E" />
+      <stop offset="0.56" stop-color="#FB7185" />
+      <stop offset="1" stop-color="#FF8A3D" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#fond)" />
+  <rect width="1200" height="630" fill="url(#nebuleuse1)" />
+  <rect width="1200" height="630" fill="url(#nebuleuse2)" />
+  <circle cx="600" cy="1010" r="620" fill="url(#planete)" />
+
+  <!-- Logo : même tracé que l'application, dégradé de marque. -->
+  <rect x="80" y="66" width="60" height="60" rx="16" fill="#0A0512" stroke="#FFFFFF" stroke-opacity="0.16" />
+  <path d="M119.5 87.3c-2.1-2.1-5.6-3.3-9.2-3.3-5.9 0-9.6 3-9.6 7.5 0 4.5 3.3 6.3 9.3 7.5 5 1 6.9 2 6.9 4.2 0 2.4-2.6 3.9-6.5 3.9-3.9 0-7.4-1.4-9.8-3.8"
+        fill="none" stroke="url(#logo)" stroke-width="4.8" stroke-linecap="round" transform="translate(6,10) scale(1.05)" />
+  <path d="M131 80v5.4M128.3 82.7h5.4" stroke="#FF8A3D" stroke-width="2.2" stroke-linecap="round" />
+
+  <text x="158" y="106" font-family="Space Grotesk, DM Sans, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="4" fill="#FFFFFF">SORAHNEX</text>
+
+  <!-- Titre : la promesse, sur deux lignes. -->
+  <text x="80" y="252" font-family="Space Grotesk, DM Sans, system-ui, sans-serif" font-size="66" font-weight="700" fill="url(#titre)">Vos vidéos publicitaires.</text>
+  <text x="80" y="330" font-family="Space Grotesk, DM Sans, system-ui, sans-serif" font-size="66" font-weight="700" fill="url(#accent)">Votre croissance.</text>
+  <text x="80" y="408" font-family="Space Grotesk, DM Sans, system-ui, sans-serif" font-size="66" font-weight="700" fill="url(#titre)">Un seul endroit.</text>
+
+  <!-- Slogan unique. -->
+  <text x="82" y="480" font-family="DM Sans, system-ui, sans-serif" font-size="26" font-weight="500" letter-spacing="3" fill="#FB7185">CREATE. EVOLVE. GROW.</text>
+
+  <!-- Réassurance : la promesse vérifiable, pas un témoignage. -->
+  <text x="82" y="536" font-family="DM Sans, system-ui, sans-serif" font-size="24" fill="#B9AFC7">Devis affiché avant chaque génération, aucun coût surprise.</text>
+
+  <!-- Trois espaces. -->
+  <g font-family="DM Sans, system-ui, sans-serif" font-size="21" fill="#E9DFF3">
+    <rect x="820" y="222" width="300" height="56" rx="16" fill="#FFFFFF" fill-opacity="0.05" stroke="#F0389E" stroke-opacity="0.5" />
+    <text x="852" y="258">Studio UGC</text>
+    <rect x="860" y="296" width="300" height="56" rx="16" fill="#FFFFFF" fill-opacity="0.05" stroke="#7C3AED" stroke-opacity="0.5" />
+    <text x="892" y="332">Grow</text>
+    <rect x="820" y="370" width="300" height="56" rx="16" fill="#FFFFFF" fill-opacity="0.05" stroke="#FB7185" stroke-opacity="0.5" />
+    <text x="852" y="406">Agent IA</text>
+  </g>
+</svg>

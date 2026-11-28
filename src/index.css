@@ -986,3 +986,826 @@
   background: rgb(var(--vy-accent) / 0.14);
   color: rgb(var(--vy-accent));
 }
+
+/* ------------------------------------------------------------------ */
+/* Landings immersives (phase 1)                                       */
+/* ------------------------------------------------------------------ */
+@layer components {
+  /*
+   * Révélation des mots du hero.
+   *
+   * L'animation part d'un état visible : si `gsap`, le JS ou même la feuille
+   * de style tardent, le titre reste lisible. Un titre qui démarre à
+   * `opacity: 0` et n'est jamais révélé est un écran blanc pour l'utilisateur,
+   * et un LCP nul pour le référencement.
+   */
+  .hero-mot {
+    animation: hero-mot-entree 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes hero-mot-entree {
+    from { opacity: 0; transform: translateY(0.5em); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Nébuleuse : respiration très lente, jamais de clignotement. */
+  .hero-nebuleuse { animation: hero-nebuleuse-respire 18s ease-in-out infinite; }
+
+  @keyframes hero-nebuleuse-respire {
+    0%, 100% { opacity: 0.85; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.04); }
+  }
+
+  /* CTA : pulsation discrète, uniquement quand le mouvement est accepté. */
+  .hero-cta { animation: hero-cta-pulse 3.4s ease-in-out 2.2s infinite; }
+
+  @keyframes hero-cta-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(240, 56, 158, 0.42); }
+    50% { box-shadow: 0 0 0 10px rgba(240, 56, 158, 0); }
+  }
+
+  /* Indice de scroll : va-et-vient lent. */
+  .hero-scroll-indice > span { animation: hero-scroll-glisse 2.6s ease-in-out infinite; }
+
+  @keyframes hero-scroll-glisse {
+    0%, 100% { transform: translateY(0); opacity: 0.35; }
+    50% { transform: translateY(8px); opacity: 0.8; }
+  }
+
+  /* Composition CSS du téléphone, quand la 3D n'est pas disponible. */
+  .hero-visuel-css { animation: hero-flotte 7s ease-in-out infinite; }
+
+  @keyframes hero-flotte {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Immersion 2 — scènes pilotées par le défilement                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Principes tenus ici, dans l'ordre où ils comptent :
+ *
+ * 1. RIEN n'est masqué par défaut. Un `opacity: 0` de départ sans animation
+ *    qui l'annule = texte invisible pour un visiteur sans JS, et page vide
+ *    pour un moteur d'indexation.
+ * 2. Le repli (`data-niveau` ≠ complet) n'est pas une page différente : c'est
+ *    la même composition, figée à son état lisible le plus complet.
+ * 3. Aucune animation ici n'est continue à 60 fps sur une propriété coûteuse :
+ *    on anime des `transform` et `opacity`, jamais une mise en page.
+ */
+
+/* La scène épinglée occupe l'écran ; `min-height` évite un saut de mise en
+   page pendant que ScrollTrigger prend la main. */
+.scene {
+  /* La navigation fixe occupe 4rem : sans cette soustraction, le bas de la
+     scène — et donc le CTA — passait sous la ligne de flottaison. */
+  min-height: calc(100svh - 4rem);
+  overflow: clip;
+}
+
+.scene-camera {
+  /* 4rem de nav fixe + respiration : sans cela, le titre passait SOUS la
+     navigation en mode épinglé (constaté à la capture). */
+  padding-top: 5.5rem;
+  padding-bottom: 3rem;
+  will-change: transform;
+}
+
+/* Volets de transition : invisibles au repos, ils ne cachent jamais la scène. */
+/*
+ * Volets de transition.
+ *
+ * Première version : deux aplats de 50 % de hauteur, visibles en permanence —
+ * résultat, une bande noire en haut et en bas de CHAQUE scène. Un volet n'est
+ * pas un décor : il est hors champ au repos, et n'entre que sur la fin de la
+ * scène pour préparer la suivante.
+ */
+.scene-volet {
+  background: linear-gradient(180deg, #05030A 0%, rgba(5, 3, 10, 0.85) 100%);
+  will-change: transform;
+  z-index: 30;
+}
+
+.scene-volet--haut { transform: translate3d(0, -100%, 0); }
+.scene-volet--bas { transform: translate3d(0, 100%, 0); background: linear-gradient(0deg, #05030A 0%, rgba(5, 3, 10, 0.85) 100%); }
+
+/* -------------------------------------------------------------- */
+/* Hero : l'objet central, en rotation et flottement permanents     */
+/* -------------------------------------------------------------- */
+
+.scene--hero .hero-objet {
+  transform: translate3d(var(--souris-x, 0px), var(--souris-y, 0px), 0);
+  transition: transform 400ms ease-out;
+}
+
+/*
+ * L'écran produit : 9:16, large, et jamais une vignette.
+ * En mobile il prend 74 % de la hauteur de scène, en desktop 78 %.
+ */
+.hero-telephone {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 100%;
+  max-width: 100%;
+  margin-inline: auto;
+  transform:
+    rotateY(calc(-16deg + var(--cam-rot-y, 0deg)))
+    rotateX(6deg)
+    translate3d(0, 0, var(--cam-z, 0px));
+  transform-style: preserve-3d;
+  /*
+   * PAS de `filter: drop-shadow()` ici, et ce n'est pas un détail esthétique.
+   * Mesuré au navigateur : avec le filtre, 23 images/s pendant le défilement ;
+   * sans lui, 59. Un `filter` sur un élément en `preserve-3d` et animé oblige
+   * le navigateur à re-composer une couche pleine taille à chaque image.
+   * Le halo est obtenu par `box-shadow` sur le corps du téléphone, qui est
+   * peint une fois et ne coûte rien au défilement.
+   */
+}
+
+/* Flottement : mouvement lent, continu, qui ne dépend d'aucun script. */
+.hero-telephone--anime {
+  animation: hero-objet-flotte 9s ease-in-out infinite;
+}
+
+@keyframes hero-objet-flotte {
+  0%, 100% { translate: 0 0; rotate: 0deg; }
+  50% { translate: 0 -14px; rotate: 1.2deg; }
+}
+
+.hero-telephone-corps {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(240, 56, 158, 0.18),
+    0 40px 90px -30px rgba(240, 56, 158, 0.55),
+    0 0 120px -30px rgba(240, 56, 158, 0.7);
+}
+
+/*
+ * Typographie cinétique du hero : chaque mot est posé à un endroit
+ * différent de l'écran, en très gros, révélé par masque + décalage.
+ *
+ * ## La règle de placement, et pourquoi elle a changé
+ * Première version : quatre coins libres — les mots passaient sur le
+ * téléphone et sur le texte du CTA. Une composition qui se chevauche n'est pas
+ * de la typographie cinétique, c'est un accident de mise en page.
+ *
+ * Désormais deux zones étanches, sans recouvrement possible :
+ *   - MOITIÉ HAUTE (desktop) : un seul mot par bande, chacun avec sa marge ;
+ *   - BANDE BASSE : le titre finit au-dessus du CTA, jamais dessus.
+ * En mobile, les mots sortent du positionnement absolu et s'empilent : un
+ * écran de 360 px ne supporte pas quatre coins.
+ */
+.hero-camera {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100svh - 4rem);
+  padding-top: 0.75rem;
+}
+
+.hero-titre-cinetique {
+  position: relative;
+  z-index: 10;
+  order: 1;
+  display: block;
+  margin: 0;
+  padding-inline: 0.25rem;
+  font-family: var(--font-display, inherit);
+  font-weight: 700;
+  font-size: clamp(1.6rem, 8.4vw, 2.4rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #fff;
+}
+
+/* Mobile : les mots s'empilent, aucun chevauchement. */
+.hero-mot {
+  display: block;
+  overflow: hidden;
+}
+
+.hero-mot-interieur { display: block; will-change: transform, opacity; }
+
+.hero-mot--accent .hero-mot-interieur {
+  text-shadow: 0 0 70px rgba(240, 56, 158, 0.45);
+}
+
+/* L'objet vient après le titre dans le flux mobile. */
+.hero-objet {
+  order: 2;
+  height: clamp(19rem, 46svh, 26rem);
+  margin-block: 0.75rem;
+}
+
+.hero-bas {
+  order: 3;
+  text-align: center;
+}
+
+@media (min-width: 640px) {
+  .hero-bas > div { max-width: 34rem; }
+}
+
+/* -------------------------------------------------------------- */
+/* Desktop : composition en scène, zones étanches                 */
+/* -------------------------------------------------------------- */
+@media (min-width: 640px) {
+  .hero-camera {
+    display: block;
+    min-height: calc(100svh - 4rem);
+    padding-top: 0;
+  }
+
+  /* Le titre occupe les bandes hautes, l'objet est centré dessous. */
+  .hero-titre-cinetique {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    padding: 0;
+    font-size: clamp(2rem, 3.9vw, 3.6rem);
+    line-height: 0.94;
+  }
+
+  .hero-objet {
+    position: absolute;
+    inset: 0;
+    order: 0;
+    height: auto;
+    margin: 0;
+    padding-block: 5.5rem 8.5rem;
+    align-items: center;
+    justify-content: center;
+    z-index: 0;
+  }
+
+  /* L'objet occupe AU MOINS 60 % de la hauteur visible : c'est la consigne,
+     et c'est ce qui distingue une scène d'une vignette. */
+  .hero-telephone {
+    height: min(100%, 64svh);
+  }
+
+  .hero-mot {
+    position: absolute;
+    max-width: 40ch;
+  }
+
+  /* Bande 1 et 2 : au-dessus de l'écran produit, jamais dessus. */
+  .hero-mot.mot-1 { top: 5rem; left: 1.5rem; }
+  .hero-mot.mot-2 { top: 9.8rem; right: 1.5rem; text-align: right; }
+
+  /* Bande 3 et 4 : sous l'écran produit, au-dessus du bloc CTA. */
+  /* Les deux derniers mots occupent une seule ligne : deux lignes pleine
+     largeur venaient buter sur le bloc du bas. */
+  .hero-mot.mot-3 { bottom: 11.2rem; left: 1.5rem; }
+  .hero-mot.mot-4 { bottom: 11.2rem; right: 1.5rem; text-align: right; }
+}
+
+@media (min-width: 1024px) {
+  .hero-titre-cinetique { font-size: clamp(2.6rem, 3.4vw, 4rem); }
+  .hero-mot.mot-1 { top: 5.5rem; left: 2.5rem; }
+  .hero-mot.mot-2 { top: 11rem; right: 2.5rem; }
+  .hero-mot.mot-3 { bottom: 11.5rem; left: 2.5rem; }
+  .hero-mot.mot-4 { bottom: 11.5rem; right: 2.5rem; }
+}
+
+/* Révélation : masque (le parent `overflow: hidden`) + décalage vertical. */
+.hero-mot--anime .hero-mot-interieur {
+  animation: hero-mot-masque 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes hero-mot-masque {
+  from { transform: translateY(110%) rotate(3deg); opacity: 0; }
+  to   { transform: translateY(0) rotate(0deg); opacity: 1; }
+}
+
+/* -------------------------------------------------------------- */
+/* Scènes : décor en perspective, états successifs                 */
+/* -------------------------------------------------------------- */
+
+.scene-decor {
+  min-height: 44svh;
+  display: grid;
+  place-items: center;
+}
+
+.scene-objet {
+  width: 100%;
+  /* 34rem = 544 px : plus large qu'un écran de 360 px. Sans le `min()`, le
+     décor débordait des deux côtés et était rogné par `overflow: clip`
+     (constaté à la capture mobile). */
+  max-width: min(34rem, 100%);
+  transition: transform 80ms linear;
+}
+
+.ecran-produit {
+  /* Pas de `backdrop-filter`: il coûtait ~2 images/s pour un flou de 2 px
+     invisible. Le fond est opaque, le flou ne se voyait pas. */
+  contain: paint;
+}
+
+/* -------------------------------------------------------------- */
+/* Repère de défilement du hero                                    */
+/* -------------------------------------------------------------- */
+
+.hero-scroll-indice {
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.5), transparent);
+  animation: hero-scroll-glisse 2.6s ease-in-out infinite;
+}
+
+/* -------------------------------------------------------------- */
+/* REPLI — la même scène, figée, complète et lisible               */
+/* -------------------------------------------------------------- */
+
+/*
+ * `data-niveau` est posé par le moteur sur la racine. Quand il n'est pas
+ * « complet » (mouvement réduit, mobile allégé, WebGL absent), on gèle tout
+ * et on s'assure que chaque élément est visible : aucun état intermédiaire,
+ * aucune opacité partielle, aucune scène vide.
+ */
+[data-niveau='statique'] .scene,
+[data-niveau='allege'] .scene {
+  min-height: auto;
+}
+
+/*
+ * Sans épinglage, une scène n'a plus de raison de mesurer un écran : elle doit
+ * se réduire à son contenu. Sans ce `min-height: auto`, chaque scène laissait
+ * un écran noir vide derrière elle — constaté à la capture.
+ */
+[data-niveau='statique'] .scene-camera,
+[data-niveau='allege'] .scene-camera {
+  min-height: auto !important;
+  padding-block: 3rem;
+}
+
+/* Et le décor n'a plus de hauteur plancher : en repli, il se règle sur son
+   contenu. C'est le vide résiduel qui restait sous chaque scène. */
+[data-niveau='statique'] .scene-decor,
+[data-niveau='allege'] .scene-decor {
+  min-height: 0;
+}
+
+/* Le hero figé garde son écran produit à une taille raisonnable, sans
+   occuper un écran entier pour du vide. */
+[data-niveau='statique'] .hero-camera,
+[data-niveau='allege'] .hero-camera {
+  min-height: auto !important;
+  padding-block: 1.5rem 2rem;
+}
+
+/*
+ * Le hero figé garde la composition « scène » en desktop : l'objet reste au
+ * centre et les mots autour. Sans cette annulation, le figé héritait de la
+ * disposition mobile empilée et l'écran produit retombait à 30 % de la
+ * hauteur — vérifié à la capture (523 px sur 900 au lieu de 60 %).
+ */
+@media (min-width: 640px) {
+  [data-niveau='statique'] .hero-camera,
+  [data-niveau='allege'] .hero-camera {
+    display: block;
+    position: relative;
+    min-height: calc(100svh - 4rem) !important;
+    padding-block: 0;
+  }
+
+  [data-niveau='statique'] .hero-objet,
+  [data-niveau='allege'] .hero-objet {
+    position: absolute;
+    inset: 0;
+    padding-block: 5.5rem 8.5rem;
+  }
+
+  [data-niveau='statique'] .hero-telephone,
+  [data-niveau='allege'] .hero-telephone {
+    height: min(100%, 64svh);
+  }
+}
+
+/* En mobile, l'objet garde une part honnête de l'écran. */
+@media (max-width: 639px) {
+  .hero-telephone {
+    height: 100%;
+  }
+}
+
+[data-niveau='statique'] .hero-mot--anime .hero-mot-interieur,
+[data-niveau='allege'] .hero-mot--anime .hero-mot-interieur,
+[data-niveau='statique'] .hero-telephone--anime,
+[data-niveau='allege'] .hero-telephone--anime {
+  animation: none !important;
+}
+
+/* Toute scène figée garde sa composition : les éléments « arrivants » sont
+   ramenés à leur état final, jamais laissés à mi-chemin. */
+[data-niveau='statique'] [style*='opacity'],
+[data-niveau='allege'] [style*='opacity'] {
+  opacity: 1 !important;
+}
+
+[data-niveau='statique'] .scene-volet,
+[data-niveau='allege'] .scene-volet {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-mot--anime .hero-mot-interieur,
+  .hero-telephone--anime,
+  .hero-scroll-indice,
+  .hero-nebuleuse,
+  .hero-cta,
+  .scene-objet {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .hero-titre-cinetique .hero-mot { overflow: visible; }
+}
+
+/*
+ * Mouvement réduit : tout est neutralisé, y compris les dégradés animés.
+ * La page reste complète et lisible — c'est une exigence, pas un repli.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .hero-mot,
+  .hero-nebuleuse,
+  .hero-cta,
+  .hero-scroll-indice > span,
+  .hero-visuel-css {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* --------------------------------------------------------------------------- */
+/* SORAHNEX — expérience immersive (hero 3D + Studio, une seule caméra)         */
+/* --------------------------------------------------------------------------- */
+@layer components {
+  .exp-panneau {
+    @apply absolute inset-0 z-20;
+    transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity;
+  }
+  .exp-panneau-interieur {
+    @apply relative mx-auto flex h-full w-full max-w-7xl flex-col px-5 sm:px-6;
+    justify-content: flex-start;
+    padding-top: 4.6rem;
+  }
+  #immersion .exp-panneau-interieur {
+    justify-content: flex-end;
+    padding-top: 0;
+    padding-bottom: 1.25rem;
+  }
+  @media (min-width: 1024px) {
+    .exp-panneau-interieur,
+    #immersion .exp-panneau-interieur {
+      justify-content: center;
+      padding-top: 4rem;
+      padding-bottom: 2rem;
+    }
+  }
+
+  /* Le hero mobile occupe le haut, le téléphone le milieu, le CTA le bas. */
+  .exp-hero-texte {
+    @apply relative w-full;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+    padding-bottom: 1rem;
+  }
+  .exp-hero-haut,
+  .exp-hero-bas {
+    pointer-events: auto;
+  }
+  @media (min-width: 1024px) {
+    .exp-hero-texte {
+      height: auto;
+      max-width: 36rem;
+      display: block;
+      padding-bottom: 0;
+    }
+  }
+
+  .exp-eyebrow {
+    @apply inline-flex items-center gap-1.5 text-[9.5px] font-semibold uppercase text-[#F7A8CF];
+    letter-spacing: 0.22em;
+    margin-bottom: 0.65rem;
+    display: none;
+  }
+  @media (min-width: 640px) {
+    .exp-eyebrow { display: inline-flex; }
+  }
+
+  .exp-h1 {
+    font-family: 'Space Grotesk', 'DM Sans', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 1.34rem;
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    color: #F7F2FA;
+    text-wrap: balance;
+  }
+  @media (min-width: 400px) { .exp-h1 { font-size: 1.52rem; } }
+  @media (min-width: 640px) { .exp-h1 { font-size: 2.55rem; } }
+  @media (min-width: 1024px) { .exp-h1 { font-size: 3.55rem; line-height: 1.02; } }
+  @media (min-width: 1280px) { .exp-h1 { font-size: 4rem; } }
+
+  .exp-h1-ligne { display: block; }
+  .exp-h1-accent {
+    background-image: linear-gradient(96deg, #F0389E, #FB7185 55%, #FF8A3D);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .exp-mot-masque {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: bottom;
+    padding-bottom: 0.09em;
+    margin-bottom: -0.09em;
+  }
+  .exp-mot { display: inline-block; }
+  .exp-mot-anime {
+    animation: expMot 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes expMot {
+    from { transform: translate3d(0, 108%, 0); opacity: 0; }
+    to { transform: translate3d(0, 0, 0); opacity: 1; }
+  }
+
+  .exp-sous-titre {
+    margin-top: 0.55rem;
+    font-size: 0.72rem;
+    line-height: 1.42;
+    color: rgba(230, 219, 240, 0.76);
+    max-width: 30rem;
+  }
+  @media (min-width: 640px) {
+    .exp-sous-titre { margin-top: 1rem; font-size: 0.875rem; line-height: 1.55; }
+  }
+  @media (min-width: 1024px) {
+    .exp-sous-titre { margin-top: 1.35rem; font-size: 0.95rem; }
+  }
+
+  .exp-actions {
+    @apply flex flex-wrap items-center gap-2;
+    margin-top: 0.55rem;
+  }
+  @media (min-width: 640px) { .exp-actions { margin-top: 1.15rem; gap: 0.75rem; } }
+
+  .exp-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    border-radius: 0.75rem;
+    padding: 0.6rem 1.05rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    background-image: linear-gradient(96deg, #F0389E, #FB7185 62%, #FF8A3D);
+    box-shadow: 0 16px 38px -18px rgba(240, 56, 158, 0.95);
+    transition: transform 160ms ease, box-shadow 160ms ease;
+    animation: expPulse 4.4s ease-in-out 2.6s infinite;
+  }
+  @media (min-width: 640px) { .exp-cta { padding: 0.8rem 1.35rem; font-size: 0.875rem; } }
+  .exp-cta:hover { transform: translateY(-1px); box-shadow: 0 22px 46px -18px rgba(251, 113, 133, 0.95); }
+  .exp-cta:focus-visible { outline: 2px solid #FB7185; outline-offset: 3px; }
+  @keyframes expPulse {
+    0%, 100% { box-shadow: 0 16px 38px -18px rgba(240, 56, 158, 0.85); }
+    50% { box-shadow: 0 18px 52px -14px rgba(251, 113, 133, 0.95); }
+  }
+
+  .exp-cta-secondaire {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    padding: 0 0.3rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: rgba(236, 226, 245, 0.82);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+    transition: color 150ms ease, border-color 150ms ease;
+  }
+  @media (min-width: 640px) { .exp-cta-secondaire { min-height: 2.75rem; font-size: 0.8rem; } }
+  .exp-cta-secondaire:hover { color: #fff; border-color: rgba(251, 113, 133, 0.7); }
+
+  .exp-reassurance {
+    margin-top: 0.4rem;
+    font-size: 0.58rem;
+    line-height: 1.4;
+    color: rgba(185, 175, 199, 0.66);
+  }
+  @media (min-width: 640px) { .exp-reassurance { margin-top: 0.75rem; font-size: 0.72rem; } }
+
+  /* Écrans courts (360 × 640) : le CTA reste au-dessus du pli. */
+  @media (max-width: 767px) and (max-height: 700px) {
+    .exp-h1 { font-size: 1.26rem; }
+    .exp-sous-titre { font-size: 0.66rem; line-height: 1.32; margin-top: 0.35rem; }
+    .exp-actions { margin-top: 0.4rem; }
+    .exp-cta { padding: 0.5rem 0.9rem; font-size: 0.7rem; }
+    .exp-cta-secondaire { font-size: 0.65rem; }
+    .exp-reassurance { font-size: 0.55rem; margin-top: 0.3rem; }
+  }
+
+  .exp-indice-defilement {
+    @apply pointer-events-none absolute bottom-4 left-1/2 hidden -translate-x-1/2 flex-col items-center gap-2 sm:flex;
+    transition: opacity 500ms ease;
+  }
+  .exp-indice-defilement > span:first-child {
+    display: block;
+    width: 1px;
+    height: 2.4rem;
+    background: linear-gradient(to bottom, rgba(251, 113, 133, 0.9), transparent);
+    animation: expIndice 2.4s ease-in-out infinite;
+  }
+  .exp-indice-texte {
+    font-size: 0.55rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: rgba(185, 175, 199, 0.55);
+  }
+  @keyframes expIndice {
+    0%, 100% { transform: scaleY(0.35); transform-origin: top; opacity: 0.4; }
+    50% { transform: scaleY(1); transform-origin: top; opacity: 1; }
+  }
+
+  /* --- Studio ------------------------------------------------------------ */
+  .exp-studio-texte {
+    @apply relative w-full;
+    pointer-events: auto;
+    max-width: 25rem;
+  }
+  .exp-studio-tete {
+    @apply flex flex-wrap items-center gap-2;
+    margin-bottom: 0.6rem;
+  }
+  .exp-pastille {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase;
+    border-color: rgba(240, 56, 158, 0.32);
+    background: rgba(240, 56, 158, 0.1);
+    color: #F7A8CF;
+    letter-spacing: 0.16em;
+  }
+  .exp-pastille-point {
+    width: 0.32rem;
+    height: 0.32rem;
+    border-radius: 999px;
+    background: #FB7185;
+    box-shadow: 0 0 12px 2px rgba(251, 113, 133, 0.8);
+  }
+  .exp-studio-devis {
+    font-size: 0.55rem;
+    color: rgba(185, 175, 199, 0.6);
+  }
+  @media (min-width: 640px) { .exp-studio-devis { font-size: 0.68rem; } }
+
+  .exp-h2 {
+    font-family: 'Space Grotesk', 'DM Sans', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 1.42rem;
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+    color: #F7F2FA;
+  }
+  @media (min-width: 640px) { .exp-h2 { font-size: 2.3rem; } }
+  @media (min-width: 1024px) { .exp-h2 { font-size: 3rem; } }
+  .exp-h2-ligne { display: block; }
+  .exp-h2-decale { padding-left: 0.75rem; }
+  @media (min-width: 640px) { .exp-h2-decale { padding-left: 1.6rem; } }
+  .exp-h2-accent {
+    background-image: linear-gradient(96deg, #FB7185, #F0389E 45%, #FF8A3D);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .exp-studio-para {
+    margin-top: 0.5rem;
+    font-size: 0.68rem;
+    line-height: 1.45;
+    color: rgba(226, 215, 236, 0.72);
+    max-width: 24rem;
+  }
+  @media (min-width: 640px) { .exp-studio-para { margin-top: 0.9rem; font-size: 0.82rem; line-height: 1.6; } }
+
+  .exp-etapes {
+    @apply flex flex-wrap items-center gap-x-3 gap-y-1;
+    margin-top: 0.55rem;
+  }
+  @media (min-width: 640px) { .exp-etapes { margin-top: 1rem; column-gap: 1rem; } }
+  .exp-etape {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.6rem;
+    color: rgba(185, 175, 199, 0.45);
+    transition: color 300ms ease;
+  }
+  @media (min-width: 640px) { .exp-etape { font-size: 0.72rem; } }
+  .exp-etape--faite { color: rgba(236, 226, 245, 0.8); }
+  .exp-etape--active { color: #FB7185; }
+  .exp-etape-num {
+    font-variant-numeric: tabular-nums;
+    font-size: 0.55rem;
+    opacity: 0.75;
+  }
+  .exp-etape--active .exp-etape-num { opacity: 1; }
+
+  .exp-etape-courante {
+    @apply pointer-events-none absolute flex items-center gap-2;
+    top: 4.4rem;
+    right: 1.25rem;
+    font-size: 0.55rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(236, 226, 245, 0.7);
+  }
+  @media (min-width: 1024px) {
+    .exp-etape-courante { top: auto; bottom: 2rem; right: 2rem; font-size: 0.62rem; }
+  }
+  .exp-etape-courante-num { color: #FB7185; font-weight: 700; }
+  .exp-etape-courante-ligne {
+    display: block;
+    width: 2.6rem;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.14);
+    overflow: hidden;
+  }
+  .exp-etape-courante-ligne i {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #F0389E, #FF8A3D);
+    transition: width 400ms ease;
+  }
+
+  .exp-voile {
+    @apply pointer-events-none absolute inset-0;
+    background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(5, 3, 10, 0.2), rgba(5, 3, 10, 0.9));
+    transition: opacity 500ms ease;
+  }
+}
+
+@layer components {
+  /* Voile de lisibilité : le texte ne dépend jamais de la luminosité de la
+     nébuleuse. Aucun `filter` ici, uniquement un dégradé fixe. */
+  .exp-voile-texte {
+    @apply pointer-events-none absolute inset-0;
+    background:
+      linear-gradient(to bottom, rgba(5, 3, 10, 0.94), rgba(5, 3, 10, 0.58) 26%, rgba(5, 3, 10, 0) 45%),
+      linear-gradient(to top, rgba(5, 3, 10, 0.92), rgba(5, 3, 10, 0.45) 13%, rgba(5, 3, 10, 0) 28%);
+  }
+  .exp-voile-studio {
+    @apply pointer-events-none absolute inset-0;
+    background: linear-gradient(to top, rgba(5, 3, 10, 0.94), rgba(5, 3, 10, 0.6) 30%, rgba(5, 3, 10, 0) 58%);
+  }
+  @media (min-width: 1024px) {
+    .exp-voile-texte {
+      background: linear-gradient(100deg, rgba(5, 3, 10, 0.95) 0%, rgba(5, 3, 10, 0.74) 24%, rgba(5, 3, 10, 0) 53%);
+    }
+    .exp-voile-studio {
+      background: linear-gradient(100deg, rgba(5, 3, 10, 0.975) 0%, rgba(5, 3, 10, 0.94) 30%, rgba(5, 3, 10, 0.66) 42%, rgba(5, 3, 10, 0) 60%);
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Lueurs des paliers légers                                           */
+/* ------------------------------------------------------------------ */
+/*
+ * Remplacement CSS des halos additifs de la scène. Mesuré sur GPU intégré :
+ * les sept plans additifs coûtaient ~30 % du temps d'image ; trois dégradés
+ * statiques composés par le navigateur coûtent une fraction de cela.
+ * Aucun filtre, aucun backdrop-filter, aucun mélange animé : uniquement de
+ * l'opacité, sur un calque qui ne bouge pas.
+ */
+.exp-lueurs {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 500ms ease;
+  background:
+    radial-gradient(42% 44% at 76% 30%, rgba(240, 56, 158, 0.26), transparent 72%),
+    radial-gradient(34% 38% at 10% 68%, rgba(251, 113, 133, 0.18), transparent 74%),
+    radial-gradient(50% 42% at 52% 92%, rgba(139, 92, 246, 0.16), transparent 76%);
+}
+.exp-lueurs[data-actif='oui'] {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .exp-lueurs {
+    transition: none;
+  }
+}

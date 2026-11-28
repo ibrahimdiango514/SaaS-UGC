@@ -160,3 +160,7 @@ test-results/
 
 # Builds locaux des Edge Functions
 .edge-build/
+
+# Captures de preuve visuelle (générées localement, hors Git :
+# 137 PNG, 37 Mo, reproductibles par scripts/capturer-immersion.mjs)
+/preuves-immersion/

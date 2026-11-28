@@ -17,12 +17,15 @@
     "preview:studio": "node scripts/studio-preview.mjs",
     "preview:spaces": "node scripts/spaces-preview.mjs",
     "verify:sorahnex-aliases": "node scripts/verify-sorahnex-aliases.mjs",
-    "audit:origins": "node scripts/audit-origins.mjs"
+    "audit:origins": "node scripts/audit-origins.mjs",
+    "capture:immersion": "node scripts/capturer-immersion.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
     "@supabase/supabase-js": "^2.49.4",
+    "gsap": "^3.15.1",
+    "lenis": "^1.3.28",
     "lucide-react": "^0.468.0",
     "mp4-muxer": "^5.2.2",
     "pdfjs-dist": "^4.10.38",
