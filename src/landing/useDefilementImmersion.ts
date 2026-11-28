@@ -113,7 +113,14 @@ export function useDefilementImmersion({ racine, niveau, pret, surProgres }: Opt
           lenis = null;
         }
 
-        const scenes = gsap.utils.toArray<HTMLElement>('[data-scene]', element);
+        /*
+         * Les scènes du moteur DOM. Le hero et le Studio portent aussi
+         * `data-scene` (ils font partie du récit et sont testés comme tels),
+         * mais ils sont pilotés par `ExperienceImmersion` et son propre
+         * épinglage : les épingler deux fois produirait deux caméras et un
+         * document deux fois plus long.
+         */
+        const scenes = gsap.utils.toArray<HTMLElement>('[data-scene]:not([data-3d])', element);
 
         scenes.forEach((scene) => {
           const nom = scene.dataset.mouvement ?? scene.id ?? 'scene';

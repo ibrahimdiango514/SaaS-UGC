@@ -109,7 +109,18 @@ describe('Récit — cinq scènes avant les blocs classiques', () => {
     restaurer = installerEnvironnement({ webgl: true });
     await monter();
 
+    /*
+     * Depuis la livraison 1, le hero et le Studio forment UNE seule scène
+     * épinglée (`#experience`, +460 %), découpée en deux panneaux internes.
+     * Leur durée propre n'est donc plus une durée d'épinglage : elle décrit la
+     * fenêtre du récit. Ce sont les scènes restées indépendantes qui portent
+     * encore une durée d'épinglage de 3 à 4 écrans.
+     */
     for (const scene of document.querySelectorAll('[data-scene]')) {
+      if (scene.closest('#experience')) {
+        expect((scene as HTMLElement).dataset.duree, `panneau ${scene.id} sans durée`).toBeTruthy();
+        continue;
+      }
       const duree = Number((scene as HTMLElement).dataset.duree);
       expect(duree, `scène ${scene.id} sans durée`).toBeGreaterThanOrEqual(3);
       expect(duree, `scène ${scene.id} trop longue`).toBeLessThanOrEqual(4);
@@ -153,7 +164,9 @@ describe('Récit — cinq scènes avant les blocs classiques', () => {
 
     expect(document.querySelectorAll('h1')).toHaveLength(1);
     for (const scene of document.querySelectorAll('[data-scene]')) {
-      expect(scene.querySelector('h2'), `scène ${scene.id} sans h2`).toBeTruthy();
+      // Le hero porte le h1 unique du site ; chaque autre scène a son h2.
+      const titre = scene.id === 'hero' ? scene.querySelector('h1') : scene.querySelector('h2');
+      expect(titre, `scène ${scene.id} sans titre`).toBeTruthy();
     }
   });
 
@@ -209,10 +222,22 @@ describe('Épinglage — la demande doit exister dans le code', () => {
     // Laisse les imports dynamiques et l'effet se résoudre.
     await new Promise((r) => setTimeout(r, 120));
 
-    expect(appelsCreate.length, 'aucun ScrollTrigger.create appelé').toBeGreaterThanOrEqual(5);
+    expect(appelsCreate.length, 'aucun ScrollTrigger.create appelé').toBeGreaterThanOrEqual(4);
 
-    const avecPin = appelsCreate.filter((vars) => vars.pin === true);
-    expect(avecPin.length, 'aucune scène épinglée').toBeGreaterThanOrEqual(5);
+    // `pin` vaut `true` pour une scène classique, mais l'expérience immersive
+    // épingle explicitement l'élément qu'elle contrôle (`pin: ciblePin`).
+    const avecPin = appelsCreate.filter(
+      (vars) => vars.pin === true || (typeof Element !== 'undefined' && vars.pin instanceof Element),
+    );
+    expect(avecPin.length, 'aucune scène épinglée').toBeGreaterThanOrEqual(4);
+
+    /*
+     * Le hero et le Studio partagent un seul épinglage long : c'est lui qui
+     * fait avancer la caméra dans une scène unique, et le retirer
+     * ramènerait l'expérience à deux blocs statiques.
+     */
+    const epingleLong = avecPin.find((vars) => String(vars.end) === '+=460%');
+    expect(epingleLong, 'expérience immersive non épinglée sur 460 %').toBeTruthy();
 
     // Chaque scène épinglée doit durer 3 à 4 hauteurs d'écran.
     for (const vars of avecPin) {

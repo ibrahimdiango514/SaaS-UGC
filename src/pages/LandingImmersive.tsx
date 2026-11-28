@@ -24,13 +24,12 @@ import {
   ArrowRight, Brain, Check, Clapperboard, Coins, Layers3,
   LockKeyhole, ShieldCheck, Sparkles, TrendingUp, Wand2, Zap,
 } from 'lucide-react';
-import { HeroScene } from '../landing/HeroScene';
+import { ExperienceImmersion } from '../landing/ExperienceImmersion';
 import { SceneMoteurProgres } from '../landing/SceneMoteurProgres';
 import {
   SceneAutomatisation,
   SceneAgent,
   SceneGrow,
-  SceneStudio,
   SceneVerdict,
 } from '../landing/ScenesImmersives';
 import { LogoHorizontal } from '../systeme/Logo';
@@ -460,8 +459,8 @@ export default function LandingImmersive() {
 
       <main id="contenu" className="pt-16">
         <SceneMoteurProgres>
-          <HeroScene />
-          <SceneStudio />
+          {/* Hero + Studio : une seule scène WebGL épinglée (voir ExperienceImmersion). */}
+          <ExperienceImmersion />
           <SceneGrow />
           <SceneAgent />
           <SceneAutomatisation />
